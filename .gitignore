@@ -1,0 +1,6 @@
+*.class
+*.jar
+*.deb
+hs_err_pid*.log
+*.qk
+output/
