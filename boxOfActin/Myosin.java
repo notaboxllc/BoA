@@ -1,0 +1,315 @@
+package boxOfActin;
+
+public class Myosin {
+	static Myosin [] theMyosins = new Myosin [100000];
+	static int myoCt = 0;
+	int myMyoNumber = 0;
+	static double uncockedLever_MotorAngle = 0; // degrees
+	static double cockedLever_MotorAngle = 60; // degrees
+	static double uncockedMotor_ActinAngle = 90; // degrees
+	static double cockedMotor_ActinAngle = 120; // degrees
+	MyoMotor myoMotor;
+	MyoLever myoLever;
+	MyoRod myoRod;
+	ProteinNode myNode = null;
+	boolean removeMe = false; // flag for taking this myosin out of the simulation
+
+	
+	// for multithreading
+	static MyosinThreads myoThreads = new MyosinThreads();
+	
+	// re-used in force calcs
+	Pt3D F = new Pt3D();
+	Pt3D R = new Pt3D();
+	Pt3D RcrossF = new Pt3D();
+	Pt3D torsionVec = new Pt3D();
+	Pt3D linkUVec1 = new Pt3D(); 
+	Pt3D linkUVec2 = new Pt3D();
+
+
+	public Myosin () {
+		myoMotor = new MyoMotor(new Pt3D());
+		myoLever = new MyoLever(new Pt3D());
+		myoRod = new MyoRod(new Pt3D());
+		setLinks();
+		addMyosin (this);
+	}
+	
+	public Myosin (Pt3D motorCM) {
+		Pt3D layDir = new Pt3D(-1,0,0);
+		Pt3D leverCM = new Pt3D();
+		Pt3D rodCM = new Pt3D();
+		leverCM.add(motorCM,Env.myoMotorLength.getValue()/2+Env.myoLeverLength.getValue()/2,layDir);
+		rodCM.add(leverCM,Env.myoLeverLength.getValue()/2 + Env.myoRodLength.getValue()/2,layDir);
+		
+		myoMotor = new MyoMotor(motorCM);
+		myoLever = new MyoLever(leverCM);
+		myoRod = new MyoRod(rodCM);
+		setLinks();
+		addMyosin (this);
+	}
+	
+	public Myosin (Pt3D rodEnd1,Pt3D unitVec) {
+		Pt3D rodCM = new Pt3D();
+		Pt3D leverCM = new Pt3D();
+		Pt3D motorCM = new Pt3D();
+		rodCM.add(rodEnd1,Env.myoRodLength.getValue()/2,unitVec);
+		leverCM.add(rodCM,Env.myoRodLength.getValue()/2+Env.myoLeverLength.getValue()/2,unitVec);
+		motorCM.add(leverCM,Env.myoLeverLength.getValue()/2 + Env.myoMotorLength.getValue()/2,unitVec);
+		
+		myoMotor = new MyoMotor(motorCM,unitVec);
+		myoLever = new MyoLever(leverCM,unitVec);
+		myoRod = new MyoRod(rodCM,unitVec);
+		setLinks();
+		addMyosin (this);
+	}
+	
+	static class MyosinThreads extends ThreadSet {
+		MyosinThreads () {
+			super (Env.numMyoThreads, "Myosin Threads");
+		}
+	
+		public void divideAndConquer (int jobId) {
+			this.jobId = jobId;
+			switch (jobId) {
+				case Env.myoJoints1Start:
+					for (int i=0; i <= numThreads; i++) {
+						jobDiv[i] = i*myoCt/numThreads;	// divide the job amongst threads
+					}
+					spawn(); break;
+			}
+			
+		}
+		
+		public void regroup (int jobId) {
+			switch (jobId) {
+				case Env.myoJoints1Stop:
+					gather(); break;
+			}
+		}
+		
+		public void execute (int threadId) {
+			switch (jobId) {
+				case Env.myoJoints1Start:
+					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+						theMyosins[i].jointConstraints(); 
+					}
+					break;
+			}
+		}
+	}
+	
+	public void sepaku() {
+		myoMotor = null;
+		myoLever = null;
+		F = null;
+		R = null;
+		RcrossF = null;
+		torsionVec = null;
+		linkUVec1 = null;
+		linkUVec2 = null;
+	}
+	
+	public void setMotor (Pt3D setCoord, Pt3D setUVec, double setDim, byte setState) {
+		myoMotor.set(setCoord, setUVec, setDim, setState);
+		myoMotor.initialize();
+	}
+	
+	public void setLever (Pt3D setCoord, Pt3D setUVec, double setDim) {
+		myoLever.set(setCoord, setUVec, setDim);
+		myoLever.initialize();
+	}
+	
+	public void setRod (Pt3D setCoord, Pt3D setUVec, double setDim, boolean invis) {
+		myoRod.set(setCoord, setUVec, setDim, invis);
+		myoRod.initialize();
+	}
+	
+	public void setLinks () {
+		myoMotor.myMyosin = this;
+		myoLever.myMyosin = this;
+		myoRod.myMyosin = this;
+	}
+	
+	public void setRodInvisible (boolean invis) {
+		myoRod.rodInvisible = invis;
+	}
+	
+	public void setInRigor() {
+		myoMotor.inRigor = true;
+	}
+	
+	public void applyLeverMotorJointForce () {
+		double strainDist = Pt3D.ptDist(myoLever.end2, myoMotor.end1);
+		linkUVec1.unitVec(myoLever.end2,myoMotor.end1);
+		linkUVec2.scale(-1,linkUVec1);
+		double moveCoeffHead = myoMotor.moveCoeff(1,linkUVec1);
+		double moveCoeffTail = myoLever.moveCoeff(2,linkUVec2);
+		double forceMag = (Env.myoJ1FracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeffHead + moveCoeffTail));
+		//double forceMag = (1.0e-6*strainDist*1e-8);
+
+		// forces and torques applied to myosin motor domain
+		F.scale(forceMag,linkUVec1);
+		myoMotor.incForceSum(F);
+		R.scale(0.5e-6*Env.myoMotorLength.getValue()*Env.myoJ1FracR.getValue(),myoMotor.uVecR);
+		RcrossF.cross(R,F);
+		myoMotor.incTorqueSum(RcrossF);
+		
+		// forces and torques applied to myosin lever arm
+		F.scale(-1,F);
+		myoLever.incForceSum(F);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ1FracR.getValue(),myoLever.uVec);
+		RcrossF.cross(R,F);
+		myoLever.incTorqueSum(RcrossF);
+		
+	}
+	
+	public void applyLeverMotorJointTorque () {
+		torsionVec.cross(myoLever.uVec,myoMotor.uVec);
+		torsionVec.unitVec();
+		
+		double dotVecs = Pt3D.Dot(myoLever.uVec,myoMotor.uVec);
+		if (dotVecs > 1.0) { dotVecs = 1.0; }
+		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		
+		double angRelaxed = uncockedLever_MotorAngle;
+		if (myoMotor.isCocked()) { angRelaxed = cockedLever_MotorAngle; }
+		double angD = angTween-angRelaxed;
+			
+		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angD/((1/myoMotor.bRotGam.y + 1/myoLever.bRotGam.y)*Env.deltaT.getValue());
+		double maxMag = Env.myosinStallForce.getValue()*0.5*myoMotor.getDim()*1e-18; //**** check this for units!!!  missing conversion of force and lever arm to proper units? 1e-18 is 1e-12 (pN to N) * 1e-6 (microns to meters)
+		torsionMag = Math.min(torsionMag,maxMag);
+		
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			myoLever.incTorqueSum(torsionVec);
+		
+			torsionVec.scale(-1);
+			myoMotor.incTorqueSum(torsionVec);
+		} else {
+			System.out.println ("Crazy torque result in Myosin.applyLeverMotorJointTorque()");
+		}
+
+	}
+	
+	public void applyRodLeverJointForce () {
+		double strainDist = Pt3D.ptDist(myoRod.end2, myoLever.end1);
+		linkUVec1.unitVec(myoRod.end2,myoLever.end1);
+		linkUVec2.scale(-1,linkUVec1);
+		double moveC1 = myoLever.moveCoeff(1,linkUVec1);
+		double moveC2 = myoRod.moveCoeff(2,linkUVec2);
+		double forceMag = (Env.myoJ2FracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveC1 + moveC2));
+		//double forceMag = (1.0e-6*strainDist*1e-8);
+
+		// forces and torques applied to myosin lever arm
+		F.scale(forceMag,linkUVec1);
+		myoLever.incForceSum(F);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ2FracR.getValue(),myoLever.uVecR);
+		RcrossF.cross(R,F);
+		myoLever.incTorqueSum(RcrossF);
+		
+		// forces and torques applied to myosin rod
+		F.scale(-1,F);
+		myoRod.incForceSum(F);
+		R.scale(0.5e-6*Env.myoRodLength.getValue()*Env.myoJ2FracR.getValue(),myoRod.uVec);
+		RcrossF.cross(R,F);
+		myoRod.incTorqueSum(RcrossF);
+		
+	}
+	
+	public void applyRodLeverJointTorque () {
+		torsionVec.cross(myoRod.uVec,myoLever.uVec);
+		torsionVec.unitVec();
+		
+		double dotVecs = Pt3D.Dot(myoRod.uVec,myoLever.uVec);
+		if (dotVecs > 1.0) { dotVecs = 1.0; }
+		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		
+		double angRelaxed = 0;
+		double angD = angTween-angRelaxed;
+			
+		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+		double torsionMag = Env.myoJ2FracMoveTorq.getValue()*(Math.PI/180)*angD/((1/myoLever.bRotGam.y + 1/myoRod.bRotGam.y)*Env.deltaT.getValue());
+		
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			myoRod.incTorqueSum(torsionVec);
+		
+			torsionVec.scale(-1);
+			myoLever.incTorqueSum(torsionVec);
+		} else {
+			System.out.println ("Crazy torque result in Myosin.applyRodLeverJointTorque()");
+		}
+
+	}
+	
+	public static void allJointContraints() {
+		for (int i=0;i<myoCt;i++) {
+			theMyosins[i].jointConstraints();
+		}
+	}
+	
+	public void jointConstraints() {
+		applyLeverMotorJointForce();
+		applyLeverMotorJointTorque();
+		
+		applyRodLeverJointForce();
+		applyRodLeverJointTorque();
+	}
+	
+	public void setOwnerNode (ProteinNode node) {
+		myNode = node;
+	}
+	
+	public static void makeTstMyosin () {
+		new Myosin();
+	}
+	
+	public static void addMyosin (Myosin nuMyo) {
+		theMyosins[myoCt] = nuMyo;
+		nuMyo.myMyoNumber = myoCt;
+		myoCt++;
+	}
+	
+	public static synchronized void cleanupMyos () {
+		Myosin curM;
+		for (int i=0;i<myoCt;i++) {
+			if (theMyosins[i] == null) { break; } // reached end of theMyosins array I guess
+			curM = theMyosins[i];
+			if (curM.removeMe) { 
+				theMyosins[i] = theMyosins[myoCt-1];
+				theMyosins[i].myMyoNumber = i;
+				theMyosins[myoCt-1] = null;
+				//System.out.println ("Removed " + String.valueOf(curM) + " from Myosin Array.  Its motor is " + String.valueOf(curM.myoMotor));
+				curM.remove();
+				curM.sepaku();
+				myoCt--;
+			}
+		}
+	}
+	
+	public static void markRandomMyosFoRemove() {
+		Myosin curM;
+		int rmMe = (int)(Math.random()*myoCt);
+		theMyosins[rmMe].removeMe = true;
+		System.out.println("Removing random myosin #" + rmMe);
+	}
+	
+	public void remove() {
+		myoMotor.remove();
+		myoLever.remove();
+		myoRod.remove();
+	}
+
+	public static void removeAll () {
+		Myosin curM;
+		for (int i=0;i<myoCt;i++) {
+			curM = theMyosins[i];
+			curM.remove();
+			curM.sepaku();
+		}
+		MyoMotor.motorCt = 0;
+		myoCt = 0;
+	}
+}

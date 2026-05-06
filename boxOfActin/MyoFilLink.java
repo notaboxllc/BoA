@@ -1,0 +1,351 @@
+package boxOfActin;
+import javax.media.j3d.Appearance;
+import javax.media.j3d.BranchGroup;
+import javax.media.j3d.ColoringAttributes;
+import javax.media.j3d.LineArray;
+import javax.media.j3d.Node;
+import javax.media.j3d.Shape3D;
+import javax.vecmath.Color3f;
+import javax.vecmath.Point3d;
+
+
+public class MyoFilLink {
+	static final int maxLinks = 100000;
+	static MyoFilLink [] theMyoFilLinks = new MyoFilLink [maxLinks];
+	static int myoFilLinkCt = 0;
+	int myMyoFilLinkNumber;
+	static int onCt = 0;
+	static int offCt = 0;
+	static double timeOnSum = 0;
+	static double timeOffSum = 0;
+	double timeOn = 0;
+	double timeOff = 0;
+	static int numInBoundingBoxes=0;
+	static int nodeHits=0;
+	
+	//counting release method
+	static int myoBreakForceRelease = 0;
+	static int normalRelease = 0;
+	
+	static double stepSize = Env.actinMonoRadius;	// the step-size for myosin
+	static double myoSpring = 1e-9;  // N/�m
+	
+	MyoMotor myMotor = null;
+	FilSegment mySeg = null;
+	double posOnSeg = 0;			// the arclength position of a myosin from end1 of its segment
+	Pt3D motorPt = new Pt3D();		// point of attachment on node
+	Pt3D attachPt = new Pt3D();		// the fixed coordinate system position of the myosin attachment on filament
+	int lastPosUpdate = 0;
+	double forceMag = 0;
+	double forceDotFil = 0;   // use this value in calculating release probabilities, it's signed appropriately but only co-linear component of force
+	ValueTracker forceDotFilTrack = new ValueTracker(10); // or maybe use this running average for release prob
+	
+	// re-used in force calcs
+	Pt3D F = new Pt3D();
+	Pt3D R = new Pt3D();
+	Pt3D RcrossF = new Pt3D();
+	Pt3D torsionVec = new Pt3D();
+	Pt3D linkUVec1 = new Pt3D(); 
+	Pt3D linkUVec2 = new Pt3D();
+	
+	// for Java3D
+	BranchGroup G = new BranchGroup();
+	LineArray myoLine;
+	Shape3D myoShape;
+	boolean graphicsMade = false;
+	
+	public MyoFilLink (MyoMotor mot, Pt3D pt) {
+		myMotor = mot;
+		motorPt = pt;
+		addMyoFilLink(this);
+	}
+	
+	public MyoFilLink (Pt3D motPt, Pt3D attPt) {
+		// used only for creating myofillinks while rendering from QK files
+		this.motorPt.copy(motPt);
+		this.attachPt.copy(attPt);
+	}
+	
+	public void sepaku () {
+		myMotor = null;
+		mySeg = null;
+		motorPt = null;
+		attachPt = null;
+		forceDotFilTrack = null;
+		F = null;
+		R = null;
+		RcrossF = null;
+		torsionVec = null;
+		linkUVec1 = null;
+		linkUVec2 = null;
+		G = null;
+		myoLine = null;
+		myoShape = null;
+		
+	}
+	
+	public void setAttachment (FilSegment seg, double pos) {
+		mySeg = seg;
+		posOnSeg = pos;
+		updatePos();
+		myMotor.onFil = true;
+	}
+	
+	public void step () {
+		if (!isFree()) {
+			updatePos();
+			addForces();
+			alignUVecTorque();
+			alignYVecTorque();
+			ckRelease();
+		}
+	}
+	
+	public void addForces () {
+		if (isFree()) return;
+		double dist = Pt3D.ptDist(motorPt, attachPt);
+		if (dist < 0) { dist = 0; }
+		forceMag = dist*myoSpring;
+		F.unitVec(attachPt,motorPt);
+		F.scale(forceMag);
+		myMotor.incForceSum(F,motorPt);
+		
+		// calculate component of force toward barbed-end, signed magnitude needed for catch/slip Guo&Guilford (2006) release probability
+		// Here, forceDotFil is positive for a force that will move myosin to plus-end of filament)
+		forceDotFil = Pt3D.Dot(F,mySeg.uVec);
+		//System.out.println ("forceDotFil = " + forceDotFil);
+		forceDotFilTrack.registerValue(forceDotFil);
+		
+		F.scale(-1);
+		mySeg.incForceSum(F,attachPt);
+		
+	}
+	
+	/*public void addForces () {
+		double strainDist = Pt3D.ptDist(motorPt,attachPt);
+		if (strainDist < 0) { strainDist = 0; }
+		linkUVec1.unitVec(attachPt,motorPt);
+		double moveCoeffMotor = myMotor.moveCoeff(2,linkUVec1);
+		double forceMag = (0.01*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeffMotor + 1/mySeg.bTransGam.y));
+
+		// forces and torques applied to myosin motor domain
+		F.scale(forceMag,linkUVec1);
+		myMotor.incForceSum(F,motorPt);
+		
+		// forces and torques applied to filament seg
+		F.scale(-1,F);
+		mySeg.incForceSum(F,attachPt);
+	}*/
+	
+	public void alignUVecTorque () {
+		torsionVec.cross(mySeg.uVec,myMotor.uVec);
+		torsionVec.unitVec();
+		
+		double dotVecs = Pt3D.Dot(mySeg.uVec,myMotor.uVec);
+		if (dotVecs > 1.0) { dotVecs = 1.0; }
+		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		
+		double angRelaxed = Myosin.uncockedMotor_ActinAngle;
+		if (myMotor.isCocked()) { angRelaxed = Myosin.cockedMotor_ActinAngle; }
+		double angD = angTween-angRelaxed;
+			
+		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angD/((1/myMotor.bRotGam.y + 1/mySeg.bRotGam.y)*Env.deltaT.getValue());
+		
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			mySeg.incTorqueSum(torsionVec);
+		
+			torsionVec.scale(-1);
+			myMotor.incTorqueSum(torsionVec);
+		} else {
+			System.out.println ("Crazy torque result in MyoFilLink.alignUVecTorque()");
+		}
+
+	}
+	
+	public void alignYVecTorque () {
+		torsionVec.cross(mySeg.yVec,myMotor.yVec);
+		torsionVec.unitVec();
+		
+		double dotVecs = Pt3D.Dot(mySeg.yVec,myMotor.yVec);
+		if (dotVecs > 1.0) { dotVecs = 1.0; }
+		double angTween = Math.acos(dotVecs)*180/Math.PI;
+			
+		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angTween/((1/myMotor.bRotGam.x + 1/mySeg.bRotGam.x)*Env.deltaT.getValue());
+		
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			mySeg.incTorqueSum(torsionVec);
+		
+			torsionVec.scale(-1);
+			myMotor.incTorqueSum(torsionVec);
+		} else {
+			System.out.println ("Crazy torque result in MyoFilLink.alignYVecTorque()");
+		}
+
+	}
+	
+	public void updatePos () {
+		if (lastPosUpdate != Env.counter) {
+			//motorPt.copy(myMotor.bindTip);
+			attachPt.add(mySeg.end1,posOnSeg,mySeg.uVec);
+			lastPosUpdate = Env.counter;
+		}
+	}
+	
+	
+	public boolean isFree () {
+		if (mySeg == null) { return true; }
+		validateSeg ();
+		return (mySeg == null);
+	}
+	
+	public void validateSeg() {
+		if ((mySeg.end1 == null) | (mySeg.uVec == null) | mySeg.removeMe) {
+			release();
+			return;
+		}
+	}
+	public void release () {
+		mySeg = null;
+		posOnSeg = 0;
+		forceMag = 0;
+		forceDotFil = 0;
+		forceDotFilTrack.zero();
+		myMotor.onFil = false;
+		myMotor.bindTimer = 0;
+	}
+	
+	public void ckRelease () {
+		if (forceMag > Env.myosinBreakForce.getValue()*1e-12) { // combat stiffness and force insanity
+			release();
+			myoBreakForceRelease++;
+			//System.out.println("**released myoFilLink because break force exceeded!");
+			return;
+		}
+		
+		if (myMotor.inRigor) { return; } // don't release a filament normally if this flag is set, only if large force as above
+		
+		double guoCatchTerm = Env.alphaCatch.getValue()*Math.exp(-forceDotFil*Env.xCatch.getValue()/(Env.Boltz*Env.tempK));
+		double guoSlipTerm = Env.alphaSlip.getValue()*Math.exp(forceDotFil*Env.xSlip.getValue()/(Env.Boltz*Env.tempK));  
+		double guoCatchSlipProb =  Env.kOff.getValue()*(guoCatchTerm + guoSlipTerm);
+		
+		
+		//System.out.println("Motor state is " + myMotor.getState() + " forceDotFil = " + forceDotFil + " ; guoCatchSlipProb = " + guoCatchSlipProb);
+		//System.out.println("Motor state is " + myMotor.getState() + " ForceMag = " + forceMag+ " ; forceDotFil = " + forceDotFil + " ; ReleaseProb = " + releaseProb + " ; guoCatchSlipProb = " + guoCatchTerm + " ; " +  guoSlipTerm + " ; " + guoCatchSlipProb);
+		
+		if (myMotor.myPRNG.nextDouble() < guoCatchSlipProb*Env.deltaT.getValue()) { 
+			release(); 
+			normalRelease++;
+		}
+		
+	}
+	
+	/*public void ckRelease () {
+		if (forceMag > Env.myosinStallForce.getValue()*1e-12) {
+			release();
+			stallForceRelease++;
+			//System.out.println("**Released myoFilLink because stall force exceeded!");
+			return;
+		}
+		double releaseModX = 1.0;
+		if (myMotor.notATP()) { releaseModX *= Env.notATPMyoReleaseMod.getValue(); } 
+		double releaseProb = Env.myoFBRBase.getValue()*Math.exp(forceMag*1e12*releaseModX*Env.myoFBRExp.getValue())*Env.deltaT.getValue();
+		//System.out.println("ForceMag = " + forceMag+ " ; ReleaseProb = " + releaseProb);
+		if (myMotor.myPRNG.nextDouble() < releaseProb) { 
+			//System.out.println("released myoFilLink normally");
+			normalRelease++;
+			release(); 
+		}
+	}*/
+	
+	/*public void ckRelease () {
+		// biochem only... ie no force dependence
+		double releaseRate;
+		if (myMotor.isATP()) { releaseRate = 20000.0; } else { releaseRate = 0; }
+		double releaseProb = releaseRate*Env.deltaT.getValue();
+		if (myMotor.myPRNG.raw() < releaseProb) { release(); }
+	}*/
+	
+	public static void resetReleaseCounters () {
+		myoBreakForceRelease = 0;
+		normalRelease = 0;
+	}
+	
+	public static synchronized void addMyoFilLink (MyoFilLink newLink) {
+		theMyoFilLinks[myoFilLinkCt] = newLink;
+		theMyoFilLinks[myoFilLinkCt].myMyoFilLinkNumber = myoFilLinkCt;
+		myoFilLinkCt ++;
+	}
+	
+	public static synchronized void removeMyoFilLink (MyoFilLink rmMe) {
+		theMyoFilLinks[rmMe.myMyoFilLinkNumber] = theMyoFilLinks[myoFilLinkCt-1];
+		theMyoFilLinks[rmMe.myMyoFilLinkNumber].myMyoFilLinkNumber = rmMe.myMyoFilLinkNumber;
+		theMyoFilLinks[myoFilLinkCt-1] = null;  // set pointer to null for garbage collection
+		myoFilLinkCt --;
+		rmMe.sepaku();
+		rmMe = null;
+	}
+	
+	public static void removeAll () {
+		for (int i=0;i<myoFilLinkCt;i++) {
+			if (theMyoFilLinks[i] != null) { 
+				if (theMyoFilLinks[i].graphicsMade) { theMyoFilLinks[i].G.detach(); }
+				theMyoFilLinks[i].sepaku();
+			}
+		}
+		myoFilLinkCt= 0;
+	}
+	
+	public void setPtsFromQKFile (Pt3D newPt1, Pt3D newPt2) {
+		if (newPt1 != null && newPt2 != null) {
+			motorPt.copy(newPt1);
+			attachPt.copy(newPt2);
+		} else {
+			motorPt.copy(Env.farfarAway);
+			attachPt.copy(Env.farfarAway);
+		}
+	}
+	
+	public void makeGraphics () {
+		// capabilities for graphics objects
+		G.setCapability(BranchGroup.ALLOW_DETACH);
+		
+		Color3f linkColor = new Color3f(0.0f,1.0f,1.0f);
+		ColoringAttributes cA = new ColoringAttributes(linkColor, ColoringAttributes.FASTEST);
+		Appearance myoApp = new Appearance();
+		myoApp.setColoringAttributes(cA);
+		
+		// line array
+		myoLine = new LineArray(2,LineArray.COORDINATES);
+		myoLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
+		myoLine.setCoordinate(0,new Point3d(motorPt.x,motorPt.y,motorPt.z));
+		myoLine.setCoordinate(1,new Point3d(motorPt.x,motorPt.y,motorPt.z));
+		myoShape = new Shape3D();
+		myoShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
+		myoShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
+		myoShape.setGeometry(myoLine);
+		myoShape.setAppearance(myoApp);
+		
+		G.addChild(myoShape);
+		graphicsMade = true;
+	}
+	
+	public void updateGraphics () {
+		myoLine.setCoordinate(0,motorPt);
+		if (!isFree()) { 
+			myoLine.setCoordinate(1,attachPt);
+		} else {
+			myoLine.setCoordinate(1,motorPt);
+		}
+		myoShape.setGeometry(myoLine);
+	}
+	
+	public Node getGraphicsNode () {
+		if (!graphicsMade) { makeGraphics();}
+		updateGraphics();
+		return G;
+	}
+}

@@ -1,0 +1,101 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title>Instructions for ActinScope</title>
+  <meta name="Author" content="Jonathan Alberts">
+  <meta name="Company" content="Center for Cell Dynamics">
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="824.44">
+  <style type="text/css">
+    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 30.0px Arial; color: #008B8B}
+    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; min-height: 14.0px}
+    p.p3 {margin: 0.0px 0.0px 0.0px 0.0px; font: 14.0px Helvetica; color: #FFDEAD}
+    p.p4 {margin: 0.0px 0.0px 0.0px 0.0px; font: 13.0px Helvetica; color: #FFFFE0; min-height: 16.0px}
+    p.p5 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; color: #D8C8AB}
+    p.p6 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; color: #FFFFFF}
+    span.s1 {font: 12.0px Helvetica}
+    span.s2 {text-decoration: underline}
+    span.Apple-tab-span {white-space:pre}
+    a.a1 {color: white}
+    li.li1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; color: #D8C8AB}
+  </style>
+</head>
+<body bgcolor=black>
+<img src="parMSpindleBanner.png">
+<p class="p2"><br></p>
+<p class="p2"><br></p>
+<p class="p3">Contents:
+	<ul>
+		<li class="li1"><a class="a1" href="#intro">Introduction</a></li>
+		<li class="li1"><a class="a1" href="#running">Running</a></li>
+		<li class="li1"><a class="a1" href="#options">Runtime options</a></li>
+		
+	</ul>
+</p>
+<p class="p2"><br></p>
+<p class="p2"><br></p>
+<p class="p3"><a name="intro"><b>Introduction</b><span class="s1"><b><span class="Apple-converted-space"> </span></b></span></p>
+<p class="p2"><br></p>
+<p class="p4">
+This Java code simulates the segregation, to opposite sides of a bacterium prior to cell division, of gene carrying
+plasmids by the bacterial actin homolog ParM.  In the simulation, plasmids are represented by spheres, which might be
+seen as the effective capture radius of the plasmid. These plasmids have the ability to bind and nucleate (depending
+upon parameter settings in a particular run) ParM filaments via an unrepresented ParR-ParC complex.  The ParM filaments
+are comprised of a set of filament segments; each adjoining filament segment is connected to its neighbor by a
+rotational spring and translational forces calculated by a pairwise Lagrange multiplier approximation.
+</p>
+<p class="p2"><br></p>
+<p class="p2"><br></p>
+<p class="p3"><a name="running"><b>Running:</b><span class="s1"><b><span class="Apple-converted-space"> </span></b></span></p>
+<p class="p2"><br></p>
+<p class="p4">
+The main class is ParMSpindle, so the source code can be compiled on any machine with Java and Java3D environments
+installed...
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+<b>javac ParMSpindle.java</b>
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+It can then be run with
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+<b>java ParMSpindle</b>
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+You're going to need a large memory allocation to do any real simulation.  This can be set at runtime with
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+<b>java -Xmx500M ParMSpindle</b>
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+where the 500M means 500 MB max heap size (you may, and may need to, use larger or smaller allocations, depending on the
+run parameters).
+</p>
+<p class="p2"><br></p>
+<p class="p2"><br></p>
+<p class="p3"><a name="options"><b>Runtime options</b></p>
+<p class="p2"><br></p>
+<p class="p4">
+There are several runtime options that can be invoked... type java ParMSpindle -help to see a list. The code allows you to set many of the important parameters at runtime through a GUI.  These values may be saved in a
+parameter file, under the File menu.  You can automatically load this parameter file using the -pf option..
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+<b>java -Xmx800M ParMSpindle -pf myParamFile</b>
+</p>
+<p class="p2"><br></p>
+<p class="p4">
+The code can be modified in any text editor, but we recommend an IDE such as Eclipse (free and available for OSX,
+Windows, Linux, and others).  Any questions, please email me:  jalberts@u.washington.edu</p>
+
+
+</body>
+</html>

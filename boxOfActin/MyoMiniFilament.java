@@ -1,0 +1,651 @@
+package boxOfActin;
+/**
+ * ProteinNode.java
+ *
+ *
+ */
+
+
+
+import java.awt.*;
+import javax.swing.*;
+import java.lang.Math.*;
+
+import com.sun.j3d.utils.geometry.Cylinder;
+import com.sun.j3d.utils.geometry.Primitive;
+import com.sun.j3d.utils.geometry.Sphere;
+import com.sun.j3d.utils.universe.*;
+import javax.media.j3d.*;
+import javax.vecmath.*;
+
+public class MyoMiniFilament extends Thing {
+	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [5000];	// array holding all protein nodes
+	static int myoMiniFilCt = 0; //
+	int myMyoMiniNumber;
+	static double length = 0.180;	// �m
+	static double radius = 0.005; // �m
+	static double headZone = 0.05; // �m  distribution of myosins about each end of filament
+	private int boundFilaments = 0;			// counter for number of bound actin filaments
+	
+	Pt3D end1 = new Pt3D();	// the free-end	
+	Pt3D end2 = new Pt3D();	// attached to head
+	
+	// empirical fit for viscous drags
+	static final double aParallel = -0.20;  // approx to constant in damping for parallel motion
+	static final double aOrthog = 0.84;		// ...for orthogonal motion
+	static final double aTurning = -0.662; 	// ...for rotational motion
+	
+	// for multithreading
+	static MyoMiniFilThreads miniFilThreads = new MyoMiniFilThreads();
+	
+	// re-used in force calcs
+	Pt3D F = new Pt3D();
+	Pt3D R = new Pt3D();
+	Pt3D RcrossF = new Pt3D();
+	Pt3D torsionVec = new Pt3D();
+	Pt3D linkUVec1 = new Pt3D(); 
+	Pt3D linkUVec2 = new Pt3D();
+	
+	// for collision detection
+	double xRange,yRange,zRange;
+	
+	// myosin heads
+	int numMyosinHeads = 0;
+	Myosin [] myosins = new Myosin [numMyosinHeads];
+	Pt3D [] myoPtsInx = new Pt3D[numMyosinHeads];
+	Pt3D [] myoPtsInX = new Pt3D[numMyosinHeads];
+	
+	// myosin dimers
+	int numMyoDimersEachEnd = Env.numMyoDimersEachEndOfMiniFil.getIntValue();
+	MyosinDimer [] myoDimersEnd1 = new MyosinDimer[numMyoDimersEachEnd];
+	MyosinDimer [] myoDimersEnd2 = new MyosinDimer[numMyoDimersEachEnd];
+	
+	Pt3D [] myoDimerPtsEnd1Inx = new Pt3D[numMyoDimersEachEnd];
+	Pt3D [] myoDimerPtsEnd1InX = new Pt3D[numMyoDimersEachEnd];
+	
+	Pt3D [] myoDimerPtsEnd2Inx = new Pt3D[numMyoDimersEachEnd];
+	Pt3D [] myoDimerPtsEnd2InX = new Pt3D[numMyoDimersEachEnd];
+
+	// for graphics
+	Vector3d coordVec3d = new Vector3d();
+	Transform3D cylT3D,cylRot;
+	TransformGroup cylTG;
+	BranchGroup cylBG;
+	Cylinder myCyl;
+	static Appearance cylA;
+	static Material cylM;
+	static Color3f ambientC = new Color3f(0.0f,1.0f,0.0f);
+	static Color3f diffuseC = new Color3f(0.4f,0.4f,0.4f);
+	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
+	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
+	static int shiny = 128;
+	
+	public MyoMiniFilament (Pt3D initCoord) {
+		super(initCoord);
+		addMiniFil(this);
+		calculateProperties();
+		initialize();
+		
+		makeMyosinHeads();
+		makeMyosinDimers();
+	}
+	
+	public MyoMiniFilament (Pt3D initCoord, Pt3D initUVec) {
+		super(initCoord);
+		addMiniFil(this);
+		
+		uVec.copy(initUVec);
+		calculateProperties();
+		initialize();
+		
+		makeMyosinHeads();
+		makeMyosinDimers();
+	}
+	
+	public MyoMiniFilament (Pt3D initCoord, Pt3D initUVec,double len, double rad) {
+		// for creation from QK files
+		super(initCoord);
+		addMiniFil(this);
+		
+		length = len;
+		radius = rad;
+		uVec.copy(initUVec);
+		calculateProperties();
+		initialize();
+		
+		
+	}
+	
+	static class MyoMiniFilThreads extends ThreadSet {
+		MyoMiniFilThreads () {
+			super (Env.numMyoThreads, "MyoMiniFil Threads");
+		}
+	
+		public void divideAndConquer (int jobId) {
+			this.jobId = jobId;
+			switch (jobId) {
+				case Env.myoJoints2Start:
+					for (int i=0; i <= numThreads; i++) {
+						jobDiv[i] = i*myoMiniFilCt/numThreads;	// divide the job amongst threads
+					}
+					spawn(); break;
+			}
+			
+		}
+		
+		public void regroup (int jobId) {
+			switch (jobId) {
+				case Env.myoJoints2Stop:
+					gather(); break;
+			}
+		}
+		
+		public void execute (int threadId) {
+			switch (jobId) {
+				case Env.myoJoints2Start:
+					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+						myoMiniFils[i].updateMyosins(); 
+					}
+					break;
+			}
+		}
+	}
+	
+	public void set (Pt3D setCoord, Pt3D setUVec, double dim, double rad) {
+		coord.copy(setCoord);
+		uVec.copy(setUVec);
+		length = dim;
+		radius = rad;
+		initialize();
+	}
+	
+	public void calculateProperties () {
+		// define the constants for motion of this rod in viscous medium
+		// Remember that the dimensions we've been using are in micrometers so...
+		double tailLengthM = 1.0e-6*length; // in meters
+		double radiusM = radius*1.0e-6;
+		double denomLogTerm = Math.log(tailLengthM/(2*radiusM));	//dimensionless
+		bTransGam.x = (2*Math.PI*Env.aeta.getValue()*tailLengthM)/(denomLogTerm + aParallel);
+		bTransGam.y = (4*Math.PI*Env.aeta.getValue()*tailLengthM)/(denomLogTerm + aOrthog);
+		bTransGam.z = bTransGam.y;
+		bRotGam.x = 4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*tailLengthM;	// drag for turning about x
+		bRotGam.y = (Math.PI*Env.aeta.getValue()*Math.pow(tailLengthM,3))/(3*(denomLogTerm + aTurning));
+		bRotGam.z = bRotGam.y;
+		
+		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
+		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
+	}
+	
+	public void initialize () {
+		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
+		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
+		zVec.cross(uVec, yVec);
+		yVec.cross(zVec, uVec);
+		// find the transformation matrices at this time step
+		transMat ();
+		// define opposite to uVec direction, used frequently
+		uVecR.scale(-1,uVec);
+		
+		// re-find the end points of the rod to make sure they meet length criteria
+		end1.add(coord, -0.5*length, uVec);
+		end2.add(coord, 0.5*length, uVec);
+		
+		// for collision detection
+		xRange = Math.abs(coord.x-end2.x);
+		yRange = Math.abs(coord.y-end2.y);
+		zRange = Math.abs(coord.z-end2.z);
+	}
+	
+	public void moveThing () {
+		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
+		
+		// first check that forceSum and torqueSum aren't wacky... exit method if they are
+		if (!forceSum.checkPt3D()) { 
+			talkln ("Crazy forceSum in " + this); 
+			forceSum.zero();
+			forceSum.inc(randForces);
+		}
+		if (!torqueSum.checkPt3D()) { 
+			talkln ("Crazy torqueSum in " + this); 
+			torqueSum.zero();
+			torqueSum.inc(randTorques);
+		}
+		
+		// Work in coordinates aligned with the minifilament... transform forces and torques into body-fixed axis....
+		bForceSum.XTox(this, forceSum);
+		bTorqueSum.XTox(this, torqueSum);
+		if (!Env.myoMiniFilBrownianMotionOff) {
+			// add random forces, given in body-fixed frame
+			bForceSum.inc(randForces);
+			bTorqueSum.inc(randTorques);
+		}
+		// now that the forces and torques are in the body fixed frame, we apply the eoms....
+		bVeloc.div(1.0e6, bForceSum, bTransGam);		// in micron/sec
+		bAngVeloc.div(bTorqueSum, bRotGam);			// in radians/sec
+			
+		// ** before progressing .... check that bVeloc and bAngVeloc are not NaN... exit if wacky
+		if (!bVeloc.checkPt3D()) { talkln ("** problem with bVeloc for " + this); return; }
+		if (!bAngVeloc.checkPt3D()) { talkln ("** problem with bAngVeloc for " + this); return; }
+		
+		// New Positions
+		// ....then transform back into fixed coordinate frame
+		veloc.xToX(this, bVeloc);
+		coord.inc(Env.deltaT.getValue(), veloc);
+		
+		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
+		// for uVec
+		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
+		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
+		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
+		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
+		uVec.unitVec();		// make a unit vector
+		
+		// for yVec 
+		double yVecTransInX = - uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
+		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
+		yVec.xToX(this);
+		yVec.unitVec();
+		
+		initialize();
+	}
+	
+	public void biochemStep () {
+		if (Env.mtRNG.nextDouble() < Env.deltaT.getValue()/Env.myoMiniLifetime.getValue()) {
+			removeMe = true;
+		}
+	}
+	
+	public void step () {
+		//increment counters that control how often different sims occur
+		collCheckCt++;
+		if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
+			checkOuterBugCollision();		// these should add forces and torques to forceSum and torqueSum
+			collCheckCt = 0;
+		}
+		
+	}
+	
+	public void resetCounters() {
+		super.resetCounters();
+	}
+	
+	public void makeMyosinHeads () {
+		for (int i=0;i<numMyosinHeads;i++) {
+			myoPtsInx[i] = new Pt3D();
+			double ang = myPRNG.nextDouble()*Math.PI;
+			myoPtsInx[i].y = getRadius()*Math.cos(ang);
+			myoPtsInx[i].z = getRadius()*Math.sin(ang);
+			myoPtsInx[i].x = (2*myPRNG.nextDouble()-1)*(length/2);
+			
+			myoPtsInX[i] = new Pt3D();
+			myoPtsInX[i].xToX(this,myoPtsInx[i]);
+			myoPtsInX[i].inc(coord);
+			myosins[i] = new Myosin(myoPtsInX[i]);
+			//myosins[i].rodInvisible = true;
+		}
+	}
+	
+	public void updateMyosinPositions () {
+		for (int i=0;i<numMyosinHeads;i++) {
+			myoPtsInX[i].xToX(this,myoPtsInx[i]);
+			myoPtsInX[i].inc(coord);
+		}
+	}
+	
+	public void keepMyosinsOnSurface () {
+		Pt3D curAttPt;
+		Myosin curMyo;
+		for (int i=0;i<numMyosinHeads;i++) {
+			curMyo = myosins[i];
+			curAttPt = myoPtsInX[i];
+			double strainDist = Pt3D.ptDist(curMyo.myoRod.end1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyo.myoRod.end1);
+			linkUVec2.scale(-1,linkUVec1);
+			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyo.myoRod.bTransGam.y + 1/bTransGam.y));
+
+			F.scale(forceMag,linkUVec1);
+			curMyo.myoRod.incForceSum(F);
+			
+			F.scale(-1,F);
+			incForceSum(F);
+		}
+	}
+	
+	public void makeMyosinDimers () {
+		
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			myoDimerPtsEnd1Inx[i] = new Pt3D();
+			double ang = myPRNG.nextDouble()*Math.PI;
+			myoDimerPtsEnd1Inx[i].y = 0;//getRadius()*Math.cos(ang);
+			myoDimerPtsEnd1Inx[i].z = 0;//getRadius()*Math.sin(ang);
+			myoDimerPtsEnd1Inx[i].x = -(length/2 - myPRNG.nextDouble()*headZone);
+			
+			myoDimerPtsEnd1InX[i] = new Pt3D();
+			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
+			myoDimerPtsEnd1InX[i].inc(coord);
+			myoDimersEnd1[i] = new MyosinDimer(myoDimerPtsEnd1InX[i],uVecR);
+			//myosins[i].rodInvisible = true;
+		}
+		
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			myoDimerPtsEnd2Inx[i] = new Pt3D();
+			double ang = myPRNG.nextDouble()*Math.PI;
+			myoDimerPtsEnd2Inx[i].y = 0;//getRadius()*Math.cos(ang);
+			myoDimerPtsEnd2Inx[i].z = 0;//getRadius()*Math.sin(ang);
+			myoDimerPtsEnd2Inx[i].x = length/2 - myPRNG.nextDouble()*headZone;
+			
+			myoDimerPtsEnd2InX[i] = new Pt3D();
+			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);
+			myoDimerPtsEnd2InX[i].inc(coord);
+			myoDimersEnd2[i] = new MyosinDimer(myoDimerPtsEnd2InX[i],uVec);
+			//myosins[i].rodInvisible = true;
+		}
+	}
+	
+	public void updateMyosinDimerPositions () {
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
+			myoDimerPtsEnd1InX[i].inc(coord);
+			
+			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);
+			myoDimerPtsEnd2InX[i].inc(coord);
+		}
+	}
+	
+	public void constrainEnd1Dimers () {
+		Pt3D curAttPt;
+		MyosinDimer curMyoD;
+		MyoRod curMyoRod;
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			// force to keep two points together
+			curMyoD = myoDimersEnd1[i];
+			curMyoRod = curMyoD.myo1.myoRod;
+			curAttPt = myoDimerPtsEnd1InX[i];
+			double strainDist = Pt3D.ptDist(curMyoRod.end1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyoRod.end1);
+			linkUVec2.scale(-1,linkUVec1);
+			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
+
+			F.scale(forceMag,linkUVec1);
+			curMyoRod.incForceSum(F);
+			
+			F.scale(-1,F);
+			incForceSum(F);
+			
+			// torque to maintain alignment (more or less)
+			torsionVec.cross(curMyoRod.uVec,uVecR);
+			torsionVec.unitVec();
+			
+			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVecR);
+			if (dotVecs > 1.0) { dotVecs = 1.0; }
+			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			
+			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+			double torsionMag = Env.myoMiniFilAlign.getValue()*(Math.PI/180)*angTween/((1/curMyoRod.bRotGam.y + 1/bRotGam.y)*Env.deltaT.getValue());
+			
+			if (torsionVec.checkPt3D()) {
+				torsionVec.scale(torsionMag);
+				curMyoRod.incTorqueSum(torsionVec);
+			
+				torsionVec.scale(-1);
+				incTorqueSum(torsionVec);
+			} else {
+				System.out.println ("Crazy torque result in MyoMiniFilament.constrainEnd1Dimers()");
+			}
+		}
+	}
+	
+	public void constrainEnd2Dimers () {
+		Pt3D curAttPt;
+		MyosinDimer curMyoD;
+		MyoRod curMyoRod;
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			// force to keep two points together
+			curMyoD = myoDimersEnd2[i];
+			curMyoRod = curMyoD.myo1.myoRod;
+			curAttPt = myoDimerPtsEnd2InX[i];
+			double strainDist = Pt3D.ptDist(curMyoRod.end1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyoRod.end1);
+			linkUVec2.scale(-1,linkUVec1);
+			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
+
+			F.scale(forceMag,linkUVec1);
+			curMyoRod.incForceSum(F);
+			
+			F.scale(-1,F);
+			incForceSum(F);
+			
+			// torque to maintain alignment (more or less)
+			torsionVec.cross(curMyoRod.uVec,uVec);
+			torsionVec.unitVec();
+			
+			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVec);
+			if (dotVecs > 1.0) { dotVecs = 1.0; }
+			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			
+			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
+			double torsionMag = Env.myoMiniFilAlign.getValue()*(Math.PI/180)*angTween/((1/curMyoRod.bRotGam.y + 1/bRotGam.y)*Env.deltaT.getValue());
+			
+			if (torsionVec.checkPt3D()) {
+				torsionVec.scale(torsionMag);
+				curMyoRod.incTorqueSum(torsionVec);
+			
+				torsionVec.scale(-1);
+				incTorqueSum(torsionVec);
+			} else {
+				System.out.println ("Crazy torque result in MyoMiniFilament.constrainEnd2Dimers()");
+			}
+		}
+	}
+	
+	public static void updateAllMyosins () {
+		for (int i=0;i<myoMiniFilCt;i++) {
+			myoMiniFils[i].updateMyosins();
+		}
+	}
+	
+	public void updateMyosins() {
+		updateMyosinPositions();
+		keepMyosinsOnSurface();
+		
+		updateMyosinDimerPositions();
+		constrainEnd1Dimers();
+		constrainEnd2Dimers();
+	}
+	
+	public void checkOuterBugCollision () {
+		double mag;
+		theBox.amICollidingOuter(cE,end1,getRadius());
+		if (cE.delta != 0) {
+			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
+			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end1);
+		}
+		
+		theBox.amICollidingOuter(cE,end2,getRadius());
+		if (cE.delta != 0) {
+			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
+			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end2);
+		}
+	}
+	
+	public static void checkMyoMiniFilCollisions () {
+		for (int i=0; i<myoMiniFilCt; i++) {
+			MyoMiniFilament iP = myoMiniFils[i];
+			for (int p=i+1;p<myoMiniFilCt;p++) {
+				MyoMiniFilament pP = myoMiniFils[p];
+				double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+				if (pDist<pP.getRadius()+iP.getRadius()) {
+					double impingedist = pP.getRadius()+iP.getRadius() - pDist;
+				    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coord, pP.coord);
+					Pt3D pVec = Pt3D.Reverse(iVec);
+					double mag = (1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/iP.bTransGam.x+1/pP.bTransGam.x);
+					iP.incForceSum(Pt3D.Scale(mag,iVec));
+					pP.incForceSum(Pt3D.Scale(mag,pVec));
+				}
+			}
+		}
+	}
+	
+	public double getRadius() {
+		return radius;
+	}
+	
+	public double getLength () {
+		return length;
+	}
+	
+	private void makeNewCyl () {
+		//cylindrical body
+		cylBG = new BranchGroup();
+		cylBG.setCapability(BranchGroup.ALLOW_DETACH);
+		myCyl = new Cylinder((float)radius,(float)length,Primitive.GENERATE_NORMALS,20,20,cylA);
+		cylRot = new Transform3D();
+		cylRot.rotZ(Math.PI/2);
+		cylT3D = new Transform3D();
+		cylT3D.setRotation(mxToX);
+		cylT3D.setScale(1);
+		cylT3D.mul(cylRot);
+		Pt3D cylCen = Pt3D.Add(end1,length/2,uVec);
+		cylT3D.setTranslation(new Vector3d(cylCen.x,cylCen.y,cylCen.z));
+		cylTG = new TransformGroup(cylT3D);
+		cylTG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
+		cylTG.addChild(myCyl);
+		cylBG.addChild(cylTG);
+		G.addChild(cylBG);
+	}
+	
+	private void updateCylGraphics () {
+		cylBG.detach();
+		cylTG.removeChild(myCyl);
+		myCyl = new Cylinder((float)radius,(float)length,Primitive.GENERATE_NORMALS,20,20,cylA);
+		cylTG.addChild(myCyl);
+		G.addChild(cylBG);
+	}
+	
+	public void makeGraphics () {
+		// make material
+		m = new Material (ambientC,emissiveC,diffuseC,specularC,shiny);
+		// set capabilities
+		setGraphicsCapabilities();
+		
+		TransparencyAttributes tA = new TransparencyAttributes ();
+		tA.setTransparency(0.4f);
+		tA.setTransparencyMode(tA.NICEST);
+		a.setTransparencyAttributes(tA);
+		a.setMaterial(m);
+		makeNewCyl();
+		
+		graphicsMade = true;
+	}
+	
+	public void updateGraphics () {
+		
+		coord.copyToVector3d(coordVec3d);
+		
+		cylT3D.setRotation(mxToX);
+		cylT3D.mul(cylRot);
+		cylT3D.setScale(1);
+		cylT3D.setTranslation(coordVec3d);
+		cylTG.setTransform(cylT3D);
+		
+	}
+	
+	
+	public static void makeInitialMyoMiniFils() {
+		for (int i=0;i<Env.initialMyoMiniFils.getValue();i++) {
+			makeRandomMyoMiniFil();
+		}
+	}
+	
+	public static void makeRandomMyoMiniFil () {
+		Pt3D randomLoc = Thing.theBox.rdmPtInside();
+		Pt3D randomUVec = Pt3D.RandomUnitVec(Env.mtRNG);
+		new MyoMiniFilament(randomLoc,randomUVec);
+	}
+	
+	public static void equilibrateMyoMiniNumber() {
+		if (myoMiniFilCt < Env.initialMyoMiniFils.getIntValue()) {
+			makeRandomMyoMiniFil();
+		}
+	}
+	
+	public static void makeTestMiniFil () {
+		Pt3D unitVec = new Pt3D(1,1,0);
+		unitVec.unitVec();
+		
+		new MyoMiniFilament(new Pt3D(0,0,0),unitVec);
+	}
+	
+	public static void addMiniFil (MyoMiniFilament newMiniFil) {
+		myoMiniFils[myoMiniFilCt] = newMiniFil;
+		myoMiniFils[myoMiniFilCt].myMyoMiniNumber = myoMiniFilCt;
+		myoMiniFilCt ++;
+	}
+	
+	public static synchronized void removeRandomMiniFil() {
+		if (myoMiniFilCt == 0) { return; }
+		int rmMeIndex = (int)(Math.random()*myoMiniFilCt);
+		myoMiniFils[rmMeIndex].removeAllMyosins();
+		myoMiniFils[rmMeIndex].removeAllMyoDimers();
+		removeMyoMiniFil(myoMiniFils[rmMeIndex],rmMeIndex);
+	}
+	
+	public static synchronized void cleanUpMyoMinis() {
+		for (int i=0;i<myoMiniFilCt;i++) { 
+			if (myoMiniFils[i] == null) { break; } // we've reached the end of the array through deletions
+			if (myoMiniFils[i].removeMe) {
+				myoMiniFils[i].removeAllMyosins();
+				myoMiniFils[i].removeAllMyoDimers();
+				myoMiniFils[i] = myoMiniFils[myoMiniFilCt-1];
+				myoMiniFils[i].myMyoMiniNumber = i;
+				myoMiniFils[myoMiniFilCt-1] = null;  // set pointer to null for garbage collection
+				myoMiniFilCt --;
+			}
+		}
+	}
+	
+	public static synchronized void removeMyoMiniFil (MyoMiniFilament rmMe, int nodeIndex) {
+		myoMiniFils[nodeIndex] = myoMiniFils[myoMiniFilCt-1];
+		myoMiniFils[nodeIndex].myMyoMiniNumber = nodeIndex;
+		myoMiniFils[myoMiniFilCt-1] = null;  // set pointer to null for garbage collection
+		myoMiniFilCt --;
+		rmMe.removeMe = true;
+	}
+	
+	public void removeAllMyosins() {
+		for (int i=0;i<numMyosinHeads;i++) {
+			myoPtsInx[i] = null;
+			myoPtsInX[i] = null;
+			myosins[i].removeMe = true;
+			myosins[i] = null; 
+		}
+		numMyosinHeads = 0;
+	}
+	
+	public void removeAllMyoDimers() {
+		for (int i=0;i<numMyoDimersEachEnd;i++) {
+			myoDimerPtsEnd1Inx[i] = null;
+			myoDimerPtsEnd1InX[i] = null;
+			myoDimersEnd1[i].removeMe = true;
+			myoDimersEnd1[i] = null; 
+			
+			myoDimerPtsEnd2Inx[i] = null;
+			myoDimerPtsEnd2InX[i] = null;
+			myoDimersEnd2[i].removeMe = true;
+			myoDimersEnd2[i] = null; 
+		}
+		numMyoDimersEachEnd = 0;
+	}
+	
+	public static void removeAll () {
+		for (int i=0;i<myoMiniFilCt;i++) {
+			myoMiniFils[i].G.detach();
+		}
+		for (int i=0;i<myoMiniFilCt;i++) {
+			myoMiniFils[i].removeMe = true;
+			myoMiniFils[i] = null;
+		}
+		myoMiniFilCt = 0;
+	}
+}
