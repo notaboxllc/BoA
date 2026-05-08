@@ -59,6 +59,7 @@ public class BoxOfActin {
 	static int jSonCt = (int)1e6;	// large number so it'll write at time zero
 	static int jSonPlotCt = (int)1e6;	// ditto
 	static int jSon2Ct = 0;  // start counting at zero so file writing starts at specified time vi Env.simJSon2StartCounter
+	static int threeJSCounter = (int)1e6;	// large number so first frame writes at time zero
 	
 	// report time in logAndDraw
 	static double lastLogAndDrawTime = System.currentTimeMillis();
@@ -115,6 +116,7 @@ public class BoxOfActin {
 				talkln (" -qk (directory) : create specified directory and save qk files there.. allows rendering of simulation");
 				talkln (" -qkN (int) : number of integration steps between qk file saves... default (" + String.valueOf(Env.toQKFileInterval) + ")");
 				talkln (" -biochem : run the simulation without any collisions, forces, or brownian motion");
+				talkln (" -3js (directory) : write Three.js per-frame JSON files to the specified directory (auto-increments .001 suffix if exists)");
 				talkln (" -oc : ordered filaments (in a biochem only run) are centered");
 				talkln (" -vf : file containing saved Transform3D, i.e. a view");
 				System.exit(0);
@@ -249,6 +251,10 @@ public class BoxOfActin {
 				} catch (java.lang.NumberFormatException nfe) {
 					System.out.println("Invalid qk file interval specified... must be an integer... the setting was ignored");
 				}
+			}
+
+			if (args[i].equals("-3js")) {
+				Env.threeJSOutputDir = args[i + 1];
 			}
 		}
 	}
@@ -504,6 +510,7 @@ public class BoxOfActin {
 		ckElasticityCounter++;
 		ckPersistenceCounter++;
 		applyBrownianForcesCounter++;
+		threeJSCounter++;
 	}
 	
 	public static void logAndDraw() {
@@ -565,7 +572,12 @@ public class BoxOfActin {
 			Env.resetEventCounters2();
 			jSon2Ct = 0;
 		}
-		
+
+		if (Env.threeJSOutputDir != null && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+			ThreeJSWriter.writeFrame();
+			threeJSCounter = 0;
+		}
+
 		if (remoteOutCounter >= Env.remoteReportInterval.getValue()) { 
 			if (Env.logFiles) { FileOps.writeToOutFile(); }
 			
@@ -624,18 +636,23 @@ public class BoxOfActin {
 	}
 	
 	public static void remoteLog() {
-		if (remoteOutCounter >= Env.remoteReportInterval.getValue()) { 
+		if (remoteOutCounter >= Env.remoteReportInterval.getValue()) {
 			//reportPlayerDets();
 			reportRunTimeDets();
 			remoteOutCounter = 0;
 		}
-			
+
 		if ((Env.toQKFile) & (qkCounter >= Env.toQKFileInterval.getIntValue())) {
 			FilSegment.updateAllMonomerPositions();
 			//FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromIntStep(Env.outFileName,Env.counter) + ".qk");
 			FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromSimpleCounter(Env.outFileName, qkFilesMadeCounter) + ".qk");
 			qkCounter = 0;
 			qkFilesMadeCounter++;
+		}
+
+		if (Env.threeJSOutputDir != null && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+			ThreeJSWriter.writeFrame();
+			threeJSCounter = 0;
 		}
 	}
 	

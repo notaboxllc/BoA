@@ -817,6 +817,7 @@ public class Env {
 	static int simJSon2StartCounting = (int)(simJSon2Start/deltaT.getValue() - simJSon2Freq);  // integration step at which to reset counters for valid first counting
 	static boolean writeSimJSons = false;		// flag for writing Simularium style output or not
 	static boolean writeSimJSons2 = false;		// flag for writing second JSon Simularium style output or not
+	static String threeJSOutputDir = null;		// directory for Three.js per-frame JSON output; null = disabled
 	static String jSonFileName = "coarse";
 	static String jSon2FileName = "fine";
 	static double simJSonsScale = 20.0;			// scale all output numbers for better Simularium rendering

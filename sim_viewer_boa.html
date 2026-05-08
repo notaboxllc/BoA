@@ -238,7 +238,7 @@
   <button id="btn30fps">30 fps</button>
 </div>
 
-<div id="navHint">Shift+scroll: pan &nbsp;|&nbsp; Pinch: zoom &nbsp;|&nbsp; Drag: rotate</div>
+<div id="navHint">Drag: rotate &nbsp;|&nbsp; Shift+drag: pan &nbsp;|&nbsp; Scroll: zoom</div>
 <button id="displayToggle">Display ▶</button>
 <div id="displayPanel">
   <label><span class="pLabel">Actin radius</span>    <input id="sActin"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vActin">1.00</span></label>
@@ -280,6 +280,15 @@ orbitControls.dampingFactor = 0.08;
 orbitControls.minDistance = 0.01;
 orbitControls.maxDistance = 500;
 orbitControls.zoomSpeed = 2.0;
+orbitControls.mouseButtons = {
+  LEFT:   THREE.MOUSE.ROTATE,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT:  THREE.MOUSE.PAN
+};
+orbitControls.touches = {
+  ONE: THREE.TOUCH.ROTATE,
+  TWO: THREE.TOUCH.DOLLY_PAN
+};
 
 // ── lighting ──────────────────────────────────────────────────────────────────
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -684,36 +693,6 @@ window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-});
-
-// ── trackpad / right-mouse pan ────────────────────────────────────────────────
-renderer.domElement.addEventListener('wheel', e => {
-  if (e.ctrlKey) {
-    e.preventDefault();
-    camera.position.z *= (1 + e.deltaY * 0.01);
-  } else if (e.shiftKey) {
-    e.preventDefault();
-    const panSpeed = 0.002 * Math.abs(camera.position.z) / 10;
-    camera.position.x -= e.deltaX * panSpeed;
-    camera.position.y += e.deltaY * panSpeed;
-  }
-}, { passive: false });
-
-renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
-
-let _rmb = null;
-renderer.domElement.addEventListener('mousedown', e => {
-  if (e.button === 2 && e.shiftKey) _rmb = { x: e.clientX, y: e.clientY };
-});
-renderer.domElement.addEventListener('mousemove', e => {
-  if (!_rmb) return;
-  const panSpeed = 0.002 * Math.abs(camera.position.z) / 10;
-  camera.position.x -= (e.clientX - _rmb.x) * panSpeed;
-  camera.position.y += (e.clientY - _rmb.y) * panSpeed;
-  _rmb = { x: e.clientX, y: e.clientY };
-});
-renderer.domElement.addEventListener('mouseup', e => {
-  if (e.button === 2) _rmb = null;
 });
 
 // ── render + playback loop ────────────────────────────────────────────────────

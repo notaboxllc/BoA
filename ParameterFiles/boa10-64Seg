@@ -1,8 +1,8 @@
 <BOA> A 10x10 micron field, no monomers simulated, 64-monomer length rigid filament segments
-deltaT:true:1.0E-4;                     // Time Step
+deltaT:true:1.0E-5;                     // Time Step
 biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
-collisionDeltaT:true:1.0E-4;            // Time Step For Collison Detection
-brownianDeltaT:true:1.0E-4;             // Time Step at which to apply Brownian forces
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
 runTime:true:100.0;                     // Run Time
 fracMove:true:0.4;                      // Coeff. for PALM movement
 fracR:true:0.134;                       // Coeff. torque arm for PALM movement
@@ -14,9 +14,10 @@ jpegQuality:true:1.0;                   // JPEG Quality
 remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
 frameWidth:true:800.0;                  // Frame Width
 frameHeight:true:800.0;                 // Frame Height
-bugOff:false:0.0;                       // Bug Off
-initialFilaments:true:1000.0;           // Initial Actin Filaments
-initialMyoMiniFils:true:500.0;          // Initial Myosin Minifilaments
+bugOff:true:1.0;                       // Bug Off
+simOutsideBug:false:0.0;         	// Sim Outside Bug
+initialFilaments:true:100.0;           // Initial Actin Filaments
+initialMyoMiniFils:true:100.0;          // Initial Myosin Minifilaments
 minFilLength:true:0.2;                  // Min. Filament Length
 maxFilLength:true:1.5;                  // Max. Filament Length
 stdDevActinDist:true:0.5;               // Std Dev Actin Distribution
