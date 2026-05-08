@@ -198,3 +198,21 @@ For crosslinker, end-link, and torsion spring forces: implement ownership assign
 ### Java3D removal (prerequisite)
 
 BoA currently depends on Java3D for graphics. This must be removed (or fully isolated behind the `-r` headless flag) before TornadoVM can be integrated — TornadoVM requires Java 21 and Java3D does not support it. Follow the approach used in Sim3D: remove Java3D imports, replace graphics output with a JSON / Three.js rendering system. The `-r` flag already suppresses all graphics calls; the remaining blocker is that Java3D classes are referenced in field declarations (e.g., `BranchGroup G`, `TransformGroup g3d` in `Thing.java`) which prevent the JVM from loading even in headless mode.
+
+## Biological Context
+
+- **Actin filaments**: ~8 nm radius, modeled as rigid rods (FilSegment chains)
+- **Myosin II structure**: rod (~200nm) → lever/neck (~8nm) → motor head (~20nm).
+  Each Myosin object has MyoRod, MyoLever, MyoMotor sub-objects with end1/end2
+- **MyoMiniFilament**: bundles multiple Myosin dimers; its own end1/end2 spans
+  the full structure. Individual MyoRod objects inside have rodInvisible=true
+- **Motor nucleotide cycle**: NONE→ATP(unbound)→ADPPi(cocked)→ADP(power stroke)→NONE
+- **Simulation modes** (set in parameter files via makeCrucible()):
+  - Box of actin: Chamber.makeABox(), no bug
+  - Pill-shaped arena: Bug.makeABugCrucible() as theBox
+  - Listeria motility: Chamber + Bug.makeListeriaBug() with ActA proteins
+
+## Parameter File Format
+  paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
+  // If isActive=false, parameter falls back to Java default regardless of value
+  // bugOff does NOT control bug creation — use simOutsideBug:false:0.0
