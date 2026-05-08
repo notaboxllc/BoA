@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BoxOfActin Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: monospace; }
+    canvas { display: block; }
+
+    #hud {
+      position: absolute;
+      top: 48px;
+      left: 12px;
+      color: #fff;
+      font: 13px/1.8 monospace;
+      pointer-events: none;
+      text-shadow: 1px 1px 3px #000;
+      z-index: 10;
+    }
+
+    #error {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #f88;
+      font: 14px/2 monospace;
+      text-align: center;
+      display: none;
+      z-index: 10;
+    }
+
+    /* ── directory bar ─────────────────────────────────────────────────────── */
+    #dirBar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 36px;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    #dirBar .label {
+      color: #777;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #dirInput {
+      flex: 1;
+      min-width: 0;
+      background: #1a1a1a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 3px 8px;
+      font: 13px monospace;
+      outline: none;
+    }
+    #dirInput:focus { border-color: #4a7aaa; color: #fff; }
+
+    #recentSel {
+      background: #2a2a2a;
+      color: #777;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 2px 4px;
+      font: 12px monospace;
+      cursor: pointer;
+      outline: none;
+      flex-shrink: 0;
+    }
+    #recentSel:hover { color: #ccc; }
+    #recentSel option { background: #1a1a1a; color: #ccc; }
+
+    #dirBar button {
+      background: #2a2a2a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 3px 11px;
+      cursor: pointer;
+      font: 13px monospace;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #dirBar button:hover { background: #3a3a3a; color: #fff; }
+
+    /* ── bottom control bar ────────────────────────────────────────────────── */
+    #controls {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 52px;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 10px;
+      z-index: 10;
+    }
+
+    #controls button {
+      background: #2a2a2a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 3px 11px;
+      cursor: pointer;
+      font: 13px monospace;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #controls button:hover  { background: #3a3a3a; color: #fff; }
+    #controls button.active { background: #1a3a5a; border-color: #4a7aaa; color: #adf; }
+
+    #slider {
+      flex: 1;
+      min-width: 0;
+      accent-color: #4a7aaa;
+      cursor: pointer;
+      height: 4px;
+    }
+
+    #frameCounter {
+      color: #ccc;
+      white-space: nowrap;
+      min-width: 130px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .sep {
+      color: #444;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    /* ── nav hint ──────────────────────────────────────────────────────────── */
+    #navHint {
+      position: absolute;
+      top: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #555;
+      font: 11px monospace;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    /* ── display panel ─────────────────────────────────────────────────────── */
+    #displayToggle {
+      position: absolute;
+      top: 44px;
+      right: 12px;
+      background: rgba(0,0,0,0.75);
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 3px 10px;
+      cursor: pointer;
+      font: 12px monospace;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    #displayToggle:hover { color: #fff; }
+
+    #displayPanel {
+      position: absolute;
+      top: 72px;
+      right: 12px;
+      background: rgba(0,0,0,0.82);
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px 14px;
+      z-index: 10;
+      display: none;
+      font: 12px/2.2 monospace;
+      color: #ccc;
+      min-width: 250px;
+    }
+    #displayPanel.open { display: block; }
+    #displayPanel label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #displayPanel .pLabel {
+      width: 116px;
+      flex-shrink: 0;
+      color: #aaa;
+    }
+    #displayPanel input[type=range] {
+      flex: 1;
+      accent-color: #4a7aaa;
+      height: 4px;
+      cursor: pointer;
+    }
+    #displayPanel .pVal {
+      width: 36px;
+      text-align: right;
+      color: #fff;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="hud">loading…</div>
+<div id="error"></div>
+
+<div id="dirBar">
+  <span class="label">Dir:</span>
+  <input id="dirInput" type="text" value="." spellcheck="false" autocomplete="off">
+  <select id="recentSel" title="Recent directories">
+    <option value="">Recent ▾</option>
+  </select>
+  <button id="btnLoad">Load</button>
+</div>
+
+<div id="controls">
+  <button id="btnPlay">&#9654; Play</button>
+  <div class="sep">|</div>
+  <input  id="slider" type="range" min="0" max="0" value="0">
+  <span   id="frameCounter">— of —</span>
+  <div class="sep">|</div>
+  <button id="btn2fps">2 fps</button>
+  <button id="btn10fps">10 fps</button>
+  <button id="btn30fps">30 fps</button>
+</div>
+
+<div id="navHint">Shift+scroll: pan &nbsp;|&nbsp; Pinch: zoom &nbsp;|&nbsp; Drag: rotate</div>
+<button id="displayToggle">Display ▶</button>
+<div id="displayPanel">
+  <label><span class="pLabel">Actin radius</span>    <input id="sActin"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vActin">1.00</span></label>
+  <label><span class="pLabel">Minifil radius</span>  <input id="sMinifil"  type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMinifil">1.00</span></label>
+  <label><span class="pLabel">Motor head</span>      <input id="sMotor"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMotor">1.00</span></label>
+  <label><span class="pLabel">Lever arm</span>       <input id="sLever"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vLever">1.00</span></label>
+  <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── renderer ──────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// ── scene / camera ────────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.0001, 1000);
+camera.position.set(0, 0, 15);
+
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.minDistance = 0.01;
+orbitControls.maxDistance = 500;
+orbitControls.zoomSpeed = 2.0;
+
+// ── lighting ──────────────────────────────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(2, 3, 4);
+scene.add(sun);
+
+// ── instanced segment mesh ────────────────────────────────────────────────────
+// Unit cylinder along Y: radius 1, height 1. Scaled per-instance to (r, length, r).
+const MAX_SEGMENTS = 50000;
+const MAX_MYOSINS       = 5000;
+const MAX_MINIFILAMENTS = 2000;
+const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1);
+const segMesh = new THREE.InstancedMesh(cylGeo,
+  new THREE.MeshPhongMaterial({ color: 0xcc44bb }), MAX_SEGMENTS);
+segMesh.count = 0;
+segMesh.frustumCulled = false;
+scene.add(segMesh);
+
+const rodMesh = new THREE.InstancedMesh(cylGeo,
+  new THREE.MeshPhongMaterial({ color: 0x888888 }), MAX_MYOSINS);
+rodMesh.count = 0;
+rodMesh.frustumCulled = false;
+scene.add(rodMesh);
+
+const leverMesh = new THREE.InstancedMesh(cylGeo,
+  new THREE.MeshPhongMaterial({ color: 0x88ccff }), MAX_MYOSINS);
+leverMesh.count = 0;
+leverMesh.frustumCulled = false;
+scene.add(leverMesh);
+
+const sphGeo = new THREE.SphereGeometry(1, 8, 6);
+const motorMesh = new THREE.InstancedMesh(sphGeo,
+  new THREE.MeshPhongMaterial({ vertexColors: THREE.VertexColors }), MAX_MYOSINS);
+motorMesh.count = 0;
+motorMesh.frustumCulled = false;
+scene.add(motorMesh);
+motorMesh.instanceColor = new THREE.InstancedBufferAttribute(
+  new Float32Array(MAX_MYOSINS * 3), 3);
+
+const minifilMesh = new THREE.InstancedMesh(cylGeo,
+  new THREE.MeshPhongMaterial({ color: 0xffffff }), MAX_MINIFILAMENTS);
+minifilMesh.count = 0;
+minifilMesh.frustumCulled = false;
+scene.add(minifilMesh);
+
+const motorColors = {
+  'NONE':  new THREE.Color(0x4444ff),
+  'ATP':   new THREE.Color(0xffff00),
+  'ADPPi': new THREE.Color(0xff9900),
+  'ADP':   new THREE.Color(0xff0000),
+};
+
+// ── reusable temporaries for per-frame matrix construction ────────────────────
+const dummy  = new THREE.Object3D();
+const _end1  = new THREE.Vector3();
+const _end2  = new THREE.Vector3();
+const _dir   = new THREE.Vector3();
+const _yAxis = new THREE.Vector3(0, 1, 0);
+
+function setCylinderMatrix(end1, end2, r, minLength = 0) {
+  _end1.set(end1[0], end1[1], end1[2]);
+  _end2.set(end2[0], end2[1], end2[2]);
+  _dir.subVectors(_end2, _end1);
+  const len = Math.max(_dir.length(), minLength);
+  if (len < 1e-10) return false;
+  _dir.normalize();
+  dummy.position.addVectors(_end1, _end2).multiplyScalar(0.5);
+  dummy.quaternion.setFromUnitVectors(_yAxis, _dir);
+  dummy.scale.set(r, len, r);
+  dummy.updateMatrix();
+  return true;
+}
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const hud          = document.getElementById('hud');
+const errorDiv     = document.getElementById('error');
+const dirInput     = document.getElementById('dirInput');
+const recentSel    = document.getElementById('recentSel');
+const btnLoad      = document.getElementById('btnLoad');
+const btnPlay      = document.getElementById('btnPlay');
+const slider       = document.getElementById('slider');
+const frameCounter = document.getElementById('frameCounter');
+const speedBtns    = {
+  2:  document.getElementById('btn2fps'),
+  10: document.getElementById('btn10fps'),
+  30: document.getElementById('btn30fps'),
+};
+
+// ── display scale factors (updated by panel sliders) ─────────────────────────
+let actinScale   = 1.0;
+let minifilScale = 1.0;
+let motorScale   = 1.0;
+let leverScale   = 1.0;
+let rodScale     = 1.0;
+
+// ── playback state ────────────────────────────────────────────────────────────
+let simDir        = '.';
+let totalFrames   = 0;
+let currentFrame  = 0;
+let isPlaying     = false;
+let playbackFps   = 2;
+let lastAdvanceMs = 0;
+let loading          = false;
+let boundsObj        = null;
+let apiPopulated     = false;
+let currentFrameData = null;
+const recentDirs     = [];
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+function normalizeDir(d) {
+  d = (d || '').trim();
+  return d.replace(/\/+$/, '') || '.';
+}
+
+function frameUrl(n) {
+  const name = 'frame_' + String(n).padStart(6, '0') + '.json';
+  return simDir === '.' ? name : simDir + '/' + name;
+}
+
+function updateUI() {
+  slider.max   = Math.max(0, totalFrames - 1);
+  slider.value = currentFrame;
+  frameCounter.textContent = totalFrames > 0
+    ? `frame ${currentFrame} of ${totalFrames - 1}`
+    : '— of —';
+}
+
+function setSpeed(fps) {
+  playbackFps = fps;
+  Object.entries(speedBtns).forEach(([f, btn]) =>
+    btn.classList.toggle('active', Number(f) === fps));
+}
+
+function setPlaying(state) {
+  isPlaying = state;
+  btnPlay.innerHTML = isPlaying ? '&#9646;&#9646; Pause' : '&#9654; Play';
+}
+
+function togglePlay() {
+  if (totalFrames === 0) return;
+  setPlaying(!isPlaying);
+}
+
+// ── recent directories ────────────────────────────────────────────────────────
+function addToRecent(dir) {
+  if (apiPopulated) return;
+  const i = recentDirs.indexOf(dir);
+  if (i !== -1) recentDirs.splice(i, 1);
+  recentDirs.unshift(dir);
+  if (recentDirs.length > 5) recentDirs.pop();
+  while (recentSel.options.length > 1) recentSel.remove(1);
+  recentDirs.forEach(d => recentSel.add(new Option(d, d)));
+  recentSel.selectedIndex = 0;
+}
+
+// ── directory loading ─────────────────────────────────────────────────────────
+function loadDirectory(dir) {
+  dir = normalizeDir(dir);
+  simDir = dir;
+  dirInput.value = dir;
+
+  const label = dir === '.' ? 'current dir' : (dir.split('/').pop() || dir);
+  document.title = 'BoxOfActin — ' + label;
+
+  addToRecent(dir);
+
+  if (boundsObj) {
+    scene.remove(boundsObj);
+    boundsObj.geometry.dispose();
+    boundsObj = null;
+  }
+  segMesh.count = 0;
+  segMesh.instanceMatrix.needsUpdate = true;
+  rodMesh.count = 0;
+  rodMesh.instanceMatrix.needsUpdate = true;
+  leverMesh.count = 0;
+  leverMesh.instanceMatrix.needsUpdate = true;
+  motorMesh.count = 0;
+  motorMesh.instanceMatrix.needsUpdate = true;
+  minifilMesh.count = 0;
+  minifilMesh.instanceMatrix.needsUpdate = true;
+
+  totalFrames  = 0;
+  currentFrame = 0;
+  loading      = false;
+  setPlaying(false);
+  updateUI();
+
+  hud.innerHTML = 'loading…';
+  errorDiv.style.display = 'none';
+
+  discoverFrames();
+}
+
+// ── frame loading ─────────────────────────────────────────────────────────────
+function applyFrameData(data) {
+  // Build box wireframe from first frame; bounds are constant per run.
+  if (!boundsObj) {
+    const { xDim, yDim, zDim } = data.bounds;
+    const boxGeo   = new THREE.BoxGeometry(xDim, yDim, zDim);
+    const edgesGeo = new THREE.EdgesGeometry(boxGeo);
+    boxGeo.dispose();
+    boundsObj = new THREE.LineSegments(edgesGeo,
+      new THREE.LineBasicMaterial({ color: 0x336633 }));
+    scene.add(boundsObj);
+  }
+
+  let count = 0;
+  for (const seg of data.segments) {
+    if (count < MAX_SEGMENTS && setCylinderMatrix(seg.end1, seg.end2, seg.r * actinScale))
+      segMesh.setMatrixAt(count++, dummy.matrix);
+  }
+  segMesh.count = count;
+  segMesh.instanceMatrix.needsUpdate = true;
+
+  updateMyosinData(data.myosins, data.minifilaments);
+
+  hud.innerHTML =
+    `frame ${data.frame}<br>` +
+    `t = ${data.t.toFixed(5)} s<br>` +
+    `segments: ${count}` +
+    (data.myosins      ? `<br>myosins: ${data.myosins.length}`           : '') +
+    (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '');
+}
+
+function updateMyosinData(myosins, minifilaments) {
+  let rodCt = 0, leverCt = 0, motorCt = 0, minifilCt = 0;
+
+  if (myosins) {
+    for (const m of myosins) {
+      if (!m.rod.invisible && rodCt < MAX_MYOSINS && setCylinderMatrix(m.rod.end1, m.rod.end2, m.rod.r * rodScale))
+        rodMesh.setMatrixAt(rodCt++, dummy.matrix);
+      if (leverCt < MAX_MYOSINS && setCylinderMatrix(m.lever.end1, m.lever.end2, m.lever.r * leverScale, m.lever.r * leverScale * 2))
+        leverMesh.setMatrixAt(leverCt++, dummy.matrix);
+      if (motorCt < MAX_MYOSINS) {
+        const mo = m.motor;
+        _end1.set(mo.end1[0], mo.end1[1], mo.end1[2]);
+        _end2.set(mo.end2[0], mo.end2[1], mo.end2[2]);
+        _dir.subVectors(_end2, _end1);
+        const len = _dir.length();
+        dummy.position.addVectors(_end1, _end2).multiplyScalar(0.5);
+        const r = mo.r * motorScale;
+        if (len > 1e-10) {
+          _dir.normalize();
+          dummy.quaternion.setFromUnitVectors(_yAxis, _dir);
+          dummy.scale.set(r, r * 1.5, r);
+        } else {
+          dummy.quaternion.identity();
+          dummy.scale.set(r, r, r);
+        }
+        dummy.updateMatrix();
+        motorMesh.setMatrixAt(motorCt, dummy.matrix);
+        motorMesh.setColorAt(motorCt, motorColors[mo.state] || motorColors['NONE']);
+        motorCt++;
+      }
+    }
+  }
+
+  if (minifilaments) {
+    for (const mf of minifilaments) {
+      if (minifilCt < MAX_MINIFILAMENTS && setCylinderMatrix(mf.end1, mf.end2, mf.r * minifilScale))
+        minifilMesh.setMatrixAt(minifilCt++, dummy.matrix);
+    }
+  }
+
+  rodMesh.count = rodCt;
+  leverMesh.count = leverCt;
+  motorMesh.count = motorCt;
+  minifilMesh.count = minifilCt;
+  rodMesh.instanceMatrix.needsUpdate = true;
+  leverMesh.instanceMatrix.needsUpdate = true;
+  motorMesh.instanceMatrix.needsUpdate = true;
+  minifilMesh.instanceMatrix.needsUpdate = true;
+  if (motorMesh.instanceColor) motorMesh.instanceColor.needsUpdate = true;
+}
+
+function loadFrame(n) {
+  if (loading) return;
+  loading = true;
+  fetch(frameUrl(n))
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => { currentFrameData = data; applyFrameData(data); loading = false; })
+    .catch(() => { loading = false; });
+}
+
+function goToFrame(n) {
+  if (totalFrames === 0) return;
+  currentFrame = ((n % totalFrames) + totalFrames) % totalFrames;
+  updateUI();
+  loadFrame(currentFrame);
+}
+
+// ── auto-discover total frame count ──────────────────────────────────────────
+async function discoverFrames() {
+  try {
+    const first = await fetch(frameUrl(0), { method: 'HEAD' });
+    if (!first.ok) { showError(`No frames found in "${simDir}".`); return; }
+  } catch (e) {
+    showError(`Cannot reach server: ${e.message}`);
+    return;
+  }
+
+  let n = 1;
+  while (true) {
+    try {
+      const r = await fetch(frameUrl(n), { method: 'HEAD' });
+      if (!r.ok) break;
+      n++;
+    } catch (_) { break; }
+  }
+
+  totalFrames = n;
+  updateUI();
+  loadFrame(0);
+}
+
+function showError(msg) {
+  hud.innerHTML = '';
+  errorDiv.style.display = 'block';
+  errorDiv.innerHTML = msg +
+    '<br><br>Serve this directory with:<br>' +
+    '<code>python3 sim_server.py</code><br>' +
+    'then open <code>http://localhost:8000/sim_viewer_boa.html</code>';
+}
+
+// ── control wiring ────────────────────────────────────────────────────────────
+btnLoad.addEventListener('click', () => loadDirectory(dirInput.value));
+
+dirInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); loadDirectory(dirInput.value); }
+});
+
+recentSel.addEventListener('change', () => {
+  if (recentSel.value) loadDirectory(recentSel.value);
+});
+
+btnPlay.addEventListener('click', togglePlay);
+
+slider.addEventListener('input', () => {
+  setPlaying(false);
+  currentFrame = Number(slider.value);
+  frameCounter.textContent = `frame ${currentFrame} of ${totalFrames - 1}`;
+  loadFrame(currentFrame);
+});
+
+document.getElementById('btn2fps') .addEventListener('click', () => setSpeed(2));
+document.getElementById('btn10fps').addEventListener('click', () => setSpeed(10));
+document.getElementById('btn30fps').addEventListener('click', () => setSpeed(30));
+
+// ── display panel ─────────────────────────────────────────────────────────────
+const displayToggle = document.getElementById('displayToggle');
+const displayPanel  = document.getElementById('displayPanel');
+displayToggle.addEventListener('click', () => {
+  const open = displayPanel.classList.toggle('open');
+  displayToggle.textContent = open ? 'Display ▼' : 'Display ▶';
+});
+
+function bindScaleSlider(sliderId, valId, setter) {
+  const sl = document.getElementById(sliderId);
+  const vl = document.getElementById(valId);
+  sl.addEventListener('input', () => {
+    setter(Number(sl.value));
+    vl.textContent = Number(sl.value).toFixed(2);
+    if (currentFrameData) applyFrameData(currentFrameData);
+  });
+}
+bindScaleSlider('sActin',   'vActin',   v => { actinScale   = v; });
+bindScaleSlider('sMinifil', 'vMinifil', v => { minifilScale = v; });
+bindScaleSlider('sMotor',   'vMotor',   v => { motorScale   = v; });
+bindScaleSlider('sLever',   'vLever',   v => { leverScale   = v; });
+bindScaleSlider('sRod',     'vRod',     v => { rodScale     = v; });
+
+window.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
+    e.preventDefault();
+    dirInput.focus();
+    dirInput.select();
+    return;
+  }
+  if (e.target === slider || e.target === dirInput) return;
+  switch (e.code) {
+    case 'Space':
+      e.preventDefault();
+      togglePlay();
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      setPlaying(false);
+      goToFrame(currentFrame + 1);
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      setPlaying(false);
+      goToFrame(currentFrame - 1);
+      break;
+  }
+});
+
+// ── resize ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ── trackpad / right-mouse pan ────────────────────────────────────────────────
+renderer.domElement.addEventListener('wheel', e => {
+  if (e.ctrlKey) {
+    e.preventDefault();
+    camera.position.z *= (1 + e.deltaY * 0.01);
+  } else if (e.shiftKey) {
+    e.preventDefault();
+    const panSpeed = 0.002 * Math.abs(camera.position.z) / 10;
+    camera.position.x -= e.deltaX * panSpeed;
+    camera.position.y += e.deltaY * panSpeed;
+  }
+}, { passive: false });
+
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+let _rmb = null;
+renderer.domElement.addEventListener('mousedown', e => {
+  if (e.button === 2 && e.shiftKey) _rmb = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!_rmb) return;
+  const panSpeed = 0.002 * Math.abs(camera.position.z) / 10;
+  camera.position.x -= (e.clientX - _rmb.x) * panSpeed;
+  camera.position.y += (e.clientY - _rmb.y) * panSpeed;
+  _rmb = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('mouseup', e => {
+  if (e.button === 2) _rmb = null;
+});
+
+// ── render + playback loop ────────────────────────────────────────────────────
+function animate(ts) {
+  requestAnimationFrame(animate);
+  orbitControls.update();
+
+  if (isPlaying && totalFrames > 0 && !loading) {
+    if (ts - lastAdvanceMs >= 1000 / playbackFps) {
+      lastAdvanceMs = ts;
+      goToFrame(currentFrame + 1);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+// ── boot ──────────────────────────────────────────────────────────────────────
+setSpeed(2);
+
+(async () => {
+  try {
+    const r = await fetch('/api/simulations');
+    if (!r.ok) throw new Error('no API');
+    const sims = await r.json();
+
+    if (sims.length > 0) {
+      apiPopulated = true;
+      recentSel.title = 'Available simulations';
+      recentSel.options[0].text = `${sims.length} found ▾`;
+      sims.forEach(s =>
+        recentSel.add(new Option(`${s.name}  (${s.frameCount} frames)`, s.name)));
+      loadDirectory(sims[0].name);
+    } else {
+      discoverFrames();
+    }
+  } catch (_) {
+    discoverFrames();
+  }
+})();
+</script>
+</body>
+</html>
