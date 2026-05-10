@@ -451,3 +451,913 @@ This project uses a two-Claude workflow:
 
 Restart Claude Code at task boundaries to avoid context bloat. The CLAUDE.md
 and JOURNAL.md files carry context forward across Claude Code sessions.
+
+---
+
+## Session 3 — Java3D Removal Survey (May 2026)
+
+This section is the mechanical removal map for a future Claude Code session.
+Every "what file?", "what line?", "what depends on what?" question is answered
+here. Read §1–§5 before touching a single file.
+
+---
+
+### §1 — The Pt3D Problem
+
+**Pt3D extends javax.vecmath.Point3d** (`Pt3D.java:12`). This is the root
+of the transitive vecmath reach that the prior survey missed.
+
+`Point3d` extends `Tuple3d` from vecmath. The `x`, `y`, `z` fields that appear
+to be native to Pt3D are actually inherited from `Tuple3d`. Every class in the
+codebase that instantiates a Pt3D therefore transitively references vecmath
+even if it has no explicit `import javax.vecmath.*` of its own.
+
+#### Pt3D methods that use vecmath types in their signatures or bodies
+
+| Method | vecmath involvement |
+|---|---|
+| `copyToVector3d(Vector3d vec3d)` line 648 | parameter type `Vector3d` |
+| `static CopyToVector3d(Pt3D pt, Vector3d vec3d)` line 642 | parameter type `Vector3d` |
+| `copyToPoint3d(Point3d point3d)` line 660 | parameter type `Point3d` |
+| `static CopyToPoint3d(Pt3D pt, Point3d point3d)` line 654 | parameter type `Point3d` |
+| `static writeVec3d(DataOutputStream ds, Vector3d vec)` line 615 | parameter type `Vector3d` |
+
+All five methods exist only to bridge Pt3D to vecmath types needed by the
+Java3D scene graph. None have callers outside of graphics methods — with one
+exception: `writeVec3d` is called from `FileOps.java:855` (QK state
+serialization), detailed in §3.
+
+#### Non-graphics vecmath usage that needs replacement — across the codebase
+
+| File | Line | Type | Used in |
+|---|---|---|---|
+| `Thing.java` | 34 | `Matrix3d mxToX` | `transMat()` (sim) and `updateGraphics()` in all subclasses (graphics) |
+| `Thing.java` | 35 | `Matrix3d mXTox` | `transMat()` (sim) only |
+| `Thing.java` | 409–410 | `mXTox.setElement()`, `mxToX.setElement()` | inside `transMat()` |
+
+`mxToX` / `mXTox` are `Matrix3d` objects populated in `transMat()` (sim code)
+and consumed exclusively in `updateGraphics()` calls across 14 subclass files
+(`t3d.setRotation(mxToX)`). After Java3D removal, `updateGraphics()` is deleted
+so its consumers go away. `transMat()` keeps only the `transXTox`/`transxToX`
+double[][] arrays; the Matrix3d updates (lines 409–410) are deleted.
+
+#### Strategy recommendation for Pt3D
+
+**Option (a) is correct**: Drop `extends Point3d`, add explicit
+`public double x, y, z` fields. This is a two-line change to Pt3D itself.
+The five vecmath bridge methods are deleted simultaneously. Their only
+non-graphics caller (`FileOps:855`) is fixed in Phase 0 as described in §4.
+This is lower risk than making Pt3D a fresh standalone class because it
+changes no existing method signatures — just removes the inheritance and adds
+explicit fields.
+
+The `setElement`-style Matrix3d calls in `transMat()` (Thing.java:409–410)
+are straightforward deletions after the Matrix3d fields are removed.
+
+---
+
+### §2 — Complete File Inventory
+
+#### 2a — Pure rendering: delete entirely (Phase D)
+
+These files have no simulation logic. Deleting them produces no callers to
+clean up in simulation files (simulation files never call into them; all
+dependency flows the other way).
+
+| File | Lines | Notes |
+|---|---|---|
+| `BoxOfActin_Graphics.java` | 1622 | Java3D universe, scene graph, full GUI |
+| `CapturingCanvas3D.java` | 170 | Canvas3D subclass for PNG capture |
+| `ExamineViewerBehavior.java` | 404 | Mouse examine behavior for 3D view |
+| `ViewerBehavior.java` | 519 | Viewer behavior base |
+| `ArchShape.java` | 242 | 3D arch geometry builder (SDSC sample code) |
+| `SphereSection.java` | 145 | 3D sphere section geometry (SDSC sample code) |
+| `InitControl.java` | 288 | Swing param panel |
+| `EnvControl.java` | 263 | Swing param panel |
+| `EndRatesControl.java` | 284 | Swing param panel |
+| `MechControl.java` | 258 | Swing param panel |
+| `GraphicsControl.java` | 258 | Swing param panel |
+| `XLinkControl.java` | 276 | Swing param panel |
+| `ActAControl.java` | 252 | Swing param panel |
+| `MyoRatesControl.java` | 292 | Swing param panel |
+| `CellShapeControl.java` | 268 | Swing param panel |
+| `MiscRatesControl.java` | 263 | Swing param panel |
+| `RenderControl.java` | 593 | QK playback renderer UI |
+
+**Note on control panel files**: The `*Control.java` files reference `Env.*`
+parameters and call `BoxOfActin.restartRun()` / `BoxOfActin.setPaused()`.
+These calls originate only from menu handlers in `BoxOfActin_Graphics.java`
+(which is also deleted). No simulation code calls into any control panel file.
+
+**Note on RenderControl.java**: Calls `FileOps.loadQuickPicture()` and
+`BoxOfActin_Graphics.updateQKBugScene()` — both sides of the dependency are
+in the deleted set.
+
+#### 2b — Simulation files: strip graphics, keep everything else
+
+For each file: line ranges of imports to delete, fields to delete, and
+graphics methods to delete are given. Everything not listed is kept.
+
+---
+
+**`Pt3D.java`** (Phase 0 — first)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.vecmath.*` | 7 | delete |
+| `extends Point3d` | 12 | remove; add `public double x, y, z;` fields |
+| `writeVec3d(DataOutputStream, Vector3d)` | 615–621 | delete |
+| `CopyToVector3d(Pt3D, Vector3d)` | 642–646 | delete |
+| `copyToVector3d(Vector3d)` | 648–652 | delete |
+| `CopyToPoint3d(Pt3D, Point3d)` | 654–658 | delete |
+| `copyToPoint3d(Point3d)` | 660–664 | delete |
+
+After Phase 0, Pt3D has no vecmath imports or types anywhere in its API.
+
+---
+
+**`Thing.java`** (Phase A — after Phase 0)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 8 | delete |
+| `import javax.vecmath.*` | 9 | delete |
+| `Matrix3d mxToX` | 34 | delete |
+| `Matrix3d mXTox` | 35 | delete |
+| `mxToX = null; mXTox = null;` in `sepaku()` | 246–247 | delete |
+| `mXTox.setElement(j,i,curVal)` in `transMat()` | 409 | delete |
+| `mxToX.setElement(i,j,curVal)` in `transMat()` | 410 | delete |
+| `boolean inGroup = false;` | 98 | delete (graphics bookkeeping) |
+| `boolean graphicsMade = false;` | 99 | delete (graphics bookkeeping) |
+| `BranchGroup G = new BranchGroup();` | 100 | delete |
+| `TransformGroup g3d = new TransformGroup();` | 101 | delete |
+| `Transform3D t3d = new Transform3D();` | 102 | delete |
+| `Appearance a = new Appearance();` | 103 | delete |
+| `Material m;` | 104 | delete |
+| `G = null; g3d = null; t3d = null; a = null; m = null;` in `sepaku()` | 293–297 | delete |
+| G.detach() guard in `removeDeadThings()` | 447–448 | delete both lines |
+| `setGraphicsCapabilities()` method | 510–528 | delete entire method |
+| `makeGraphics()` stub | 530 | delete |
+| `updateGraphics()` stub | 531 | delete |
+| `getGraphicsNode()` method | 533–537 | delete |
+| `detachGraphics()` method | 539–543 | delete |
+
+**Phase A compile checkpoint**: After Phase A, Thing.java is clean. Subclass
+files still reference the deleted fields (`G`, `g3d`, `t3d`, `a`, `mxToX`)
+in their `makeGraphics()`/`updateGraphics()` methods — so the full project
+won't compile until Phase B strips those methods too. Phase A can be verified
+by compiling Thing.java in isolation with `javac -cp .:... boxOfActin/Thing.java`.
+
+---
+
+**`FilSegment.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.*` | 21–26 | delete (5 lines) |
+| `import javax.media.j3d.*` | 28 | delete |
+| `import javax.vecmath.*` | 29 | delete |
+| `Vector3d end1Vec3d, end2Vec3d, coordVec3d` | 175–177 | delete |
+| `TransformGroup cylTG, plusCapTG` | 189 | delete |
+| `Transform3D cylT3D, cylRot, plusCapT3D` | 190 | delete |
+| All `static Color3f` fields | 196–244 | delete (19 static class-load-time Color3f) |
+| All `static Material` fields | 214–237 | delete (10 Material objects) |
+| All `static TransparencyAttributes` | 225–228 | delete |
+| `Appearance cylApp = new Appearance()` | 232 | delete |
+| All `static Appearance` fields | 234–240 | delete |
+| `static ColoringAttributes` fields | 245–247 | delete |
+| `LineArray xLine, yLine, zLine` | 249 | delete |
+| `Shape3D xLineShape, yLineShape, zLineShape` | 250 | delete |
+| `BranchGroup cylBG, coordSysG, plusCapBG` | 191 | delete |
+| `Cylinder myCyl; Cone myArrow; Box plusCapBox` | 192–194 | delete |
+| `boolean updateCylGraphicsFlag` | 187 | delete |
+| `double renderThicken` | 188 | delete |
+| `boolean coordSysOn, plusCapMarkOn` | 254–255 | delete |
+| `resetGraphics()` method | 3424–3435 | delete entire method |
+| `resetGraphicsAll()` method | 3437–3441 | delete entire method |
+| Graphics-helper method block | ~3540–3670 | delete (cylinder construction helper methods) |
+| `makeGraphics()` method | 3744–3757 | delete |
+| `updateGraphics()` method | 3759–3795 | delete |
+| `detachGraphics()` method | 3797–3810 | delete |
+
+Also remove callers of `detachGraphics()` and `resetGraphics()` within the
+file: e.g., `curSeg.detachGraphics()` at line 2798 (guarded block, remove
+the call; check if the `if` block has other content to keep).
+
+---
+
+**`Monomer.java`** (Phase B — **critical: has static Java3D at class load**)
+
+The static `Color3f`, `Material`, `Appearance`, `LineAttributes`,
+`ColoringAttributes` fields at lines 37–57 initialize Java3D objects when
+the `Monomer` class is first loaded. This is a class-load-time blocker even
+before any `-r` flag can be checked.
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.geometry.*` | 4–6 | delete |
+| `import javax.media.j3d.*` | 7 | delete |
+| `import javax.vecmath.*` | 8 | delete |
+| All `static Color3f` fields | 37–42 | delete (6 class-load static Color3f) |
+| All `static ColoringAttributes` | 43–46 | delete (4 static, class-load) |
+| All `static Material` fields | 47–52 | delete (6 static Materials, class-load) |
+| `static Appearance` fields | 53–56 | delete |
+| `static LineAttributes monLineAttributes` | 57 | delete |
+| `boolean graphicsIn/Initialized/cofilinMark/tropoMark/plusCapMark` | 58–62 | delete |
+| `BranchGroup monHelixG, monSphereG` | 63–64 | delete |
+| `LineArray theMonLine; Shape3D monShape; Sphere monSphere; Box capBox` | 65–68 | delete |
+| `TransformGroup monTG` | 69 | delete |
+| `Transform3D monT3D` | 70 | delete |
+| `Vector3d monVec3D` | 71 | delete |
+| `BranchGroup cofilinMarkBG, tropoMarkBG, plusCapMarkBG` | 72–74 | delete |
+| `Transform3D rotT3D; Matrix3d rotMat; Matrix3d curMat` | 77–79 | delete |
+| All `Monomer()` constructor graphics calls | in constructors | remove `addGraphics()` and `initializeGraphics()` calls |
+| `initializeGraphics()` method | ~370+ | delete |
+| `updateGraphics(FilSegment, Pt3D, Pt3D, boolean)` | 491–544 | delete |
+| `addGraphics(FilSegment)` | 546–554 | delete |
+| `addGraphics(BranchGroup)` | 556–563 | delete |
+| `detachGraphics()` | 565–604 | delete |
+| `resetGraphics()` | anywhere | delete |
+
+After Phase B, `monVec3D` is gone. The `FileOps.java:855` QK write is handled
+in Phase C (replace with direct `Pt3D` write of the monomer center position).
+
+---
+
+**`Bug.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 16–17 | delete |
+| `import javax.media.j3d.*` | 19 | delete |
+| `import javax.vecmath.*` | 20 | delete |
+| Graphics field declarations (Vector3d coordVec3d, Transform3D t3d local, etc.) | near top of class | delete |
+| `makeGraphics()` method | 796–1011 | delete (~215 lines) |
+| `updateGraphics()` method | 1012+ | delete |
+| `copyToVector3d` calls in updateGraphics | 1013, 1017 | gone with the method |
+
+---
+
+**`Chamber.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 15–17 | delete |
+| `import javax.media.j3d.*` | 19 | delete |
+| `import javax.vecmath.*` | 20 | delete |
+| `makeGraphics()` method | 199–357 | delete (~158 lines) |
+| `updateGraphics()` method | 359+ | delete |
+
+---
+
+**`Crucible.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.BranchGroup` | 3 | delete |
+| `BranchGroup infoG;` field | 32 | delete |
+| `appearanceChange()` method | 219–222 | delete (calls `updateGraphics()`) |
+| `updateTextInfoState()` method | 224–229 | delete (uses `infoG.detach()`, `g3d.addChild()`) |
+
+Note: `BranchGroup infoG` is declared but not initialized inline (no
+`new BranchGroup()`) so it is NOT a class-load-time trigger. However, the
+`updateTextInfoState()` method would NPE if called before `infoG` is set. Just
+delete both the field and both methods.
+
+---
+
+**`ProteinNode.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 14–17 | delete |
+| `import javax.media.j3d.*` | 18 | delete |
+| `import javax.vecmath.*` | 19 | delete |
+| Graphics field declarations (Vector3d coordVec3d, etc.) | near top | delete |
+| `makeGraphics()` method | 754–848 | delete (~94 lines) |
+| `updateGraphics()` method | 850+ | delete |
+
+---
+
+**`StickyNode.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 6–16 | delete (11 specific imports) |
+| `import javax.vecmath.Color3f, Vector3d` | 17–18 | delete |
+| `import com.sun.j3d.utils.geometry.Sphere` | 20 | delete |
+| Graphics fields (Vector3d coordVec3d, etc.) | near top | delete |
+| `setGraphicsCapabilities()` override | 366–379 | delete |
+| `makeGraphics()` method | 381–458 | delete |
+| `updateGraphics()` method | 460+ | delete |
+
+---
+
+**`FillNode.java`** (Phase B — **simulation file, not pure rendering**)
+
+FillNode has real simulation logic (`calculateProperties()`, `moveThing()`,
+`step()`, `rdmPtInside()`, `fillCellWithSpheres()`, `addFillNodeToCell()`).
+Strip graphics only; keep the simulation methods.
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 6–15 | delete |
+| `import javax.vecmath.Color3f, Vector3d` | 16–17 | delete |
+| `import com.sun.j3d.utils.geometry.Sphere` | 19 | delete |
+| `static Color3f ambientC/diffuseC/specularC/emissiveC` | 29–32 | delete (class-load-time) |
+| `static float shiny` | 33 | delete |
+| `makeGraphics()` method | 73–101 | delete |
+| `updateGraphics()` method | 103–110 | delete |
+
+Keep: `removeAll()` (line 69), `calculateProperties()` (43), `moveThing()` (58),
+`step()` (64), `rdmPtInside()` (118), `fillCellWithSpheres()` (132),
+`addFillNodeToCell()` (140).
+
+---
+
+**`ActA.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 19–21 | delete |
+| `import javax.media.j3d.*` | 26 | delete |
+| `import javax.vecmath.*` | 27 | delete |
+| `BranchGroup G = new BranchGroup();` instance field | 65 | delete |
+| `boolean graphicsMade` | 68 | delete |
+| G.detach() calls in `remove(ActA)` and `removeAll()` | 380, 390 | delete |
+| `makeGraphics()` method | 427–452 | delete |
+| `updateGraphics()` method | 454–469 | delete |
+| `getGraphicsNode()` method | 470–472 | delete |
+
+---
+
+**`Arp23.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 21–23 | delete |
+| `import javax.media.j3d.*` | 27 | delete |
+| `import javax.vecmath.*` | 28 | delete |
+| `BranchGroup G = new BranchGroup();` instance field | 66 | delete |
+| `Transform3D t3d = new Transform3D();` | 68 | delete |
+| `Vector3d coordVec3d = new Vector3d();` | 70 | delete |
+| `boolean graphicsMade` | 73 | delete |
+| `setGraphicsCapabilities()` override | 345–363 | delete |
+| `makeGraphics()` method | 364–402 | delete |
+| `updateGraphics()` method | 404–422 | delete |
+| `getGraphicsNode()` method | 424–426 | delete |
+
+---
+
+**`FilLink.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 18–20 | delete |
+| `import javax.media.j3d.*` | 26 | delete |
+| `import javax.vecmath.*` | 27 | delete |
+| `BranchGroup G = new BranchGroup();` instance field | 64 | delete |
+| `boolean graphicsMade` | 67 | delete |
+| G.detach() call in remove method | 398 | delete |
+| `makeGraphics()` method | 471–493 | delete |
+| `updateGraphics()` method | 495–512 | delete |
+| `getGraphicsNode()` | 511–512 block | delete |
+
+---
+
+**`NodeLink.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 13–15 | delete |
+| `import javax.media.j3d.*` | 21 | delete |
+| `import javax.vecmath.*` | 22 | delete |
+| `BranchGroup G = new BranchGroup();` instance field | 59 | delete |
+| `boolean graphicsMade` | 62 | delete |
+| G.detach() calls | 255 | delete |
+| `makeGraphics()` method | 327–349 | delete |
+| `updateGraphics()` method | 351+ | delete |
+| `getGraphicsNode()` | ~368–370 | delete |
+
+---
+
+**`MyoFilLink.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 2–7 | delete |
+| `import javax.vecmath.Color3f, Point3d` | 8–9 | delete |
+| `BranchGroup G = new BranchGroup();` instance field | 52 | delete |
+| `LineArray myoLine; Shape3D myoShape;` | 53–54 | delete |
+| `boolean graphicsMade` | 55 | delete |
+| `G = null; myoLine = null; myoShape = null;` in `sepaku()` | 81–83 | delete |
+| G.detach() call in `removeAll()` | 295 | delete |
+| `makeGraphics()` method | 312–334 | delete |
+| `updateGraphics()` method | 336–344 | delete |
+| `getGraphicsNode()` method | 346–350 | delete |
+
+---
+
+**`MyoRod.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 3–10 | delete |
+| `import javax.vecmath.TransparencyAttributes, Color3f, Vector3d` | 10–12 | delete |
+| `import com.sun.j3d.utils.*` | 14–15 | delete |
+| Graphics field declarations (cylTG, cylT3D, coordVec3d, etc.) | near top of class | delete |
+| `makeGraphics()` method | 234–254 | delete |
+| `updateGraphics()` method | 257+ | delete |
+
+---
+
+**`MyoLever.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 3–9 | delete |
+| `import javax.vecmath.TransparencyAttributes, Color3f, Vector3d` | 10–12 | delete |
+| `import com.sun.j3d.utils.*` | 14–15 | delete |
+| Graphics field declarations | near top | delete |
+| `makeGraphics()` method | 232–252 | delete |
+| `updateGraphics()` method | 255+ | delete |
+
+---
+
+**`MyoMotor.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.*` | 3–9 | delete |
+| `import javax.vecmath.Color3f, Vector3d` | 10–11 | delete |
+| `import com.sun.j3d.utils.*` | 13–15 | delete |
+| Graphics field declarations (sphT3D, coordVec3d, etc.) | near top | delete |
+| `makeGraphics()` method | 507–539 | delete |
+| `updateGraphics()` method | 542+ | delete |
+
+---
+
+**`MyoMiniFilament.java`** (Phase B)
+
+| What | Lines | Action |
+|---|---|---|
+| `import com.sun.j3d.utils.*` | 14–17 | delete |
+| `import javax.media.j3d.*` | 18 | delete |
+| `import javax.vecmath.*` | 19 | delete |
+| Graphics field declarations (cylT3D, coordVec3d, etc.) | near top | delete |
+| `makeGraphics()` method | 526–540 | delete |
+| `updateGraphics()` method | 542+ | delete |
+
+---
+
+**`Env.java`** (Phase C)
+
+`Env` is loaded very early — before any `begin()` is called. Its static field
+initializers run at JVM class-load time. These are the earliest class-load-time
+Java3D triggers in the codebase.
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.vecmath.Color3f` | 8 | delete |
+| `import javax.vecmath.Point3d` | 9 | delete (unused — no Point3d field in class body) |
+| `static Color3f dumC = new Color3f(1.0f, 0f, .2f)` | 56 | delete (unused) |
+| `static final Color3f universeColor3f = ...` | 886 | delete |
+| `static final Color universeColor = universeColor3f.get()` | 888 | replace with `static final Color universeColor = Color.BLACK` |
+| `static final Color3f headlightColor` | 889 | delete (only used in BoxOfActin_Graphics, which is deleted) |
+| `static final Color3f cellColor3f` | 891 | delete (only used in graphics files) |
+| `static final Color cellColor = cellColor3f.get()` | 897 | replace with literal `java.awt.Color` if any non-graphics file uses it; otherwise delete |
+| `static final Color3f nodeColor3f` | 893 | delete |
+| `static final Color3f membraneColor3f` | 894 | delete |
+| `static final Color3f membraneActivatorColor3f` | 895 | delete |
+| `static final Color3f parRparCColor3f` | 896 | delete |
+| `static final Color3f controlBackColor3f` | 903 | delete |
+| `static final Color controlBackColor = controlBackColor3f.get()` | 904 | delete (only used in *Control.java files, which are deleted) |
+
+**Note**: `Env.controlForeColor` is also used only by `*Control.java` files.
+Check for it and delete. After deleting all control panel files in Phase D,
+any remaining `controlForeColor`/`controlBackColor` references in Env.java
+are dead and should be deleted.
+
+---
+
+**`FileOps.java`** (Phase C)
+
+| What | Lines | Action |
+|---|---|---|
+| `import javax.media.j3d.Transform3D` | 12 | delete |
+| `import javax.vecmath.Matrix4d` | 17 | delete |
+| `saveView(Transform3D viewTrans)` method | 322–334 | delete |
+| `readView(String viewFileStr)` method | 336–358 | delete |
+| `Pt3D.writeVec3d(ds, mon.monVec3D)` at line 855 | 855 | replace — see below |
+
+**Fixing line 855**: After Phase B strips Monomer graphics, `monVec3D` (a
+`Vector3d`) is gone. Replace the QK write with a direct `Pt3D.writePt3D()`
+using a new `Pt3D monCenter` field added to `Monomer` in Phase B. That field
+is populated wherever `monVec3D` was populated (in the old
+`updateGraphics()` method — i.e., by copying the monomer center from the
+filament geometry). Specifically: when writing QK state, the monomer center
+is the position along the filament helix. The simplest replacement is to
+write a sentinel (three large floats, like `farfarAway`) when monomer graphics
+are disabled, and write the computed center otherwise. In practice, monomer
+positions in the QK file are only used when loading QK for rendering — since
+rendering is now Three.js, QK monomer positions can be deprecated or kept as
+a raw float triple without the `Vector3d` type.
+
+---
+
+**`BoxOfActin.java`** (Phase C)
+
+| What | Lines | Action |
+|---|---|---|
+| `static BoxOfActin_Graphics boaGraphics;` | 16 | delete |
+| `if (!Env.remote) { boaGraphics = ...; boaGraphics.initialize(); ... }` | 79–85 | delete entire `if (!Env.remote)` block |
+| `if (!Env.remote) { boaGraphics.updateBugScene(); }` | 275 | delete |
+| `boaGraphics.rotateViewY()` | 360, 524, 537–539 | delete |
+| `boaGraphics.updateBugScene()` | 525, 539 | delete |
+| `boaGraphics.theCanvas.firstRender()` guard | 533 | delete/simplify surrounding `if` |
+| `boaGraphics.captureImage()` | 543 | delete |
+| `boaGraphics.waitOnCapture()` | 544 | delete |
+| `if (!Env.remote) { Thing.theBox.G.detach(); }` | 754 | delete |
+| `if (!Env.remote & Env.simOutsideBug...) { Thing.lmBug.G.detach(); }` | 755 | delete |
+| `if (!Env.remote) { boaGraphics.canvasSizeCurrent()... boaGraphics.updateBugScene()... }` | 765–775 | delete entire block |
+| `FillNode.removeAll()` in `restartRun()` | 743 | keep — FillNode is a sim class |
+| `boaGraphics.pausedMenuItem.setState(...)` in `setPaused()`/`setRunning()` | 783–785, 791–793 | delete |
+| `startUpdateTimer()` method | 796–804 | delete (drives control panel updates) |
+
+Note: `restartRun()` body (lines 740–763) is pure simulation reset and stays.
+
+---
+
+**`BoxOfActin.java` (top-level, project root)** — check if this is a separate
+file from `boxOfActin/BoxOfActin.java`:
+The file listing shows both `BoxOfActin.java` (root) and
+`boxOfActin/BoxOfActin.java`. The root `BoxOfActin.java` is the entry point
+with `main()`. Its content may differ. Confirm by reading it before Phase C.
+
+---
+
+#### 2c — Clean files: no changes needed
+
+These files have zero `javax.media.j3d`, `com.sun.j3d`, or `javax.vecmath`
+imports. No action required.
+
+`Myosin.java`, `MyosinDimer.java`, `MyosinFixed.java`, `AnchorNode.java`,
+`StaticFilSegment.java`, `Barrier.java`, `CollisionEvent.java`, `NameValue.java`,
+`Parameter.java`, `ParamGui.java`, `RunTimer.java`, `Stat.java`,
+`ThreadSet.java`, `ThreeJSWriter.java`, `Mesh.java`, `UCircRnd.java`,
+`ValueTracker.java`, `BareButton.java`, `CheckboxMenu.java`,
+`CheckboxMenuListener.java`, `InertGuiHead.java`, `HistoPlotPanel.java`,
+`HistogramPlus.java`, `HistogramPlus2.java`, all `infoCCD/*.java`, all
+`ec/util/*.java`, all `edu/cornell/.../*.java`.
+
+---
+
+### §3 — Caller Graph
+
+#### makeGraphics / updateGraphics / detachGraphics / getGraphicsNode / setGraphicsCapabilities
+
+All call sites in the codebase:
+
+| Call site | File:Line | Guard | Action |
+|---|---|---|---|
+| `Thing.theThings[i].getGraphicsNode()` | BoxOfActin_Graphics.java:466 | inside class being deleted | gone with Phase D |
+| `curThing.getGraphicsNode()` | BoxOfActin_Graphics.java:486 | inside class being deleted | gone with Phase D |
+| `curFL.getGraphicsNode()` | BoxOfActin_Graphics.java:498 | inside class being deleted | gone with Phase D |
+| `curNL.getGraphicsNode()` | BoxOfActin_Graphics.java:508 | inside class being deleted | gone with Phase D |
+| `curActA.getGraphicsNode()` | BoxOfActin_Graphics.java:521 | inside class being deleted | gone with Phase D |
+| `curArp.getGraphicsNode()` | BoxOfActin_Graphics.java:534 | inside class being deleted | gone with Phase D |
+| `curThing.updateGraphics()` | BoxOfActin_Graphics.java:488 | inside class being deleted | gone with Phase D |
+| `curFL.updateGraphics()` | BoxOfActin_Graphics.java:500 | inside class being deleted | gone with Phase D |
+| `curNL.updateGraphics()` | BoxOfActin_Graphics.java:512 | inside class being deleted | gone with Phase D |
+| `curActA.updateGraphics()` | BoxOfActin_Graphics.java:524 | inside class being deleted | gone with Phase D |
+| `curArp.updateGraphics()` | BoxOfActin_Graphics.java:537 | inside class being deleted | gone with Phase D |
+| `theThings[i].G.detach()` | Thing.java:448 | inside `removeDeadThings()` | delete in Phase A |
+| `theThings[i].graphicsMade` | Thing.java:447 | inside `removeDeadThings()` | delete in Phase A |
+| `Thing.theBox.G.detach()` | BoxOfActin.java:754 | `if (!Env.remote)` | delete in Phase C |
+| `Thing.lmBug.G.detach()` | BoxOfActin.java:755 | `if (!Env.remote)` | delete in Phase C |
+| `Thing.theBox.G.detach()` | BoxOfActin_Graphics.java:606 | inside `clearForRun()` | gone with Phase D |
+| `Thing.theBox.G.detach()` | BoxOfActin_Graphics.java:623 | inside `clearForRender()` | gone with Phase D |
+| `rmMe.G.detach()` | FilLink.java:398 | inside `removeFilLink()` | delete in Phase B |
+| `rmMe.graphicsMade` | FilLink.java:398 | same guard | delete in Phase B |
+| `theMyoFilLinks[i].G.detach()` | MyoFilLink.java:295 | inside `removeAll()` | delete in Phase B |
+| `theMyoFilLinks[i].graphicsMade` | MyoFilLink.java:295 | same guard | delete in Phase B |
+| `theActAs[i].G.detach()` | ActA.java:390 | inside `removeAllActAs()` | delete in Phase B |
+| `rmMe.G.detach()` | ActA.java:380 | inside `remove(ActA)` | delete in Phase B |
+| `FilSegment.theFilSegments[i].detachGraphics()` | BoxOfActin_Graphics.java:565 | inside class being deleted | gone with Phase D |
+| `Monomer.theMonomers[x].detachGraphics()` | BoxOfActin_Graphics.java:584 | inside class being deleted | gone with Phase D |
+| `curMon.addGraphics(bugState)` | BoxOfActin_Graphics.java:592 | inside class being deleted | gone with Phase D |
+| `curSeg.detachGraphics()` | FilSegment.java:2798 | inside `removeAll()` | delete in Phase B |
+| `FilSegment.resetGraphicsAll()` | BoxOfActin_Graphics.java:1280/1287/1294 | inside itemStateChanged | gone with Phase D |
+| `infoG.detach()` | Crucible.java:225 | inside `updateTextInfoState()` | delete in Phase B |
+| `g3d.addChild(infoG)` | Crucible.java:227 | inside `updateTextInfoState()` | delete in Phase B |
+| `theBox.updateGraphics()` | Crucible.java:221 | `if (Env.paused)` | delete in Phase B |
+| `Arp23.getGraphicsNode()` | BoxOfActin_Graphics.java | inside class being deleted | gone with Phase D |
+| `FileOps.saveView(Transform3D)` | BoxOfActin_Graphics.java:424 | inside `saveAsView()` | gone with Phase D |
+| `FileOps.readView(String)` | BoxOfActin_Graphics.java:414 | inside `setView()` | gone with Phase D |
+
+#### Pt3D vecmath bridge method call sites
+
+| Call site | File:Line | Context | Action |
+|---|---|---|---|
+| `coord.copyToVector3d(coordVec3d)` | FilSegment.java:3760 | in `updateGraphics()` | gone with Phase B |
+| `start.copyToVector3d(monVec3D)` | Monomer.java:511 | in `updateGraphics()` | gone with Phase B |
+| `loc.copyToVector3d(monVec3D)` | Monomer.java:521, 542 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | MyoRod.java:263 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | MyoMiniFilament.java:544 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | StickyNode.java:475 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | MyoLever.java:256 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | ProteinNode.java:851 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | MyoMotor.java:543 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | Bug.java:1013 | in `updateGraphics()` | gone with Phase B |
+| `curDTipLoc.copyToVector3d(coordVec3d)` | Arp23.java:406 | in `updateGraphics()` | gone with Phase B |
+| `coord.copyToVector3d(coordVec3d)` | FillNode.java:92, 105 | in `makeGraphics/updateGraphics` | gone with Phase B |
+| `Pt3D.writeVec3d(ds, mon.monVec3D)` | FileOps.java:855 | QK state write — **non-graphics** | fix in Phase C (see §2b) |
+
+#### BoxOfActin.java graphics instantiation call sites
+
+| Call site | Lines | Action |
+|---|---|---|
+| `boaGraphics = new BoxOfActin_Graphics()` | 80 | delete (in `!Env.remote` block) |
+| `boaGraphics.initialize()` | 81 | delete |
+| `boaGraphics.buildUniverse()` | 82 | delete |
+| `boaGraphics.showFrame()` | 83 | delete |
+| `boaGraphics.setView(viewFileStr)` | 84 | delete |
+| `boaGraphics.updateBugScene()` | 275, 525, 539 | delete |
+| `boaGraphics.rotateViewY()` | 360, 537 | delete |
+| `boaGraphics.captureImage(boaGraphics.theCanvas)` | 543 | delete |
+| `boaGraphics.waitOnCapture(boaGraphics.theCanvas)` | 544 | delete |
+| `boaGraphics.canvasSizeCurrent()` | 767, 771 | delete |
+| `boaGraphics.makeCanvasSizeCurrent()` | 767 | delete |
+| `boaGraphics.updateCanvasSizeParams()` | 769 | delete |
+| `BoxOfActin_Graphics.updateBugScene()` | 772 | delete |
+| `BoxOfActin_Graphics.updateAllControls()` | 773 | delete |
+| `BoxOfActin_Graphics.theCanvas.resetFileCt()` | 774 | delete |
+| `boaGraphics.pausedMenuItem.setState(...)` | 783, 792 | delete |
+| `boaGraphics.runMenuItem.setState(...)` | 784, 791 | delete |
+| `boaGraphics.updateAllControls()` | 800 | delete (in `startUpdateTimer()`) |
+| `boaGraphics.rotateViewY(...)` | 538 | delete |
+
+---
+
+### §4 — Revised Phase Plan
+
+#### Phase 0 — Pt3D surgery
+
+**Goal**: Remove the `extends Point3d` inheritance so Pt3D no longer depends
+on vecmath for its fundamental `x`/`y`/`z` storage.
+
+**Files touched**: `Pt3D.java` only.
+
+**Changes**:
+1. Remove `import javax.vecmath.*` (line 7)
+2. Change `public class Pt3D extends Point3d {` → `public class Pt3D {`
+3. Add `public double x, y, z;` as the first field declarations in the class body
+4. Remove all five vecmath bridge methods (`copyToVector3d`, `CopyToVector3d`,
+   `copyToPoint3d`, `CopyToPoint3d`, `writeVec3d`)
+
+**Note on FileOps:855**: The call `Pt3D.writeVec3d(ds, mon.monVec3D)` references
+the deleted `writeVec3d` method. However, `monVec3D` is typed as `Vector3d`
+(a vecmath type), which means FileOps still imports vecmath in Phase 0 anyway.
+Defer this line to Phase C when Monomer's `monVec3D` field is also being
+replaced. In Phase C, replace the line with writing a new `Pt3D` field
+(`mon.center`) that is populated by Monomer's simulation code.
+
+**Compile checkpoint**: `javac -cp .:$J3D_JARS boxOfActin/Pt3D.java`
+(vecmath.jar still needed for other files). Phase 0 in isolation: Pt3D.java
+clean-compiles with no vecmath jar. Other files still fail without vecmath —
+this is expected until Phase B.
+
+**Estimated time**: 30 minutes.
+
+---
+
+#### Phase A — Thing.java strip
+
+**Goal**: Remove all Java3D fields and graphics methods from the root
+simulation class, including the Matrix3d bridge fields used by all
+`updateGraphics()` subclass methods.
+
+**Files touched**: `Thing.java` only.
+
+**Compile checkpoint**: `javac -cp .:$J3D_JARS boxOfActin/Thing.java`
+(subclasses will still reference the now-deleted fields until Phase B, so
+full project compile still fails — verify only Thing.java in isolation).
+
+**Estimated time**: 30 minutes.
+
+---
+
+#### Phase B — All simulation file strips (leaf classes)
+
+**Goal**: Remove all graphics methods and fields from the 21 simulation files
+listed in §2b (FilSegment, Monomer, Bug, Chamber, Crucible, ProteinNode,
+StickyNode, FillNode, ActA, Arp23, FilLink, NodeLink, MyoFilLink, MyoRod,
+MyoLever, MyoMotor, MyoMiniFilament). Also add `Pt3D monCenter` field to
+Monomer for Phase C's FileOps fix.
+
+**Files touched**: The 21 simulation files listed in §2b.
+
+This phase can be batched — process all files in one session. The files are
+logically independent (no simulation file's graphics methods call another's).
+
+**Compile checkpoint after Phase B**:
+```
+javac -cp .:$J3D_JARS boxOfActin/*.java
+```
+Should produce zero errors related to `javax.media.j3d` or `javax.vecmath`
+in the simulation files. Remaining errors (if any) will be in the pure
+rendering files (Phase D) — those are expected.
+
+**Estimated time**: 3–4 hours (21 files, each 10–30 min of precise editing).
+
+---
+
+#### Phase C — Cross-file cleanup
+
+**Goal**: Remove the residual Java3D and vecmath references from FileOps,
+Env, and BoxOfActin.
+
+**Files touched**: `Env.java`, `FileOps.java`, `boxOfActin/BoxOfActin.java`
+(and root `BoxOfActin.java` if different — confirm before editing).
+
+**Changes** as listed in §2b above.
+
+**Additional FileOps change**: Replace `Pt3D.writeVec3d(ds, mon.monVec3D)` at
+line 855 with `Pt3D.writePt3D(ds, mon.center)` (using the new `Pt3D center`
+field added to Monomer in Phase B, where `center` is populated as the computed
+3D position of the monomer — same coordinates that `monVec3D` held).
+
+**Compile checkpoint after Phase C**:
+```
+javac -cp .:$J3D_JARS boxOfActin/*.java
+```
+Only the pure rendering files (BoxOfActin_Graphics, CapturingCanvas3D,
+ExamineViewerBehavior, ViewerBehavior, ArchShape, SphereSection, and all
+`*Control.java` files) should now have Java3D compile errors.
+Simulation files should compile cleanly with vecmath.jar removed from classpath.
+To verify: `javac --class-path . boxOfActin/FilSegment.java boxOfActin/Thing.java boxOfActin/Env.java boxOfActin/FileOps.java`
+
+**Estimated time**: 2 hours.
+
+---
+
+#### Phase D — Pure rendering file deletion
+
+**Goal**: Delete the 18 pure rendering files listed in §2a.
+
+**Files deleted**: BoxOfActin_Graphics.java, CapturingCanvas3D.java,
+ExamineViewerBehavior.java, ViewerBehavior.java, ArchShape.java,
+SphereSection.java, InitControl.java, EnvControl.java, EndRatesControl.java,
+MechControl.java, GraphicsControl.java, XLinkControl.java, ActAControl.java,
+MyoRatesControl.java, CellShapeControl.java, MiscRatesControl.java,
+RenderControl.java.
+
+Also: delete `import javax.swing.Timer` from `BoxOfActin.java` (line 8) since
+`startUpdateTimer()` is deleted in Phase C and it was the only Swing Timer user.
+
+**Compile checkpoint after Phase D**:
+```
+javac --class-path . boxOfActin/*.java *.java infoCCD/*.java ec/util/*.java
+```
+With NO Java3D jars on the classpath. This is the first clean-compile test
+that proves Java3D is fully removed.
+
+**Expected result**: Zero compile errors. If there are errors, they are
+unresolved references — check §3 for missed callers.
+
+**Estimated time**: 30 minutes (mostly file deletion + final scan for missed
+references).
+
+---
+
+#### Phase E — Java 21 switch
+
+**Goal**: Compile and run under Java 21.
+
+**Changes**:
+1. Update Eclipse .classpath to remove `/Library/JOGLAndj3D/*.jar` entries
+2. Update CLAUDE.md build instructions (remove Java3D from classpath line)
+3. Test: `java --enable-preview --release 21 -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js test_out`
+
+**Estimated time**: 30 minutes.
+
+---
+
+### §5 — Risks and Unknowns
+
+#### The static Java3D initialization problem is broader than JOURNAL.md stated
+
+The current JOURNAL.md ("Session 2") says the blocker is specifically
+`Thing.java`'s instance field declarations:
+```java
+BranchGroup G = new BranchGroup();
+TransformGroup g3d = new TransformGroup();
+```
+This is incomplete. The actual class-load-time problem is worse:
+
+1. **`Env.java` static fields** (lines 56, 886–904): `Env` is loaded first
+   (every other class references it). It has `static final Color3f` and
+   `static Color3f` fields that trigger vecmath loading before any simulation
+   code runs.
+
+2. **`FilSegment.java` static fields** (lines 196–258): At least 19 static
+   `Color3f`, 10 static `Material`, and several static `Appearance` objects
+   are initialized at class load. `FilSegment` is loaded early because
+   `Thing.java` has no direct FilSegment reference, but `makeCrucible()` and
+   `makeInitialThings()` reference FilSegment immediately.
+
+3. **`Monomer.java` static fields** (lines 37–57): Six static `Color3f`, four
+   `ColoringAttributes`, six `Material`, two `Appearance` objects. The class
+   also has `static Monomer plusGhost = new Monomer()` (line 88) that runs
+   the constructor at class-init time, which calls `initializeGraphics()` if
+   `!Env.noMonomersRendered.isActive() & !Env.remote`. However, the static
+   Color3f/Material fields run BEFORE the constructor, unconditionally.
+
+4. **`FillNode.java` static fields** (lines 29–32): Four `Color3f` at class
+   load.
+
+The bottom line: even if `Thing.java`'s instance fields were behind a
+`if (!Env.remote)` guard, the sim would still fail to load without vecmath.jar
+because of these static initializers.
+
+#### Instance field initializers in connector classes
+
+`FilLink.java:64`, `NodeLink.java:59`, `MyoFilLink.java:52`, `Arp23.java:66`
+all have `BranchGroup G = new BranchGroup()` as **instance** field
+initializers (not static). These run when each object is constructed. In the
+current codebase, any call to `new FilLink(...)` triggers `new BranchGroup()`
+which triggers Java3D initialization. After removal, these fields are simply
+deleted.
+
+#### FileOps.saveView/readView persist the Java3D camera transform to disk
+
+`FileOps.saveView()` (line 322) serializes a `Matrix4d` to a binary file.
+Saved `.view` files (referenced via `-vf` flag) are **Java3D object streams**
+and will be unreadable after Phase C. The `-vf` CLI flag and the `readView`
+method must both be deleted (the feature becomes permanently unsupported).
+The Three.js viewer already manages its own camera state in the browser.
+
+#### Env.Point3d import is unused
+
+`import javax.vecmath.Point3d` at `Env.java:9` — there is no `Point3d` field
+or local variable anywhere in Env.java's body. It is a dead import leftover
+from an older version. Delete in Phase C.
+
+#### FillNode.removeAll() is called from BoxOfActin.restartRun() (line 743)
+
+`FillNode` is a simulation class (not deleted in Phase D), so this call
+remains after Phase D. No action needed on this call site.
+
+#### No static {} initializer blocks found
+
+Grep for `static {` found zero results across all simulation files. There are
+no hidden static initializer blocks that would do surprise Java3D initialization
+outside the static field declarations already catalogued.
+
+#### infoCCD files do not touch Java3D
+
+All seven `infoCCD/*.java` files (`Console`, `CopyingNotice`, `Info`,
+`InfoViewer`, `ParamLoader`, `ResourceGetter`, `URLPoint`) use only Swing.
+No changes required.
+
+#### The root BoxOfActin.java vs boxOfActin/BoxOfActin.java
+
+The file listing shows `BoxOfActin.java` at the project root AND
+`boxOfActin/BoxOfActin.java`. These are different files:
+the root file is the outer entry point (contains `main()`); the inner
+`boxOfActin/BoxOfActin.java` contains the simulation class with `begin()`,
+`doLoop()`, `parseArgs()`, etc. Both must be checked in Phase C. The root
+file likely just calls `BoxOfActin.begin(args)` with minimal Java3D exposure.
+Read both before editing.
+
+#### QK file format will silently change
+
+After Phase B removes `Monomer.monVec3D` and Phase C replaces the
+`writeVec3d` call, the binary format of QK files changes at the monomer
+position record. Old QK files will be unreadable by the new code and vice
+versa. This is acceptable since the goal is headless JSON output, not
+QK playback. Document this change in a comment near the write code.
+
+#### Swing imports survive Phase D
+
+After deleting all `*Control.java` and `BoxOfActin_Graphics.java`, several
+Swing imports in simulation files become dead:
+- `BoxOfActin.java:8`: `import javax.swing.Timer` (for `startUpdateTimer()`,
+  deleted in Phase C)
+- `FilSegment.java`, `Bug.java`, etc. have `import javax.swing.*` that were
+  only used by GUI interaction methods. Check for and remove these in Phase B.
+
+Swing is a standard JDK library and does not block Java 21. However, dead
+imports should be cleaned up for clarity.
+
+---
+
+### Session 3 — Commit commands
+
+Run at the end of this session (survey only, no code edited):
+
+```
+git add JOURNAL.md
+git commit -m "Session 3: Java3D removal survey — complete file inventory, phase plan, caller graph"
+git push
+```
