@@ -1637,6 +1637,68 @@ simulation logic that is unchanged.
 
 ---
 
+## Session 4 — Phase 0 execution: Pt3D surgery (May 2026)
+
+### Pre-flight findings
+
+Scanned Pt3D.java in full before editing. No method body calls any inherited
+`Point3d` or `Tuple3d` method — every operation uses direct `.x`/`.y`/`.z`
+field access. The commented-out `//double x,y,z;` at line 13 was the original
+explicit field declaration, commented out when `extends Point3d` was added.
+No reimplementation needed beyond uncommenting and adding the `public` modifier.
+
+`writeNullVec3d` (lines 607–613 original) uses only Pt3D fields (`farfarAway.x`
+etc.) — not a vecmath bridge method, kept intact. Only `writeVec3d` (which took
+a `Vector3d` parameter) was deleted.
+
+### Exact edits made
+
+**Edit 1** — import and class declaration (lines 7–13 original):
+- Removed `import javax.vecmath.*;`
+- Changed `public class Pt3D extends Point3d {` → `public class Pt3D {`
+- Changed `\t//double x,y,z;` → `\tpublic double x, y, z;`
+
+**Edit 2** — `writeVec3d` method (lines 615–621 original):
+- Deleted the entire method body; kept the `// ****...` separator line that
+  followed it (it serves as the end-of-section marker for `writeNullVec3d`)
+
+**Edit 3** — COPY bridge methods section (lines 641–664 original):
+- Deleted section comment `//**** COPY TO OTHER DATA STRUCTURES ****`
+- Deleted `CopyToVector3d(Pt3D, Vector3d)` (static)
+- Deleted `copyToVector3d(Vector3d)` (instance)
+- Deleted `CopyToPoint3d(Pt3D, Point3d)` (static)
+- Deleted `copyToPoint3d(Point3d)` (instance)
+
+### Compile checkpoint
+
+```
+javac -cp . boxOfActin/Pt3D.java
+```
+(Java 8 on this machine — `--class-path` is Java 9+ syntax; `-cp` used instead.)
+
+Result: **exit 0, zero errors, zero warnings.** No other files compiled.
+
+### Post-edit verification
+
+```
+grep -n "vecmath\|Point3d\|Vector3d\|javax.media" boxOfActin/Pt3D.java
+```
+Result: **zero hits.** The file has no remaining `javax.vecmath` or
+`javax.media.j3d` references.
+
+### State after Phase 0
+
+`Pt3D.java` is now a standalone class with explicit `public double x, y, z`
+fields and no vecmath dependency. The five bridge methods are gone. All callers
+of those bridge methods are in graphics methods (deleted in Phase 2) or QK code
+(deleted in Phase 3) — no surprise non-graphics callers were found, confirming
+the §3 caller graph.
+
+Phase 1 (Env statics + Thing.java + class-load blockers) begins in a fresh
+session.
+
+---
+
 ### Session 3 — Commit commands
 
 Run at the end of this session (survey only, no code edited):

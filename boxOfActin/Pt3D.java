@@ -4,13 +4,12 @@ package boxOfActin;
 import java.lang.Math;
 import java.io.*;
 import java.text.*;
-import javax.vecmath.*;
 import edu.cornell.lassp.houle.RngPack.RanMT;
 import ec.util.*;
 
 
-public class Pt3D extends Point3d {
-	//double x,y,z;
+public class Pt3D {
+	public double x, y, z;
 	static final Pt3D zeroPt3D = new Pt3D(0,0,0);
 	static final Pt3D farfarAway = new Pt3D(10000,10000,10000);
 	
@@ -612,13 +611,6 @@ public class Pt3D extends Point3d {
 		} catch (IOException ioe) { talkln ("some sort of error writing binary file in writePt3D"); }
 	}
 	
-	public static void writeVec3d (DataOutputStream ds, Vector3d vec) {
-		try {
-			ds.writeFloat((float) vec.x);
-			ds.writeFloat((float) vec.y);
-			ds.writeFloat((float) vec.z);
-		} catch (IOException ioe) { talkln ("some sort of error writing binary file in writePt3D"); }
-	}
 	// ********************************************
 	
 	//**** CHECK PT3D ***  make sure everything is kosher, so to speak
@@ -636,31 +628,6 @@ public class Pt3D extends Point3d {
 		} else {
 			return true;
 		}
-	}
-	
-	//**** COPY TO OTHER DATA STRUCTURES ****
-	public static void CopyToVector3d (Pt3D pt, Vector3d vec3d) {
-		vec3d.x = pt.x;
-		vec3d.y = pt.y;
-		vec3d.z = pt.z;
-	}
-	
-	public void copyToVector3d (Vector3d vec3d) {
-		vec3d.x = x;
-		vec3d.y = y;
-		vec3d.z = z;
-	}
-	
-	public static void CopyToPoint3d (Pt3D pt, Point3d point3d) {
-		point3d.x = pt.x;
-		point3d.y = pt.y;
-		point3d.z = pt.z;
-	}
-	
-	public void copyToPoint3d (Point3d point3d) {
-		point3d.x = x;
-		point3d.y = y;
-		point3d.z = z;
 	}
 	
 	public static void talkln (String info) {
