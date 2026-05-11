@@ -5,9 +5,6 @@ package boxOfActin;
 import java.awt.*;
 import java.text.DecimalFormat;
 
-import javax.media.j3d.*;
-import javax.vecmath.*;
-
 import edu.cornell.lassp.houle.RngPack.RanMT;
 import ec.util.MersenneTwisterFast;
 
@@ -31,8 +28,6 @@ public class Thing extends Object {
 	static Pt3D maxPos = Env.worldDimension;	// maximum x position this Thing can occupy
 	double [][] transXTox = new double [3][3];	// transformation matrix from fixed to body-fixed frame
 	double [][] transxToX = new double [3][3];	// the inverse transformation... body-fixed to fixed
-	Matrix3d mxToX = new Matrix3d(); 
-	Matrix3d mXTox = new Matrix3d();
 	Pt3D uVec = new Pt3D(1,0,0);		// the unit vector that describes the orientation of the player
 	Pt3D uVecR = new Pt3D(-1,0,0);		// opposite direction of uVec
 	Pt3D yVec = new Pt3D(0,1,0);		// the first transvers vector for this body... in y direction
@@ -93,15 +88,6 @@ public class Thing extends Object {
 	// reused in torque calculations
 	Pt3D rForce = new Pt3D();
 	Pt3D tempTorq = new Pt3D();
-	
-	// for graphics
-	boolean inGroup = false;
-	boolean graphicsMade = false;
-	BranchGroup G = new BranchGroup();
-	TransformGroup g3d = new TransformGroup();
-	Transform3D t3d = new Transform3D();
-	Appearance a = new Appearance();
-	Material m;
 	
 	static DecimalFormat expFormat = new DecimalFormat ("0.000E0");
 	
@@ -243,8 +229,6 @@ public class Thing extends Object {
 		coord = null;
 		transXTox = null;
 		transxToX = null;
-		mxToX = null;
-		mXTox = null;
 		uVec = null;
 		uVecR = null;
 		yVec = null;
@@ -289,12 +273,6 @@ public class Thing extends Object {
 		
 		rForce = null;
 		tempTorq = null;
-	
-		G = null;
-		g3d = null;
-		t3d = null;
-		a = null;
-		m = null;
 	}
 	
 	public void initialize(){}
@@ -405,9 +383,6 @@ public class Thing extends Object {
 			for (int j = 0; j < 3; j++) {
 				curVal = transXTox [j][i];
 				transxToX [i][j] = curVal;
-				// set Matrix3d versions
-				mXTox.setElement(j,i,curVal);
-				mxToX.setElement(i,j,curVal);
 			}
 		}
 	}
@@ -443,9 +418,6 @@ public class Thing extends Object {
 		for (int i=0;i<thingCt;i++) {
 			if (theThings[i] == null) { break; }		// this means we've gotten to the end of our shortening list of things
 			if (theThings[i].removeMe) {
-				try {
-					if (theThings[i].graphicsMade) { theThings[i].G.detach(); }
-				} catch (NullPointerException npe) { } //talkln ("Null Pointer Exception trying to remove graphics object G in Thing.removeDeadThings"); }
 				removeThing(theThings[i]);
 			}
 		}
@@ -507,40 +479,6 @@ public class Thing extends Object {
 		}
 	}
 
-	public void setGraphicsCapabilities () {
-		g3d.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		g3d.setCapability(TransformGroup.ALLOW_TRANSFORM_READ);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_EXTEND);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_WRITE);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_READ);
-		
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_EXTEND);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_WRITE);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_READ);
-		
-		a.setCapability(Appearance.ALLOW_LINE_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_COLORING_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_POLYGON_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_TRANSPARENCY_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_MATERIAL_WRITE);
-		
-	}
-	
-	public void makeGraphics () {}
-	public void updateGraphics () {}
-
-	public Node getGraphicsNode () {
-		if (!graphicsMade) { makeGraphics();}
-		updateGraphics();
-		return G;
-	}
-	
-	public void detachGraphics () {
-		G.detach();
-		graphicsMade = false;
-	}
-	
 	public static void talk (String info) {
 		System.out.print(info);
 	}

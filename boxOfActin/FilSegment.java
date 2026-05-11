@@ -18,16 +18,6 @@ import javax.swing.*;
 import java.lang.Math.*;
 import java.util.Random;
 
-import com.sun.j3d.utils.geometry.Box;
-import com.sun.j3d.utils.geometry.Cone;
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Primitive;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-
-import javax.media.j3d.*;
-import javax.vecmath.*;
-
 public class FilSegment extends Thing {
 	
 	static FilSegment [] theFilSegments = new FilSegment [1000000];	// array holding all filament segments
@@ -172,9 +162,6 @@ public class FilSegment extends Thing {
 	Pt3D end1MonCenter = new Pt3D();
 	Pt3D end2MonCenter = new Pt3D();
 	Pt3D coordMonCenter = new Pt3D();
-	Vector3d end1Vec3d = new Vector3d();
-	Vector3d end2Vec3d = new Vector3d();
-	Vector3d coordVec3d = new Vector3d();
 	Pt3D curMonStart = new Pt3D();
 	Pt3D curMonStop = new Pt3D();
 
@@ -183,82 +170,16 @@ public class FilSegment extends Thing {
 	double helixAng = 2*Math.PI*myPRNG.nextDouble();	// keeps track of the helix angle of minusMon.. starts randomly
 	int monomerCt = 0;
 
-	// for graphics
-	boolean updateCylGraphicsFlag = false; // flag to trigger remaking graphics appearance in cylinder representation of filaments
+	// graphics bookkeeping (primitives only; Java3D fields removed in Phase 1)
+	boolean updateCylGraphicsFlag = false;
 	double renderThicken = Env.filRenderThicken.getValue();
-	TransformGroup cylTG,plusCapTG;
-	Transform3D cylT3D,cylRot,plusCapT3D;
-	BranchGroup cylBG,coordSysG,plusCapBG;
-	Cylinder myCyl;
-	Cone myArrow;
-	Box plusCapBox;
-	static float shiny = 128.0f;
-	static Color3f ambientC = new Color3f(0.0f,1.0f,0.0f);
-	static Color3f diffuseC = new Color3f(1.0f,0.0f,0.0f);
-	static Color3f diffuseCS1 = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f diffuseArrow = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f); 
-	// colors and materials for coarse representation of "live vs dead" filaments
-	static Color3f ninetyNotADP = new Color3f(1.0f,1.0f,0.0f);
-	static Color3f eightyNotADP = new Color3f(1.0f,0.9f,0.0f);
-	static Color3f seventyNotADP = new Color3f(1.0f,0.8f,0.0f);
-	static Color3f sixtyNotADP = new Color3f(1.0f,0.7f,0.0f);
-	static Color3f fiftyNotADP = new Color3f(1.0f,0.6f,0.0f);
-	static Color3f fortyNotADP = new Color3f(1.0f,0.5f,0.0f);
-	static Color3f thirtyNotADP = new Color3f(1.0f,0.4f,0.0f);
-	static Color3f twentyNotADP = new Color3f(1.0f,0.3f,0.0f);
-	static Color3f tenNotADP = new Color3f(1.0f,0.2f,0.0f);
-	static Color3f zeroNotADP = new Color3f(1.0f,0.1f,0.0f);
-	
-	static Material ninetyADPCylM = new Material(ambientC,ninetyNotADP,diffuseC,specularC,shiny);
-	static Material eightyADPCylM = new Material(ambientC,eightyNotADP,diffuseC,specularC,shiny);
-	static Material seventyADPCylM = new Material(ambientC,seventyNotADP,diffuseC,specularC,shiny);
-	static Material sixtyADPCylM = new Material(ambientC,sixtyNotADP,diffuseC,specularC,shiny);
-	static Material fiftyADPCylM = new Material(ambientC,fiftyNotADP,diffuseC,specularC,shiny);  
-	static Material fortyADPCylM = new Material(ambientC,fortyNotADP,diffuseC,specularC,shiny);
-	static Material thirtyADPCylM = new Material(ambientC,thirtyNotADP,diffuseC,specularC,shiny);
-	static Material twentyADPCylM = new Material(ambientC,twentyNotADP,diffuseC,specularC,shiny);
-	static Material tenADPCylM = new Material(ambientC,tenNotADP,diffuseC,specularC,shiny);
-	static Material zeroADPCylM = new Material(ambientC,zeroNotADP,diffuseC,specularC,shiny);
-	
-	static TransparencyAttributes tA = new TransparencyAttributes (TransparencyAttributes.FASTEST,0.0f);
-	static TransparencyAttributes topThirdTA = new TransparencyAttributes (TransparencyAttributes.FASTEST,0.2f);
-	static TransparencyAttributes midThirdTA = new TransparencyAttributes (TransparencyAttributes.FASTEST,0.5f);
-	static TransparencyAttributes bottomThirdTA = new TransparencyAttributes (TransparencyAttributes.FASTEST,0.8f);
-	
-	// end colors and materials for coarse representation of "live vs "dead"
-	
-	Appearance cylApp = new Appearance();
-	
-	static Material cylM = new Material(ambientC,emissiveC,diffuseC,specularC,shiny);
-	static Material cylMS1 = new Material(ambientC,emissiveC,diffuseCS1,specularC,shiny);
-	static Material arrowM = new Material(ambientC,emissiveC,diffuseArrow,specularC,shiny);
-	static final Material capMat = new Material(specularC,specularC,specularC,specularC,shiny);
-	static Appearance aCyl,aCylS1,xLineApp,yLineApp,zLineApp,endCapApp,arrowApp;
-	static Appearance ninetyNotADPApp,eightyNotADPApp,seventyNotADPApp,sixtyNotADPApp,fiftyNotADPApp,fortyNotADPApp,thirtyNotADPApp,twentyNotADPApp,tenNotADPApp,zeroNotADPApp;
-	static Appearance topThirdCofApp,midThirdCofApp,bottomThirdCofApp;
-	// for coord sys drawing
-	static Color3f xLineColor = new Color3f(1.0f,0.0f,0.0f);
-	static Color3f yLineColor = new Color3f(0.0f,1.0f,0.0f);
-	static Color3f zLineColor = new Color3f(0.0f,0.0f,1.0f);
-	static ColoringAttributes xLineCA = new ColoringAttributes(xLineColor, ColoringAttributes.FASTEST);
-	static ColoringAttributes yLineCA = new ColoringAttributes(yLineColor, ColoringAttributes.FASTEST);
-	static ColoringAttributes zLineCA = new ColoringAttributes(zLineColor, ColoringAttributes.FASTEST);
 	double coordLineLength = 5*Env.actinMonoDiam;
-	LineArray xLine, yLine, zLine;
-	Shape3D xLineShape, yLineShape, zLineShape;
 	Pt3D xLineEndPt = new Pt3D();
 	Pt3D yLineEndPt = new Pt3D();
 	Pt3D zLineEndPt = new Pt3D();
 	boolean coordSysOn = false;
 	boolean plusCapMarkOn = false;
-	// for end cap graphics
-	static Color3f endCapColor = new Color3f(1.0f,0.0f,0.0f);
-	static Material endCapMat = new Material(ambientC,endCapColor,diffuseC,specularC,shiny);
-	
 
-	
 	public FilSegment (Pt3D initCoord, Pt3D initUVec, int filID) {
 		super(initCoord);
 		//synchronized (filSync) {
@@ -392,24 +313,8 @@ public class FilSegment extends Thing {
 		end1MonCenter = null;
 		end2MonCenter = null;
 		coordMonCenter = null;
-		end1Vec3d = null;
-		end2Vec3d = null;
-		coordVec3d = null;
 		curMonStart = null;
 		curMonStop = null;
-		
-		cylTG=null;
-		plusCapTG = null;
-		cylT3D=null; cylRot = null; plusCapT3D = null;
-		cylBG=null; coordSysG=null; plusCapBG = null;
-		myCyl=null;
-		myArrow=null;
-		plusCapBox = null;
-		
-		cylApp = null;
-	
-		xLine=null; yLine=null; zLine=null;
-		xLineShape=null; yLineShape=null; zLineShape=null;
 		xLineEndPt = null;
 		yLineEndPt = null;
 		zLineEndPt = null;
@@ -3559,262 +3464,18 @@ public class FilSegment extends Thing {
 		}
 	}
 
-	private void makeNewCyl () {
-		//appearance 
-		cylApp.setMaterial(ninetyADPCylM);
-		//cylindrical body 
-		cylBG = new BranchGroup();  
-		cylBG.setCapability(BranchGroup.ALLOW_DETACH);
-		cylRot = new Transform3D();
-		cylRot.rotZ(-Math.PI/2); 
-		cylT3D = new Transform3D();
-		cylT3D.setRotation(mxToX);
-		cylT3D.setScale(1); 
-		cylT3D.mul(cylRot);
-		Pt3D cylCen = Pt3D.Add(end1,length/2,uVec);
-		cylT3D.setTranslation(new Vector3d(cylCen.x,cylCen.y,cylCen.z));
-		cylTG = new TransformGroup(cylT3D);
-		cylTG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		if (Env.polarityArrows) {
-			myArrow = new Cone((float)(renderThicken*3*Env.actinMonoDiam),(float)0.04,arrowApp);
-			cylTG.addChild(myArrow);		
-		}
-		myCyl = new Cylinder((float)(renderThicken*Env.actinWidth/4),(float)length,Primitive.GENERATE_NORMALS,20,20,aCyl);
-		cylTG.addChild(myCyl);
-		cylBG.addChild(cylTG);
-		G.addChild(cylBG);
-		
-		// Plus-End Cap mark, currently using a transparent box
-		TransparencyAttributes capTA = new TransparencyAttributes(TransparencyAttributes.FASTEST,0.5f);
- 		Appearance plusCapApp = new Appearance();
- 	    plusCapApp.setMaterial(capMat);
- 	    plusCapApp.setTransparencyAttributes(capTA);
- 	    plusCapBox = new Box(0.02f,0.02f,0.02f,plusCapApp);
- 	    plusCapT3D = new Transform3D();
- 	    plusCapTG = new TransformGroup();
- 	    plusCapT3D.rotZ(Math.PI/2.0);
- 	    plusCapT3D.setScale(0.15);
- 	    plusCapTG.setTransform(plusCapT3D);
- 	    plusCapTG.addChild(plusCapBox);
- 	    plusCapBG = new BranchGroup();
- 	    plusCapBG.setCapability(BranchGroup.ALLOW_DETACH);
- 	    plusCapBG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
- 	    plusCapBG.addChild(plusCapTG);
-	}
+	private void makeNewCyl () {}
 	 
-	private void updateCylGraphics () {
-		cylBG.detach();
-		cylTG.removeChild(myCyl);
-		cylTG.removeChild(myArrow);
-		if (Env.polarityArrows) {
-			myArrow = new Cone((float)(renderThicken*3*Env.actinMonoDiam),(float)0.04,arrowApp);
-			cylTG.addChild(myArrow);		
-		}
-		// end cap graphics on and off, as appropriate
-		if (end2Capped) { 
-			//cylTG.removeChild(plusCapBG);
-			plusCapT3D.setTranslation(new Vector3d(0.0,(length+Env.actinMonoRadius)/2,0.0));
-			plusCapTG.setTransform(plusCapT3D);
-			if (!plusCapMarkOn) {
-				cylTG.addChild(plusCapBG);
-				plusCapMarkOn = true; 
-			}
-			//plusCapMarkOn = true;
-		}
-		if (!end2Capped & plusCapMarkOn) { cylTG.removeChild(plusCapBG); plusCapMarkOn = false; }
-		
-		myCyl = new Cylinder((float)(renderThicken*Env.actinWidth/4),(float)length,Primitive.GENERATE_NORMALS,20,20,cylApp);
-		cylTG.addChild(myCyl);
-		G.addChild(cylBG);
-	}
+	private void updateCylGraphics () {}
 	
-	private void makeCoordinateSysGraphics () {
-		// x-axis
-		xLine = new LineArray(2,LineArray.COORDINATES);
-		xLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		xLineEndPt.add(coord,0.5*length+coordLineLength,uVec);
-		xLine.setCoordinate(0,coord);
-		xLine.setCoordinate(1,xLineEndPt);
-		xLineShape = new Shape3D();
-		xLineShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		xLineShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		xLineShape.setGeometry(xLine);
-		xLineShape.setAppearance(xLineApp);
-		// y-axis
-		yLine = new LineArray(2,LineArray.COORDINATES);
-		yLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		yLineEndPt.add(coord,coordLineLength,yVec);
-		yLine.setCoordinate(0,coord);
-		yLine.setCoordinate(1,yLineEndPt);
-		yLineShape = new Shape3D();
-		yLineShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		yLineShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		yLineShape.setGeometry(yLine);
-		yLineShape.setAppearance(yLineApp);
-		// z-axis
-		zLine = new LineArray(2,LineArray.COORDINATES);
-		zLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		zLineEndPt.add(coord,coordLineLength,zVec);
-		zLine.setCoordinate(0,coord);
-		zLine.setCoordinate(1,zLineEndPt);
-		zLineShape = new Shape3D();
-		zLineShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		zLineShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		zLineShape.setGeometry(zLine);
-		zLineShape.setAppearance(zLineApp);
-		coordSysG = new BranchGroup();
-		coordSysG.setCapability(BranchGroup.ALLOW_DETACH);
-		coordSysG.addChild(xLineShape);
-		coordSysG.addChild(yLineShape);
-		coordSysG.addChild(zLineShape);
-	}
+	private void makeCoordinateSysGraphics () {}
 	
-	public static void initializeAllAppearances () {
-		// coordinate system graphics
-		xLineApp = new Appearance();
-		yLineApp = new Appearance();
-		zLineApp = new Appearance();
-
-		xLineApp.setColoringAttributes(xLineCA);
-		yLineApp.setColoringAttributes(yLineCA);
-		zLineApp.setColoringAttributes(zLineCA);
-		
-		// end cap graphics
-		endCapApp = new Appearance();
-		endCapApp.setMaterial(endCapMat);
-		
-		// all the cylinder appearances	
-		// "live or dead" appearances
-		ninetyNotADPApp = new Appearance();
-		ninetyNotADPApp.setTransparencyAttributes(tA);
-		ninetyNotADPApp.setMaterial(ninetyADPCylM);
-		eightyNotADPApp = new Appearance();
-		eightyNotADPApp.setTransparencyAttributes(tA);
-		eightyNotADPApp.setMaterial(eightyADPCylM);
-		seventyNotADPApp = new Appearance();
-		seventyNotADPApp.setTransparencyAttributes(tA);
-		seventyNotADPApp.setMaterial(seventyADPCylM);
-		sixtyNotADPApp = new Appearance();
-		sixtyNotADPApp.setTransparencyAttributes(tA);
-		sixtyNotADPApp.setMaterial(sixtyADPCylM);
-		fiftyNotADPApp = new Appearance();
-		fiftyNotADPApp.setTransparencyAttributes(tA);
-		fiftyNotADPApp.setMaterial(fiftyADPCylM);
-		fortyNotADPApp = new Appearance();
-		fortyNotADPApp.setTransparencyAttributes(tA);
-		fortyNotADPApp.setMaterial(fortyADPCylM);
-		thirtyNotADPApp = new Appearance();
-		thirtyNotADPApp.setTransparencyAttributes(tA);
-		thirtyNotADPApp.setMaterial(thirtyADPCylM);
-		twentyNotADPApp = new Appearance();
-		twentyNotADPApp.setTransparencyAttributes(tA);
-		twentyNotADPApp.setMaterial(twentyADPCylM);
-		tenNotADPApp = new Appearance();
-		tenNotADPApp.setTransparencyAttributes(tA);
-		tenNotADPApp.setMaterial(tenADPCylM);
-		zeroNotADPApp = new Appearance();
-		zeroNotADPApp.setTransparencyAttributes(tA);
-		zeroNotADPApp.setMaterial(zeroADPCylM);
-		
-		// cofilin infested appearances
-		topThirdCofApp = new Appearance();
-		topThirdCofApp.setTransparencyAttributes(topThirdTA);
-		topThirdCofApp.setMaterial(zeroADPCylM);
-		
-		midThirdCofApp = new Appearance();
-		midThirdCofApp.setTransparencyAttributes(midThirdTA);
-		midThirdCofApp.setMaterial(zeroADPCylM);
-		
-		bottomThirdCofApp = new Appearance();
-		bottomThirdCofApp.setTransparencyAttributes(bottomThirdTA);
-		bottomThirdCofApp.setMaterial(zeroADPCylM);
-
-		// default 
-		aCyl = ninetyNotADPApp;
-		
-		//?
-		aCylS1 = new Appearance();
-		aCylS1.setMaterial(cylMS1);
-		
-		arrowApp = new Appearance();
-		arrowApp.setMaterial(arrowM);
-		
-	}
-	
-	public void makeGraphics () {
-		setGraphicsCapabilities();
-	
-		if (!Env.monomerGraphics) { makeNewCyl(); }
-		 
-		// coordinate system
-		makeCoordinateSysGraphics();
-		if (Env.filCoordSysOn) {
-			G.addChild(coordSysG);
-			coordSysOn = true;
-		}
-		
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		coord.copyToVector3d(coordVec3d);
-		
-		if (Env.monomerGraphics) { 
-			updateMonomerGraphics(); 
-		
-		} else {
-			setRenderThicken();
-			setADPAppearance();
-			setCofilinAppearance();
-			if (updateCylGraphicsFlag) {
-				updateCylGraphics();
-				updateCylGraphicsFlag = false;
-			}
-			
-			cylT3D.setRotation(mxToX);
-			cylT3D.mul(cylRot);
-			cylT3D.setScale(1);
-			cylT3D.setTranslation(coordVec3d);
-			cylTG.setTransform(cylT3D);
-		}
-		
-		xLineEndPt.add(coord,0.5*length+coordLineLength,uVec);
-		xLine.setCoordinate(0,coord);
-		xLine.setCoordinate(1,xLineEndPt);
-		yLineEndPt.add(coord,coordLineLength,yVec);
-		yLine.setCoordinate(0,coord);
-		yLine.setCoordinate(1,yLineEndPt);
-		zLineEndPt.add(coord,coordLineLength,zVec);
-		zLine.setCoordinate(0,coord);
-		zLine.setCoordinate(1,zLineEndPt);
-		
-		
-		
-		
-		
-	}
-	
-	public void detachGraphics () {
-		G.detach();
-		G.removeChild(cylBG);
-		cylBG.detach();
-		coordSysG.detach();
-		graphicsMade = false;
-	}
-	
-	public void addCoordSysGraphics () {
-		if (!coordSysOn) {
-			G.addChild(coordSysG);
-			coordSysOn = true;
-		}
-	}
-	
-	public void removeCoordSysGraphics () {
-		if (coordSysOn) {
-			coordSysG.detach();
-			coordSysOn = false;
-		}
-	}
+	public static void initializeAllAppearances () {}
+	public void makeGraphics () {}
+	public void updateGraphics () {}
+	public void detachGraphics () {}
+	public void addCoordSysGraphics () {}
+	public void removeCoordSysGraphics () {}
 	
 	public double getEffADPLength() {	// write method to figure length from end1 that is a certain high percentage ADP
 		return 0;
@@ -3862,43 +3523,9 @@ public class FilSegment extends Thing {
 		
 	}*/
 	
-	public void setCofilinAppearance () {
-		if (notADPRatio > 0.1) { return; }
-		float noCofRatio = ((float)(monomerCt-cofilinCt))/((float)monomerCt);
-		if (0.9>=noCofRatio && noCofRatio>0.7) { setAppearance(FilSegment.topThirdCofApp); return;} 
-		if (0.7>=noCofRatio && noCofRatio>0.4) { setAppearance(FilSegment.midThirdCofApp); return;} 
-		if (0.4>=noCofRatio) { setAppearance(FilSegment.bottomThirdCofApp); return;} 
-	}
-	
-	public void setADPAppearance () {
-		double ADPCount = 0;
-		Monomer curMon = this.minusMon;
-		while (curMon != Monomer.plusGhost) {
-			try {
-			 curMon = curMon.frontMon;
-			 if (curMon.isADP()) { ADPCount++; }
-			} catch (NullPointerException npe) {  return; }
-		}
-		notADPRatio = ((double)(monomerCt-ADPCount))/((double)monomerCt);
-		if (notADPRatio>0.9) { setAppearance(FilSegment.ninetyNotADPApp); return;} 
-		if (0.9>=notADPRatio && notADPRatio>0.8) { setAppearance(FilSegment.eightyNotADPApp); return;} 
-		if (0.8>=notADPRatio && notADPRatio>0.7) { setAppearance(FilSegment.seventyNotADPApp); return;} 
-		if (0.7>=notADPRatio && notADPRatio>0.6) { setAppearance(cylApp = FilSegment.sixtyNotADPApp); return;} 
-		if (0.6>=notADPRatio && notADPRatio>0.5) { setAppearance(FilSegment.fiftyNotADPApp); return;} 
-		if (0.5>=notADPRatio && notADPRatio>0.4) { setAppearance(FilSegment.fortyNotADPApp); return;} 
-		if (0.4>=notADPRatio && notADPRatio>0.3) { setAppearance(FilSegment.thirtyNotADPApp); return;} 
-		if (0.3>=notADPRatio && notADPRatio>0.2) { setAppearance(FilSegment.twentyNotADPApp); return;} 
-		if (0.2>=notADPRatio && notADPRatio>0.1) { setAppearance(FilSegment.tenNotADPApp); return;} 
-		if (notADPRatio >= 0) { setAppearance(FilSegment.zeroNotADPApp); } 
-	}
+	public void setCofilinAppearance () {}
 
-	
-	public void setAppearance (Appearance myNewApp) {
-		if (cylApp != myNewApp) {
-			cylApp = myNewApp;
-			updateCylGraphicsFlag = true;
-		}
-	}
+	public void setADPAppearance () {}
 	
 	public static void updateAllMonomerPositions () {
 		if (Env.noMonomersSimd.isActive()) { return; }

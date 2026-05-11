@@ -3,21 +3,6 @@ package boxOfActin;
 import java.awt.Color;
 import java.awt.Font;
 
-import javax.media.j3d.Appearance;
-import javax.media.j3d.ColoringAttributes;
-import javax.media.j3d.Font3D;
-import javax.media.j3d.FontExtrusion;
-import javax.media.j3d.Material;
-import javax.media.j3d.Shape3D;
-import javax.media.j3d.Text3D;
-import javax.media.j3d.Transform3D;
-import javax.media.j3d.TransformGroup;
-import javax.media.j3d.TransparencyAttributes;
-import javax.vecmath.Color3f;
-import javax.vecmath.Vector3d;
-
-import com.sun.j3d.utils.geometry.Sphere;
-
 import boxOfActin.ProteinNode.ProteinNodeThreads;
 
 public class FillNode extends ProteinNode {
@@ -25,12 +10,6 @@ public class FillNode extends ProteinNode {
 	boolean iAmGrowing = false;
 
 	
-	// graphics
-	static Color3f ambientC = new Color3f(0.0f,0.0f,1.0f);
-	static Color3f diffuseC = new Color3f(0.0f,0.0f,1.0f);
-	static Color3f specularC = new Color3f(0.0f,0.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
-	static float shiny = 128.0f;
 	
 	public FillNode (Pt3D initCoord, double radius) {
 		super(initCoord,false);
@@ -70,44 +49,9 @@ public class FillNode extends ProteinNode {
 		fillNodeCt = 0;  // right now the ProteinNode.removeAll nullifies FillNodes, just reset counter here
 	}
 	
-	public void makeGraphics () {
-		// make material
-		Color3f fillNodeColor = new Color3f(Color.DARK_GRAY);
-		m = new Material(fillNodeColor,fillNodeColor,fillNodeColor,fillNodeColor,shiny);
-		// set capabilities
-		setGraphicsCapabilities();
-		
-		ColoringAttributes cA = new ColoringAttributes(fillNodeColor, ColoringAttributes.FASTEST);
-		a.setColoringAttributes(cA);
-		TransparencyAttributes tA = new TransparencyAttributes ();
-		tA.setTransparency(0.5f);
-		tA.setTransparencyMode(tA.FASTEST);
-		a.setTransparencyAttributes(tA);
-		a.setMaterial(m);
-		
-		//a.setPolygonAttributes(new PolygonAttributes(PolygonAttributes.POLYGON_LINE,PolygonAttributes.CULL_BACK,0.0f));
-		mySphere = new Sphere(1.0f,Sphere.GENERATE_NORMALS, Env.nodeTessalation, a);
-		mySphere.setCapability(Sphere.ALLOW_BOUNDS_READ);
-		
-		coord.copyToVector3d(coordVec3d);
-		t3d.setScale(radius);
-		t3d.setTranslation(coordVec3d);
-		t3d.setRotation(mxToX);
-		g3d.setTransform(t3d);
-		
-		g3d.addChild(mySphere);
-		G.addChild(g3d);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		if (iAmGrowing) { t3d.setScale(radius); }
-		coord.copyToVector3d(coordVec3d);
-		//coordVec3d.z += 0.8*radius;  // shift where we visualize spheres to plane of contact at inner edge of cell
-		t3d.setTranslation(coordVec3d);
-		t3d.setRotation(mxToX);
-		g3d.setTransform(t3d);
-	}
+	public void makeGraphics () {}
+
+	public void updateGraphics () {}
 	
 	public static void makeExpandingInnerSphere() {
 		double initialR = 0.8;

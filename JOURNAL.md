@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-07
+Last updated: 2026-05-11
 
 ---
 
@@ -1706,5 +1706,137 @@ Run at the end of this session (survey only, no code edited):
 ```
 git add JOURNAL.md
 git commit -m "Session 3: Java3D removal survey — complete file inventory, phase plan, caller graph"
+git push
+```
+
+---
+
+## Session 5 — Phase 1 execution: static-init blockers + Thing.java (2026-05-11)
+
+### Scope
+
+Remove all class-load-time Java3D triggers so the JVM can load the simulation
+without Java3D on the classpath (prerequisite for Java 21 + TornadoVM). Files
+touched: `Env.java`, `Thing.java`, `FilSegment.java`, `Monomer.java`,
+`FillNode.java`, `ProteinNode.java` (added to scope — see §3 below), `Pt3D.java`
+(two missing methods added).
+
+### Changes per file
+
+**`boxOfActin/Env.java`** (from Session 4 draft + one new fix this session)
+- Deleted `import javax.vecmath.Color3f` and `import javax.vecmath.Point3d`
+- Deleted `static Color3f dumC = ...` and 10 other Color3f/Color3b static fields
+- Replaced vecmath color constants with plain `java.awt.Color` / `java.awt.Font` equivalents
+- Deleted all QK-related fields (per QK deletion catalog in Session 3 addendum §1a)
+- **New this session:** inlined `ProteinNode.defaultTransDiff()` and
+  `ProteinNode.defaultRotDiff()` to break the Env→ProteinNode static class-loading
+  chain (see §3 below)
+
+**`boxOfActin/Thing.java`** (from Session 4 draft)
+- Deleted `import javax.media.j3d.*` and `import javax.vecmath.*`
+- Deleted `Matrix3d mxToX`, `Matrix3d mXTox` instance fields
+- Deleted 7 graphics instance fields (`BranchGroup G`, `TransformGroup g3d`,
+  `Transform3D t3d`, `Appearance a`, `Material m`, `boolean inGroup`,
+  `boolean graphicsMade`)
+- Cleaned `sepaku()`, `transMat()`, `removeDeadThings()` of Java3D references
+- Deleted 5 graphics methods: `setGraphicsCapabilities()`, `makeGraphics()`,
+  `updateGraphics()`, `getGraphicsNode()`, `detachGraphics()`
+
+**`boxOfActin/FilSegment.java`**
+- Deleted all Java3D/vecmath imports
+- Deleted all Java3D-typed instance fields (Cylinder, Cone, TransformGroup,
+  Transform3D, BranchGroup, LineArray, Shape3D, Appearance, Vector3d ×3)
+- Kept primitive/Pt3D bookkeeping fields (`updateCylGraphicsFlag`, `renderThicken`,
+  `coordLineLength`, `xLineEndPt`, `yLineEndPt`, `zLineEndPt`, `coordSysOn`,
+  `plusCapMarkOn`, `notADPRatio`, `cofilinCt`)
+- Cleaned `sepaku()` of Java3D null assignments
+- Stubbed to `{}`: `makeNewCyl()`, `updateCylGraphics()`,
+  `makeCoordinateSysGraphics()`, `initializeAllAppearances()`, `makeGraphics()`,
+  `updateGraphics()`, `detachGraphics()`, `addCoordSysGraphics()`,
+  `removeCoordSysGraphics()`, `setCofilinAppearance()`, `setADPAppearance()`
+- Deleted `setAppearance(Appearance)` entirely (parameter type unresolvable)
+
+**`boxOfActin/Monomer.java`**
+- Deleted all Java3D/vecmath imports
+- Deleted all static Java3D fields (Color3f ×6, ColoringAttributes ×4, Material ×6,
+  Appearance ×4, LineAttributes ×1, float shiny)
+- Deleted all Java3D instance fields (BranchGroup ×5, LineArray, Shape3D, Sphere,
+  Box, TransformGroup, Transform3D ×2, Vector3d monVec3D, Matrix3d ×2)
+- Removed `initializeGraphics()` calls from all 3 constructors (plusGhost sentinel
+  fix — per Session 3 addendum §1b)
+- Removed `addGraphics()` call from `polymerize()`
+- Deleted `getPosition(Vector3d)` (parameter type unresolvable)
+- Deleted `addGraphics(BranchGroup)` (parameter type unresolvable)
+- Stubbed to `{}`: `chooseBiochemAppearance()`, `initializeAllAppearances()`,
+  `initializeGraphics()`, `resetGraphics()`, `reassignGraphics()`,
+  `updateGraphics()`, `setFromQKInfo()`, `setToFarAway()`, `updatePosition()`,
+  `addGraphics(FilSegment)`, `detachGraphics()`
+- Cleaned `sepaku()` of Java3D null assignments
+
+**`boxOfActin/FillNode.java`**
+- Deleted all Java3D/vecmath imports
+- Deleted static Color3f ×4 + float shiny fields
+- Stubbed `makeGraphics()` and `updateGraphics()` to `{}`
+
+**`boxOfActin/ProteinNode.java`** ← added to Phase 1 scope (see §3)
+- Deleted all Java3D/vecmath imports
+- Deleted static Color3f ×4 + float shiny fields
+- Deleted Java3D instance fields: `Sphere mySphere`, `Sphere[] forminSpheres`,
+  `Vector3d coordVec3d`, `Vector3d nodeScaleVec3d`
+- Stubbed `updateSphGraphics()`, `makeGraphics()`, `updateGraphics()` to `{}`
+- Removed `G.detach()` from `removeAll()` (G deleted from Thing)
+
+**`boxOfActin/Pt3D.java`** ← bug fixes needed for compile
+- Uncommented `scale(double)` (in-place scalar multiply — was commented out,
+  caused 12 compile errors across FilSegment and Thing)
+- Added `add(Pt3D)` (in-place vector add — was missing, caused 6 compile errors
+  in FilSegment.updateMonomerPositions)
+
+### §3 — Why ProteinNode was added to Phase 1 scope
+
+`Env.java` line 352 had `static final double nodeTransDiff_init = ProteinNode.defaultTransDiff()`. This static field initializer forces the JVM to load the `ProteinNode` class during `Env.<clinit>`. `ProteinNode` had 4 static `Color3f` fields that instantiate vecmath objects, triggering `NoClassDefFoundError: javax/media/j3d/Node`.
+
+Fix: inlined the two computations in Env.java (removing the class-loading trigger), then did the same Phase 1 cleanup on ProteinNode.java so it compiles cleanly without Java3D.
+
+### Compile checkpoint result
+
+```
+javac -cp . boxOfActin/Env.java boxOfActin/Thing.java boxOfActin/Pt3D.java \
+  boxOfActin/FilSegment.java boxOfActin/Monomer.java boxOfActin/FillNode.java \
+  boxOfActin/ProteinNode.java
+```
+**Exit 0 — clean.**
+
+### JVM load test result
+
+```
+java -cp . BoxOfActin -h
+```
+Crashes at `BoxOfActin.begin():80` → `new BoxOfActin_Graphics()` →
+`NoClassDefFoundError: javax/media/j3d/Canvas3D`.
+
+**Phase 1 classes (Env, Thing, FilSegment, Monomer, FillNode, ProteinNode, Pt3D)
+load without errors.** The crash is in `BoxOfActin_Graphics`, a Phase 2 target.
+This is the expected Phase 1 pass condition.
+
+### Phase 2 targets (next session)
+
+Files still triggering Java3D at class-load time (have static Java3D fields or
+are in the load path before any `-r` check):
+
+- `BoxOfActin_Graphics.java` — the crash site; has Canvas3D and other J3D statics
+- `StickyNode.java`, `Bug.java`, `Crucible.java`, `Chamber.java` — likely have
+  static Color3f/Appearance/Material statics (need audit)
+- `BoxOfActin.java` — references `Env.toQKFileInterval` (deleted field) in its
+  `-qkN` help text; needs cleanup before it can compile without Java3D
+- All remaining Phase 2 instance-field cleanup (ProteinNode, StickyNode, etc.)
+
+### Commit
+
+```
+git add JOURNAL.md boxOfActin/Env.java boxOfActin/Thing.java boxOfActin/Pt3D.java \
+  boxOfActin/FilSegment.java boxOfActin/Monomer.java boxOfActin/FillNode.java \
+  boxOfActin/ProteinNode.java
+git commit -m "Session 5 / Phase 1: remove all class-load-time Java3D triggers from Env, Thing, FilSegment, Monomer, FillNode, ProteinNode; add Pt3D.scale/add methods"
 git push
 ```

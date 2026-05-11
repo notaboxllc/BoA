@@ -282,6 +282,10 @@ public class Pt3D {
 	public void add (double sc, Pt3D vec1, Pt3D vec2) {
 		this.x = sc*(vec1.x+vec2.x); this.y = sc*(vec1.y+vec2.y); this.z = sc*(vec1.z+vec2.z);
 	}
+
+	public void add (Pt3D vec) {
+		this.x += vec.x; this.y += vec.y; this.z += vec.z;
+	}
 	// ************************************************************
 	
 	
@@ -323,10 +327,10 @@ public class Pt3D {
 	public void scale (double scalar, Pt3D vec) {
 		this.x = vec.x*scalar; this.y = vec.y*scalar; this.z = vec.z*scalar;
 	}
-	
-	/*public void scale (double sc) {
+
+	public void scale (double sc) {
 		this.x = sc*this.x; this.y = sc*this.y; this.z = sc*this.z;
-	} */
+	}
 	// ***************************************************************
 	
 	

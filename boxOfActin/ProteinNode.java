@@ -11,12 +11,6 @@ import java.awt.*;
 import javax.swing.*;
 import java.lang.Math.*;
 
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Primitive;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-import javax.media.j3d.*;
-import javax.vecmath.*;
 
 public class ProteinNode extends Thing {  
 	static ProteinNode [] theNodes = new ProteinNode [100000];	// array holding all protein nodes
@@ -74,15 +68,6 @@ public class ProteinNode extends Thing {
 	ValueTracker bugCollidingTrack = new ValueTracker(Env.bugNodeCollisionsToSum);
 	Color nodeColor = Color.green;	// color for drawing
 
-	Sphere mySphere;
-	Sphere [] forminSpheres = new Sphere [maxFormins];
-	Vector3d coordVec3d = new Vector3d();
-	Vector3d nodeScaleVec3d = new Vector3d();
-	static Color3f ambientC = new Color3f(0.9f,0.9f,0.9f);
-	static Color3f diffuseC = new Color3f(0.9f,0.9f,0.9f);
-	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
-	static float shiny = 128.0f;
 
 	
 	public ProteinNode (Pt3D initCoord, boolean fromQKFile) {
@@ -743,120 +728,11 @@ public class ProteinNode extends Thing {
 		return boundFilaments;
 	}
 	
-	private void updateSphGraphics () {
-		G.detach();
-		g3d.removeChild(mySphere);
-		mySphere = new Sphere((float)getRadius(),Sphere.GENERATE_NORMALS, Env.nodeTessalation, a);
-		g3d.addChild(mySphere);
-		BoxOfActin_Graphics.bugState.addChild(G);
-	}
+	private void updateSphGraphics () {}
 	
-	public void makeGraphics () {
-		// make material
-		m = new Material (ambientC,emissiveC,diffuseC,specularC,shiny);
-		// set capabilities
-		setGraphicsCapabilities();
-		
-		ColoringAttributes cA = new ColoringAttributes(Env.nodeColor3f, ColoringAttributes.NICEST);
-		a.setColoringAttributes(cA);
-		TransparencyAttributes tA = new TransparencyAttributes ();
-		tA.setTransparency(0.6f);
-		if (!Env.showProteinNode.isActive()) { tA.setTransparency(1.0f); }
-		tA.setTransparencyMode(tA.NICEST);
-		a.setTransparencyAttributes(tA);
-		a.setMaterial(m);
-		//a.setPolygonAttributes(new PolygonAttributes(PolygonAttributes.POLYGON_LINE,PolygonAttributes.CULL_BACK,0.0f));
-		mySphere = new Sphere(1.0f,Sphere.GENERATE_NORMALS, Env.nodeTessalation, a);
-		mySphere.setCapability(Sphere.ALLOW_BOUNDS_READ);
-		mySphere.setCapability(Sphere.ALLOW_BOUNDS_WRITE);
-		
-		// ParR-ParC spheres
-		ColoringAttributes parCA = new ColoringAttributes(Env.parRparCColor3f, ColoringAttributes.NICEST);
-		Appearance parRparCApp = new Appearance();
-		parRparCApp.setColoringAttributes(cA);
-		for (int i=0;i<forminSpheres.length;i++) {
-			//parRparCSpheres[i] = new Sphere((float)Env.parRparCRadius,Sphere.GENERATE_NORMALS,Env.plasmidTessalation,parRparCApp);
-		}
-		
-		// fiduciary marks
-		double markSphereSize = getRadius()/12.0;
-		Appearance yApp = new Appearance();
-		ColoringAttributes yCA = new ColoringAttributes(new Color3f(Color.BLACK), ColoringAttributes.NICEST);
-		Material yM = new Material (new Color3f(Color.BLACK),emissiveC,new Color3f(Color.BLACK),specularC,shiny);
-		yApp.setColoringAttributes(yCA);
-		yApp.setMaterial(yM);
-		
-		Sphere yMark = new Sphere((float)(markSphereSize),Sphere.GENERATE_NORMALS, Env.nodeTessalation, yApp);
-		Transform3D yMarkT3D = new Transform3D();
-		yMarkT3D.setScale(new Vector3d(1.0,0.1,1.0));
-		yMarkT3D.setTranslation(new Vector3d(0.0,getRadius(),0.0));
-		TransformGroup yMarkTG = new TransformGroup();
-		yMarkTG.addChild(yMark);
-		yMarkTG.setTransform(yMarkT3D);
-		
-		Sphere xMark = new Sphere((float)(markSphereSize),Sphere.GENERATE_NORMALS, Env.nodeTessalation, yApp);
-		Transform3D xMarkT3D = new Transform3D();
-		xMarkT3D.setScale(new Vector3d(0.1,1.0,1.0));
-		xMarkT3D.setTranslation(new Vector3d(getRadius(),0.0,0.0));
-		TransformGroup xMarkTG = new TransformGroup();
-		xMarkTG.addChild(xMark);
-		xMarkTG.setTransform(xMarkT3D);
-		
-		Appearance textAppear = new Appearance();
-	    ColoringAttributes textColor = new ColoringAttributes();
-	    textColor.setColor(1.0f, 0.0f, 0.0f);
-	    textAppear.setColoringAttributes(textColor);
-	    textAppear.setMaterial(new Material());
-	    // Create a simple shape leaf node, add it to the scene graph.
-	    Font3D font3D = new Font3D(new Font("Helvetica", Font.PLAIN, 1),new FontExtrusion());
-	    Text3D yTextGeom = new Text3D(font3D, new String("Y"));
-	    yTextGeom.setAlignment(Text3D.ALIGN_CENTER);
-	    Shape3D yTextShape = new Shape3D();
-	    yTextShape.setGeometry(yTextGeom);
-	    yTextShape.setAppearance(textAppear);
-	    Transform3D yTextT3D = new Transform3D();
-	    TransformGroup yTextTG = new TransformGroup();
-	    yTextT3D.rotX(Math.PI/2.0);
-	    yTextT3D.setScale(0.015);
-	    yTextT3D.setTranslation(new Vector3d(0,.010,-0.005));
-	    yTextTG.setTransform(yTextT3D);
-	    yTextTG.addChild(yTextShape);
-	    yMarkTG.addChild(yTextTG);
-		
-	    Text3D xTextGeom = new Text3D(font3D, new String("X"));
-	    xTextGeom.setAlignment(Text3D.ALIGN_CENTER);
-	    Shape3D xTextShape = new Shape3D();
-	    xTextShape.setGeometry(xTextGeom);
-	    xTextShape.setAppearance(textAppear);
-	    Transform3D xTextT3D = new Transform3D();
-	    TransformGroup xTextTG = new TransformGroup();
-	    xTextT3D.rotY(Math.PI/2.0);
-	    xTextT3D.setScale(0.015);
-	    xTextT3D.setTranslation(new Vector3d(0.007,-.005,0));
+	public void makeGraphics () {}
 
-	    xTextTG.setTransform(xTextT3D);
-	    xTextTG.addChild(xTextShape);
-	    xMarkTG.addChild(xTextTG);
-		
-		g3d.addChild(mySphere);
-		t3d.setScale(radius);
-		g3d.setTransform(t3d);
-		//g3d.addChild(xMarkTG);
-		//g3d.addChild(yMarkTG);
-		G.addChild(g3d);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		coord.copyToVector3d(coordVec3d);
-		t3d.setTranslation(coordVec3d);
-		//Pt3D toNode = new Pt3D(1,1,.1);//Pt3D.Sub(coord, Thing.theBug.coord);
-		//toNode.unitVec();
-		//toNode.copyToVector3d(nodeScaleVec3d);
-		//t3d.setScale(nodeScaleVec3d);
-		t3d.setRotation(mxToX);
-		g3d.setTransform(t3d);
-	 }
+	public void updateGraphics () {}
 	
 	
 	public static void makeInitialProteinNodes() {
@@ -1059,9 +935,6 @@ public class ProteinNode extends Thing {
 	}
 	
 	public static void removeAll () {
-		for (int i=0;i<nodeCt;i++) {
-			theNodes[i].G.detach();
-		}
 		for (int i=0;i<nodeCt;i++) {
 			theNodes[i].removeMe = true;
 			theNodes[i] = null;

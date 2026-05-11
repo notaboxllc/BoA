@@ -5,9 +5,6 @@ import java.awt.Font;
 import java.io.File;
 import java.util.Date;
 
-import javax.vecmath.Color3f;
-import javax.vecmath.Point3d;
-
 import edu.cornell.lassp.houle.RngPack.RanMT;
 
 import ec.util.*;
@@ -53,7 +50,6 @@ public class Env {
 	static final double radOfActA = Math.pow(reffCoeff*massOfActA, 1.0/3.0);
 
 	// *** The Virtual World Dimensions ****
-	static Color3f dumC = new Color3f(1.0f, 0f, .2f);
 	static final Pt3D worldDimension = new Pt3D(1, 1, 1);
 	static final Pt3D farfarAway = new Pt3D(1000, 1000, 1000);
 
@@ -189,10 +185,6 @@ public class Env {
 	static String outFileName = null;
 	static String logFolderPath = null;
 	static String srcFilePath = null;
-	static String qkFilePath = null;
-	static String fromQKFilePath;
-	static String fromQKFileName;
-	static String fromQKStatePath;
 	static File paramFile = null;
 	static String parentFolderPath;
 
@@ -207,16 +199,12 @@ public class Env {
 	static boolean paintOn = true;
 	static boolean fullSetToFile = true;
 	static boolean toFile = false;
-	static boolean toQKFile = false;
-	static boolean fromQKFile = false;
-	static boolean loadingQKFile = false;
 	static boolean paused = true;
 	static boolean viewRotation = false;
 	static boolean orderedCentered = false;
 
 	static private final int drawInterval_init = 100;
 	static private final int toFileInterval_init = 100;
-	static private final int toQKFileInterval_init = 100;
 	static private final double jpegQuality_init = 1.0;
 	static private final int remoteReportInterval_init = (int) 1e4; // time-steps
 	static final boolean timeStampJPEGs = true; // write time and other info on
@@ -224,7 +212,6 @@ public class Env {
 
 	static final Parameter drawInterval = new Parameter("drawInterval"," To Screen Interval", drawInterval_init, "time steps", Parameter.INT);
 	static final Parameter toFileInterval = new Parameter("toFileInterval"," Image to File Interval", toFileInterval_init, "time steps", Parameter.INT);
-	static final Parameter toQKFileInterval = new Parameter("toQKFileInterval"," QK Interval", toQKFileInterval_init, "time steps", Parameter.INT);
 	static final Parameter jpegQuality = new Parameter("jpegQuality"," JPEG Quality", jpegQuality_init, " (1.0 is best)");
 	static final Parameter remoteReportInterval = new Parameter("remoteWriteInterval", " Remote Reporting Interval",remoteReportInterval_init, "time steps", Parameter.INT);
 	static final Parameter rotationPerWrite = new Parameter("rotationPerWrite", " Rotation Per Image Write",0, "degrees", Parameter.DOUBLE);
@@ -232,9 +219,6 @@ public class Env {
 	
 	static String toFilePath;
 	static String toFileName;
-
-	// static String toQKFilePath;
-	// static String toQKFileName;
 
 	// Rendering from QK files
 	static boolean filRenderOff = false;
@@ -365,10 +349,10 @@ public class Env {
 	static private final int forminsPerNode_init = 0; // # of filaments a node can nucleate
 	static final Parameter forminsPerNode = new Parameter("forminsPerNode"," Formins per node", forminsPerNode_init, "", Parameter.INT);
 
-	static private final double nodeTransDiff_init = ProteinNode.defaultTransDiff();
+	static private final double nodeTransDiff_init = Boltz*tempK / (6*Math.PI*aeta.getValue()*(1.0e-6*nodeRadius.getValue()));
 	static final Parameter nodeTransDiff = new Parameter("nodeTransDiff"," Protein Node Translation Diffusivity", nodeTransDiff_init,"m^2/s", Parameter.DOUBLE, false);
 
-	static private final double nodeRotDiff_init = ProteinNode.defaultRotDiff();
+	static private final double nodeRotDiff_init = Boltz*tempK / (8*Math.PI*aeta.getValue()*Math.pow(1.0e-6*nodeRadius.getValue(),3));
 	static final Parameter nodeRotDiff = new Parameter("nodeRotDiff"," Protein Node Rotational Diffusivity", nodeRotDiff_init, "/s",Parameter.DOUBLE, false);
 	
 	static final Parameter showProteinNode = new Parameter("showProteinNode"," Draw Protein Node?", 0, "  ",Parameter.BOOLEAN, true);
@@ -883,26 +867,13 @@ public class Env {
 	static boolean eachMonomerADot = false;
 
 	// **** GUI AND COLOR RELATED ****
-	static final Color3f universeColor3f = new Color3f(0.0f, 0.0f, 0.0f);
-	// static final Color3f universeColor3f = new Color3f(1.0f,1.0f,1.0f);
-	static final Color universeColor = universeColor3f.get();
-	static final Color3f headlightColor = new Color3f(1.0f, 1.0f, 1.0f);
-	// static final Color3f headlightColor = new Color3f(0.7f,0.7f,0.7f);
-	static final Color3f cellColor3f = new Color3f(0.1f, 0.1f, 0.1f);
-	// static final Color3f cellColor3f = new Color3f(0.0f,0.0f,0.0f);
-	static final Color3f nodeColor3f = new Color3f(0.1f, 0.1f, 0.1f);
-	static final Color3f membraneColor3f = new Color3f(1.0f,1.0f,1.0f);
-	static final Color3f membraneActivatorColor3f = new Color3f(1.0f,0.0f,0.0f);
-	static final Color3f parRparCColor3f = new Color3f(0f, 1.0f, 1.0f);
-	static final Color cellColor = cellColor3f.get();
+	static final Color universeColor = Color.BLACK;
 	static final Color cellShadeColor = Color.BLACK;
 	static final Font controlFont = new Font(null, Font.PLAIN, 10);
 	static final Font headFont = new Font(null, Font.BOLD, 10);
 	static final Font text2DFont = new Font(null, Font.PLAIN, 18);
 	static final Font elasticityFont = new Font(null, Font.BOLD, 12);
-	static final Color3f controlBackColor3f = new Color3f(0.1f, 0.1f, 0.1f);
-	static final Color controlBackColor = controlBackColor3f.get();// Color.BLACK;
-	static final Color controlForeColor = new Color(.8f, .8f, .8f);// Color.WHITE;
+	static final Color controlForeColor = new Color(.8f, .8f, .8f);
 	static final Color controlFlashColor = Color.WHITE;
 
 	public static void resetEventCounters () {
