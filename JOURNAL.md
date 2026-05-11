@@ -1104,7 +1104,7 @@ All call sites in the codebase:
 #### Phase 0 — Pt3D surgery
 
 **Goal**: Remove the `extends Point3d` inheritance so Pt3D no longer depends
-on vecmath for its fundamental `x`/`y`/`z` storage.
+on vecmath for its `x`/`y`/`z` storage.
 
 **Files touched**: `Pt3D.java` only.
 
@@ -1115,131 +1115,288 @@ on vecmath for its fundamental `x`/`y`/`z` storage.
 4. Remove all five vecmath bridge methods (`copyToVector3d`, `CopyToVector3d`,
    `copyToPoint3d`, `CopyToPoint3d`, `writeVec3d`)
 
-**Note on FileOps:855**: The call `Pt3D.writeVec3d(ds, mon.monVec3D)` references
-the deleted `writeVec3d` method. However, `monVec3D` is typed as `Vector3d`
-(a vecmath type), which means FileOps still imports vecmath in Phase 0 anyway.
-Defer this line to Phase C when Monomer's `monVec3D` field is also being
-replaced. In Phase C, replace the line with writing a new `Pt3D` field
-(`mon.center`) that is populated by Monomer's simulation code.
+**Compile checkpoint**: `javac --class-path . boxOfActin/Pt3D.java` with no
+vecmath jar. Other files still fail — expected.
 
-**Compile checkpoint**: `javac -cp .:$J3D_JARS boxOfActin/Pt3D.java`
-(vecmath.jar still needed for other files). Phase 0 in isolation: Pt3D.java
-clean-compiles with no vecmath jar. Other files still fail without vecmath —
-this is expected until Phase B.
+**Bail-out criterion**: Any compile error *inside* Pt3D.java after the change
+(e.g., an inherited `Point3d` method call remaining in the body). Audit for
+stray `Point3d` method calls before proceeding.
 
 **Estimated time**: 30 minutes.
 
 ---
 
-#### Phase A — Thing.java strip
+#### Phase 1 — Env statics + Thing.java + class-load blockers
 
-**Goal**: Remove all Java3D fields and graphics methods from the root
-simulation class, including the Matrix3d bridge fields used by all
-`updateGraphics()` subclass methods.
+**Goal**: Make the JVM able to load `BoxOfActin` with no Java3D jars on the
+classpath. This phase removes all static-initializer-time Java3D triggers —
+the class-load blocker that the prior Phase A checkpoint missed entirely.
 
-**Files touched**: `Thing.java` only.
+**Files touched**: `boxOfActin/Env.java`, `boxOfActin/Thing.java`,
+`boxOfActin/FilSegment.java` (static declarations only),
+`boxOfActin/Monomer.java` (static declarations only),
+`boxOfActin/FillNode.java` (static declarations only).
 
-**Compile checkpoint**: `javac -cp .:$J3D_JARS boxOfActin/Thing.java`
-(subclasses will still reference the now-deleted fields until Phase B, so
-full project compile still fails — verify only Thing.java in isolation).
+**Changes per file**:
 
-**Estimated time**: 30 minutes.
+*Env.java*:
+- Delete `import javax.vecmath.Color3f` (line 8) and `import javax.vecmath.Point3d`
+  (line 9, unused)
+- Delete `static Color3f dumC = new Color3f(1.0f, 0f, .2f)` (line 56)
+- Delete `static final Color3f universeColor3f` (line 886); replace
+  `static final Color universeColor = universeColor3f.get()` (line 888) with
+  `static final Color universeColor = Color.BLACK`; add `import java.awt.Color`
+- Delete remaining `static final Color3f` fields at lines 889–904:
+  `headlightColor3f`, `cellColor3f`, `nodeColor3f`, `membraneColor3f`,
+  `controlBackColor3f`, and any others in that block
+- Delete all QK fields (lines 192–239): `qkFilePath`, `fromQKFilePath`,
+  `fromQKFileName`, `fromQKStatePath`, `toQKFile`, `fromQKFile`,
+  `loadingQKFile`, `toQKFileInterval_init`, `Parameter toQKFileInterval`,
+  and the commented-out `toQKFilePath`/`toQKFileName` lines
+
+*Thing.java*:
+- Delete `import javax.media.j3d.*` (line 8) and `import javax.vecmath.*` (line 9)
+- Delete `Matrix3d mxToX = new Matrix3d()` (line 34) and
+  `Matrix3d mXTox = new Matrix3d()` (line 35)
+- Delete graphics instance fields: `BranchGroup G = new BranchGroup()` (line 100),
+  `TransformGroup g3d` (line 101), `Transform3D t3d` (line 102),
+  `Appearance a` (line 103), `Material m` (line 104)
+- Delete graphics methods: `setGraphicsCapabilities()` (lines 510–528),
+  `makeGraphics()` (line 530), `updateGraphics()` (line 531),
+  `getGraphicsNode()` (lines 533–537), `detachGraphics()` (lines 539–543)
+- Delete `G.detach()` guard in `removeDeadThings()` (lines 447–448)
+
+*FilSegment.java* (static declarations only — leave instance fields and
+method bodies for Phase 2):
+- Delete `import com.sun.j3d.utils.*` (lines 21–26), `import javax.media.j3d.*`
+  (line 28), `import javax.vecmath.*` (line 29)
+- Delete all 19 static `Color3f`, 10 static `Material`, static `Appearance`,
+  static `TransparencyAttributes` at lines 196–258
+- Leave `Vector3d end1Vec3d/end2Vec3d/coordVec3d`, `TransformGroup cylTG`,
+  and all graphics methods for Phase 2
+
+*Monomer.java* (static declarations only — leave instance fields and method
+bodies for Phase 2):
+- Delete `import com.sun.j3d.utils.geometry.*` (lines 4–6),
+  `import javax.media.j3d.*` (line 7), `import javax.vecmath.*` (line 8)
+- Delete all static `Color3f`, `ColoringAttributes`, `Material`, `Appearance`,
+  `LineAttributes` at lines 37–57
+- Delete `static int monRenderCt = 0` (line 16)
+- Delete `Vector3d monVec3D` field (line 71) — **clean delete, no replacement**
+  (QK is gone; see §5 Addendum §1a)
+- The `static Monomer plusGhost = new Monomer()` (line 88) **must remain**.
+  After removing the static Color3f fields, audit the default `Monomer()`
+  constructor: if it calls `initializeGraphics()`, add a no-op guard so the
+  constructor does not crash without Java3D at class-init time. The goal is
+  that constructing the `plusGhost` sentinel cannot throw.
+- Leave all other instance fields and method bodies for Phase 2
+
+*FillNode.java* (static declarations only):
+- Delete static `Color3f ambientC`, `diffuseC`, `specularC`, `emissiveC`
+  (lines 29–32)
+- Leave `makeGraphics()`, `updateGraphics()`, and all simulation methods
+  for Phase 2
+
+**Compile checkpoint after Phase 1**:
+```
+javac --class-path . boxOfActin/Env.java boxOfActin/Thing.java boxOfActin/Pt3D.java boxOfActin/FilSegment.java boxOfActin/Monomer.java boxOfActin/FillNode.java
+java -cp . boxOfActin.BoxOfActin -h    # or some flag that exits immediately
+```
+With **no Java3D jars** in the classpath. The `javac` line must succeed
+cleanly for all six files. The `java` line tests whether the class-load-time
+blockers in these specific files are resolved: if the JVM can invoke `-h`
+(which loads Env early) without a `NoClassDefFoundError` on a vecmath or j3d
+type from one of the six Phase 1 files, Phase 1 is sound.
+
+The `java` line may still fail on Java3D references in *other* files not yet
+touched — that is expected and not a bail-out signal. The bail-out condition
+is specifically failure caused by the six Phase 1 files.
+
+**Bail-out criterion**: If `javac --class-path .` fails on any of the six
+Phase 1 files after removing their static initializers, stop and report the
+exact error. There is a missed Java3D reference in a static context. Do not
+proceed to Phase 2.
+
+**Estimated time**: 1.5–2 hours.
 
 ---
 
-#### Phase B — All simulation file strips (leaf classes)
+#### Phase 2 — Simulation file strips, batched
 
-**Goal**: Remove all graphics methods and fields from the 21 simulation files
-listed in §2b (FilSegment, Monomer, Bug, Chamber, Crucible, ProteinNode,
-StickyNode, FillNode, ActA, Arp23, FilLink, NodeLink, MyoFilLink, MyoRod,
-MyoLever, MyoMotor, MyoMiniFilament). Also add `Pt3D monCenter` field to
-Monomer for Phase C's FileOps fix.
+**Goal**: Remove all Java3D instance fields, instance-field initializers, and
+graphics method bodies from the 21 simulation files in §2b; delete QK-related
+methods from simulation files.
 
-**Files touched**: The 21 simulation files listed in §2b.
+**Files touched**: All 21 simulation files from §2b. FilSegment, Monomer, and
+FillNode have partial work from Phase 1; Phase 2 handles their remaining
+instance fields and method bodies.
 
-This phase can be batched — process all files in one session. The files are
-logically independent (no simulation file's graphics methods call another's).
+**Key changes from the prior Phase B plan**:
+- `Monomer.monVec3D` (`Vector3d`) is already deleted in Phase 1.
+  **No `Pt3D monCenter` field is added** — QK is deleted entirely, not
+  preserved. The FileOps:855 `writeVec3d` call disappears with
+  `takeQuickPicture()` in Phase 3.
+- Delete QK methods from simulation files:
+  - `Monomer.setFromQKInfo()` (lines 520–533) — references deleted `monVec3D`
+    and Java3D graphics; delete entirely
+  - `FilSegment.setFromQKInfo()` (lines 328–334) — delete
+  - `FilSegment.end2LinkThingNumber` field (line 125) — delete
+  - `FilLink` QK constructor `public FilLink(Pt3D, Pt3D)` (line 69) — delete
+  - `FilLink.setPtsFromQKFile()` (line 438) — delete
+  - `Arp23` QK constructor `public Arp23(Pt3D, Pt3D)` (lines 76–79) — delete
+  - `Arp23.setPtsFromQKFile()` (line 337) — delete
+  - `NodeLink` QK constructor `public NodeLink(Pt3D, Pt3D)` (line 64) — delete
+  - `NodeLink.setPtsFromQKFile()` (line 294) — delete
+  - `MyoFilLink.setPtsFromQKFile()` (line 302) and QK comment (line 64) — delete
+  - `ProteinNode.setFromQK()` (line 321) — delete
+  - `ProteinNode` constructors (lines 88, 100): both have a `boolean fromQKFile`
+    parameter used to skip graphics init; after graphics removal this flag is
+    meaningless — simplify to a single constructor without the parameter
 
-**Compile checkpoint after Phase B**:
+**Compile-and-load checkpoints**: After every 3–5 files:
 ```
-javac -cp .:$J3D_JARS boxOfActin/*.java
+javac --class-path . boxOfActin/<edited_file>.java
 ```
-Should produce zero errors related to `javax.media.j3d` or `javax.vecmath`
-in the simulation files. Remaining errors (if any) will be in the pure
-rendering files (Phase D) — those are expected.
+No Java3D jars. Uses existing `.class` files as classpath context. Each
+stripped file must compile cleanly before moving to the next batch.
 
-**Estimated time**: 3–4 hours (21 files, each 10–30 min of precise editing).
+**Bail-out criterion**: If a stripped simulation file fails to compile with no
+Java3D jars on the classpath, stop and identify the missed reference before
+editing the next file.
+
+**Estimated time**: 6–8 hours (21 files; static-field surprises may surface;
+conservative estimate to account for per-file investigation).
 
 ---
 
-#### Phase C — Cross-file cleanup
+#### Phase 3 — Cross-file cleanup
 
-**Goal**: Remove the residual Java3D and vecmath references from FileOps,
-Env, and BoxOfActin.
+**Goal**: Remove all remaining Java3D/vecmath references from FileOps and
+BoxOfActin; delete the entire QK code block from FileOps.
 
-**Files touched**: `Env.java`, `FileOps.java`, `boxOfActin/BoxOfActin.java`
-(and root `BoxOfActin.java` if different — confirm before editing).
+**Files touched**: `boxOfActin/FileOps.java`, `boxOfActin/BoxOfActin.java`,
+root `BoxOfActin.java`.
 
-**Changes** as listed in §2b above.
+**FileOps.java changes**:
+- Delete `import javax.media.j3d.Transform3D` (line 12) and
+  `import javax.vecmath.Matrix4d` (line 17)
+- Delete `saveView()` (lines 322–334) and `readView()` (lines 336–358) — no
+  replacement; Three.js viewer manages camera state
+- Delete the entire QK block (full catalog in §5 Addendum §1a):
+  - `QKFileFilter` inner class (lines 203–222)
+  - `getQKFileList()` (lines 238–239)
+  - `takeQuickPicture()` (lines 772–912)
+  - `writeFilLinks()` helper (lines 914–928)
+  - `writeMyosins()` helper (lines 930–957) — dead code, never called anywhere
+  - `loadQuickPicture()` (lines 959–1173)
+  - `loadQuickState()` (lines 1175–1299)
 
-**Additional FileOps change**: Replace `Pt3D.writeVec3d(ds, mon.monVec3D)` at
-line 855 with `Pt3D.writePt3D(ds, mon.center)` (using the new `Pt3D center`
-field added to Monomer in Phase B, where `center` is populated as the computed
-3D position of the monomer — same coordinates that `monVec3D` held).
+Note: `loadQuickState()` at line 1177 calls `BoxOfActin_Graphics.clearForRun()`.
+That reference vanishes when `loadQuickState()` is deleted — no separate action.
 
-**Compile checkpoint after Phase C**:
+**BoxOfActin.java (boxOfActin/) changes**:
+- Delete `static BoxOfActin_Graphics boaGraphics` field (line 16)
+- Delete `if (!Env.remote) { boaGraphics = new BoxOfActin_Graphics(); ... }`
+  block (lines 79–85)
+- Delete QK fields: `static int qkCounter` (line 52),
+  `static int qkFilesMadeCounter` (line 57)
+- Delete `-ic` flag parsing (lines 149–152), `-qk` parsing (lines 230–243),
+  `-qkN` parsing (lines 246–252)
+- Delete help text for `-ic`/`-qk`/`-qkN` (lines 112–117)
+- Delete QK subfolder creation in `-o` handler (lines 183–187) and
+  `-outMade` handler (lines 201–205)
+- Delete `qkCounter` initialization (line 349)
+- Simplify loop condition (line 357): remove `| Env.fromQKFile` → condition
+  becomes `while (Env.simulationTime <= (Env.runTime.getValue() + Env.runBump))`
+- Delete `Env.fromQKFile = false` (line 366)
+- Delete `qkCounter++` (line 508)
+- Delete both QK write blocks: lines 550–555 and lines 645–650
+- Delete `loadQuickState` call block (lines 660–661)
+- Delete `boaGraphics.*` calls in `restartRun()` (lines 754–755, 765–775)
+- Delete `startUpdateTimer()` method and its call site
+- Delete `import javax.swing.Timer` (line 8)
+
+**Compile checkpoint after Phase 3**:
 ```
-javac -cp .:$J3D_JARS boxOfActin/*.java
+javac --class-path . boxOfActin/FileOps.java boxOfActin/BoxOfActin.java boxOfActin/Env.java boxOfActin/Thing.java boxOfActin/Pt3D.java
 ```
-Only the pure rendering files (BoxOfActin_Graphics, CapturingCanvas3D,
-ExamineViewerBehavior, ViewerBehavior, ArchShape, SphereSection, and all
-`*Control.java` files) should now have Java3D compile errors.
-Simulation files should compile cleanly with vecmath.jar removed from classpath.
-To verify: `javac --class-path . boxOfActin/FilSegment.java boxOfActin/Thing.java boxOfActin/Env.java boxOfActin/FileOps.java`
+These five files must compile cleanly with no Java3D jars. Any residual
+failure in a non-Phase-4 file is a missed deletion — stop and report.
 
-**Estimated time**: 2 hours.
+**Bail-out criterion**: Any unresolved reference in FileOps or BoxOfActin that
+is *not* a reference to a Phase 4 file (i.e., not `BoxOfActin_Graphics.*`)
+means a missed QK or Java3D removal. Stop before Phase 4.
+
+**Estimated time**: 2–3 hours.
 
 ---
 
-#### Phase D — Pure rendering file deletion
+#### Phase 4 — Pure rendering file deletion
 
-**Goal**: Delete the 18 pure rendering files listed in §2a.
+**Goal**: Delete the 18 pure rendering files. After this phase, a full compile
+with no Java3D jars must succeed — this is the integration test for the entire
+removal effort.
 
-**Files deleted**: BoxOfActin_Graphics.java, CapturingCanvas3D.java,
-ExamineViewerBehavior.java, ViewerBehavior.java, ArchShape.java,
-SphereSection.java, InitControl.java, EnvControl.java, EndRatesControl.java,
-MechControl.java, GraphicsControl.java, XLinkControl.java, ActAControl.java,
-MyoRatesControl.java, CellShapeControl.java, MiscRatesControl.java,
-RenderControl.java.
+**Files deleted**: `BoxOfActin_Graphics.java`, `CapturingCanvas3D.java`,
+`ExamineViewerBehavior.java`, `ViewerBehavior.java`, `ArchShape.java`,
+`SphereSection.java`, `InitControl.java`, `EnvControl.java`,
+`EndRatesControl.java`, `MechControl.java`, `GraphicsControl.java`,
+`XLinkControl.java`, `ActAControl.java`, `MyoRatesControl.java`,
+`CellShapeControl.java`, `MiscRatesControl.java`, `RenderControl.java`.
 
-Also: delete `import javax.swing.Timer` from `BoxOfActin.java` (line 8) since
-`startUpdateTimer()` is deleted in Phase C and it was the only Swing Timer user.
+(17 named above; cross-check §2a for the complete 18-file list.)
 
-**Compile checkpoint after Phase D**:
+**Compile checkpoint after Phase 4**:
 ```
 javac --class-path . boxOfActin/*.java *.java infoCCD/*.java ec/util/*.java
 ```
-With NO Java3D jars on the classpath. This is the first clean-compile test
-that proves Java3D is fully removed.
+With **no Java3D jars** on the classpath. Zero errors = Java3D fully removed.
 
-**Expected result**: Zero compile errors. If there are errors, they are
-unresolved references — check §3 for missed callers.
+**JVM load test**:
+```
+java -cp . BoxOfActin -h
+java -cp . -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg
+```
+First: should print help and exit cleanly. Second: should run headless with
+no `ClassNotFoundException` or `NoClassDefFoundError`.
 
-**Estimated time**: 30 minutes (mostly file deletion + final scan for missed
-references).
+**Bail-out criterion**: Any compile error in a non-deleted file indicates a
+missed reference not in §3's caller graph. Stop and audit before Phase 5.
+
+**Estimated time**: 30 minutes (file deletion + compile + load test).
 
 ---
 
-#### Phase E — Java 21 switch
+#### Phase 5 — Java 21 switch
 
-**Goal**: Compile and run under Java 21.
+**Goal**: Compile and run under Java 21, prerequisite for TornadoVM.
 
 **Changes**:
-1. Update Eclipse .classpath to remove `/Library/JOGLAndj3D/*.jar` entries
-2. Update CLAUDE.md build instructions (remove Java3D from classpath line)
-3. Test: `java --enable-preview --release 21 -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js test_out`
+1. Update Eclipse `.classpath` to remove `/Library/JOGLAndj3D/*.jar` entries
+2. Update CLAUDE.md build instructions (remove Java3D jars; add `--enable-preview`
+   and `-g` flags per TornadoVM requirements)
+3. Test: `java --enable-preview -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg`
+
+**Bail-out criterion**: Any Java source that uses API removed between Java 8
+and Java 21, or that fails under `--enable-preview`. Note the exact error and
+stop; do not attempt workarounds without understanding the root cause.
 
 **Estimated time**: 30 minutes.
+
+---
+
+#### Phase ordering rationale
+
+The prior plan split into Phase A (Thing.java) and Phase C (Env/FileOps/
+BoxOfActin) with Phase B (simulation files) between them. This ordering was
+wrong: Phase A's compile checkpoint (`javac boxOfActin/Thing.java` in
+isolation) could pass while the JVM still failed to load at runtime, because
+`Env`, `FilSegment`, `Monomer`, and `FillNode` all have static field
+initializers that fire at class load before any `-r` flag is checked, and
+those were deferred to later phases. The new Phase 1 collapses all
+class-load-time blockers into one phase and verifies with a JVM load test
+rather than an isolated `javac`. Phases 2–4 can then proceed without
+discovering a new static-init blocker mid-flight.
 
 ---
 
@@ -1349,6 +1506,134 @@ Swing imports in simulation files become dead:
 
 Swing is a standard JDK library and does not block Java 21. However, dead
 imports should be cleaned up for clarity.
+
+---
+
+### Session 3 Addendum — Resolved Open Questions
+
+Two facts clarified after the Session 3 survey changed the phase plan:
+(1) QK files are fully replaced by Three.js JSON output — all QK code is
+deleted, not preserved. (2) `Monomer.plusGhost` is a pure linked-list sentinel
+whose constructor side effects are irrelevant to simulation correctness.
+
+#### §1a — QK is deletable: complete deletion catalog
+
+The prior §5 entry "QK file format will silently change" treated QK as a
+preserve-and-adapt problem. That is now obsolete. All QK write/read/render
+code paths are deleted in Phases 1–4.
+
+**Effect on §2b Monomer.java instructions**: The prior plan said to replace
+`Monomer.monVec3D` with `Pt3D monCenter` and update `FileOps.java:855`.
+Both steps are cancelled. `monVec3D` is a clean delete in Phase 1. The
+FileOps:855 `writeVec3d` call disappears with `takeQuickPicture()` in Phase 3.
+No replacement field is added.
+
+| File | Line(s) | Item | Action |
+|---|---|---|---|
+| `Env.java` | 192 | `static String qkFilePath` | DELETE (Phase 1) |
+| `Env.java` | 193 | `static String fromQKFilePath` | DELETE (Phase 1) |
+| `Env.java` | 194 | `static String fromQKFileName` | DELETE (Phase 1) |
+| `Env.java` | 195 | `static String fromQKStatePath` | DELETE (Phase 1) |
+| `Env.java` | 210 | `static boolean toQKFile` | DELETE (Phase 1) |
+| `Env.java` | 211 | `static boolean fromQKFile` | DELETE (Phase 1) |
+| `Env.java` | 212 | `static boolean loadingQKFile` | DELETE (Phase 1) |
+| `Env.java` | 219 | `toQKFileInterval_init` constant | DELETE (Phase 1) |
+| `Env.java` | 227 | `Parameter toQKFileInterval` | DELETE (Phase 1) |
+| `Env.java` | 236–237 | commented-out `toQKFilePath`/`toQKFileName` | DELETE (Phase 1) |
+| `FilSegment.java` | 125 | `int end2LinkThingNumber` field | DELETE (Phase 2) |
+| `FilSegment.java` | 328–334 | `setFromQKInfo()` method | DELETE (Phase 2) |
+| `Monomer.java` | 11 | comment "used only in drawing from QK files" | DELETE (Phase 1) |
+| `Monomer.java` | 16 | `static int monRenderCt` | DELETE (Phase 1) |
+| `Monomer.java` | 71 | `Vector3d monVec3D` field | DELETE (Phase 1) — clean delete, no replacement |
+| `Monomer.java` | 520–533 | `setFromQKInfo()` method | DELETE (Phase 2) |
+| `FilLink.java` | 69 | `public FilLink(Pt3D, Pt3D)` QK constructor | DELETE (Phase 2) |
+| `FilLink.java` | 438 | `setPtsFromQKFile()` | DELETE (Phase 2) |
+| `Arp23.java` | 76–79 | `public Arp23(Pt3D, Pt3D)` QK constructor | DELETE (Phase 2) |
+| `Arp23.java` | 337 | `setPtsFromQKFile()` | DELETE (Phase 2) |
+| `NodeLink.java` | 64 | `public NodeLink(Pt3D, Pt3D)` QK constructor | DELETE (Phase 2) |
+| `NodeLink.java` | 294 | `setPtsFromQKFile()` | DELETE (Phase 2) |
+| `MyoFilLink.java` | 64 | QK comment; constructor note | DELETE comment (Phase 2) |
+| `MyoFilLink.java` | 302 | `setPtsFromQKFile()` | DELETE (Phase 2) |
+| `ProteinNode.java` | 88, 100 | `boolean fromQKFile` constructor parameter | SIMPLIFY — remove param, merge constructors (Phase 2) |
+| `ProteinNode.java` | 321 | `setFromQK()` | DELETE (Phase 2) |
+| `FileOps.java` | 203–222 | `QKFileFilter` inner class | DELETE (Phase 3) |
+| `FileOps.java` | 238–239 | `getQKFileList()` | DELETE (Phase 3) |
+| `FileOps.java` | 772–912 | `takeQuickPicture()` | DELETE (Phase 3) |
+| `FileOps.java` | 914–928 | `writeFilLinks()` helper | DELETE (Phase 3) |
+| `FileOps.java` | 930–957 | `writeMyosins()` helper | DELETE (Phase 3) — **dead code, never called** |
+| `FileOps.java` | 959–1173 | `loadQuickPicture()` | DELETE (Phase 3) |
+| `FileOps.java` | 1175–1299 | `loadQuickState()` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 52 | `static int qkCounter` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 57 | `static int qkFilesMadeCounter` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 112–117 | help text `-ic`/`-qk`/`-qkN` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 149–152 | `-ic` flag parsing | DELETE (Phase 3) |
+| `BoxOfActin.java` | 183–187 | QK subfolder creation in `-o` handler | DELETE (Phase 3) |
+| `BoxOfActin.java` | 201–205 | QK subfolder creation in `-outMade` handler | DELETE (Phase 3) |
+| `BoxOfActin.java` | 230–243 | `-qk` flag parsing | DELETE (Phase 3) |
+| `BoxOfActin.java` | 246–252 | `-qkN` flag parsing | DELETE (Phase 3) |
+| `BoxOfActin.java` | 349 | `qkCounter` initialization | DELETE (Phase 3) |
+| `BoxOfActin.java` | 357 | `\| Env.fromQKFile` in loop condition | SIMPLIFY (Phase 3) — see Flag 2 below |
+| `BoxOfActin.java` | 366 | `Env.fromQKFile = false` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 508 | `qkCounter++` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 550–555 | QK write block #1 in `doLoop()` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 645–650 | QK write block #2 in `doLoop()` | DELETE (Phase 3) |
+| `BoxOfActin.java` | 660–661 | `loadQuickState()` call for `-ic` | DELETE (Phase 3) |
+| `BoxOfActin_Graphics.java` | entire file | all QK GUI (`writeQKFileMenuItem`, `renderQKFileMenuItem`, `prepForQKWriting()`, `prepForQKRender()`, `prepForQKStateLoad()`, `updateQKBugScene()`) | DELETE (whole file, Phase 4) |
+| `GraphicsControl.java` | 183 | `addParam(new ParamGui(Env.toQKFileInterval))` | DELETE (whole file, Phase 4) |
+| `RenderControl.java` | entire file | QK rendering loop | DELETE (whole file, Phase 4) |
+
+**Surprises found during QK search (executor must read before editing)**:
+
+**Flag 1 — `writeMyosins()` is dead code**: `FileOps.java:930–957` defines
+`writeMyosins()` which is never called anywhere in the codebase. It was
+presumably intended for `takeQuickPicture()` but was never wired in. The only
+grep hits are its own definition and closing brace. Delete with no callers.
+
+**Flag 2 — `Env.fromQKFile` is a loop-termination mechanism, not just a flag**:
+`BoxOfActin.java:357` — the main sim loop condition is:
+```java
+while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump) | Env.fromQKFile) {
+```
+The `|` is **bitwise OR** (not short-circuit `||`). In QK render mode,
+`fromQKFile=true` kept the loop alive regardless of `simulationTime`;
+`RenderControl` loaded picture files one by one, then set `Env.fromQKFile =
+false` (line 366) to terminate. After QK deletion the condition becomes the
+straightforward `while (Env.simulationTime <= (Env.runTime.getValue() +
+Env.runBump))`. No other logic depends on the bitwise-OR behavior.
+
+**Flag 3 — Two separate QK write blocks in `doLoop()`**: Lines 550–555 and
+645–650 both call `FileOps.takeQuickPicture()`. These are two independent
+trigger points within a single `doLoop()` call (likely pre-equilibration and
+main sim phases). Both must be deleted independently; neither is a copy/paste
+error in the existing code.
+
+#### §1b — Monomer.plusGhost: confirmed linked-list sentinel
+
+`Monomer.plusGhost` (declared at `Monomer.java:88` as
+`static Monomer plusGhost = new Monomer()`) is the end-of-chain sentinel for
+the `frontMon`/`backMon` monomer linked list. It functions as an identity
+token only — the invariant is `while (curMon != Monomer.plusGhost)`. Its
+position and simulation state are never read. After Phase 2 strips Java3D from
+the Monomer constructor, `new Monomer()` at class-init time is safe;
+`plusGhost` continues to function identically. No simulation logic depends on
+`plusGhost`'s constructor side effects.
+
+Complete reference inventory (27 sites):
+
+| File | Lines | Context |
+|---|---|---|
+| `Monomer.java` | 88 | Declaration: `static Monomer plusGhost = new Monomer()` |
+| `Monomer.java` | 105, 126 | Constructor: `this.frontMon = plusGhost` (list terminator) |
+| `Monomer.java` | 175, 182 | Instance methods: list-end guard and assignment |
+| `Monomer.java` | 264, 285 | Instance methods: `if (plusMon.frontMon != plusGhost)` |
+| `FilSegment.java` | 718, 745, 757, 764, 772, 785, 792, 800, 808, 866, 868, 874 | Simulation code (filament split/removal) — **keep** |
+| `FilSegment.java` | 2783 | Simulation code (biochem loop) — **keep** |
+| `FilSegment.java` | 3427, 3446, 3491, 3519, 3830, 3876 | Inside graphics methods (`resetGraphics`, `updateGraphics`, etc.) — disappear when those methods are deleted in Phase 2 |
+| `FileOps.java` | 841 | Inside `takeQuickPicture()` — disappears with QK deletion in Phase 3 |
+
+After Phase 2 and Phase 3, the remaining `plusGhost` references are the 13
+Monomer.java sites plus the 13 FilSegment simulation-code sites — all correct
+simulation logic that is unchanged.
 
 ---
 
