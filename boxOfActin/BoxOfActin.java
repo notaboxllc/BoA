@@ -1,22 +1,14 @@
 package boxOfActin;
 
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.File;
 import java.text.DecimalFormat;
-
-import javax.swing.Timer;
-
 
 //import FileOps.SourceFileFilter;
 
 public class BoxOfActin {
 	
-	// graphics component
-	static BoxOfActin_Graphics boaGraphics;
-	static TimeLoop timeLoop; 
-	static String viewFileStr;
-	
+	static TimeLoop timeLoop;
+
 	// output formats
 	static DecimalFormat timeFormat = new DecimalFormat ("00.00");
 	static DecimalFormat deflectionFormat = new DecimalFormat ("0.0000");
@@ -49,12 +41,10 @@ public class BoxOfActin {
 	static int drawCounter = 0;
 	static int toFileCounter = 0;
 	static int remoteOutCounter = 0;
-	static int qkCounter = 0;
 	static int collisionCkCounter = 0;
 	static int ckElasticityCounter = 0;
 	static int ckPersistenceCounter = 0;
 	static int applyBrownianForcesCounter = 0;
-	static int qkFilesMadeCounter = 0;
 	static int drawingsMadeCounter = 0;
 	static int jSonCt = (int)1e6;	// large number so it'll write at time zero
 	static int jSonPlotCt = (int)1e6;	// ditto
@@ -75,14 +65,6 @@ public class BoxOfActin {
 		
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }
-		
-		if (!Env.remote) { 
-			boaGraphics = new BoxOfActin_Graphics( );
-			boaGraphics.initialize( );
-			boaGraphics.buildUniverse( );
-			boaGraphics.showFrame( ); 
-			if (viewFileStr != null) { boaGraphics.setView(viewFileStr); }
-		}
 		
 		// reset dependent parameters, etc
 		Env.setTimeStepCounts();
@@ -115,7 +97,6 @@ public class BoxOfActin {
 				talkln (" -biochem : run the simulation without any collisions, forces, or brownian motion");
 				talkln (" -3js (directory) : write Three.js per-frame JSON files to the specified directory (auto-increments .001 suffix if exists)");
 				talkln (" -oc : ordered filaments (in a biochem only run) are centered");
-				talkln (" -vf : file containing saved Transform3D, i.e. a view");
 				System.exit(0);
 			}
 			
@@ -130,25 +111,6 @@ public class BoxOfActin {
 					Env.paramFile = paramFile;
 				} else {
 					talkln ("Specified param file can't be found... check path, etc");
-					System.exit(0);
-				}
-			}
-			
-			if (args[i].equals("-viewfile") | args[i].equals("-vf")) {
-				viewFileStr = args[i+1];
-				File viewFile = new File(viewFileStr);
-				if (!viewFile.exists()) {
-					viewFileStr = null;
-					talkln ("Specified view file can't be found... check path, etc");
-				}
-			}
-			
-			if (args[i].equals("-ic")) {
-				File icFile = new File(args[i+1]);
-				if (icFile.exists()) {
-					Env.fromQKStatePath = icFile.getAbsolutePath();
-				} else {
-					talkln ("Specified ic file can't be found... check path, etc");
 					System.exit(0);
 				}
 			}
@@ -177,13 +139,7 @@ public class BoxOfActin {
 				File srcSubFolder = new File (altOutFolder.getAbsolutePath() + File.separator + Env.outFileName + "-SRC");
 				Env.srcFilePath = srcSubFolder.getAbsolutePath();
 				srcSubFolder.mkdir();
-				// directory for the qk files
-				File qkSubFolder = new File(altOutFolder.getAbsolutePath() + File.separator + Env.outFileName + "-QK");
-				Env.qkFilePath = qkSubFolder.getAbsolutePath();
-				qkSubFolder.mkdir();
-				Env.toQKFile = true;
-				//*******
-				
+
 			}
 			
 			if (args[i].equals("-outMade")) {
@@ -195,13 +151,7 @@ public class BoxOfActin {
 				Env.logFolderPath = logSubFolder.getAbsolutePath();
 				logSubFolder.mkdir();
 				Env.logFiles = true;
-				// directory for the qk files
-				File qkSubFolder = new File(outFolder.getAbsolutePath() + File.separator + Env.outFileName + "-QK");
-				Env.qkFilePath = qkSubFolder.getAbsolutePath();
-				qkSubFolder.mkdir();
-				Env.toQKFile = true;
-				//*******
-				
+
 			}
 			
 			if ((args[i].equals("-logfile")) | (args[i].equals("-lf")) | (args[i].equals("-logFile"))) {
@@ -224,32 +174,6 @@ public class BoxOfActin {
 				Env.logFiles = true;
 			}
 			
-			if (args[i].equals("-qk")) {
-				File qkFolder = new File(args[i+1]);
-				File altqkFolder = new File (args[i+1]);
-				int j=1;
-				while (altqkFolder.isDirectory()) {
-					System.out.println (altqkFolder.getName() + " exists.... keeping file name BUT changing directory name");
-					altqkFolder = new File(args[i+1] + "." + String.valueOf(j));
-					j++;
-				}
-				altqkFolder.mkdir();
-				Env.outFileName = qkFolder.getName();
-				Env.qkFilePath = altqkFolder.getAbsolutePath();
-				Env.toQKFile = true;
-				System.out.println("QK file output to " + Env.qkFilePath);
-			}
-			
-			if (args[i].equals("-qkN")) {
-				try {
-					Double qkN = Double.valueOf(args[i+1]);
-					Env.toQKFileInterval.setValue(qkN.intValue());
-					System.out.println("QK file interval set to " + Env.toQKFileInterval.getStringValue());
-				} catch (java.lang.NumberFormatException nfe) {
-					System.out.println("Invalid qk file interval specified... must be an integer... the setting was ignored");
-				}
-			}
-
 			if (args[i].equals("-3js")) {
 				Env.threeJSOutputDir = args[i + 1];
 			}
@@ -269,10 +193,6 @@ public class BoxOfActin {
 	static class TimeLoop extends Thread {
 	
 		public void run() {
-			if (!Env.remote) {
-				boaGraphics.updateBugScene();		// draw once at the beginning of the simulation
-				startUpdateTimer();
-			}
 			doLoop();
 			
 			FileOps.closeJSons();
@@ -343,24 +263,15 @@ public class BoxOfActin {
 	}
 	
 	public static void doLoop() {
-		if (Env.toQKFile) { qkCounter = Env.toQKFileInterval.getIntValue(); } 	// will write initial QK file
-		//System.out.println("max vBlob sum is " + (Env.maxVBlobs*Env.bTransGamViscBlob));
-		
 		// timers
 		double startTime;
 		double collisionTime = 0;
 		double myosinTime = 0;
 		
-		while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump) | Env.fromQKFile) {  // run bump is a small increment to make sure we write that last desired frame
-			if (Env.paused) { 
-				if (Env.viewRotation) {
-					boaGraphics.rotateViewY();  // let's us set up a good looking rotation before starting movie
-					try { Thread.sleep(20); } catch (InterruptedException e) { talkln ("error sleeping"); }
-				} else {
-					try { Thread.sleep(1000); } catch (InterruptedException e) { talkln ("error sleeping"); }
-				}
+		while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump)) {
+			if (Env.paused) {
+				try { Thread.sleep(1000); } catch (InterruptedException e) { talkln ("error sleeping"); }
 			} else {
-				Env.fromQKFile = false;	// not rendering if in this loop
 				synchronized(Env.safeO) {
 					// set biophysical values needed for this next time step
 					FilSegment.setBiophysValues();
@@ -502,7 +413,6 @@ public class BoxOfActin {
 		Env.counter++;
 		Env.simulationTime += Env.deltaT.getValue();
 		remoteOutCounter++;
-		qkCounter++;
 		collisionCkCounter++;
 		ckElasticityCounter++;
 		ckPersistenceCounter++;
@@ -518,39 +428,11 @@ public class BoxOfActin {
 		jSon2Ct++;
 		
 		if ((Env.paintOn) & (drawCounter >= Env.drawInterval.getIntValue() | Env.simulationTime == 0)) {
-			if ((Env.viewRotation) & (!Env.toFile)) { boaGraphics.rotateViewY(); }
-			boaGraphics.updateBugScene();
 			paintedThisStep = true;
 			drawCounter = 0;
 			StickyNode.stickyBoundStats();
-			//reportActATetherStats();
-			//try { Thread.sleep(20); } catch (InterruptedException e) { talkln ("error sleeping"); }
 		}
-		
-		if ((Env.toFile) & (toFileCounter >= Env.toFileInterval.getIntValue() | boaGraphics.theCanvas.firstRender())) {
-			boolean flashPaintOn = false;
-			if (!Env.paintOn) { flashPaintOn = true; Env.paintOn = true; }
-			if (!paintedThisStep) {
-				if (Env.viewRotation) { boaGraphics.rotateViewY(); }
-				if (Env.rotationPerWrite.isActive()) { boaGraphics.rotateViewY(Env.rotationPerWrite.getValue()); }
-				boaGraphics.updateBugScene();
-				paintedThisStep = true;
-				try { Thread.sleep(500); } catch (InterruptedException e) { talkln ("error sleeping"); }
-			}
-			boaGraphics.captureImage(boaGraphics.theCanvas);
-			boaGraphics.waitOnCapture(boaGraphics.theCanvas);
-			toFileCounter = 0;
-			try { Thread.sleep(100); } catch (InterruptedException e) { talkln ("error sleeping"); }
-			if (flashPaintOn) { Env.paintOn = false; }
-		}
-		
-		if ((Env.toQKFile) & (qkCounter >= Env.toQKFileInterval.getIntValue())) {
-			FilSegment.updateAllMonomerPositions();
-			//FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromIntStep(Env.outFileName,Env.counter) + ".qk");
-			FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromSimpleCounter(Env.outFileName, qkFilesMadeCounter) + ".qk");
-			qkCounter = 0;
-			qkFilesMadeCounter++;
-		}
+
 		if ((jSonCt >= Env.simJSonFreq) && (Env.writeSimJSons)) {
 			FileOps.writeSimJSonsFrame();
 			jSonCt = 0;
@@ -639,25 +521,14 @@ public class BoxOfActin {
 			remoteOutCounter = 0;
 		}
 
-		if ((Env.toQKFile) & (qkCounter >= Env.toQKFileInterval.getIntValue())) {
-			FilSegment.updateAllMonomerPositions();
-			//FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromIntStep(Env.outFileName,Env.counter) + ".qk");
-			FileOps.takeQuickPicture(Env.qkFilePath + File.separator + FileOps.makeNameFromSimpleCounter(Env.outFileName, qkFilesMadeCounter) + ".qk");
-			qkCounter = 0;
-			qkFilesMadeCounter++;
-		}
-
 		if (Env.threeJSOutputDir != null && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			threeJSCounter = 0;
 		}
 	}
-	
+
 	public static void makeInitialThings() {
-		if (Env.fromQKStatePath != null) {
-			FileOps.loadQuickState(Env.fromQKStatePath);
-		} else {
-			if (Env.twoNodesOneFil) {
+		if (Env.twoNodesOneFil) {
 				FilSegment.twoNodesOneFilTst();
 				Env.equilNodes.setValue(ProteinNode.nodeCt);
 				return;
@@ -720,9 +591,8 @@ public class BoxOfActin {
 			//MyoMiniFilament.makeTestMiniFil();
 			
 			Env.equilNodes.setValue(ProteinNode.nodeCt);  // after all nodes created, set value for number to maintain
-		}
 	}
-	
+
 	public static void makeCrucible () {
 		if (Env.bugShapedCrucible.isActive() & !Env.simOutsideBug.isActive()) {
 			Bug.makeABugCrucible();
@@ -748,8 +618,6 @@ public class BoxOfActin {
 			MyosinDimer.removeAll();
 			Thing.removeDeadThings();
 			Thing.thingCt = 0;	// no Things left
-			if (!Env.remote) { Thing.theBox.G.detach();}
-			if (!Env.remote & Env.simOutsideBug.isActive()) { Thing.lmBug.G.detach(); }
 			Thing.theBox = null;
 			Thing.lmBug = null;
 			makeCrucible();
@@ -759,49 +627,17 @@ public class BoxOfActin {
 			FileOps.recalcJSonValues();
 			makeInitialThings();
 			
-			if (!Env.remote) {
-				if (newParamsLoaded) {
-					if (!boaGraphics.canvasSizeCurrent()) { boaGraphics.makeCanvasSizeCurrent(); }
-				} else {
-					boaGraphics.updateCanvasSizeParams();
-				}
-				if (!boaGraphics.canvasSizeCurrent()) { boaGraphics.makeCanvasSizeCurrent(); }
-				BoxOfActin_Graphics.updateBugScene();
-				BoxOfActin_Graphics.updateAllControls();
-				BoxOfActin_Graphics.theCanvas.resetFileCt();
-			}
-			
 		}
 	}
 	
 	public static void setRunning () {
 		Env.paused = false;
-		if (!Env.remote) {
-			boaGraphics.pausedMenuItem.setState(false);
-			boaGraphics.runMenuItem.setState(true);
-		}
 	}
-	
+
 	public static void setPaused () {
 		Env.paused = true;
-		if (!Env.remote) {
-			boaGraphics.pausedMenuItem.setState(true);
-			boaGraphics.runMenuItem.setState(false);
-		}
 	}
-	
-	public static void startUpdateTimer() {
-		int delay = 2000; //milliseconds
-		ActionListener taskPerformer = new ActionListener() {
-			public void actionPerformed(ActionEvent evt) {
-				boaGraphics.updateAllControls();
-		    }
-		};
-		new Timer(delay, taskPerformer).start();
-	}
-	
 
-	
 	private static void talkln (String info) {
 		System.out.println(info);
 	}

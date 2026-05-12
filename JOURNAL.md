@@ -1906,3 +1906,127 @@ expected Phase 2 pass condition.
 git add JOURNAL.md boxOfActin/*.java
 git commit -m "Session 6 / Phase 2: strip all Java3D from 20 simulation files; all sim files compile and load without J3D jars"
 ```
+
+---
+
+## Session 7 — Phase 3 execution (BoxOfActin.java + FileOps.java cleanup)
+
+**Date:** 2026-05-11
+
+### Pre-flight survey
+
+**Root `BoxOfActin.java`:** Pure delegate (`boxOfActin.BoxOfActin.begin(args)`). No Java3D, no edits needed.
+
+**`boxOfActin/BoxOfActin.java` — actual findings vs. Session 3 survey:**
+
+Imports to delete (confirmed):
+- `import java.awt.event.ActionEvent;` and `import java.awt.event.ActionListener;` — only used in `startUpdateTimer()`
+- `import javax.swing.Timer;` — only used in `startUpdateTimer()`
+
+Fields to delete (confirmed):
+- `static BoxOfActin_Graphics boaGraphics;`
+- `static String viewFileStr;` (used by `-vf`)
+- `static int qkCounter = 0;` and `static int qkFilesMadeCounter = 0;`
+
+Discovered beyond Session 3 survey: All QK Env fields (`Env.toQKFile`, `Env.toQKFileInterval`, `Env.qkFilePath`, `Env.fromQKStatePath`, `Env.fromQKFile`) were already deleted from `Env.java` in Phases 1–2 — so `BoxOfActin.java` had compile errors against those deleted fields in `parseArgs()`, `doLoop()`, `logAndDraw()`, `remoteLog()`, and `makeInitialThings()`.
+
+`Thing.theBox.G.detach()` and `Thing.lmBug.G.detach()` in `restartRun()` also caused compile errors because `Thing.G` (BranchGroup) was removed in Phase 1.
+
+**`boxOfActin/FileOps.java` — actual findings vs. Session 3 survey:**
+
+Java3D imports (confirmed):
+- `import javax.media.j3d.Transform3D;` (line 12)
+- `import javax.vecmath.Matrix4d;` (line 17)
+
+Methods deleted (confirmed):
+- `saveView(Transform3D)` — lines 322–334
+- `readView(String)` — lines 336–358
+
+QK methods deleted (confirmed):
+- `takeQuickPicture(String)` — lines 772–912
+- `writeFilLinks(DataOutputStream)` — lines 914–928
+- `writeMyosins(DataOutputStream)` — lines 930–957
+- `loadQuickPicture(String)` — lines 959–1173
+
+`loadQuickState(String)` — required additional attention:
+- 4 rendering/deleted-field lines: `Env.loadingQKFile = true/false`, `BoxOfActin_Graphics.clearForRun()`, `BoxOfActin.boaGraphics.updateBugScene()`
+- After cleaning those 4 lines, still had compile errors: `fil.end2LinkThingNumber` (FilSegment field deleted in Phase 2, missed by Session 3 survey — not in Env.java but in FilSegment.java)
+- Decision: deleted `loadQuickState()` entirely. It is unreachable dead code after removing the `-ic` flag and the `makeInitialThings()` call.
+- Swing imports (`javax.swing.*` etc.) **kept** — still needed by file-dialog methods (`getFileToSave()`, etc.) used by gliding-assay code.
+
+### Edits per file
+
+**`boxOfActin/BoxOfActin.java`:**
+- Deleted `ActionEvent`, `ActionListener`, `javax.swing.Timer` imports
+- Deleted `boaGraphics`, `viewFileStr`, `qkCounter`, `qkFilesMadeCounter` fields
+- Deleted `if (!Env.remote)` graphics-init block from `begin()` (was crash site)
+- Removed `-vf` line from help text
+- Deleted `-vf`/`-viewfile` and `-ic` flag handlers from `parseArgs()`
+- Deleted QK subdirectory creation from `-o` and `-outMade` handlers
+- Deleted `-qk` and `-qkN` flag handlers
+- Simplified `TimeLoop.run()`: removed `boaGraphics.updateBugScene()` + `startUpdateTimer()` call
+- `doLoop()`: removed QK init line, stripped `| Env.fromQKFile` from while condition, removed `Env.fromQKFile = false`, simplified paused block (removed `boaGraphics.rotateViewY()` branch)
+- `updateCounters()`: removed `qkCounter++`
+- `logAndDraw()`: stripped `boaGraphics.rotateViewY()` + `boaGraphics.updateBugScene()` from paint block; deleted entire image-capture block; deleted QK-write block
+- `remoteLog()`: deleted QK-write block
+- `makeInitialThings()`: deleted `if (Env.fromQKStatePath != null) { ... } else { ... }` wrapper; inner content promoted to method body
+- `restartRun()`: deleted `Thing.theBox.G.detach()` and `Thing.lmBug.G.detach()` lines; deleted `if (!Env.remote)` graphics-update block
+- `setRunning()` / `setPaused()`: deleted `if (!Env.remote)` menu-item blocks
+- Deleted `startUpdateTimer()` method entirely
+
+**`boxOfActin/FileOps.java`:**
+- Deleted `import javax.media.j3d.Transform3D` and `import javax.vecmath.Matrix4d`
+- Deleted `saveView(Transform3D)` and `readView(String)` methods
+- Deleted `takeQuickPicture()`, `writeFilLinks()`, `writeMyosins()`, `loadQuickPicture()` (all QK I/O methods)
+- Deleted `loadQuickState()` (dead code; also had Phase-2-deleted `FilSegment.end2LinkThingNumber` references)
+
+**Root `BoxOfActin.java`:** No edits.
+
+### Compile checkpoint
+
+```
+javac -cp . boxOfActin/BoxOfActin.java boxOfActin/FileOps.java [+ 20 other sim files]
+```
+→ **Zero errors.** All 22 files compile without Java3D on the classpath.
+
+### JVM load test
+
+```
+java -Xmx800M -cp . BoxOfActin -help
+```
+→ **Possibility A** (best case). Help text printed, JVM exited cleanly. No `NoClassDefFoundError`. The 22 compiled simulation files load without any reference to rendering classes.
+
+### Minimal sim run
+
+```
+java -Xmx800M -cp . BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js /tmp/phase3_test
+```
+→ **Ran successfully.** Parameter file loaded, simulation started, JSON frames written continuously (`frame_000000.json` through `frame_000139.json` observed before process was killed). Two stale parameters in the param file (`toQKFileInterval`, `bugOff`, `myosPerNode`) printed "no match" warnings — expected, those params were removed in prior sessions.
+
+### Discoveries that contradict Session 3 survey
+
+1. **QK Env fields already deleted in Phase 1/2.** `Env.toQKFile`, `Env.toQKFileInterval`, `Env.qkFilePath`, `Env.fromQKStatePath`, `Env.fromQKFile`, `Env.loadingQKFile` were all removed from `Env.java` before this session. `BoxOfActin.java` had compile errors against all of them.
+2. **`Thing.G` (BranchGroup) removed in Phase 1.** The `G.detach()` calls in `restartRun()` were already compile errors.
+3. **`FilSegment.end2LinkThingNumber` removed in Phase 2.** `loadQuickState()` referenced this field; this was missed by the Session 3 survey. Combined with being unreachable dead code, this motivated deleting the whole method.
+4. **`loadQuickState()` deleted, not just cleaned.** Scope expansion was necessary (dead code + Phase-2-deleted field reference = compile error).
+
+### Phase 4 targets
+
+All rendering files that must be deleted. Priority = those that would cause `NoClassDefFoundError` if the JVM tried to load them. Since Phase 3 achieved Possibility A (no rendering class referenced from compiled simulation code), **all Phase 4 files are dead weight rather than blockers**. Delete them all; none will cause a JVM load failure.
+
+Recommended deletion order (dependency first):
+1. `boxOfActin/CapturingCanvas3D.java` — extends Java3D Canvas3D
+2. `boxOfActin/ViewerBehavior.java` — extends Java3D Behavior
+3. `boxOfActin/BoxOfActin_Graphics.java` — the main rendering class; references all of the above
+4. `boxOfActin/ArchShape.java`, `boxOfActin/SphereSection.java` — geometry helpers
+5. All `*Control.java` files (`MyoMotorControl.java`, `FilSegControl.java`, `NodeControl.java`, `BugControl.java`, `MyoMiniFilControl.java`, `ArpControl.java`, `ActAControl.java`, `XLinkControl.java`, etc.) — UI panel classes, all extend `JPanel`/`JSlider`/etc., reference `boaGraphics` back-references
+6. Any remaining rendering utilities
+
+After Phase 4: all `.java` and `.class` files for those renderers gone, project compiles and runs clean for Java 8 → then Phase 5 migrates to Java 21 for TornadoVM.
+
+### Commit
+
+```
+git add JOURNAL.md boxOfActin/BoxOfActin.java boxOfActin/FileOps.java
+git commit -m "Session 7 / Phase 3: strip Java3D from BoxOfActin.java and FileOps.java; remove graphics orchestration, QK code, and Swing timer"
+```
