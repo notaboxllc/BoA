@@ -7,7 +7,7 @@ public class AnchorNode extends ProteinNode {
 	public AnchorNode (Pt3D initCoord) {
 		super(initCoord,false);
 		// set drags to some semblence of immobile
-		bTransGam.set(1e6,1e6,1e6);
+		bTransGam.setVals(1e6,1e6,1e6);
 		
 	}
 	

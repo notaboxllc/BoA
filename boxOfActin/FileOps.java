@@ -642,14 +642,10 @@ public class FileOps {
 			BoxOfActin.restartRun(true);
 			talkln("done.");
 		}
-		if (Env.remote) { 
-			BoxOfActin.setRunning(); 
-		} else {
-			ParamGui.syncAllToParameters();
-		}
-		
+		if (Env.remote) BoxOfActin.setRunning();
+
 	}
-	
+
 	public static boolean loadParamLine (String curLine, String fromArg) {
 		String curLabel,curValueStr,curActiveStr;
 		boolean curActive = true;
@@ -720,14 +716,10 @@ public class FileOps {
 		System.out.print ("Restarting simulation... ");
 		BoxOfActin.restartRun(true);
 		talkln("done.");
-		if (Env.remote) { 
-			BoxOfActin.setRunning(); 
-		} else {
-			ParamGui.syncAllToParameters();
-		}
-		
+		if (Env.remote) BoxOfActin.setRunning();
+
 	}
-	
+
 	synchronized public static void addJSonID (int id) {
 		idsThisFrame[idCt]=id;
 		idCt++;

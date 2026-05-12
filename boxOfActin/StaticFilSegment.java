@@ -78,7 +78,7 @@ public class StaticFilSegment extends FilSegment {
 
 		
 		// south of hoop
-		coordPt.set(0,-Env.bugRadius.getValue(),0);
+		coordPt.setVals(0,-Env.bugRadius.getValue(),0);
 		//new StaticFilSegment(coordPt,unitVec,-1,numMons,false);
 		new StaticFilSegment(coordPt,unitVecR,-1,numMons,false);
 	

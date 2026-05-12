@@ -8,24 +8,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build and Run
 
-Requires Java and Java3D. The Eclipse project classpath expects jars at `/Library/JOGLAndj3D/` (`vecmath.jar`, `j3dutils.jar`, `j3dcore.jar`, `jogamp-fat.jar`).
+Java3D has been fully removed from BoA (Session 8, 2026-05-11). BoA no longer requires the `/Library/JOGLAndj3D/` jars. Two build paths are available on the MBP:
 
-**Compile** (from project root, all source is in the default package and `boxOfActin/`):
+**BoA on MBP — Java 8 build (legacy, retained because other projects on this machine still use Java 8 + Java3D):**
 ```
-javac BoxOfActin.java
+javac -cp . boxOfActin/*.java
 ```
-The Eclipse builder handles incremental compilation.
+The Eclipse builder handles incremental compilation. Note: the `.classpath` file still lists the J3D jars (Eclipse project artifact — BoA no longer uses them, but removing them from `.classpath` is optional future cleanup).
 
-**Run** (large heap required):
+**BoA on MBP — Java 21 build (post-Java3D-removal, for TornadoVM prep):**
 ```
-java -Xmx800M BoxOfActin
-java -Xmx800M BoxOfActin -r                          # headless/remote, no graphics
-java -Xmx800M BoxOfActin -pf ParameterFiles/boa10-64Seg   # load parameter file
-java -Xmx800M BoxOfActin -ic myState.qk              # resume from saved state
-java -Xmx800M BoxOfActin -o myOutputDir              # save logs, QK frames, source
-java -Xmx800M BoxOfActin -qk myQKDir -qkN 100        # QK snapshot output every 100 steps
-java -Xmx800M BoxOfActin -help                       # full option list
+$(/usr/libexec/java_home -v 21)/bin/javac --enable-preview --release 21 -cp "." boxOfActin/*.java *.java
 ```
+Requires `brew install openjdk@21` first (Java 21 was not yet installed on this MBP as of Session 8).
+
+**BoA on MBP — Java 21 run:**
+```
+$(/usr/libexec/java_home -v 21)/bin/java --enable-preview -Xmx800M -cp "." BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/boa_test1
+```
+
+**BoA headless run (Java 8, confirmed working after Session 8):**
+```
+java -Xmx800M -cp . BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js myOutputDir
+java -Xmx800M -cp . BoxOfActin -help                # full option list
+```
+
+Note: `-ic` (resume from QK state), `-qk`, `-qkN`, `-vf` flags have been removed (QK serialization code deleted in Session 7). The `-o` flag remains for output directory but no longer creates QK subdirectories.
 
 ## Architecture
 

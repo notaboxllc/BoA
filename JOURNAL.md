@@ -2030,3 +2030,188 @@ After Phase 4: all `.java` and `.class` files for those renderers gone, project 
 git add JOURNAL.md boxOfActin/BoxOfActin.java boxOfActin/FileOps.java
 git commit -m "Session 7 / Phase 3: strip Java3D from BoxOfActin.java and FileOps.java; remove graphics orchestration, QK code, and Swing timer"
 ```
+
+---
+
+## Session 8 — Phases 4 and 5 execution (Final cleanup and Java 21 add)
+
+**Date:** 2026-05-11
+
+---
+
+### Phase 4 — Delete pure-rendering files
+
+#### Pre-deletion grep result
+
+```
+for f in BoxOfActin_Graphics CapturingCanvas3D ExamineViewerBehavior ViewerBehavior \
+  ArchShape SphereSection InitControl EnvControl EndRatesControl MechControl \
+  GraphicsControl XLinkControl ActAControl MyoRatesControl CellShapeControl \
+  MiscRatesControl RenderControl; do
+  grep -l "$f" boxOfActin/*.java 2>/dev/null | grep -v "boxOfActin/$f.java"
+done | sort -u
+```
+
+Result: only files within the target delete set appeared (cross-references between
+renderers). No simulation file referenced any of the 17 deletion targets.
+Possibility A confirmed — same finding as Session 7's JVM load test.
+
+The additional `*Control.java` files mentioned in Session 7 (`MyoMotorControl.java`,
+`FilSegControl.java`, `NodeControl.java`, `BugControl.java`, `MyoMiniFilControl.java`,
+`ArpControl.java`) do not exist in the repo.
+
+#### Files actually deleted
+
+**Planned 17 (via `git rm`):**
+- `BoxOfActin_Graphics.java`
+- `CapturingCanvas3D.java`
+- `ExamineViewerBehavior.java`
+- `ViewerBehavior.java`
+- `ArchShape.java`
+- `SphereSection.java`
+- `InitControl.java`
+- `EnvControl.java`
+- `EndRatesControl.java`
+- `MechControl.java`
+- `GraphicsControl.java`
+- `XLinkControl.java`
+- `ActAControl.java`
+- `MyoRatesControl.java`
+- `CellShapeControl.java`
+- `MiscRatesControl.java`
+- `RenderControl.java`
+
+**Discovered during compile check — 4 additional GUI-only files (no external references):**
+- `BareButton.java` — JButton subclass referencing `Env.controlBackColor` (missing field)
+- `HistoPlotPanel.java` — JPanel for histogram display, references `Env.controlBackColor`
+- `InertGuiHead.java` — Swing panel header utility, references `Env.controlBackColor`
+- `ParamGui.java` — Swing parameter panel; referenced by `FileOps.java` in two
+  `if (!Env.remote) { ParamGui.syncAllToParameters(); }` else-blocks
+
+**Consequential fixes (small, clearly correct):**
+
+1. `FileOps.java` — removed two live `else { ParamGui.syncAllToParameters(); }` blocks
+   from `loadParamConfig()` and `remoteParamConfigSave()`. Both were inside
+   `if (Env.remote) { ... } else { ... }` guards that would never execute in
+   headless mode. Replaced both with `if (Env.remote) BoxOfActin.setRunning();`.
+
+2. `AnchorNode.java:10` — `bTransGam.set(1e6,1e6,1e6)` → `bTransGam.setVals(1e6,1e6,1e6)`.
+   `Pt3D.set()` was inherited from `javax.vecmath.Point3d`; after removing that
+   inheritance (Session 4), `setVals()` is the correct replacement method.
+
+3. `StaticFilSegment.java:81` — `coordPt.set(0,-Env.bugRadius.getValue(),0)` →
+   `coordPt.setVals(0,-Env.bugRadius.getValue(),0)`. Same issue.
+
+#### Phase 4 Java 8 compile result
+
+```
+javac -cp . boxOfActin/*.java
+```
+→ **Zero errors.** 43 `.java` files compile without Java3D on the classpath.
+
+#### Phase 4 Java 8 sim run result
+
+```
+java -Xmx800M -cp . BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js /tmp/phase4_test
+```
+→ **Ran successfully.** 23 frames written in ~20s before process was killed.
+Parameter file loaded with 11 "no match" warnings for removed params (expected).
+Frame 0 saved to `/tmp/phase4_baseline_frame0.json`.
+
+---
+
+### Phase 5 — Java 21 as alternative build target
+
+#### Java 21 availability
+
+```
+/usr/libexec/java_home -V
+```
+Result:
+```
+Matching Java Virtual Machines (2):
+    1.8.231.11 (x86_64) "Oracle Corporation" - "Java" /Library/...
+    1.8.0_231 (x86_64) "Oracle Corporation" - "Java SE 8" /Library/Java/...
+```
+
+**Java 21 is not installed on this MBP.** Phase 5 stopped per instructions.
+The user will need to run `brew install openjdk@21` before Phase 5 can proceed.
+
+#### CLAUDE.md additive updates
+
+The following lines were added to the "Build and Run" section (replacing the old
+Java3D-centric build instructions with two parallel build paths):
+
+```
+**BoA on MBP — Java 8 build (legacy, retained because other projects on this machine still use Java 8 + Java3D):**
+javac -cp . boxOfActin/*.java
+
+**BoA on MBP — Java 21 build (post-Java3D-removal, for TornadoVM prep):**
+$(/usr/libexec/java_home -v 21)/bin/javac --enable-preview --release 21 -cp "." boxOfActin/*.java *.java
+Requires `brew install openjdk@21` first.
+
+**BoA on MBP — Java 21 run:**
+$(/usr/libexec/java_home -v 21)/bin/java --enable-preview -Xmx800M -cp "." BoxOfActin -r \
+  -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/boa_test1
+```
+
+The old Java 8 build command (`javac BoxOfActin.java`) was updated to
+`javac -cp . boxOfActin/*.java` since BoA no longer uses the J3D jars. Notes about
+removed flags (`-ic`, `-qk`, `-qkN`) were also added.
+
+#### .classpath current state
+
+The `.classpath` file at the repo root still lists:
+```xml
+<classpathentry kind="lib" path="/Library/JOGLAndj3D/vecmath.jar"/>
+<classpathentry kind="lib" path="/Library/JOGLAndj3D/j3dutils.jar"/>
+<classpathentry kind="lib" path="/Library/JOGLAndj3D/j3dcore.jar"/>
+<classpathentry kind="lib" path="/Library/JOGLAndj3D/jogamp-fat.jar"/>
+```
+
+**Recommendation:** This is optional future cleanup. The J3D jars are still on disk
+and Eclipse won't break. Removing them from `.classpath` would be the tidy thing
+but is low priority. Defer until the user explicitly wants to update the Eclipse project.
+**Not modified in this session** per the session plan.
+
+---
+
+### Final state
+
+**Java3D / vecmath / com.sun.j3d imports remaining:**
+```
+grep -r "javax.media.j3d\|javax.vecmath\|com.sun.j3d" boxOfActin/
+```
+Result: **zero**. BoA is fully free of Java3D.
+
+**Total `.java` files remaining in `boxOfActin/`:** 43
+
+Core simulation files: `ActA`, `AnchorNode`, `Arp23`, `Barrier`, `BoxOfActin`,
+`Bug`, `Chamber`, `Crucible`, `Env`, `FilLink`, `FilSegment`, `FileOps`,
+`FillNode`, `InitialConditions`, `Mesh`, `Monomer`, `MyoFilLink`, `MyoLever`,
+`MyoMiniFilament`, `MyoMotor`, `MyoRod`, `Myosin`, `MyosinDimer`, `MyosinFixed`,
+`NodeLink`, `Parameter`, `ProteinNode`, `Pt3D`, `Stat`, `StaticFilSegment`,
+`StickyNode`, `Thing`, `ThreadSet`, `ThreeJSWriter`.
+
+Utility files: `CheckboxMenu`, `CheckboxMenuListener`, `CollisionEvent`,
+`HistogramPlus`, `HistogramPlus2`, `NameValue`, `RunTimer`, `UCircRnd`,
+`ValueTracker`.
+
+**Java3D removal effort: COMPLETE** (Java 8 compile + run verified).
+Phase 5 (Java 21 compile + run verify) deferred pending `brew install openjdk@21`.
+
+---
+
+### Forward-looking note
+
+The natural next step is to install Java 21 on this MBP (`brew install openjdk@21`),
+then run Phase 5 to verify the simulation compiles and produces identical frame 0
+output under both JVMs. After that, the project can be pulled fresh on aorus1
+(the Linux GPU machine, which already has Java 21 and TornadoVM installed), where
+GPU integration work begins. The strategic entry point for GPU work is documented
+in `CLAUDE.md` under "GPU Acceleration Strategy": Step 0 is creating SoA shadow
+arrays alongside the existing `FilSegment[]` structure, followed by a fused
+Brownian + integration kernel (Step 1). The MBP will keep Java 8 + Java3D for any
+other projects that depend on it; BoA development can continue under Java 8 on
+the MBP or full Java 21 + TornadoVM on aorus1.
+
