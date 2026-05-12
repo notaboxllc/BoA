@@ -112,7 +112,6 @@ public class FilSegment extends Thing {
 	boolean end1TorqCkd = false;
 	boolean end2TorqCkd = false;
 	
-	int end2LinkThingNumber;		// used in reading QK state... myThingNumber of end2 filsegment if any
 	int end1NodeThingNumber;		// ditto
 	int end2NodeThingNumber;		// ditto
 	
@@ -244,14 +243,6 @@ public class FilSegment extends Thing {
 			
 			//if (arpChildCt > 0) { transferArpChildren(splitFromFil); }
 		//}
-	}
-	
-	public void setFromQKInfo (Pt3D nuCoord, Pt3D nuAng, int mons) {
-		coord.copy(nuCoord);
-		uVec.copy(nuAng);
-		monomerCt = mons;
-		initialize();
-		updateCylGraphicsFlag = true;
 	}
 	
 	public void sepaku () {
@@ -2699,10 +2690,7 @@ public class FilSegment extends Thing {
 		FilSegment curSeg;
 		for (int i=0;i<filSegmentCt;i++) {
 			curSeg = theFilSegments[i];
-			try {
-				curSeg.detachGraphics();
-				cleanup(curSeg,false,true);
-			} catch (NullPointerException npe) { }
+			cleanup(curSeg,false,true);
 		}
 		for (int i=0;i<filSegmentCt;i++) {
 			theFilSegments[i].removeMe = true;
@@ -3473,7 +3461,6 @@ public class FilSegment extends Thing {
 	public static void initializeAllAppearances () {}
 	public void makeGraphics () {}
 	public void updateGraphics () {}
-	public void detachGraphics () {}
 	public void addCoordSysGraphics () {}
 	public void removeCoordSysGraphics () {}
 	

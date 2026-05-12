@@ -3,22 +3,6 @@ package boxOfActin;
 import java.awt.Color;
 import java.awt.Font;
 
-import javax.media.j3d.Appearance;
-import javax.media.j3d.BranchGroup;
-import javax.media.j3d.ColoringAttributes;
-import javax.media.j3d.Font3D;
-import javax.media.j3d.FontExtrusion;
-import javax.media.j3d.Material;
-import javax.media.j3d.Shape3D;
-import javax.media.j3d.Text3D;
-import javax.media.j3d.Transform3D;
-import javax.media.j3d.TransformGroup;
-import javax.media.j3d.TransparencyAttributes;
-import javax.vecmath.Color3f;
-import javax.vecmath.Vector3d;
-
-import com.sun.j3d.utils.geometry.Sphere;
-
 import boxOfActin.ProteinNode.ProteinNodeThreads;
 
 public class StickyNode extends ProteinNode {
@@ -39,10 +23,6 @@ public class StickyNode extends ProteinNode {
 	boolean iAmHotSpotOriginator = false;
 	StickyNode myHotSpotOriginator;
 	
-	// graphics
-	Appearance rhoHotA = new Appearance();
-	BranchGroup sphBG = new BranchGroup();
-	Sphere hotRhoSphere;
 	boolean hotRhoGraphicsOn = false;
 	
 	// for multithreading
@@ -363,121 +343,6 @@ public class StickyNode extends ProteinNode {
 		return trans;
 	}
 	
-	public void setGraphicsCapabilities() {
-		super.setGraphicsCapabilities();
-		// alt appearance capabilities
-		sphBG.setCapability(BranchGroup.ALLOW_DETACH);
-		sphBG.setCapability(TransformGroup.ALLOW_CHILDREN_EXTEND);
-		sphBG.setCapability(TransformGroup.ALLOW_CHILDREN_WRITE);
-		sphBG.setCapability(TransformGroup.ALLOW_CHILDREN_READ);
-		
-		rhoHotA.setCapability(Appearance.ALLOW_LINE_ATTRIBUTES_WRITE);
-		rhoHotA.setCapability(Appearance.ALLOW_COLORING_ATTRIBUTES_WRITE);
-		rhoHotA.setCapability(Appearance.ALLOW_POLYGON_ATTRIBUTES_WRITE);
-		rhoHotA.setCapability(Appearance.ALLOW_TRANSPARENCY_ATTRIBUTES_WRITE);
-		rhoHotA.setCapability(Appearance.ALLOW_MATERIAL_WRITE);
-	}
-	
-	public void makeGraphics () {
-		// make material
-		m = new Material(ambientC,emissiveC,diffuseC,specularC,shiny);
-		//Material mActivator = new Material(Env.membraneActivatorColor3f,Env.membraneActivatorColor3f,Env.membraneActivatorColor3f,Env.membraneActivatorColor3f,shiny);
-		// set capabilities
-		setGraphicsCapabilities();
-		
-		ColoringAttributes cA = new ColoringAttributes(Env.membraneColor3f, ColoringAttributes.FASTEST);
-		ColoringAttributes activatorCA = new ColoringAttributes(Env.membraneActivatorColor3f, ColoringAttributes.FASTEST);
-		rhoHotA.setColoringAttributes(activatorCA);
-		a.setColoringAttributes(cA);
-		
-		TransparencyAttributes tA = new TransparencyAttributes ();
-		tA.setTransparency(getMembraneTransparency());
-		tA.setTransparencyMode(tA.FASTEST);
-		a.setTransparencyAttributes(tA);
-		
-		TransparencyAttributes rhoHotTA = new TransparencyAttributes ();
-		rhoHotTA.setTransparency(0.8f);
-		rhoHotTA.setTransparencyMode(rhoHotTA.FASTEST);
-		rhoHotA.setTransparencyAttributes(rhoHotTA);
-		
-		rhoHotA.setMaterial(m);
-		a.setMaterial(m);
-
-		mySphere = new Sphere((float)getRadius(),Sphere.GENERATE_NORMALS, Env.nodeTessalation, a);
-		mySphere.setCapability(Sphere.ALLOW_BOUNDS_READ);
-		
-		hotRhoSphere = new Sphere((float)getRadius(),Sphere.GENERATE_NORMALS, Env.nodeTessalation, rhoHotA);
-		hotRhoSphere.setCapability(Sphere.ALLOW_BOUNDS_READ);
-		
-		// flatten spheres to discs, maybe enlarge them. Set flattening such that thickness is always about 6nm
-		double desiredMembraneThickness = 0.006; // 6 nm
-		double flatFrac = desiredMembraneThickness/(2*radius);
-		t3d.setScale(new Vector3d(1.0,1.0,flatFrac));
-
-		
-		// fiduciary marks
-		double markSphereSize = getRadius()/12.0;
-		Appearance yApp = new Appearance();
-		ColoringAttributes yCA = new ColoringAttributes(new Color3f(Color.BLACK), ColoringAttributes.NICEST);
-		Material yM = new Material (new Color3f(Color.BLACK),emissiveC,new Color3f(Color.BLACK),specularC,shiny);
-		yApp.setColoringAttributes(yCA);
-		yApp.setMaterial(yM);
-
-		
-
-		TransformGroup xMarkTG = new TransformGroup();
-		Appearance textAppear = new Appearance();
-	    ColoringAttributes textColor = new ColoringAttributes();
-	    textColor.setColor(1.0f, 0.0f, 0.0f);
-	    textAppear.setColoringAttributes(textColor);
-	    textAppear.setMaterial(new Material());
-	    // Create a simple shape leaf node, add it to the scene graph.
-	    Font3D font3D = new Font3D(new Font("Helvetica", Font.PLAIN, 1),new FontExtrusion());
-
-		
-	    Text3D xTextGeom = new Text3D(font3D, myIJ);
-	    xTextGeom.setAlignment(Text3D.ALIGN_CENTER);
-	    Shape3D xTextShape = new Shape3D();
-	    xTextShape.setGeometry(xTextGeom);
-	    xTextShape.setAppearance(textAppear);
-	    Transform3D xTextT3D = new Transform3D();
-	    TransformGroup xTextTG = new TransformGroup();
-	    //xTextT3D.rotY(Math.PI/2.0);
-	    xTextT3D.setScale(0.01);
-	    //xTextT3D.setTranslation(new Vector3d(0.007,-.005,0));
-
-	    xTextTG.setTransform(xTextT3D);
-	    xTextTG.addChild(xTextShape);
-	    xMarkTG.addChild(xTextTG);
-		
-	  //g3d.addChild(xMarkTG);
-	    g3d.addChild(mySphere);
-		sphBG.addChild(g3d);
-		G.addChild(sphBG);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		if (iAmHotRho && !hotRhoGraphicsOn) {
-			sphBG.detach();
-			g3d.removeChild(mySphere);
-			g3d.addChild(hotRhoSphere);
-			G.addChild(sphBG);
-			hotRhoGraphicsOn = true;
-		}
-		if (!iAmHotRho && hotRhoGraphicsOn) {
-			sphBG.detach();
-			g3d.removeChild(hotRhoSphere);
-			g3d.addChild(mySphere);
-			G.addChild(sphBG);
-			hotRhoGraphicsOn = false;
-		}
-		coord.copyToVector3d(coordVec3d);
-		coordVec3d.z += -0.9*radius;  // shift where we visualize spheres to plane of contact at inner edge of cell
-		t3d.setTranslation(coordVec3d);
-		t3d.setRotation(mxToX);
-		g3d.setTransform(t3d);
-	}
 	
 	public static synchronized void ckToLink (StickyNode iNode, StickyNode jNode) {
 		if (iNode.fullyBound() || jNode.fullyBound()) { return; } // exit if one or both nodes already fully bound

@@ -1,13 +1,4 @@
 package boxOfActin;
-import javax.media.j3d.Appearance;
-import javax.media.j3d.BranchGroup;
-import javax.media.j3d.ColoringAttributes;
-import javax.media.j3d.LineArray;
-import javax.media.j3d.Node;
-import javax.media.j3d.Shape3D;
-import javax.vecmath.Color3f;
-import javax.vecmath.Point3d;
-
 
 public class MyoFilLink {
 	static final int maxLinks = 100000;
@@ -48,22 +39,11 @@ public class MyoFilLink {
 	Pt3D linkUVec1 = new Pt3D(); 
 	Pt3D linkUVec2 = new Pt3D();
 	
-	// for Java3D
-	BranchGroup G = new BranchGroup();
-	LineArray myoLine;
-	Shape3D myoShape;
-	boolean graphicsMade = false;
 	
 	public MyoFilLink (MyoMotor mot, Pt3D pt) {
 		myMotor = mot;
 		motorPt = pt;
 		addMyoFilLink(this);
-	}
-	
-	public MyoFilLink (Pt3D motPt, Pt3D attPt) {
-		// used only for creating myofillinks while rendering from QK files
-		this.motorPt.copy(motPt);
-		this.attachPt.copy(attPt);
 	}
 	
 	public void sepaku () {
@@ -78,10 +58,6 @@ public class MyoFilLink {
 		torsionVec = null;
 		linkUVec1 = null;
 		linkUVec2 = null;
-		G = null;
-		myoLine = null;
-		myoShape = null;
-		
 	}
 	
 	public void setAttachment (FilSegment seg, double pos) {
@@ -292,60 +268,10 @@ public class MyoFilLink {
 	public static void removeAll () {
 		for (int i=0;i<myoFilLinkCt;i++) {
 			if (theMyoFilLinks[i] != null) { 
-				if (theMyoFilLinks[i].graphicsMade) { theMyoFilLinks[i].G.detach(); }
 				theMyoFilLinks[i].sepaku();
 			}
 		}
 		myoFilLinkCt= 0;
 	}
 	
-	public void setPtsFromQKFile (Pt3D newPt1, Pt3D newPt2) {
-		if (newPt1 != null && newPt2 != null) {
-			motorPt.copy(newPt1);
-			attachPt.copy(newPt2);
-		} else {
-			motorPt.copy(Env.farfarAway);
-			attachPt.copy(Env.farfarAway);
-		}
-	}
-	
-	public void makeGraphics () {
-		// capabilities for graphics objects
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		
-		Color3f linkColor = new Color3f(0.0f,1.0f,1.0f);
-		ColoringAttributes cA = new ColoringAttributes(linkColor, ColoringAttributes.FASTEST);
-		Appearance myoApp = new Appearance();
-		myoApp.setColoringAttributes(cA);
-		
-		// line array
-		myoLine = new LineArray(2,LineArray.COORDINATES);
-		myoLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		myoLine.setCoordinate(0,new Point3d(motorPt.x,motorPt.y,motorPt.z));
-		myoLine.setCoordinate(1,new Point3d(motorPt.x,motorPt.y,motorPt.z));
-		myoShape = new Shape3D();
-		myoShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		myoShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		myoShape.setGeometry(myoLine);
-		myoShape.setAppearance(myoApp);
-		
-		G.addChild(myoShape);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		myoLine.setCoordinate(0,motorPt);
-		if (!isFree()) { 
-			myoLine.setCoordinate(1,attachPt);
-		} else {
-			myoLine.setCoordinate(1,motorPt);
-		}
-		myoShape.setGeometry(myoLine);
-	}
-	
-	public Node getGraphicsNode () {
-		if (!graphicsMade) { makeGraphics();}
-		updateGraphics();
-		return G;
-	}
 }

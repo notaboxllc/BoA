@@ -1,19 +1,5 @@
 package boxOfActin;
 
-import javax.media.j3d.Appearance;
-import javax.media.j3d.BranchGroup;
-import javax.media.j3d.LineArray;
-import javax.media.j3d.Material;
-import javax.media.j3d.Shape3D;
-import javax.media.j3d.Transform3D;
-import javax.media.j3d.TransformGroup;
-import javax.media.j3d.TransparencyAttributes;
-import javax.vecmath.Color3f;
-import javax.vecmath.Vector3d;
-
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Primitive;
-
 public class MyoRod extends Thing {
 	static double radius = 0.003; // microns
 	Myosin myMyosin;
@@ -28,21 +14,7 @@ public class MyoRod extends Thing {
 	
 	// for collision detection
 	double xRange,yRange,zRange;
-	
-	// for graphics
-	static boolean graphicsInitialized = false;
-	Vector3d coordVec3d = new Vector3d();
-	Transform3D cylT3D,cylRot;
-	TransformGroup cylTG;
-	BranchGroup cylBG;
-	Cylinder myCyl;
-	static Appearance cylA;
-	static Material cylM;
-	static Color3f ambientC = new Color3f(0.0f,1.0f,0.0f);
-	static Color3f diffuseC = new Color3f(0.4f,0.4f,0.4f);
-	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
-	static int shiny = 128;
+
 	boolean rodInvisible = false;
 
 	public MyoRod(Pt3D initCoord) {
@@ -67,12 +39,6 @@ public class MyoRod extends Thing {
 		myMyosin = null;
 		end1 = null;
 		end2 = null;
-		coordVec3d = null;
-		cylT3D = null;
-		cylRot = null;
-		cylTG = null;
-		cylBG = null;
-		myCyl = null;
 	}
 	
 	public void set (Pt3D setCoord, Pt3D setUVec, double dim, boolean invis) {
@@ -203,75 +169,7 @@ public class MyoRod extends Thing {
 		return moveC;
 	}
 
-	private void makeNewCyl () {
-		//cylindrical body
-		cylBG = new BranchGroup();
-		cylBG.setCapability(BranchGroup.ALLOW_DETACH);
-		myCyl = new Cylinder((float)radius,(float)getDim(),Primitive.GENERATE_NORMALS,20,20,cylA);
-		cylRot = new Transform3D();
-		cylRot.rotZ(Math.PI/2);
-		cylT3D = new Transform3D();
-		cylT3D.setRotation(mxToX);
-		cylT3D.setScale(1);
-		cylT3D.mul(cylRot);
-		Pt3D cylCen = Pt3D.Add(end1,getDim()/2,uVec);
-		cylT3D.setTranslation(new Vector3d(cylCen.x,cylCen.y,cylCen.z));
-		cylTG = new TransformGroup(cylT3D);
-		cylTG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		cylTG.addChild(myCyl);
-		cylBG.addChild(cylTG);
-		G.addChild(cylBG);
-	}
-	
-	private void updateCylGraphics () {
-		cylBG.detach();
-		cylTG.removeChild(myCyl);
-		myCyl = new Cylinder((float)radius,(float)getDim(),Primitive.GENERATE_NORMALS,20,20,cylA);
-		cylTG.addChild(myCyl);
-		G.addChild(cylBG);
-	}
-	
-	public void makeGraphics () {
-		if (!graphicsInitialized) {
-			// cyl appearance
-			int transMode = TransparencyAttributes.NONE; 
-			cylM = new Material(ambientC,emissiveC,diffuseC,specularC,shiny);
-			cylA = new Appearance();
-			TransparencyAttributes tA = new TransparencyAttributes ();
-			tA.setTransparency(1.0f);
-			tA.setTransparencyMode(transMode);
-			//cylA.setTransparencyAttributes(tA);
-			cylA.setMaterial(cylM);
-			
-			graphicsInitialized = true;
-		}
-		
-		setGraphicsCapabilities();
-		
-		makeNewCyl(); 
-
-		graphicsMade = true;
-	}
-	
-	
-	public void updateGraphics () {
-		if (rodInvisible) { 
-			cylBG.detach();
-			return;
-		}
-		
-		coord.copyToVector3d(coordVec3d);
-		
-		cylT3D.setRotation(mxToX);
-		cylT3D.mul(cylRot);
-		cylT3D.setScale(1);
-		cylT3D.setTranslation(coordVec3d);
-		cylTG.setTransform(cylT3D);
-		
-	}
-	
 	public void remove() {
-		G.detach();
 		removeMe = true;
 		sepaku();
 	}

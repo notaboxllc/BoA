@@ -11,12 +11,6 @@ import java.awt.*;
 import javax.swing.*;
 import java.lang.Math.*;
 
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Primitive;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-import javax.media.j3d.*;
-import javax.vecmath.*;
 
 public class MyoMiniFilament extends Thing {
 	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [5000];	// array holding all protein nodes
@@ -66,19 +60,6 @@ public class MyoMiniFilament extends Thing {
 	Pt3D [] myoDimerPtsEnd2Inx = new Pt3D[numMyoDimersEachEnd];
 	Pt3D [] myoDimerPtsEnd2InX = new Pt3D[numMyoDimersEachEnd];
 
-	// for graphics
-	Vector3d coordVec3d = new Vector3d();
-	Transform3D cylT3D,cylRot;
-	TransformGroup cylTG;
-	BranchGroup cylBG;
-	Cylinder myCyl;
-	static Appearance cylA;
-	static Material cylM;
-	static Color3f ambientC = new Color3f(0.0f,1.0f,0.0f);
-	static Color3f diffuseC = new Color3f(0.4f,0.4f,0.4f);
-	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
-	static int shiny = 128;
 	
 	public MyoMiniFilament (Pt3D initCoord) {
 		super(initCoord);
@@ -100,20 +81,6 @@ public class MyoMiniFilament extends Thing {
 		
 		makeMyosinHeads();
 		makeMyosinDimers();
-	}
-	
-	public MyoMiniFilament (Pt3D initCoord, Pt3D initUVec,double len, double rad) {
-		// for creation from QK files
-		super(initCoord);
-		addMiniFil(this);
-		
-		length = len;
-		radius = rad;
-		uVec.copy(initUVec);
-		calculateProperties();
-		initialize();
-		
-		
 	}
 	
 	static class MyoMiniFilThreads extends ThreadSet {
@@ -495,63 +462,6 @@ public class MyoMiniFilament extends Thing {
 		return length;
 	}
 	
-	private void makeNewCyl () {
-		//cylindrical body
-		cylBG = new BranchGroup();
-		cylBG.setCapability(BranchGroup.ALLOW_DETACH);
-		myCyl = new Cylinder((float)radius,(float)length,Primitive.GENERATE_NORMALS,20,20,cylA);
-		cylRot = new Transform3D();
-		cylRot.rotZ(Math.PI/2);
-		cylT3D = new Transform3D();
-		cylT3D.setRotation(mxToX);
-		cylT3D.setScale(1);
-		cylT3D.mul(cylRot);
-		Pt3D cylCen = Pt3D.Add(end1,length/2,uVec);
-		cylT3D.setTranslation(new Vector3d(cylCen.x,cylCen.y,cylCen.z));
-		cylTG = new TransformGroup(cylT3D);
-		cylTG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		cylTG.addChild(myCyl);
-		cylBG.addChild(cylTG);
-		G.addChild(cylBG);
-	}
-	
-	private void updateCylGraphics () {
-		cylBG.detach();
-		cylTG.removeChild(myCyl);
-		myCyl = new Cylinder((float)radius,(float)length,Primitive.GENERATE_NORMALS,20,20,cylA);
-		cylTG.addChild(myCyl);
-		G.addChild(cylBG);
-	}
-	
-	public void makeGraphics () {
-		// make material
-		m = new Material (ambientC,emissiveC,diffuseC,specularC,shiny);
-		// set capabilities
-		setGraphicsCapabilities();
-		
-		TransparencyAttributes tA = new TransparencyAttributes ();
-		tA.setTransparency(0.4f);
-		tA.setTransparencyMode(tA.NICEST);
-		a.setTransparencyAttributes(tA);
-		a.setMaterial(m);
-		makeNewCyl();
-		
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		
-		coord.copyToVector3d(coordVec3d);
-		
-		cylT3D.setRotation(mxToX);
-		cylT3D.mul(cylRot);
-		cylT3D.setScale(1);
-		cylT3D.setTranslation(coordVec3d);
-		cylTG.setTransform(cylT3D);
-		
-	}
-	
-	
 	public static void makeInitialMyoMiniFils() {
 		for (int i=0;i<Env.initialMyoMiniFils.getValue();i++) {
 			makeRandomMyoMiniFil();
@@ -639,9 +549,6 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public static void removeAll () {
-		for (int i=0;i<myoMiniFilCt;i++) {
-			myoMiniFils[i].G.detach();
-		}
 		for (int i=0;i<myoMiniFilCt;i++) {
 			myoMiniFils[i].removeMe = true;
 			myoMiniFils[i] = null;

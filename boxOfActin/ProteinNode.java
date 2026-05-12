@@ -75,11 +75,8 @@ public class ProteinNode extends Thing {
 		addNode(this);
 		calculateProperties();
 		initialize();
-		
-		if (!fromQKFile) { 
-			makeMyosinSinglets();
-			makeMyosinDimers();
-		}
+		makeMyosinSinglets();
+		makeMyosinDimers();
 	}
 	
 	public ProteinNode (Pt3D initCoord, Pt3D initUVec, Pt3D initZVec, boolean fromQKFile) {
@@ -93,11 +90,8 @@ public class ProteinNode extends Thing {
 		addNode(this);
 		calculateProperties();
 		initialize();
-		
-		if (!fromQKFile) { 
-			makeMyosinSinglets();
-			makeMyosinDimers();
-		}
+		makeMyosinSinglets();
+		makeMyosinDimers();
 	}
 	
 	public ProteinNode (Pt3D initCoord, Pt3D hemisphereNormal) {  // this constructor specifies a hemisphere for myosins
@@ -301,13 +295,6 @@ public class ProteinNode extends Thing {
 			theNodes[i].forceSum.zero();
 			theNodes[i].bTorqueSum.zero();
 		}
-	}
-	
-	public void setFromQK (double rad,Pt3D nuCoord) {
-		Env.nodeRadius.setValue(rad);
-		coord.copy(nuCoord);
-		initialize();
-		updateSphGraphics();
 	}
 	
 	public void registerWithNode (FilSegment forminSeg) {

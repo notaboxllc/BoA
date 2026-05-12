@@ -1840,3 +1840,69 @@ git add JOURNAL.md boxOfActin/Env.java boxOfActin/Thing.java boxOfActin/Pt3D.jav
 git commit -m "Session 5 / Phase 1: remove all class-load-time Java3D triggers from Env, Thing, FilSegment, Monomer, FillNode, ProteinNode; add Pt3D.scale/add methods"
 git push
 ```
+
+---
+
+## Session 6 — Phase 2 execution
+
+**Goal:** Remove all Java3D references from the 20 simulation files so they
+compile and load cleanly without the J3D jars on the classpath.
+
+### Work done
+
+**Bridge fix (BoxOfActin.java):** Deleted help-text lines for `-ic`, `-qk`,
+`-qkN` options that referenced the already-deleted `Env.toQKFileInterval`.
+
+**Phase 2a — statics-first sweep (13 files):** Deleted all `javax.media.j3d.*`,
+`javax.vecmath.*`, `com.sun.j3d.*` imports and all static Java3D-typed fields
+(`Color3f`, `Appearance`, `Material`, `TransparencyAttributes`,
+`ColoringAttributes`, static `Vector3d`) from: Crucible, StickyNode, Bug,
+Chamber, ActA, Arp23, FilLink, NodeLink, MyoFilLink, MyoRod, MyoLever,
+MyoMotor, MyoMiniFilament.
+
+**Phase 2b — full graphics strip (all 20 simulation files):**
+
+- Deleted Java3D-typed instance fields (`BranchGroup`, `TransformGroup`,
+  `Transform3D`, `LineArray`, `Shape3D`, `Cylinder`, `Sphere`, `Vector3d
+  coordVec3d`, etc.) from each class.
+- Deleted `makeGraphics()`, `updateGraphics()`, `makeNewCyl()`,
+  `makeNewSpheres()`, `updateCylGraphics()`, `updateTextInfoState()`,
+  `setWireFrameAppearance()`, `setFillAppearance()`, `setCoarseWireAppearance()`,
+  `setGraphicsCapabilities()` methods where present.
+- Deleted QK constructor overloads (`FilLink(Pt3D,Pt3D)`, `NodeLink(Pt3D,Pt3D)`,
+  `Arp23(Pt3D,Pt3D)`, `MyoFilLink(Pt3D,Pt3D)`, `MyoMiniFilament(Pt3D,Pt3D,double,double)`).
+- Deleted `setPtsFromQKFile()`, `setFromQKInfo()`, `setFromQK()` methods.
+- Deleted `detachGraphics()` stubs from FilSegment and Monomer and their call
+  sites in `removeAll()`.
+- Deleted `G.detach()` calls from `remove()` and `removeAll()` methods.
+- Cleaned up `sepaku()` null-assignments for deleted fields in all connector
+  classes (FilLink, Arp23, NodeLink, ActA, MyoFilLink, MyoRod, MyoLever,
+  MyoMotor).
+- Removed `graphicsUpdate = true` from state-setter methods in MyoMotor;
+  removed `if (!fromQKFile)` guards from ProteinNode constructors (QK loading
+  path is gone).
+- Fixed two `Pt3D.set(x,y,z)` → `Pt3D.setVals(x,y,z)` calls in Bug.java and
+  Chamber.java (vecmath method no longer present after Phase 0 Pt3D surgery).
+
+### Compile and load checkpoint
+
+```
+javac -cp . [all 20 simulation files]
+```
+→ **No errors.** All 20 simulation files compile clean without Java3D jars.
+
+```
+java -Xmx800M -cp . BoxOfActin -h
+```
+→ Crashes at `BoxOfActin.begin():80` → `BoxOfActin_Graphics` constructor →
+`NoClassDefFoundError: javax/media/j3d/Canvas3D`.
+**All simulation files load without errors.** The crash is in
+`BoxOfActin_Graphics`, which is the Phase 4 delete target. This is the
+expected Phase 2 pass condition.
+
+### Commit
+
+```
+git add JOURNAL.md boxOfActin/*.java
+git commit -m "Session 6 / Phase 2: strip all Java3D from 20 simulation files; all sim files compile and load without J3D jars"
+```

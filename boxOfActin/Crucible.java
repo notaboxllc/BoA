@@ -1,8 +1,5 @@
 package boxOfActin;
 
-import javax.media.j3d.BranchGroup;
-
-
 public class Crucible extends Thing {
 	static double boxVolume;	// entire volume contained within the rod-shaped bug
 	static double microMolarChangePerMonomer;	// how much to change concentration when one monomer is used or returned
@@ -28,8 +25,6 @@ public class Crucible extends Thing {
 	static Pt3D linkUVec1 = new Pt3D(); 
 	static Pt3D linkUVec2 = new Pt3D();
 	
-	// for java3d
-	BranchGroup infoG;
 	static boolean appearanceChanged = false;
 
 	
@@ -218,14 +213,6 @@ public class Crucible extends Thing {
 	
 	public static void appearanceChange() {
 		appearanceChanged = true;
-		if (Env.paused) { theBox.updateGraphics();}
-	}
-	
-	public void updateTextInfoState() {
-		infoG.detach();
-		if (Env.infoIn3D) {
-			g3d.addChild(infoG);
-		}
 	}
 
 }

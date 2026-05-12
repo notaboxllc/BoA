@@ -1,19 +1,5 @@
 package boxOfActin;
 
-import javax.media.j3d.Appearance;
-import javax.media.j3d.BranchGroup;
-import javax.media.j3d.Material;
-import javax.media.j3d.Shape3D;
-import javax.media.j3d.Transform3D;
-import javax.media.j3d.TransformGroup;
-import javax.media.j3d.TransparencyAttributes;
-import javax.vecmath.Color3f;
-import javax.vecmath.Vector3d;
-
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Primitive;
-import com.sun.j3d.utils.geometry.Sphere;
-
 public class MyoMotor extends Thing {
 	static MyoMotor [] theMotors = new MyoMotor[100000];
 	static int motorCt = 0;
@@ -50,25 +36,6 @@ public class MyoMotor extends Thing {
 	// myosins in node
 	MyoFilLink tipLink;
 	
-	// for graphics
-	static boolean graphicsInitialized = false;
-	boolean graphicsUpdate = false;
-	Vector3d coordVec3d = new Vector3d();
-	static Vector3d scaleV3d = new Vector3d(1.0,0.5,0.5);
-	Transform3D sphT3D;
-	TransformGroup sphTG;
-	BranchGroup sphBG;
-	Sphere mySph,mySph_ATP,mySph_ADPPi,mySph_ADP;
-	static Appearance sphA,sphA_ATP,sphA_ADPPi,sphA_ADP;
-	static Material sphM,sphM_ATP,sphM_ADPPi,sphM_ADP;
-	static Color3f ambientC = new Color3f(0.0f,1.0f,0.0f);
-	static Color3f diffuseC = new Color3f(0.0f,0.5f,0.8f);
-	static Color3f diffuseC_ATP = new Color3f(1.0f,1.0f,0.0f);
-	static Color3f diffuseC_ADPPi = new Color3f(1.0f,0.5f,0.0f);
-	static Color3f diffuseC_ADP = new Color3f(1.0f,0.0f,0.0f);
-	static Color3f specularC = new Color3f(1.0f,1.0f,1.0f);
-	static Color3f emissiveC = new Color3f(0.0f,0.0f,1.0f);
-	static int shiny = 128;
 	
 	public MyoMotor(Pt3D initCoord) {
 		super(initCoord);
@@ -101,11 +68,6 @@ public class MyoMotor extends Thing {
 		end1 = null;
 		end2 = null;
 		bindTip = null;
-		coordVec3d = null;
-		sphT3D = null;
-		sphTG = null;
-		sphBG = null;
-		mySph = null;
 	}
 	
 	public void set (Pt3D setCoord, Pt3D setUVec, double dim, byte nucState) {
@@ -113,7 +75,6 @@ public class MyoMotor extends Thing {
 		uVec.copy(setUVec);
 		Env.myoMotorLength.setValue(dim);
 		nucleotideState = nucState;
-		graphicsUpdate = true;
 	}
 	
 	public void calculateProperties () {
@@ -187,25 +148,13 @@ public class MyoMotor extends Thing {
 		}
 	}*/
 	
-	public void setStateNONE () {
-		nucleotideState = NONE;
-		graphicsUpdate = true;
-	}
-	
-	public void setStateATP () {
-		nucleotideState = ATP;
-		graphicsUpdate = true;
-	}
-	
-	public void setStateADPPi () {
-		nucleotideState = ADPPi;
-		graphicsUpdate = true;
-	}
-	
-	public void setStateADP () {
-		nucleotideState = ADP;
-		graphicsUpdate = true;
-	}
+	public void setStateNONE () { nucleotideState = NONE; }
+
+	public void setStateATP () { nucleotideState = ATP; }
+
+	public void setStateADPPi () { nucleotideState = ADPPi; }
+
+	public void setStateADP () { nucleotideState = ADP; }
 	
 	public void biochemStep (){
 		if (Env.myosinsOff) { return; }
@@ -462,98 +411,6 @@ public class MyoMotor extends Thing {
 		tipLink = new MyoFilLink(this,bindTip);
 	}
 		
-	private void makeNewSpheres () {
-		//cylindrical body
-		sphBG = new BranchGroup();
-		sphBG.setCapability(BranchGroup.ALLOW_DETACH);
-		// make 4 spheres to represent biochemical states
-		mySph =  new Sphere((float)getDim()/2,Sphere.GENERATE_NORMALS, 20,sphA);
-		mySph_ATP =  new Sphere((float)getDim()/2,Sphere.GENERATE_NORMALS, 20,sphA_ATP);
-		mySph_ADPPi =  new Sphere((float)getDim()/2,Sphere.GENERATE_NORMALS, 20,sphA_ADPPi);
-		mySph_ADP =  new Sphere((float)getDim()/2,Sphere.GENERATE_NORMALS, 20,sphA_ADP);
-		sphT3D = new Transform3D();
-		sphT3D.setRotation(mxToX);
-		sphT3D.setScale(scaleV3d);
-		Pt3D cylCen = Pt3D.Add(end1,getDim()/2,uVec);
-		sphT3D.setTranslation(new Vector3d(cylCen.x,cylCen.y,cylCen.z));
-		sphTG = new TransformGroup(sphT3D);
-		sphTG.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		sphTG.addChild(mySph);
-		sphBG.addChild(sphTG);
-		G.addChild(sphBG);
-	}
-	
-	private void updateCylGraphics () {
-		sphBG.detach();
-		sphTG.removeAllChildren();
-		switch (nucleotideState) {
-		case NONE:
-			sphTG.addChild(mySph);
-			break;
-		case ATP:
-			sphTG.addChild(mySph_ATP);
-			break;
-		case ADPPi:
-			sphTG.addChild(mySph_ADPPi);
-			break;
-		case ADP:
-			sphTG.addChild(mySph_ADP);
-			break;
-		}
-		
-		G.addChild(sphBG);
-	}
-	
-	public void makeGraphics () {
-		if (!graphicsInitialized) {
-			// cyl appearance
-			int transMode = TransparencyAttributes.NONE; 
-			sphM = new Material(ambientC,emissiveC,diffuseC,specularC,shiny);
-			sphA = new Appearance();
-			TransparencyAttributes tA = new TransparencyAttributes ();
-			tA.setTransparency(1.0f);
-			tA.setTransparencyMode(transMode);
-			//cylA.setTransparencyAttributes(tA);
-			sphA.setMaterial(sphM);
-			
-			sphM_ATP = new Material(ambientC,emissiveC,diffuseC_ATP,specularC,shiny);
-			sphA_ATP = new Appearance();
-			sphA_ATP.setMaterial(sphM_ATP);
-			
-			sphM_ADPPi = new Material(ambientC,emissiveC,diffuseC_ADPPi,specularC,shiny);
-			sphA_ADPPi = new Appearance();
-			sphA_ADPPi.setMaterial(sphM_ADPPi);
-			
-			sphM_ADP = new Material(ambientC,emissiveC,diffuseC_ADP,specularC,shiny);
-			sphA_ADP = new Appearance();
-			sphA_ADP.setMaterial(sphM_ADP);
-			
-			graphicsInitialized = true;
-		}
-		
-		setGraphicsCapabilities();
-		
-		makeNewSpheres(); 
-
-		graphicsMade = true;
-	}
-	
-	
-	public void updateGraphics () {
-		coord.copyToVector3d(coordVec3d);
-		
-		sphT3D.setRotation(mxToX);
-		sphT3D.setScale(scaleV3d);
-		sphT3D.setTranslation(coordVec3d);
-		sphTG.setTransform(sphT3D);
-		
-		if (graphicsUpdate) {
-			updateCylGraphics();
-			graphicsUpdate = false;
-		}
-		
-	}
-	
 	public static synchronized void cleanupMyoMotors () {
 		MyoMotor curM;
 		for (int i=0;i<motorCt;i++) {
@@ -571,7 +428,6 @@ public class MyoMotor extends Thing {
 	}
 	
 	public void remove() {
-		G.detach();
 		removeMe = true;
 		sepaku();
 	}

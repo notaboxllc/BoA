@@ -16,15 +16,8 @@ import javax.swing.*;
 import java.lang.Math.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-
 import ec.util.MersenneTwisterFast;
 import edu.cornell.lassp.houle.RngPack.RanMT;
-
-import javax.media.j3d.*;
-import javax.vecmath.*;
 
 public class ActA {
 	static final int maxActAs = 20000;
@@ -59,13 +52,6 @@ public class ActA {
 	static ActAThreads actAThreads = new ActAThreads();
 	//MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
 	
-	// for Java3D
-	Point3d bugPt = new Point3d();
-	Point3d filPt = new Point3d();
-	BranchGroup G = new BranchGroup();
-	LineArray linkLine;
-	Shape3D linkShape;
-	boolean graphicsMade = false;
 	
 	public ActA (Pt3D ptOnBug, Bug bug) {  
 		myBug = bug;
@@ -141,9 +127,6 @@ public class ActA {
 		linkVec = null;
 		forceVec = null;
 		R = null;
-		G = null;
-		linkLine = null;
-		linkShape = null;
 	}
 	
 	public void step () {
@@ -376,8 +359,7 @@ public class ActA {
 	}
 	
 	
-	synchronized static void removeActA (ActA rmMe) { 
-		if (rmMe.graphicsMade) { rmMe.G.detach(); }
+	synchronized static void removeActA (ActA rmMe) {
 		int swapId = rmMe.myActAID;				// here we swap from end of list to keep a compact array of FilLinks
 		theActAs[swapId] = theActAs[actACt-1];
 		theActAs[swapId].myActAID = swapId;
@@ -387,7 +369,6 @@ public class ActA {
 	
 	public static void removeAll () {
 		for (int i=0;i<actACt;i++) {
-			if (theActAs[i].graphicsMade) { theActAs[i].G.detach(); }
 			theActAs[i].sepaku();
 		}
 		actACt = 0;
@@ -424,53 +405,6 @@ public class ActA {
 		}	
 	}
 	
-	public void makeGraphics () {
-		// capabilities for graphics objects
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		
-		Color3f actAColor = new Color3f(0.0f,1.0f,0.0f);
-		ColoringAttributes cA = new ColoringAttributes(actAColor, ColoringAttributes.FASTEST);
-		Appearance actAApp = new Appearance();
-		actAApp.setColoringAttributes(cA);
-		//LineAttributes la = new LineAttributes();
-		//la.setLineWidth(3);
-		//actAApp.setLineAttributes(la);
-		
-		// line array
-		linkLine = new LineArray(2,LineArray.COORDINATES);
-		linkLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		linkLine.setCoordinate(0,new Point3d(ptOnBugInX.x,ptOnBugInX.y,ptOnBugInX.z));
-		linkLine.setCoordinate(1,new Point3d(ptOnFilInX.x,ptOnFilInX.y,ptOnFilInX.z));
-		linkShape = new Shape3D();
-		linkShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		linkShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		linkShape.setGeometry(linkLine);
-		linkShape.setAppearance(actAApp);
-		
-		G.addChild(linkShape);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		if (!ptsUpdated) { updatePtOnBugInX(); }
-		bugPt.set(ptOnBugInX.x,ptOnBugInX.y,ptOnBugInX.z);
-		if (!bound) {
-			ptOnFilInX.randomUnitVec(Env.mtRNG);
-			ptOnFilInX.scale(restLength);
-			ptOnFilInX.add(ptOnBugInX);
-		}
-		filPt.set(ptOnFilInX.x,ptOnFilInX.y,ptOnFilInX.z);
-		linkLine.setCoordinate(0,bugPt);
-		linkLine.setCoordinate(1,filPt);
-		linkShape.setGeometry(linkLine);
-		
-	}
-	
-	public Node getGraphicsNode () {
-		if (!graphicsMade) { makeGraphics();}
-		updateGraphics();
-		return G;
-	}
 	
 	public String getJSonString () {
 		/* Format for ActA JSON Serialization for Simularium

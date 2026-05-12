@@ -109,12 +109,9 @@ public class BoxOfActin {
 				talkln (" -help: print this message");
 				talkln (" -r  : run the code 'remotely', without any graphics output");
 				talkln (" -pf -paramfile -paramFile (file) : load parameter values from specified file");
-				talkln (" -ic -initial condition (file) : load initial condition from specified qk file");
-				talkln (" -o -out (directory) : create specified directory... all log, histogram, and qk files will be saved there");
-				talkln (" -outMade (directory) : same as -out except main directory already made... all log, histogram, and qk files will be saved there");
+				talkln (" -o -out (directory) : create specified directory... all log, histogram, and log files will be saved there");
+				talkln (" -outMade (directory) : same as -out except main directory already made... all log, histogram, and log files will be saved there");
 				talkln (" -lf -logfile -logFile (directory) : create specified directory and save all output files to there");
-				talkln (" -qk (directory) : create specified directory and save qk files there.. allows rendering of simulation");
-				talkln (" -qkN (int) : number of integration steps between qk file saves... default (" + String.valueOf(Env.toQKFileInterval) + ")");
 				talkln (" -biochem : run the simulation without any collisions, forces, or brownian motion");
 				talkln (" -3js (directory) : write Three.js per-frame JSON files to the specified directory (auto-increments .001 suffix if exists)");
 				talkln (" -oc : ordered filaments (in a biochem only run) are centered");

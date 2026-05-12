@@ -15,16 +15,8 @@ import javax.swing.*;
 import java.lang.Math.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-import com.sun.j3d.utils.geometry.Cylinder;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-
 import ec.util.MersenneTwisterFast;
 import edu.cornell.lassp.houle.RngPack.RanMT;
-
-
-import javax.media.j3d.*;
-import javax.vecmath.*;
 
 public class FilLink {
 	static final int maxFilLinks = 100000;
@@ -57,20 +49,8 @@ public class FilLink {
 	static XLinkThreads xLinkThreads = new XLinkThreads();
 	//MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
 	
-	// for Java3D
 	boolean farAway = false;
-	//static Pt3D farPt = new Pt3D(1e6,1e6,1e6);
 	static Pt3D farPt = new Pt3D();
-	BranchGroup G = new BranchGroup();
-	LineArray linkLine;
-	Shape3D linkShape;
-	boolean graphicsMade = false;
-	
-	public FilLink (Pt3D pt1, Pt3D pt2) {  // instantiate from QK file
-		this.pt1.copy(pt1);
-		this.pt2.copy(pt2);
-		addFilLink(this);
-	}
 	
 	public FilLink (FilSegment fil1, double loc1, FilSegment fil2, double loc2) {
 		set(fil1,loc1,fil2,loc2);
@@ -144,9 +124,6 @@ public class FilLink {
 		strainTrack = null;
 		linkVec = null;
 		torsionVec = null;
-		G = null;
-		linkLine = null;
-		linkShape = null;
 	}
 	
 	synchronized static void makeLink (FilSegment fil1, double loc1, FilSegment fil2, double loc2) {
@@ -394,8 +371,7 @@ public class FilLink {
 		filLinkCt_inactive++;
 	}
 	
-	synchronized static void removeFilLink (FilLink rmMe) { 
-		if (rmMe.graphicsMade) { rmMe.G.detach(); }
+	synchronized static void removeFilLink (FilLink rmMe) {
 		int swapId = rmMe.filLinkNum;				// here we swap from end of list to keep a compact array of FilLinks
 		filLinks[swapId] = filLinks[filLinkCt-1];
 		filLinks[swapId].filLinkNum = swapId;
@@ -418,7 +394,6 @@ public class FilLink {
 			try {
 				if (!filLinks[i].active) {
 				addInactive(filLinks[i]);
-				//if (!Env.remote) { filLinks[i].updateGraphics(); }
 				}	
 			}
 			catch (NullPointerException npe)
@@ -435,16 +410,6 @@ public class FilLink {
 		filLinkCt_inactive = 0; // let's start with clean slate... been some linker weirdness after restart
 	}
 		
-	public void setPtsFromQKFile (Pt3D newPt1, Pt3D newPt2) {
-		if (newPt1 != null & newPt2 != null) {
-			pt1.copy(newPt1);
-			pt2.copy(newPt2);
-		} else {
-			pt1.copy(Env.farfarAway);
-			pt2.copy(Env.farfarAway);
-		}
-	}
-	
 	public static void pointAndLineIntersectTest (Pt3D point, Pt3D ptA, Pt3D ptB, RetObj retO) {
 		// Point and Line Segment Intersection test... 
 		// see derivation of the following formulae in work book... uses dot product as zero to enforce
@@ -468,50 +433,6 @@ public class FilLink {
 		}	
 	}
 	
-	public void makeGraphics () {
-		// capabilities for graphics objects
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		
-		Color3f linkColor = new Color3f(1.0f,1.0f,1.0f);
-		ColoringAttributes cA = new ColoringAttributes(linkColor, ColoringAttributes.FASTEST);
-		Appearance linkApp = new Appearance();
-		linkApp.setColoringAttributes(cA);
-		
-		// line array
-		linkLine = new LineArray(2,LineArray.COORDINATES);
-		linkLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		linkLine.setCoordinate(0,new Point3d(pt1.x,pt1.y,pt1.z));
-		linkLine.setCoordinate(1,new Point3d(pt2.x,pt2.y,pt2.z));
-		linkShape = new Shape3D();
-		linkShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		linkShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		linkShape.setGeometry(linkLine);
-		linkShape.setAppearance(linkApp);
-		
-		G.addChild(linkShape);
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		if (active) {
-			linkLine.setCoordinate(0,pt1);
-			linkLine.setCoordinate(1,pt2);
-			linkShape.setGeometry(linkLine);
-			farAway = false;
-		} else {
-			if (farAway) { return; }
-			linkLine.setCoordinate(0,farPt);
-			linkLine.setCoordinate(1,farPt);
-			linkShape.setGeometry(linkLine);
-			farAway = true;
-		}
-	}
-	
-	public Node getGraphicsNode () {
-		if (!graphicsMade) { makeGraphics();}
-		updateGraphics();
-		return G;
-	}
 	
 	public String getJSonString () {
 		/* Format for ActA JSON Serialization for Simularium

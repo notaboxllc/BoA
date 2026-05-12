@@ -283,15 +283,11 @@ public class Monomer {
 
 	public void updateGraphics (FilSegment myFil, Pt3D start, Pt3D stop, boolean endCap) {}
 
-	public void setFromQKInfo (Pt3D loc, int state, double monRot, boolean cofilinIsOn) {}
-
 	public void setToFarAway () {}
 
 	public void updatePosition (Pt3D loc) {}
 
 	public void addGraphics (FilSegment fil) {}
-
-	public void detachGraphics () {}
 
 	public void sepaku () {
 		removeMe = true;
@@ -301,7 +297,6 @@ public class Monomer {
 	
 	public static void removeAll() {
 		for (int i=0;i<monCt;i++) {
-			theMonomers[i].detachGraphics();
 			theMonomers[i].sepaku();
 		}
 	}

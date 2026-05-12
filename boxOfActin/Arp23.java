@@ -18,14 +18,7 @@ import boxOfActin.FilLink.RetObj;
 import boxOfActin.FilLink.XLinkThreads;
 import ec.util.MersenneTwisterFast;
 
-import com.sun.j3d.utils.geometry.Primitive;
-import com.sun.j3d.utils.geometry.Sphere;
-import com.sun.j3d.utils.universe.*;
-
 import edu.cornell.lassp.houle.RngPack.RanMT;
-
-import javax.media.j3d.*;
-import javax.vecmath.*;
 
 public class Arp23 {
 	static final int maxArp23s = 10000;
@@ -59,24 +52,9 @@ public class Arp23 {
 	// multithreading
 	static Arp23Threads arp23Threads = new Arp23Threads();
 	
-	// for Java3D
 	boolean farAway = false;
-	//static Pt3D farPt = new Pt3D(1e6,1e6,1e6);
 	static Pt3D farPt = new Pt3D();
-	BranchGroup G = new BranchGroup();
-	TransformGroup g3d = new TransformGroup();
-	Transform3D t3d = new Transform3D();
-	Appearance a = new Appearance();
-	Vector3d coordVec3d = new Vector3d();
-	LineArray linkLine;
-	Shape3D linkShape;
-	boolean graphicsMade = false;
 	static boolean showArpLink = false;
-	
-	public Arp23 (Pt3D pt1, Pt3D pt2) {  // instantiate from QK file
-		this.momPt.copy(pt1);
-		addArp23(this);
-	}
 	
 	public Arp23 (FilSegment momFil, double momLoc, FilSegment daughterFil) {
 		set(momFil,momLoc,daughterFil);
@@ -148,9 +126,6 @@ public class Arp23 {
 		torqueMag = null;
 		displacementVec = null;
 		torsionVec = null;
-		G = null;
-		linkLine = null;   
-		linkShape = null;
 	}
 	
 	synchronized static Arp23 newArpBranch (FilSegment mFil, double mLoc, FilSegment dFil) {	
@@ -299,7 +274,6 @@ public class Arp23 {
 			try {
 				if (!theArp23s[i].active) {
 					theArp23s[i].cleanUpPointers();
-					theArp23s[i].removeGraphics();
 					addInactive(theArp23s[i]);
 				}	
 			}
@@ -307,10 +281,6 @@ public class Arp23 {
 			{ System.out.println("null pointer exception in Arp23.setInactiveArp23s!");}
 		}
 	}		
-	
-	public void removeGraphics () {
-		G.detach();
-	}
 	
 	public void cleanUpPointers() {
 		try {
@@ -334,97 +304,6 @@ public class Arp23 {
 		arp23Ct_inactive = 0; // try.. why are links working every other restart only
 	}
 		
-	public void setPtsFromQKFile (Pt3D newPt1, Pt3D newPt2) {
-		if (newPt1 != null & newPt2 != null) {
-			momPt.copy(newPt1);
-		} else {
-			momPt.copy(Env.farfarAway);
-		}
-	}  
-	
-	public void setGraphicsCapabilities () {
-		g3d.setCapability(TransformGroup.ALLOW_TRANSFORM_WRITE);
-		g3d.setCapability(TransformGroup.ALLOW_TRANSFORM_READ);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_EXTEND);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_WRITE);
-		g3d.setCapability(TransformGroup.ALLOW_CHILDREN_READ);
-		
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_EXTEND);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_WRITE);
-		G.setCapability(TransformGroup.ALLOW_CHILDREN_READ);
-		
-		a.setCapability(Appearance.ALLOW_LINE_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_COLORING_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_POLYGON_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_TRANSPARENCY_ATTRIBUTES_WRITE);
-		a.setCapability(Appearance.ALLOW_MATERIAL_WRITE);
-	}
-	
-	public void makeGraphics () {
-		setGraphicsCapabilities();
-		// for testing... dot showing relaxed location of daughterfil tip
-		Color3f dotColor = new Color3f(Color.WHITE);
-		Material m = new Material (dotColor,dotColor,dotColor,dotColor,128f);
-		a.setMaterial(m);
-		Sphere dotSphere = new Sphere(0.004f,Sphere.GENERATE_NORMALS, Env.nodeTessalation, a);
-		dotSphere.setCapability(Sphere.ALLOW_BOUNDS_READ);
-		dotSphere.setCapability(Sphere.ALLOW_BOUNDS_WRITE);
-		// capabilities for graphics objects
-		G.setCapability(BranchGroup.ALLOW_DETACH);
-		
-		Color3f linkColor = new Color3f(1.0f,1.0f,1.0f);
-		ColoringAttributes cA = new ColoringAttributes(linkColor, ColoringAttributes.FASTEST);
-		Appearance linkApp = new Appearance();
-		linkApp.setColoringAttributes(cA);
-		
-		// line array
-		linkLine = new LineArray(2,LineArray.COORDINATES);
-		linkLine.setCapability(LineArray.ALLOW_COORDINATE_WRITE);
-		try {
-			linkLine.setCoordinate(0,momPt);
-			linkLine.setCoordinate(1,daughterFil.end1);
-		} catch (NullPointerException npe) { System.out.println ("null pointer exception in Arp23.makeGraphics");}
-		linkShape = new Shape3D();
-		linkShape.setCapability(Shape3D.ALLOW_APPEARANCE_WRITE);
-		linkShape.setCapability(Shape3D.ALLOW_GEOMETRY_WRITE);
-		linkShape.setGeometry(linkLine);
-		linkShape.setAppearance(linkApp);
-		
-		if (showArpLink) { 
-			G.addChild(linkShape);
-			g3d.addChild(dotSphere);
-			g3d.setTransform(t3d);
-			G.addChild(g3d);
-		}
-	
-		graphicsMade = true;
-	}
-	
-	public void updateGraphics () {
-		if (!showArpLink) { return; }	
-		curDTipLoc.copyToVector3d(coordVec3d);
-		t3d.setTranslation(coordVec3d);
-		g3d.setTransform(t3d);	
-		if (active) {
-			linkLine.setCoordinate(0,momPt);
-			linkLine.setCoordinate(1,daughterFil.end1);
-			linkShape.setGeometry(linkLine);
-			farAway = false;
-		} else {
-			if (farAway) { return; }
-			linkLine.setCoordinate(0,farPt);
-			linkLine.setCoordinate(1,farPt);
-			linkShape.setGeometry(linkLine);
-			farAway = true;
-		}
-	}
-	
-	public Node getGraphicsNode () {
-		if (!graphicsMade) { makeGraphics();}
-		updateGraphics();
-		return G;
-	}
 	
 	public static int getNumberActiveArps () {
 		int activeArpCt = 0;
