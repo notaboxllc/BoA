@@ -6,42 +6,77 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BoxOfActin** — a Java biophysics simulation of actin filament network dynamics in cells. Simulates filaments, myosin motors, crosslinkers, Arp2/3-branched networks, membrane nodes, and Listeria motility using overdamped Langevin dynamics with Brownian motion.
 
+As of Phase 4 (commit `dd4314f`), Java3D has been fully removed from the codebase. The simulation no longer requires `vecmath.jar`, `j3dcore.jar`, `j3dutils.jar`, or `jogamp-fat.jar` on the classpath. Visualization is now handled out-of-process by a Three.js browser viewer fed by per-frame JSON files written from the simulation (`ThreeJSWriter`).
+
 ## Build and Run
 
-Java3D has been fully removed from BoA (Session 8, 2026-05-11). BoA no longer requires the `/Library/JOGLAndj3D/` jars. Two build paths are available on the MBP:
+### Build (current, post-Phase 4)
 
-**BoA on MBP — Java 8 build (legacy, retained because other projects on this machine still use Java 8 + Java3D):**
-```
-javac -cp . boxOfActin/*.java
-```
-The Eclipse builder handles incremental compilation. Note: the `.classpath` file still lists the J3D jars (Eclipse project artifact — BoA no longer uses them, but removing them from `.classpath` is optional future cleanup).
+The codebase compiles with stock Java — no Java3D, no JOGLAndj3D classpath. Source lives in the default package (top-level `BoxOfActin.java`) and the `boxOfActin/` subpackage, plus bundled libraries in `ec/util/`, `edu/cornell/lassp/houle/RngPack/`, and `infoCCD/`.
 
-**BoA on MBP — Java 21 build (post-Java3D-removal, for TornadoVM prep):**
 ```
-$(/usr/libexec/java_home -v 21)/bin/javac --enable-preview --release 21 -cp "." boxOfActin/*.java *.java
-```
-Requires `brew install openjdk@21` first (Java 21 was not yet installed on this MBP as of Session 8).
-
-**BoA on MBP — Java 21 run:**
-```
-$(/usr/libexec/java_home -v 21)/bin/java --enable-preview -Xmx800M -cp "." BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/boa_test1
+javac -XDignore.symbol.file boxOfActin/*.java *.java
 ```
 
-**BoA headless run (Java 8, confirmed working after Session 8):**
+`-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries.
+
+### Build (post-Phase 5, once Java 21 is installed)
+
 ```
-java -Xmx800M -cp . BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js myOutputDir
-java -Xmx800M -cp . BoxOfActin -help                # full option list
+javac --release 21 --enable-preview -XDignore.symbol.file boxOfActin/*.java *.java
 ```
 
-Note: `-ic` (resume from QK state), `-qk`, `-qkN`, `-vf` flags have been removed (QK serialization code deleted in Session 7). The `-o` flag remains for output directory but no longer creates QK subdirectories.
+Phase 5 has not yet been performed. The MBP needs `brew install openjdk@21` before this command will work. Once Java 21 is installed and the codebase is validated under it, this becomes the canonical build command and `--enable-preview` is required for TornadoVM compatibility (TornadoVM's `FloatArray` is a Java 21 preview feature).
+
+### Run
+
+```
+java -Xmx800M BoxOfActin
+java -Xmx800M BoxOfActin -r                                  # headless / no graphics
+java -Xmx800M BoxOfActin -pf ParameterFiles/boa10-64Seg      # load parameter file
+java -Xmx800M BoxOfActin -o myOutputDir                      # save logs and source
+java -Xmx800M BoxOfActin -3js myThreeJSDir                   # write Three.js JSON frames
+java -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/run1
+java -Xmx800M BoxOfActin -help                               # full option list
+```
+
+The full command-line option list, as of Phase 3:
+
+| flag | effect |
+|---|---|
+| `-r` | run remotely / headless, no graphics output (no longer means anything in practice — there is no GUI mode — but the flag is retained because it gates some bookkeeping) |
+| `-pf <file>` (also `-paramfile`, `-paramFile`) | load parameter values from file |
+| `-o <dir>` (also `-out`, `-outfile`) | create output directory, save logs and copy of source |
+| `-outMade <dir>` | like `-out` but assumes directory already exists |
+| `-lf <dir>` (also `-logfile`, `-logFile`) | save log files to this directory |
+| `-biochem` | run without collisions, forces, or Brownian motion |
+| `-3js <dir>` | write Three.js per-frame JSON files; directory auto-increments `.001` suffix if it exists |
+| `-oc` | ordered filaments (in a biochem-only run) are centered |
+
+The QK (quickstate) save/resume flags (`-qk`, `-qkN`, `-ic`) were removed in Phase 3 along with the QK serialization code in `FileOps.java`.
+
+### Viewing Three.js output
+
+In the directory containing the `-3js` output folder:
+
+```
+python3 sim_server.py 8000
+```
+
+Then open `http://localhost:8000/sim_viewer_boa.html`. The viewer auto-discovers run directories via `/api/simulations`.
 
 ## Architecture
 
+### Entry point
+
+There is a top-level `BoxOfActin.java` (default package) and a `boxOfActin.BoxOfActin` class. The default-package version is the entry point; its `main()` calls `boxOfActin.BoxOfActin.begin(args)`. The `main()` inside `boxOfActin.BoxOfActin` is currently commented out. This is brittle and worth tidying eventually, but it works.
+
 ### Core simulation classes
 
-- **`boxOfActin/BoxOfActin.java`** — entry point (`begin()`), main simulation loop (`doLoop()`), and per-timestep orchestration. One `TimeLoop` thread drives everything.
-- **`boxOfActin/Env.java`** — global singleton with all physical constants, simulation parameters (`Parameter` instances), thread counts, and timestep-phase integer constants (`meshFilsStart`, `stepStart`, etc.).
-- **`boxOfActin/Thing.java`** — abstract superclass for every simulated object. Holds position, orientation, forces/torques, drag/diffusion tensors, Java3D graphics nodes, and Brownian force calculation. All simulated objects live in the static `theThings[]` array.
+- **`boxOfActin/BoxOfActin.java`** — `begin()` parses args and sets up the simulation; `doLoop()` is the per-timestep orchestration. One `TimeLoop` thread drives everything. After Phase 3, this file no longer contains graphics orchestration, QK code, or the Swing timer.
+- **`boxOfActin/Env.java`** — global singleton with all physical constants, `Parameter` instances, thread counts, and timestep-phase integer constants (`meshFilsStart`, `stepStart`, etc.). Still has a few legacy graphics-flag fields (`paintOn`, `viewRotation`, etc.) that are harmless leftovers; they don't pull in Java3D.
+- **`boxOfActin/Thing.java`** — abstract superclass for every simulated object. Holds position, orientation, forces/torques, drag/diffusion tensors, and Brownian force calculation. All simulated objects live in the static `theThings[]` array. After Phase 1, this class has no Java3D fields. `drawYourself(Graphics, double, double[])` is an empty AWT-typed stub retained as the rendering hook for future use.
+- **`boxOfActin/Pt3D.java`** — 3D point / vector. After Phase 0, this is a standalone class with explicit `public double x, y, z;` fields and ~600 lines of pure-Java math (cross, dot, unit-vector, body-frame transforms via `Thing.transXTox` / `Thing.transxToX`, etc.). It is no longer `extends javax.vecmath.Point3d`.
 
 ### Simulated objects (all extend `Thing`)
 
@@ -64,7 +99,7 @@ Note: `-ic` (resume from QK state), `-qk`, `-qkN`, `-vf` flags have been removed
 
 ### Multithreading
 
-**`ThreadSet`** is the worker-pool abstraction. Each biological operation (mesh fill, collision detection, Brownian forces, crosslinks, `step()`, `moveThing()`, `biochemStep()`, etc.) has its own `ThreadSet` subclass. `BoxOfActin.doLoop()` calls `startAllThreadSets(phaseId)` / `waitOnAllThreadSets(phaseId)` pairs to fan out and collect work. The `phaseId` constants are defined in `Env` (e.g., `Env.stepStart`, `Env.stepStop`).
+**`ThreadSet`** is the worker-pool abstraction. Each biological operation (mesh fill, collision detection, Brownian forces, crosslinks, `step()`, `moveThing()`, `biochemStep()`, etc.) has its own `ThreadSet` subclass. `BoxOfActin.doLoop()` calls `startAllThreadSets(phaseId)` / `waitOnAllThreadSets(phaseId)` pairs to fan out and collect work. The `phaseId` constants are defined in `Env`.
 
 ### Simulation loop order (one timestep)
 
@@ -85,24 +120,31 @@ Note: `-ic` (resume from QK state), `-qk`, `-qkN`, `-vf` flags have been removed
 
 `Parameter` objects in `Env` represent all tuneable values. They carry a string label used for serialization, enabling save/load of parameter configurations via `FileOps.loadParamConfig()` / `FileOps.remoteParamConfigSave()`. Sample parameter files are in `ParameterFiles/`.
 
+Two-field model:
+- **isActive()** — whether the parameter is applied. If `false`, the value falls back to the Java default regardless of what's in the file.
+- **getValue()** — the actual value. For booleans, `1.0` = true, `0.0` = false.
+
+`bugOff` does NOT control bug creation — to suppress Listeria, set `simOutsideBug:false:0.0`.
+
 ### Output
 
 - **Log files** — time-series data written by `FileOps.writeToOutFile()`
-- **QK files** — binary quickstate snapshots (save/resume full simulation state)
-- **JSON output** — `FileOps.writeSimJSonsFrame()` for rendering/analysis
-- **Image capture** — `CapturingCanvas3D` grabs Java3D frames to disk
+- **Three.js JSON frames** — `ThreeJSWriter.writeFrame()` writes `frame_NNNNNN.json` files in a Three.js-renderable format. Includes `segments`, `myosins` (rod/lever/motor parts with nucleotide-state), and `minifilaments` arrays. Source code is zipped to `source.zip` in the output directory on first write.
+- **Simularium JSON** — `FileOps.writeSimJSonsFrame()` and `writeSimJSonsFrame2()` produce coarse/fine Simularium-format JSON for the Simularium Viewer (separate ecosystem from the Three.js viewer).
+- **QK files** — REMOVED in Phase 3. No longer supported.
+- **Image capture** — REMOVED. Was Java3D-dependent; replaced by Three.js viewer.
 
 ### Bundled libraries
 
 - `ec/util/` — `MersenneTwister` / `MersenneTwisterFast` PRNG
 - `edu/cornell/lassp/houle/RngPack/` — `RanMT` and related RNG classes
-- `infoCCD/` — GUI utilities (`InfoViewer`, `ParamLoader`, `Console`) for the parameter browser and help system
+- `infoCCD/` — `Info` and `ResourceGetter` (a small remnant; most of this package's GUI utilities were removed with Phase 4)
 
 ---
 
 ## GPU Acceleration Strategy
 
-Lessons from GPU experiments on Sim3D (see `~/Dropbox/CodeSync/Sim3D/GPU_STRATEGY.md`) combined with analysis of this codebase.
+Lessons from GPU experiments on Sim3D (see `~/Dropbox/CodeSync/Sim3D/GPU_STRATEGY.md`) combined with analysis of this codebase. Java3D removal (Sessions 3–8) cleared the Java 21 prerequisite for TornadoVM, so this plan is now executable as soon as Phase 5 validates.
 
 ### Lessons from Sim3D
 
@@ -203,24 +245,25 @@ For crosslinker, end-link, and torsion spring forces: implement ownership assign
 - `FIRST_EXECUTION` vs `EVERY_EXECUTION` transfer modes are the primary performance lever.
 - `invalidatePlan()` pattern: when topology changes (poly/depoly, crosslinker bind/unbind), close and rebuild the execution plan so `FIRST_EXECUTION` arrays get re-uploaded with fresh topology.
 
-### Java3D removal (prerequisite)
+### Phase 5 (Java 21) — the only remaining prerequisite
 
-BoA currently depends on Java3D for graphics. This must be removed (or fully isolated behind the `-r` headless flag) before TornadoVM can be integrated — TornadoVM requires Java 21 and Java3D does not support it. Follow the approach used in Sim3D: remove Java3D imports, replace graphics output with a JSON / Three.js rendering system. The `-r` flag already suppresses all graphics calls; the remaining blocker is that Java3D classes are referenced in field declarations (e.g., `BranchGroup G`, `TransformGroup g3d` in `Thing.java`) which prevent the JVM from loading even in headless mode.
+Java3D removal is complete (Sessions 3–8). The only remaining blocker to TornadoVM is `brew install openjdk@21` on the MBP, followed by a clean compile/run under Java 21 with `--enable-preview --release 21`. After that, GPU work can begin on aorus (Linux GPU machine with NVIDIA driver 595.58.03, CUDA 13.2, TornadoVM 4.0.1-dev PTX backend installed).
 
 ## Biological Context
 
 - **Actin filaments**: ~8 nm radius, modeled as rigid rods (FilSegment chains)
-- **Myosin II structure**: rod (~200nm) → lever/neck (~8nm) → motor head (~20nm).
-  Each Myosin object has MyoRod, MyoLever, MyoMotor sub-objects with end1/end2
-- **MyoMiniFilament**: bundles multiple Myosin dimers; its own end1/end2 spans
-  the full structure. Individual MyoRod objects inside have rodInvisible=true
+- **Myosin II structure**: rod (~200nm) → lever/neck (~8nm) → motor head (~20nm). Each Myosin object has MyoRod, MyoLever, MyoMotor sub-objects with end1/end2
+- **MyoMiniFilament**: bundles multiple Myosin dimers; its own end1/end2 spans the full structure. Individual MyoRod objects inside have `rodInvisible=true`
 - **Motor nucleotide cycle**: NONE→ATP(unbound)→ADPPi(cocked)→ADP(power stroke)→NONE
-- **Simulation modes** (set in parameter files via makeCrucible()):
-  - Box of actin: Chamber.makeABox(), no bug
-  - Pill-shaped arena: Bug.makeABugCrucible() as theBox
-  - Listeria motility: Chamber + Bug.makeListeriaBug() with ActA proteins
+- **Simulation modes** (set in parameter files via `makeCrucible()`):
+  - Box of actin: `Chamber.makeABox()`, no bug
+  - Pill-shaped arena: `Bug.makeABugCrucible()` as `theBox`
+  - Listeria motility: Chamber + `Bug.makeListeriaBug()` with ActA proteins
 
 ## Parameter File Format
-  paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
-  // If isActive=false, parameter falls back to Java default regardless of value
-  // bugOff does NOT control bug creation — use simOutsideBug:false:0.0
+
+```
+paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
+// If isActive=false, parameter falls back to Java default regardless of value
+// bugOff does NOT control bug creation — use simOutsideBug:false:0.0
+```
