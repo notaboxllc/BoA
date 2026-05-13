@@ -60,8 +60,12 @@ public class BoxOfActin {
 		
 	}
 	
+	// Entry point: the default-package BoxOfActin.java at the project root has the main() method;
+	// it parses no arguments itself and immediately calls this begin(args). Run with: java -Xmx800M BoxOfActin
 	public static void begin (String[] args) {
 		parseArgs(args);
+		System.err.println("[TELEPORT_DIAG] enabled=" + Env.myoMiniTeleportDiag
+    + " threshold=" + Env.myoMiniTeleportThreshold);
 		
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }
@@ -179,16 +183,6 @@ public class BoxOfActin {
 			}
 		}
 	}
-	
-	//
-	//  Main
-	//
-	/*public static void main( String[] args )
-	{
-		new BoxOfActin(args);
-		
-	}
-	*/
 	
 	static class TimeLoop extends Thread {
 	
