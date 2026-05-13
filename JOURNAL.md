@@ -294,6 +294,47 @@ Removal is: delete the two fields from `Env.java`, delete the `if (Env.myoMiniTe
 
 ---
 
+## Session 11 — Vestigial cleanup (May 2026)
+
+### Item G1: .class orphan deletions — COMPLETE
+
+**Commit:** `f609d40` "Session 11: commit Phase 4 .class orphan deletions"
+
+Verified all 23 pending .class deletions from `git status` had no corresponding .java file, then staged and committed them. All were compiled artifacts of the 21 source files deleted in Session 8 / Phase 4, plus two inner-class files (`RenderControl$1.class`, `RenderControl$RenderThread.class`).
+
+### Item G2: Strip vestigial graphics-bookkeeping fields — COMPLETE (with documented deferral)
+
+**Commit:** `2b4d74c` "Session 11: strip vestigial graphics-bookkeeping fields"
+
+Deleted all write-only graphics stub fields confirmed to have no readers, across four files:
+
+- **`FilSegment.java`**: `updateCylGraphicsFlag`, `coordLineLength`, `xLineEndPt`, `yLineEndPt`, `zLineEndPt`, `coordSysOn`, `plusCapMarkOn` — declarations removed, plus all write sites and null-assignments in `step()`, `resetGraphics()`, and `cleanUp()`.
+- **`StaticFilSegment.java`**: two `updateCylGraphicsFlag` write sites removed from `step()` and `biochemStep()` (field is inherited from `FilSegment`).
+- **`Chamber.java`**: four instance fields (`coordLineLength`, `xLineEndPt`, `yLineEndPt`, `zLineEndPt`) removed.
+- **`Monomer.java`**: `graphicsInitialized`, `cofilinMarkOn`, `tropoMarkOn`, `plusCapMarkOn` removed.
+
+Codebase compiled clean after all deletions.
+
+**Deferred — `renderThicken` / `setRenderThicken()` (Phase 6):** `renderThicken` is read inside `setRenderThicken()`, which is itself never called. Per task rules, a field that is read by dead code still counts as "read" and must be deferred. The whole method can be deleted in Phase 6 (delete the method, then the field becomes write-only and can go too).
+
+**Deferred — Chamber/Bug/Crucible static boolean graphics flags:** `shiny`, `bugInScene`, `coordSysInScene`, `appearanceChanged`, `useWireAppearance` appear as static declarations in `Chamber.java`, `Bug.java`, and `Crucible.java`. `Crucible.java:215` writes `appearanceChanged = true` in live code. None are ever read. Cleanup needs to span three files and should confirm the `Crucible` write is truly dead before deleting — out of scope for a quick tidying pass.
+
+### Item G3: main() entry point (Option A) — COMPLETE
+
+**Commit:** `0525ccf` "Session 11: consolidate main() entry point (Option A)"
+
+Deleted the 8-line commented-out `main()` block (plus the `// Main` heading comment) from `boxOfActin/BoxOfActin.java`. Added a two-line comment immediately above `begin()` documenting the entry point chain:
+
+```java
+// Entry point: the default-package BoxOfActin.java at the project root has the main() method;
+// it parses no arguments itself and immediately calls this begin(args). Run with: java -Xmx800M BoxOfActin
+public static void begin (String[] args) {
+```
+
+The top-level shim (`BoxOfActin.java`) and run command are unchanged.
+
+---
+
 ## Current Known Issues
 
 ### Phase 5 not yet started
@@ -306,17 +347,18 @@ Java 21 has not been installed on the MBP. `brew install openjdk@21` is the next
 
 After that, the path is open to TornadoVM integration on aorus (the GPU machine). The GPU plan in CLAUDE.md (preserved from earlier sessions) remains the authoritative roadmap: Step 0 SoA shadow arrays, Step 1 Brownian + integration kernel, Step 2 motor-filament search, Step 3 bounds + link + crosslink forces.
 
-### Vestigial graphics bookkeeping fields
+### Vestigial graphics bookkeeping fields (partial — residue after Session 11)
 
-Several simulation classes retain primitive-typed fields (`updateCylGraphicsFlag`, `coordLineLength`, `xLineEndPt`, etc.) that survived Phase 1 as harmless stubs. These don't break anything but are dead weight; cleanup is optional and low-priority.
+- `renderThicken` / `setRenderThicken()` in `FilSegment.java`: `renderThicken` is read inside the dead `setRenderThicken()` method, which is never called. Delete the method first, then the field becomes write-only and can be removed. Phase 6.
+- `Chamber.java`, `Bug.java`, `Crucible.java` static boolean graphics flags (`bugInScene`, `coordSysInScene`, `appearanceChanged`, `useWireAppearance`, `shiny`): write-only in Chamber and Bug; `Crucible.java:215` writes `appearanceChanged = true`. Needs multi-file pass. Phase 6.
 
-### `.class` files in working tree
+### main() — resolved
 
-`git status` shows pending deletions of compiled `.class` files corresponding to the source files deleted in Phase 4. These should be committed in a tidying pass — they're not affecting the simulation but they're untracked clutter.
+The commented-out `main()` in `boxOfActin.BoxOfActin` was deleted in Session 11 (Item G3). Entry chain is now documented with a comment above `begin()`.
 
-### main() commented out in boxOfActin.BoxOfActin
+### .class orphans — resolved
 
-`boxOfActin.BoxOfActin` has its `main()` commented out. Entry happens via the top-level (default-package) `BoxOfActin.java`, which calls `boxOfActin.BoxOfActin.begin(args)`. This works but is brittle — at some point it's worth choosing one entry point and deleting the other.
+Committed in Session 11 (Item G1).
 
 ---
 
