@@ -32,10 +32,6 @@ public class Chamber extends Crucible {
 	static boolean coordSysInScene = false;
 	static boolean appearanceChanged = false;
 	static boolean useWireAppearance = false;
-	double coordLineLength = 20*Env.actinMonoDiam;
-	Pt3D xLineEndPt = new Pt3D();
-	Pt3D yLineEndPt = new Pt3D();
-	Pt3D zLineEndPt = new Pt3D();
 	
 	
 	

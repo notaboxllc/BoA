@@ -21,8 +21,6 @@ public class StaticFilSegment extends FilSegment {
 		// increment counters that control how often different bits are run
 		collCheckCt++;
 		
-		if (Env.simulationTime < 0.01) updateCylGraphicsFlag = true;
-				
 		if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
 			end1TipC = end2TipC = 1e6;		// reset these to big numbers since we are about to check them again
 			
@@ -48,11 +46,10 @@ public class StaticFilSegment extends FilSegment {
 	
 	public void biochemStep () {
 		
-		if (monomerCt >= 2*staticFilSegLength) { 
+		if (monomerCt >= 2*staticFilSegLength) {
 			splitSegment();
 			calculateProperties();	// again if split
 			initialize();
-			updateCylGraphicsFlag = true;
 		}	
 		
 	}

@@ -169,15 +169,8 @@ public class FilSegment extends Thing {
 	double helixAng = 2*Math.PI*myPRNG.nextDouble();	// keeps track of the helix angle of minusMon.. starts randomly
 	int monomerCt = 0;
 
-	// graphics bookkeeping (primitives only; Java3D fields removed in Phase 1)
-	boolean updateCylGraphicsFlag = false;
+	// renderThicken: read by setRenderThicken() — dead call chain, defer to Phase 6
 	double renderThicken = Env.filRenderThicken.getValue();
-	double coordLineLength = 5*Env.actinMonoDiam;
-	Pt3D xLineEndPt = new Pt3D();
-	Pt3D yLineEndPt = new Pt3D();
-	Pt3D zLineEndPt = new Pt3D();
-	boolean coordSysOn = false;
-	boolean plusCapMarkOn = false;
 
 	public FilSegment (Pt3D initCoord, Pt3D initUVec, int filID) {
 		super(initCoord);
@@ -306,9 +299,6 @@ public class FilSegment extends Thing {
 		coordMonCenter = null;
 		curMonStart = null;
 		curMonStop = null;
-		xLineEndPt = null;
-		yLineEndPt = null;
-		zLineEndPt = null;
 	}
 	
 	public static void setBiophysValues () {
@@ -407,8 +397,6 @@ public class FilSegment extends Thing {
 		// increment counters that control how often different bits are run
 		collCheckCt++;
 		
-		if (Env.simulationTime < 0.01) updateCylGraphicsFlag = true; // ? investigate better way here
-				
 		/*if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
 			checkBugOrBoxCollision(); 		// these should add forces and torques to forceSum and torqueSum
 			if (Env.simulationTime < 0.001) { checkForminBinding(); }
@@ -445,16 +433,14 @@ public class FilSegment extends Thing {
 		if (lengthChanged) {
 			calculateProperties(); 	// calculate new drag coefficients, etc if length has changed
 			initialize();			// calculate transformation matrices, etc given the new coordinates
-			updateCylGraphicsFlag = true;
 		}
-		
-		
-		if (monomerCt >= 2*Env.stdSegLength.getIntValue()) { 
+
+
+		if (monomerCt >= 2*Env.stdSegLength.getIntValue()) {
 			splitSegment(this);
 			calculateProperties();	// again if split
 			initialize();
-			updateCylGraphicsFlag = true;
-		}	
+		}
 		
 		//*** joining broken with branched networks right now, but who really needs it anyway
 		/*if (monomerCt <= Env.stdSegLength.getIntValue()/2) {
@@ -3322,7 +3308,6 @@ public class FilSegment extends Thing {
 				curMon = curMon.frontMon;
 			}
 		}
-		updateCylGraphicsFlag = true;
 		updateGraphics();
 			
 	}
@@ -3448,7 +3433,6 @@ public class FilSegment extends Thing {
 	public void setRenderThicken () {
 		if (renderThicken != Env.filRenderThicken.getValue()) {
 			renderThicken = Env.filRenderThicken.getValue();
-			updateCylGraphicsFlag = true;
 		}
 	}
 

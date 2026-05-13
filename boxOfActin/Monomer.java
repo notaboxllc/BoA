@@ -27,10 +27,6 @@ public class Monomer {
 	int nucleotideState = ATPstate;
 	boolean removeMe = false;
 	
-	boolean graphicsInitialized = false;
-	boolean cofilinMarkOn = false; // for graphics only
-	boolean tropoMarkOn	= false; 	// for graphics only
-	boolean plusCapMarkOn = false;  // for graphics bookkeeping only
 	boolean isArp = false;  // special flag for denoting first two monomers in Arp2/3 bound filament as ARPs
 	double xRotAng = 0;
 	static double xRotAngInc = 0.7*Env.helixAngInc;
