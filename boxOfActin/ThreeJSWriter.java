@@ -72,7 +72,8 @@ public class ThreeJSWriter {
                 FilSegment fs = FilSegment.theFilSegments[i];
                 if (fs == null || fs.removeMe) continue;
                 if (!first) pw.print(",");
-                pw.printf("{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035}",
+                pw.printf("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035}",
+                        fs.thingInstanceId,
                         fs.end1.x, fs.end1.y, fs.end1.z,
                         fs.end2.x, fs.end2.y, fs.end2.z);
                 first = false;
@@ -84,7 +85,8 @@ public class ThreeJSWriter {
                 Myosin m = Myosin.theMyosins[i];
                 if (m == null || m.removeMe) continue;
                 if (!firstMyo) pw.print(",");
-                pw.printf("{\"rod\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
+                pw.printf("{\"id\":%d,\"rod\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
+						m.myoMotor.thingInstanceId,  // motor's stable ID; carries the biologically interesting state
                         m.myoRod.end1.x, m.myoRod.end1.y, m.myoRod.end1.z,
                         m.myoRod.end2.x, m.myoRod.end2.y, m.myoRod.end2.z,
                         MyoRod.radius, m.myoRod.rodInvisible);
@@ -103,7 +105,8 @@ public class ThreeJSWriter {
                 MyoMiniFilament mf = MyoMiniFilament.myoMiniFils[i];
                 if (mf == null || mf.removeMe) continue;
                 if (!firstMiniFil) pw.print(",");
-                pw.printf("{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                pw.printf("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                        mf.thingInstanceId,
                         mf.end1.x, mf.end1.y, mf.end1.z,
                         mf.end2.x, mf.end2.y, mf.end2.z,
                         MyoMiniFilament.radius);

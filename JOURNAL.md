@@ -187,6 +187,113 @@ The Phase 4 commit message notes: **"Java3D removal complete; Phase 5 (Java 21) 
 
 ---
 
+## Session 10 — Stable Thing IDs and identity-keyed viewer rendering (May 2026)
+
+### Diagnosis (from Session 9 TELEPORT_DIAG + temporary [MINI_LIFE] prints)
+
+With `Env.myoMiniTeleportDiag = true`, the instrumentation showed no large displacements in `moveThing()` — so the apparent "teleports" in the viewer were not a physics bug. Temporary `[MINI_LIFE]` prints in `MyoMiniFilament.cleanUpMyoMinis()` and `makeRandomMyoMiniFil()` confirmed the cause: a minifilament died (via `cleanUp`) and a new one spawned in the same timestep. The viewer, keying its InstancedMesh slots by array position, displayed the new object's position through the old object's cylinder — producing the apparent teleport. The fix is not physics; it is viewer aliasing.
+
+This aliasing is latent in every renderable Thing subclass. Minifilaments exposed it because their lifetime (`myoMiniLifetime`, default 10 s) is short enough to produce frequent death/spawn events during a typical run. The connector classes (FilLink, NodeLink, Arp23, ActA — not Thing subclasses) have analogous cleanup patterns and may show similar viewer artifacts if they are ever rendered; left for future work.
+
+### Fix
+
+**`boxOfActin/Thing.java`** — Added a class-level monotonic counter and a `public final int thingInstanceId` assigned once in the `Thing` constructor before `addThing(this)`. The counter is private and static. `myThingNumber` (array-position index used by the swap-and-decrement cleanup pattern) is unchanged.
+
+**`boxOfActin/ThreeJSWriter.java`** — Every entity JSON object now carries `"id"` as its first field:
+- Segments: `fs.thingInstanceId`
+- Myosins: `m.myoRod.thingInstanceId` — `Myosin` is not a `Thing` subclass, so the rod's stable ID is the canonical identifier for the rod/lever/motor composite. Each `MyoRod`, `MyoLever`, and `MyoMotor` are `Thing` subclasses.
+- Minifilaments: `mf.thingInstanceId`
+
+**`sim_viewer_boa.html`** — Converted from array-position–keyed to `id`-keyed instance management. Eight `Map` objects added at module scope:
+
+```javascript
+segIdToSlot, segSlotToId        // FilSegment
+myoIdToSlot, myoSlotToId        // Myosin lever+motor (lever = canonical slot)
+rodIdToSlot, rodSlotToId        // Myosin rod (separate: rod can be invisible)
+miniIdToSlot, miniSlotToId      // MyoMiniFilament
+```
+
+All maps are rebuilt from scratch each frame (sequential slot assignment = compact packing). For each entity type:
+- `applyFrameData` / `updateMyosinData` clear and repopulate all maps from the incoming JSON.
+- Forward maps (`idToSlot`): populated for future "find slot by stable ID" use.
+- Reverse maps (`slotToId`): the **picking attachment point** — when a future WebSocket-based click-to-inspect feature does `intersection.instanceId` via THREE.js raycasting, it will call `segSlotToId.get(instanceId)` (or the appropriate mesh's reverse map) to resolve the stable `thingInstanceId` and send it over the socket.
+
+**`boxOfActin/MyoMiniFilament.java`** — Removed the temporary `[MINI_LIFE]` debug prints from `cleanUpMyoMinis()` and `makeRandomMyoMiniFil()` that were added during Session 9 diagnosis.
+
+**`boxOfActin/Env.java`** — Flipped `myoMiniTeleportDiag` back to `false` (it was left `true` from the debug session). The field and threshold remain in place for future use; see Session 9 for the `TELEPORT_DIAG` grep/removal instructions.
+
+### Foundation for planned click-to-inspect
+
+`thingInstanceId` is the wire-level identifier for the future WebSocket click-to-inspect protocol:
+
+1. User clicks a rendered object in the viewer.
+2. THREE.js raycasting returns `intersection.instanceId` (a slot index).
+3. Viewer resolves to stable ID: e.g., `miniSlotToId.get(intersection.instanceId)`.
+4. Viewer sends `{"action": "inspect", "id": <stableId>}` over WebSocket.
+5. Simulation looks up the live object by ID and returns its state.
+6. If the object has since died, the lookup returns null and the viewer is told gracefully.
+
+No WebSocket plumbing was added in this session. The Java side would also need a `Thing.findByInstanceId(int)` lookup (a static `HashMap<Integer,Thing>` or a linear scan) — that too is future work. This session only establishes the stable ID and the viewer-side identity structure.
+
+### Connector classes (FilLink, NodeLink, Arp23, ActA)
+
+These are not `Thing` subclasses and were not touched. Their cleanup methods (`setInactiveFilLinks`, `setInactiveNodeLinks`, `setInactiveArp23s`, `cleanUpActAs`) use similar swap-with-last patterns. If these classes are ever rendered, the same aliasing problem will appear and the same fix applies. Not rendered currently, so no action taken.
+
+Post-Session 10 correction: the myosin composite ID was changed from m.myoRod.thingInstanceId to m.myoMotor.thingInstanceId. The motor is where the biologically interesting state lives (nucleotide cycle, on/off filament, bound actin), and is the natural raycast target for a clicked myosin. Back-references from each part (MyoMotor.myMyosin, MyoLever.myMyosin, MyoRod.myMyosin) make upward navigation in the hierarchy possible for the future inspection panel.
+
+
+---
+
+## Session 9 — Teleportation diagnostic instrumentation (May 2026)
+
+### What was added
+
+Toggleable instrumentation that catches large single-step displacements of `MyoMiniFilament` objects and emits a labeled state dump to stderr when one is detected.
+
+**`Env.java`** — two new fields in the "Flags and Constants for Testing" section:
+
+```java
+static boolean myoMiniTeleportDiag = false;     // TELEPORT_DIAG toggle
+static double  myoMiniTeleportThreshold = 0.1;  // TELEPORT_DIAG µm threshold
+```
+
+**`MyoMiniFilament.java`** — two additions:
+
+1. The existing `moveThing()` override is wrapped with a diagnostic block. At method entry (before any force transforms), when `Env.myoMiniTeleportDiag` is true, nine `Pt3D` snapshots are taken: `coord`, `end1`, `end2`, `forceSum`, `torqueSum`, `randForces`, `randTorques`, `bTransGam`, `bRotGam`. At method exit (after `initialize()`), the displacement `Pt3D.ptDist(coordBefore, coord)` is computed; if it exceeds `Env.myoMiniTeleportThreshold`, `dumpTeleportDiag()` is called.
+
+2. A new private method `dumpTeleportDiag(...)` formats and prints a 17-line `[TELEPORT]`-prefixed block to `System.err`. The block includes: simulation time and step counter, minifilament index (`myMyoMiniNumber`), displacement magnitude, position before/after for `coord`/`end1`/`end2`, pre-step `forceSum`/`torqueSum`/`randForces`/`randTorques`, post-integration `bForceSum`/`bTorqueSum`/`bVeloc`/`bAngVeloc`, drag tensors `bTransGam`/`bRotGam`, and `collisionCt`/`lastCollisionTime`.
+
+Forces and velocities are formatted with `%.3e` (scientific notation) to handle the wide dynamic range.
+
+### Toggle and threshold
+
+| Field | Location | Default |
+|---|---|---|
+| `Env.myoMiniTeleportDiag` | `Env.java` line ~234 | `false` |
+| `Env.myoMiniTeleportThreshold` | `Env.java` line ~235 | `0.1` µm |
+
+Set `myoMiniTeleportDiag = true` and redirect stderr to catch events: `java -Xmx800M BoxOfActin -r ... 2>teleport.log`. Then `grep TELEPORT teleport.log` to find every event block.
+
+Threshold of 0.1 µm is well above any physical single-step displacement (typical Brownian step for a minifilament is O(1 nm)), so false positives should be rare. Lower if events are missed; raise if noise is excessive.
+
+### Zero overhead when disabled
+
+All diagnostic code is inside `if (Env.myoMiniTeleportDiag)` guards. The JIT eliminates the dead branch entirely when the flag is `false`. No per-step allocation or computation occurs in the default-off state.
+
+### How to remove later
+
+```
+grep -rn TELEPORT_DIAG boxOfActin/ *.java
+```
+
+Every instrumentation site is tagged with `// TELEPORT_DIAG`. The tag appears at:
+- `Env.java` — two field declarations
+- `MyoMiniFilament.java` — two comments in `moveThing()` and the `dumpTeleportDiag` method header
+
+Removal is: delete the two fields from `Env.java`, delete the `if (Env.myoMiniTeleportDiag)` blocks from `moveThing()`, and delete the `dumpTeleportDiag` method. No other files are touched.
+
+---
+
 ## Current Known Issues
 
 ### Phase 5 not yet started
