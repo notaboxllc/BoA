@@ -4,6 +4,114 @@ Last updated: 2026-05-13
 
 ---
 
+## Session 16 — C1–C3 integration test bugfixes (May 2026)
+
+### Bug 1 — inspect panel crash on orientation fields
+
+**Root cause:** `fmt3()` in `sim_viewer_boa.html` assumed every object value had
+`{x, y, z}` keys, so it did `v.x.toFixed(5)`. The `orientation` field the server
+emits has keys `{ux, uy, uz}`, so `v.x` was `undefined` → `Cannot read properties
+of undefined (reading 'toFixed')` on the first click of any entity.
+
+**Reconciliation (viewer fields vs. server fields):**
+
+| entity kind | field | server key shape | viewer assumed | mismatch? |
+|---|---|---|---|---|
+| filSegment | position | `{x,y,z}` | `v.x/v.y/v.z` | no |
+| filSegment | orientation | `{ux,uy,uz}` | `v.x/v.y/v.z` | **YES — crash** |
+| filSegment | end1 / end2 | `[x,y,z]` array | Array.isArray path | no |
+| myosin | position | `{x,y,z}` | `v.x/v.y/v.z` | no |
+| myosin | orientation | `{ux,uy,uz}` | `v.x/v.y/v.z` | **YES — crash** |
+| myoMiniFilament | position | `{x,y,z}` | `v.x/v.y/v.z` | no |
+| myoMiniFilament | orientation | `{ux,uy,uz}` | `v.x/v.y/v.z` | **YES — crash** |
+| myoMiniFilament | end1 / end2 | `[x,y,z]` array | Array.isArray path | no |
+
+The C2 "documented omissions" (intra-filament index, per-monomer nucleotide state,
+lever angle) were irrelevant — no viewer code referenced those missing fields. The
+crash was hit before any missing-field issue could surface.
+
+**Fix:** Viewer-side only. `fmt3` now uses `Object.entries(v)` to format any object
+generically: `(ux:val, uy:val, uz:val)` for orientation, `(x:val, y:val, z:val)`
+for position. The key names are displayed alongside the values, which is more
+informative than a bare triple. Server emits the correct shapes per C2 spec;
+no server-side change needed.
+
+**Fields shown per entity kind after fix:**
+
+*filSegment:* position, orientation, end1, end2, filamentId, segmentArrayPos,
+monomerCount, notADPRatio, cofilinCount, end2Capped, ageSteps, prevSegId, nextSegId.
+
+*myosin:* position, orientation, nucleotideState, onFil, inRigor, boundSegId, ageSteps.
+
+*myoMiniFilament:* position, orientation, end1, end2, ageSteps, attachedMotorIds.
+
+**Verified:** All three entity kinds display a panel with no console error. Panel
+works during pause (inspect drain runs inside the post-step wait loop per C3).
+
+**Commit:** `bbbd275`
+
+### Minor — THREE.VertexColors warning (fixed)
+
+`motorMesh` material was constructed with `vertexColors: THREE.VertexColors`.
+`THREE.VertexColors` was removed in modern Three.js (the constant resolves to
+`undefined`), producing a console warning on every page load. One-line fix:
+`vertexColors: true`. Included in the Bug 1 commit.
+
+### Bug 2 — NullPointerException in closeJSons() / writeSimJSonPlots()
+
+**Root cause:** `closeJSons()` (`FileOps.java:968`) called `writeSimJSonPlots()`
+and `writeSimJSon2Plots()` unconditionally. Both methods use `jSonPW` / `jSonPW2`
+(Simularium JSON PrintWriters), which are only initialized inside `setupJSons()`.
+`setupJSons()` has **no call sites anywhere in the codebase** — Simularium JSON
+output has never been activated in recent sessions. So `jSonPW` is always null,
+and any call to `closeJSons()` NPEs at the first `jSonPW.print(...)` call (line 866).
+
+**Is this live-only-specific?** No. The null is present regardless of `-3js` or
+`-3jsLive` flags. Both `jSonPW` and `jSonPW2` are always null. Any clean exit —
+time-limit or C3 kill — triggers `closeJSons()` and hits the NPE.
+
+**Is this a long-standing breakage?** `closeJSons()` has been in `TimeLoop.run()`
+since at least Session 11 (confirmed via `git show 0525ccf`). The NPE has been
+latent since then. It was never triggered because simulations were either killed
+externally (Ctrl+C, bypassing the clean-exit path) or ran longer than the testing
+window. C3's kill action is the first mechanism that reliably exercises the clean
+exit, exposing the bug. This is not a broken feature that used to work — Simularium
+JSON was simply never activated.
+
+**Note on C3 kill testing:** The C3 journal entry claimed the kill path left a
+valid output directory. That test likely used `-3js` or `-3jsLive` with an
+external kill before the loop exited naturally, or used a run that reached the
+time limit before kill was sent — paths that happened to avoid `closeJSons()`.
+The live-only kill scenario (which definitely reaches `closeJSons()` via kill)
+was not covered.
+
+**Fix:** Guard each Simularium writer pair in `closeJSons()` with its activation
+flag, matching the pattern already used at every per-frame write site:
+
+```java
+if (Env.writeSimJSons) {
+    writeSimJSonPlots();
+    closeSimulariumJSonFile();
+}
+if (Env.writeSimJSons2) {
+    writeSimJSon2Plots();
+    closeSimulariumJSonFile2();
+}
+```
+
+When Simularium output is inactive (`Env.writeSimJSons == false`, the default),
+finalization is skipped. Three.js output (`-3js` / `-3jsLive`) is unaffected —
+it uses a completely separate writer path (`ThreeJSWriter`).
+
+**Kill scenario verification:**
+- `-3jsLive` only: exits cleanly, no NPE, no files written (correct).
+- `-3js` only: exits cleanly, Three.js frame files intact.
+- `-3js` + `-3jsLive`: exits cleanly, frame files intact.
+
+**Commit:** `1db1ad0`
+
+---
+
 ## Session 14 — Pause / resume / kill (C3) (May 2026)
 
 ### What was built
