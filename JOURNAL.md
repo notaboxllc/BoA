@@ -153,7 +153,7 @@ to apply nucleotide-state colors per-instance via `USE_INSTANCING_COLOR` as befo
 No change to the `instanceColor` setup (line 428) or `setColorAt` calls (line 701)
 — those were and remain correct.
 
-**Commit:** `(see below)`
+**Commit:** `231748d`
 
 ### Exit-path audit (orderly-shutdown coverage)
 
