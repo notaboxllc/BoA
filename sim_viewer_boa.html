@@ -421,7 +421,7 @@ scene.add(leverMesh);
 
 const sphGeo = new THREE.SphereGeometry(1, 8, 6);
 const motorMesh = new THREE.InstancedMesh(sphGeo,
-  new THREE.MeshPhongMaterial({ vertexColors: THREE.VertexColors }), MAX_MYOSINS);
+  new THREE.MeshPhongMaterial({ vertexColors: true }), MAX_MYOSINS);
 motorMesh.count = 0;
 motorMesh.frustumCulled = false;
 scene.add(motorMesh);
@@ -791,7 +791,7 @@ function fmt3(v) {
   if (Array.isArray(v))
     return '[' + v.map(n => (typeof n === 'number' ? n.toFixed(5) : String(n))).join(', ') + ']';
   if (typeof v === 'object')
-    return '(' + v.x.toFixed(5) + ', ' + v.y.toFixed(5) + ', ' + v.z.toFixed(5) + ')';
+    return '(' + Object.entries(v).map(([k, n]) => k + ':' + (typeof n === 'number' ? n.toFixed(5) : String(n))).join(', ') + ')';
   return String(v);
 }
 
