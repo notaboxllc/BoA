@@ -110,6 +110,63 @@ it uses a completely separate writer path (`ThreeJSWriter`).
 
 **Commit:** `1db1ad0`
 
+### Exit-path audit (orderly-shutdown coverage)
+
+`TimeLoop.run()` has exactly this structure:
+
+```java
+public void run() {
+    doLoop();
+    FileOps.closeJSons();        // orderly finalization
+    LiveFrameServer.stopServer();
+    // System.exit(0);  ← commented out
+}
+```
+
+Three exit scenarios, traced:
+
+**Natural completion (`runTime` reached)**
+The `while` loop condition is `simulationTime <= runTime + runBump && !terminating`.
+When simulation time passes the limit, the loop falls through, `doLoop()` returns,
+and `closeJSons()` is reached. *This path does call `closeJSons()`.*
+
+Before Session 16: the call NPE'd. The unhandled exception in `TimeLoop` killed
+the thread but left the JVM alive — worker-pool threads and the WebSocket server
+thread (non-daemon) kept the process running indefinitely. `stopServer()` was
+never reached. Any Three.js frame file actively being written at that moment may
+have been left truncated (PrintWriter buffers; the JVM did not exit to flush them).
+
+After Session 16: the guard skips Simularium finalization, `stopServer()` runs,
+and the orderly path completes for the first time without an exception.
+
+**C3 kill (`Env.terminating = true`)**
+`break outer` exits the labeled loop; `doLoop()` returns; `closeJSons()` is called.
+This is the path that exposed the NPE (the Session 16 bug report). Same pre/post
+fix behavior as natural completion.
+
+**Ctrl-C / JVM SIGTERM**
+No `Runtime.addShutdownHook()` is registered anywhere in the codebase.
+On SIGINT/SIGTERM the JVM halts immediately; `closeJSons()` is NOT called.
+Three.js frame files written via `ThreeJSWriter` use `PrintWriter` with auto-flush,
+so complete frames are likely on disk, but any frame that was mid-write is
+truncated. The WebSocket server is killed without a clean handshake.
+
+**Conclusion for the planner**
+
+The orderly shutdown path — `closeJSons()` → `stopServer()` → thread exit — has
+in practice **never successfully run end-to-end** before Session 16:
+
+- Ctrl-C bypasses it entirely (no shutdown hook).
+- Natural completion and C3 kill both reached it but NPE'd on `jSonPW`, leaving
+  the JVM hung rather than exiting.
+
+As of Session 16's fix, natural completion and C3 kill both exit cleanly.
+Ctrl-C still bypasses finalization, which is probably acceptable (the OS reclaims
+resources), but it means the WebSocket close handshake is never sent and any
+pending Three.js frame is lost. If orderly Ctrl-C shutdown is ever needed, a
+shutdown hook calling `LiveFrameServer.stopServer()` and flushing any open
+`PrintWriter` in `ThreeJSWriter` would be the place to add it.
+
 ---
 
 ## Session 14 — Pause / resume / kill (C3) (May 2026)
