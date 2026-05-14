@@ -251,6 +251,12 @@ public class Env {
 	static final Parameter fixedMyosinClusters = new Parameter("fixedMyosinClusters", " Fixed Myosin Cluster Test", 0, "", Parameter.BOOLEAN, false);
 	static final Parameter glidingAssay = new Parameter("glidingAssay"," Filament Gliding Assay", 0, "", Parameter.BOOLEAN, false);
 	static final Parameter nodeGrowthPerStep = new Parameter("nodeGrowthPerStep"," Node Growth (testing)", 0.001, "microns", Parameter.DOUBLE);
+
+	// F1 static-deflection benchmark — gated by Env.benchmarkFilament (set by -bm flag)
+	static boolean benchmarkFilament = false;
+	static int benchmarkNSegs = 11;       // odd → midpoint segment is exactly at midspan
+	static double benchmarkForceFrac = 0.01; // target deflection as fraction of span
+	static int benchmarkSettleSteps = 5000;  // steps before first measurement
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;

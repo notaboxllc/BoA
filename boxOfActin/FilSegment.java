@@ -1271,6 +1271,8 @@ public class FilSegment extends Thing {
 		} else {
 			cosBeta = Pt3D.Dot(uVecR, linkUVec);
 		}
+		if (cosBeta > 1.0) cosBeta = 1.0;
+		if (cosBeta < -1.0) cosBeta = -1.0;
 		double beta = Math.acos(cosBeta);
 		double cosAlpha = Math.sin(beta);
 		double lSqrd = 1e-12*length*length;
@@ -1615,9 +1617,10 @@ public class FilSegment extends Thing {
 				dotVecs = Pt3D.Dot(uVec,end2Fil.uVecR);
 			}
 			
-			if (dotVecs > 1.0) { dotVecs = 1.0; }
+			if (dotVecs > 1.0) dotVecs = 1.0;
+			if (dotVecs < -1.0) dotVecs = -1.0;
 			double angTween = Math.acos(dotVecs)*180/Math.PI;
-			
+
 			// check if angle too large
 			end2SegAng.registerValue(angTween);
 			/*if (Env.maxSegAngle.isActive() & end2SegAng.averageVal() > Env.maxSegAngle.getValue()/4) { 
@@ -1668,9 +1671,10 @@ public class FilSegment extends Thing {
 				dotVecs = Pt3D.Dot(uVecR,end1Fil.uVecR);
 			}
 			
-			if (dotVecs > 1.0) { dotVecs = 1.0; }
+			if (dotVecs > 1.0) dotVecs = 1.0;
+			if (dotVecs < -1.0) dotVecs = -1.0;
 			double angTween = Math.acos(dotVecs)*180/Math.PI;
-			
+
 			// check if angle too large
 			end1SegAng.registerValue(angTween);
 			/*if (Env.maxSegAngle.isActive() & end1SegAng.averageVal() > Env.maxSegAngle.getValue()/4) { 
@@ -3690,7 +3694,28 @@ public class FilSegment extends Thing {
 		if (end2Capped) { filString += getSphereCapJSonString(); }	// add info on plus-end cap if applicable
 		return filString;
 	}
-	
+
+	// F1 benchmark: create n segments in a straight chain along +X axis, linked end-to-end.
+	// Caller must set Env.noMonomersSimd active before calling (suppresses Monomer creation
+	// in constructors and biochemistry each step). Returns the segment array so BoxOfActin
+	// can store first/mid/last references without creating a circular class dependency.
+	public static FilSegment[] makeBenchmarkChain(int n) {
+		int monCt = Env.stdSegLength.getIntValue();
+		double segLen = (monCt + 1) * halfmono; // µm
+		double totalLen = n * segLen;
+		Pt3D xAxis = new Pt3D(1, 0, 0);
+		FilSegment[] segs = new FilSegment[n];
+		for (int i = 0; i < n; i++) {
+			double cx = -totalLen / 2.0 + (i + 0.5) * segLen;
+			segs[i] = new FilSegment(new Pt3D(cx, 0, 0), xAxis, 0, monCt, true);
+		}
+		for (int i = 0; i < n - 1; i++) {
+			segs[i].setEnd2Links(segs[i + 1], true);
+			segs[i + 1].setEnd1Links(segs[i], true);
+		}
+		return segs;
+	}
+
 }
 
 

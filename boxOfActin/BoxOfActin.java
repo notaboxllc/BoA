@@ -55,7 +55,17 @@ public class BoxOfActin {
 	static double lastLogAndDrawTime = System.currentTimeMillis();
 	static double curLogAndDrawTime = 0;
 	static double lastRunDetsTime = 0;
-	
+
+	// F1 benchmark state — populated by makeInitialThings() when Env.benchmarkFilament is set
+	static FilSegment benchFirstSeg = null;
+	static FilSegment benchLastSeg = null;
+	static FilSegment benchMidSeg = null;
+	static Pt3D benchAnchor1 = new Pt3D();
+	static Pt3D benchAnchor2 = new Pt3D();
+	static Pt3D benchTransForce = new Pt3D();
+	static int benchStepCount = 0;
+	static double benchAnalyticDefl = 0;
+
 	public BoxOfActin (String[] args) {
 		
 	}
@@ -64,6 +74,11 @@ public class BoxOfActin {
 	// it parses no arguments itself and immediately calls this begin(args). Run with: java -Xmx800M BoxOfActin
 	public static void begin (String[] args) {
 		parseArgs(args);
+		if (Env.benchmarkFilament) {
+			Env.brownianFilMotionOff = true;
+			Env.remote = true;
+			Env.simOutsideBug.setActive(false); // suppress Listeria bug + ActA creation
+		}
 		if (Env.threeJSLivePort > 0) {
 			LiveFrameServer.startServer(Env.threeJSLivePort);
 		}
@@ -193,6 +208,10 @@ public class BoxOfActin {
 					talkln("Invalid port for -3jsLive: " + args[i + 1]);
 					System.exit(1);
 				}
+			}
+
+			if (args[i].equals("-bm") || args[i].equals("-benchmark")) {
+				Env.benchmarkFilament = true;
 			}
 		}
 	}
@@ -346,10 +365,18 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.stepStop);
 				stepTimer.stopInc();
 
+				// F1 benchmark: apply transverse force to midpoint segment before integration
+				if (Env.benchmarkFilament && benchMidSeg != null) {
+					benchMidSeg.incForceSum(benchTransForce);
+				}
+
 				moveTimer.start();
 				startAllThreadSets(Env.moveStart);
 				waitOnAllThreadSets(Env.moveStop);
 				moveTimer.stopInc();
+
+				// F1 benchmark: restore pinned endpoints after integration
+				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
 
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
@@ -386,6 +413,16 @@ public class BoxOfActin {
 				if (Env.terminating) break outer;
 				drainInspectQueue();
 				drainParamQueue();  // C4: apply pending parameter changes, dispatch acks
+
+				// F1 benchmark: count steps and print deflection readout after settle period
+				if (Env.benchmarkFilament) {
+					benchStepCount++;
+					if (benchStepCount == Env.benchmarkSettleSteps) {
+						reportBenchmarkDeflection("SETTLED");
+					} else if (benchStepCount > Env.benchmarkSettleSteps && benchStepCount % 500 == 0) {
+						reportBenchmarkDeflection("CHECK  ");
+					}
+				}
 
 				// output to screen and/or files
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
@@ -429,6 +466,43 @@ public class BoxOfActin {
 		
 	}
 	
+	// F1 benchmark: translate terminal segments so their pinned endpoints return to anchors.
+	// Called after moveThing() each step. Post-moveThing() position correction handles both
+	// centroid translation and rotation (rotation pivots about centroid, not pin, so the
+	// endpoint drifts; the correction below restores it exactly regardless of the source).
+	private static void applyBenchmarkPins() {
+		if (benchFirstSeg == null || benchLastSeg == null) return;
+		benchFirstSeg.coord.x += benchAnchor1.x - benchFirstSeg.end1.x;
+		benchFirstSeg.coord.y += benchAnchor1.y - benchFirstSeg.end1.y;
+		benchFirstSeg.coord.z += benchAnchor1.z - benchFirstSeg.end1.z;
+		benchFirstSeg.initialize();
+		benchLastSeg.coord.x += benchAnchor2.x - benchLastSeg.end2.x;
+		benchLastSeg.coord.y += benchAnchor2.y - benchLastSeg.end2.y;
+		benchLastSeg.coord.z += benchAnchor2.z - benchLastSeg.end2.z;
+		benchLastSeg.initialize();
+	}
+
+	// F1 benchmark: print midpoint perpendicular deflection vs analytic FL³/(48EI).
+	private static void reportBenchmarkDeflection(String label) {
+		if (benchMidSeg == null) return;
+		double ax = benchAnchor2.x - benchAnchor1.x;
+		double ay = benchAnchor2.y - benchAnchor1.y;
+		double az = benchAnchor2.z - benchAnchor1.z;
+		double aLen = Math.sqrt(ax*ax + ay*ay + az*az);
+		ax /= aLen; ay /= aLen; az /= aLen;
+		double px = benchMidSeg.coord.x - benchAnchor1.x;
+		double py = benchMidSeg.coord.y - benchAnchor1.y;
+		double pz = benchMidSeg.coord.z - benchAnchor1.z;
+		double proj = px*ax + py*ay + pz*az;
+		double perpX = px - proj*ax, perpY = py - proj*ay, perpZ = pz - proj*az;
+		double deflMeas = Math.sqrt(perpX*perpX + perpY*perpY + perpZ*perpZ);
+		double ratio = benchAnalyticDefl > 0 ? deflMeas / benchAnalyticDefl : Double.NaN;
+		System.out.println("[BENCH:" + label + "] step=" + benchStepCount
+			+ "  meas=" + deflectionFormat.format(deflMeas) + " µm"
+			+ "  analytic=" + deflectionFormat.format(benchAnalyticDefl) + " µm"
+			+ "  ratio=" + String.format("%.4f", ratio));
+	}
+
 	// C2/C3: drain pending inspect requests at the safe-point — after all physics phases
 	// complete and before cleanup removes Things, inside synchronized(Env.safeO).
 	// C3 pause/kill waits use this same point; both pause wait loops call this directly.
@@ -580,6 +654,25 @@ public class BoxOfActin {
 	}
 
 	public static void makeInitialThings() {
+		if (Env.benchmarkFilament) {
+			Env.noMonomersSimd.setActive(true);
+			FilSegment[] segs = FilSegment.makeBenchmarkChain(Env.benchmarkNSegs);
+			int n = segs.length;
+			benchFirstSeg = segs[0];
+			benchLastSeg  = segs[n - 1];
+			benchMidSeg   = segs[n / 2];
+			benchAnchor1.setVals(segs[0].end1.x, segs[0].end1.y, segs[0].end1.z);
+			benchAnchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
+			double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac / (spanM * spanM);
+			benchTransForce.setVals(0, 0, forceN);
+			benchAnalyticDefl = Env.benchmarkForceFrac * spanM * 1e6; // µm
+			System.out.println("[BENCH] " + n + "-seg chain"
+				+ ", span=" + String.format("%.4f", spanM * 1e6) + " µm"
+				+ ", F=" + String.format("%.3e", forceN) + " N"
+				+ ", analytic δ=" + String.format("%.4f", benchAnalyticDefl) + " µm");
+			return;
+		}
 		if (Env.twoNodesOneFil) {
 				FilSegment.twoNodesOneFilTst();
 				Env.equilNodes.setValue(ProteinNode.nodeCt);

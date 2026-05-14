@@ -1187,6 +1187,84 @@ After Phase 5 validates, consider one of:
 
 ---
 
+## F1 Step 1 — Deflection benchmark harness (May 2026)
+
+### Part A: Survey findings
+
+**Torsion formulation**
+
+The active branch in `FilSegment.addTorsionSpringForces()` is the PAIRS-style drag formulation, not the Hookean spring. `Env.filTorqSpring` is declared with `activeState = false` (line ~535 of Env.java), so the active branch is:
+
+```java
+torsionMag = Env.fracMoveTorq.getValue() * (Math.PI/180) * angTween
+             / ((1/bRotGam.y + 1/end2Fil.bRotGam.y) * Env.deltaT.getValue());
+```
+
+Effective spring stiffness = `fracMoveTorq / (compliance * deltaT)`. This is velocity-proportional (overdamped), not position-proportional (Hookean). The coefficient the search loop will move is `fracMoveTorq` (default init value 0.02; parameter label `fracMoveTorq`).
+
+`addLinkForcesOld()` is dead code — never called. `addLinkForces()` is the live implementation using the same PAIRS style:
+
+```java
+forceMag = (fracMove * 1e-6 * strainDist) / (deltaT * (moveCoeff1 + moveCoeff2));
+```
+
+**Endpoint geometry and pinning**
+
+`end1 = coord - (length/2) * uVec`, `end2 = coord + (length/2) * uVec`. Both are recomputed in `initialize()` (line ~354), which is called at the end of `moveThing()`. So after each integration step, `end1`/`end2` reflect the current centroid + orientation.
+
+Viable pinning approaches (evaluated):
+1. **Post-moveThing centroid translation** (implemented): After `moveThing()`, compute `delta = pinTarget - currentEnd`, translate `coord` by `delta`, call `initialize()`. Exact, O(1), handles segment rotation naturally (the pin is free to rotate; centroid is corrected). This is the approach used.
+2. **Spring-based restoring force**: Apply a large restoring force toward the pin each step. Requires tuning the spring constant; can cause stiffness instabilities. Not used.
+3. **Zero-velocity boundary condition**: Zero the translational velocity each step. Incompatible with overdamped integration where there is no velocity state — positions update directly from forces. Not applicable.
+
+The planner's hypothesis about post-moveThing() centroid translation was confirmed correct and implemented exactly as described.
+
+**Minimal crucible path**
+
+Three changes gate off all non-benchmark content:
+1. `Env.simOutsideBug.setActive(false)` — suppresses `Bug.makeListeriaBug()` and all 10,000 ActA objects. **Critical**: `simOutsideBug` is declared with `activeState = true` (default active), so it must be explicitly deactivated.
+2. `Env.brownianFilMotionOff = true` — suppresses Brownian forces on FilSegments. Flag, not Parameter.
+3. `Env.noMonomersSimd.setActive(true)` — suppresses Monomer creation in `FilSegment` constructor and all biochemistry in `biochemStep()`. Default inactive; must be activated before `makeBenchmarkChain()` is called.
+
+`makeInitialThings()` returns immediately after creating the benchmark chain, bypassing all standard filament/node/motor initialization.
+
+**NaN clamp bug (discovered during build)**
+
+`FilSegment.moveCoeff()` computed `Math.acos(cosBeta)` without clamping `cosBeta` to [-1, 1]. When benchmark segments are exactly colinear along +X, `Pt3D.Dot(uVec, linkUVec)` returns `1.0000000000000002` due to floating-point rounding. Result: NaN propagates from `moveCoeff()` into link forces → segment positions → `uVec` → torsion cross products. Fixed by adding the clamp. The same guard already existed in `addTorsionSpringForces()` for the upper bound; this session also added the lower-bound clamp (`< -1.0`) to both torsion sites.
+
+---
+
+### Part B: Build results
+
+**Implementation** (committed in this session):
+- `Env.benchmarkFilament` flag, `benchmarkNSegs`, `benchmarkForceFrac`, `benchmarkSettleSteps` statics
+- `-bm` / `-benchmark` CLI flag
+- `FilSegment.makeBenchmarkChain(int n)` factory method
+- `BoxOfActin.applyBenchmarkPins()` — post-moveThing centroid translation for both terminal segments
+- `BoxOfActin.reportBenchmarkDeflection(label)` — perpendicular distance of midpoint from anchor line vs analytic FL³/48EI
+- Force application to midpoint segment in the `stepStart/Stop` → `moveStart/Stop` gap
+
+**Pass condition: met.**
+
+```
+[BENCH] 11-seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+[BENCH:SETTLED] step=5000  meas=0.0305 µm  analytic=0.0098 µm  ratio=3.1150
+```
+
+Run 2 (same parameters):
+```
+[BENCH:SETTLED] step=5000  meas=0.0305 µm  analytic=0.0098 µm  ratio=3.1141
+```
+
+(a) Stable across runs: ratio 3.115 vs 3.114 — < 0.1% difference. ✓  
+(b) Within order of magnitude of FL³/48EI: ratio ~3.1 at settle, converging to ~3.5 at equilibrium (~10 000 steps). ✓
+
+**Key finding for search loop (F1 Step 2):**
+
+The equilibrium deflection ratio is ~3.5× the Euler-Bernoulli FL³/48EI prediction. The PAIRS torsion formulation has an effective bending stiffness that does not map 1:1 to EI = kT·Lp with `fracMoveTorq = 0.02`. The search loop will need to scan `fracMoveTorq` to find the value that drives the ratio to 1.0. The time constant for deflection convergence is ~3 700 steps (empirical), so the settle period used by the search loop should be ≥ 5 000 steps.
+
+---
+
 ## Workflow note
 
 This project uses a two-Claude workflow:
