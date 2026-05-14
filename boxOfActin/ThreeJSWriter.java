@@ -138,6 +138,118 @@ public class ThreeJSWriter {
         frameNumber++;
     }
 
+    // ── C2: click-to-inspect ─────────────────────────────────────────────────
+
+    /**
+     * Build an inspectResult JSON payload for the given thingInstanceId.
+     * Returns a notFound payload if the ID is unknown or the Thing is flagged
+     * for removal (its state would be unreliable).
+     */
+    public static String buildInspectJson(int requestedId) {
+        Thing t = Thing.findByInstanceId(requestedId);
+        if (t == null || t.removeMe) {
+            return "{\"id\":" + requestedId + ",\"kind\":\"notFound\"}";
+        }
+        if (t instanceof FilSegment)      return inspectFilSegment((FilSegment) t);
+        if (t instanceof MyoMotor)        return inspectMyoMotor((MyoMotor) t);
+        if (t instanceof MyoMiniFilament) return inspectMyoMiniFilament((MyoMiniFilament) t);
+        return String.format("{\"id\":%d,\"kind\":\"unknown\"}", t.thingInstanceId);
+    }
+
+    private static String inspectFilSegment(FilSegment fs) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"id\":").append(fs.thingInstanceId);
+        sb.append(",\"kind\":\"filSegment\"");
+        sb.append(String.format(",\"position\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}",
+                fs.coord.x, fs.coord.y, fs.coord.z));
+        sb.append(String.format(",\"orientation\":{\"ux\":%.5g,\"uy\":%.5g,\"uz\":%.5g}",
+                fs.uVec.x, fs.uVec.y, fs.uVec.z));
+        sb.append(String.format(",\"end1\":[%.5g,%.5g,%.5g]", fs.end1.x, fs.end1.y, fs.end1.z));
+        sb.append(String.format(",\"end2\":[%.5g,%.5g,%.5g]", fs.end2.x, fs.end2.y, fs.end2.z));
+        sb.append(",\"filamentId\":").append(fs.filID);
+        // filArrayPos is position in global theFilSegments[] — not an intra-filament index;
+        // computing intra-filament index requires walking the end1/end2 chain (omitted, C2)
+        sb.append(",\"segmentArrayPos\":").append(fs.filArrayPos);
+        sb.append(",\"monomerCount\":").append(fs.monomerCt);
+        // notADPRatio is the fraction of monomers NOT in ADP state (aggregate nucleotide state proxy)
+        sb.append(String.format(",\"notADPRatio\":%.4g", fs.notADPRatio));
+        sb.append(",\"cofilinCount\":").append(fs.cofilinCt);
+        sb.append(",\"end2Capped\":").append(fs.end2Capped);
+        sb.append(",\"ageSteps\":").append(Env.counter - fs.createdAtStep);
+        if (fs.end1Fil != null)
+            sb.append(",\"prevSegId\":").append(fs.end1Fil.thingInstanceId);
+        else
+            sb.append(",\"prevSegId\":null");
+        if (fs.end2Fil != null)
+            sb.append(",\"nextSegId\":").append(fs.end2Fil.thingInstanceId);
+        else
+            sb.append(",\"nextSegId\":null");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private static String inspectMyoMotor(MyoMotor motor) {
+        String state;
+        switch (motor.nucleotideState) {
+            case MyoMotor.ATP:   state = "ATP";   break;
+            case MyoMotor.ADPPi: state = "ADPPi"; break;
+            case MyoMotor.ADP:   state = "ADP";   break;
+            default:             state = "NONE";  break;
+        }
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"id\":").append(motor.thingInstanceId);
+        sb.append(",\"kind\":\"myosin\"");
+        sb.append(String.format(",\"position\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}",
+                motor.coord.x, motor.coord.y, motor.coord.z));
+        sb.append(String.format(",\"orientation\":{\"ux\":%.5g,\"uy\":%.5g,\"uz\":%.5g}",
+                motor.uVec.x, motor.uVec.y, motor.uVec.z));
+        sb.append(",\"nucleotideState\":\"").append(state).append("\"");
+        sb.append(",\"onFil\":").append(motor.onFil);
+        sb.append(",\"inRigor\":").append(motor.inRigor);
+        // lever angle requires computing the rod-lever angle — omitted (C2); add as C2+ if needed
+        if (motor.onFil && motor.tipLink != null && motor.tipLink.mySeg != null)
+            sb.append(",\"boundSegId\":").append(motor.tipLink.mySeg.thingInstanceId);
+        else
+            sb.append(",\"boundSegId\":null");
+        sb.append(",\"ageSteps\":").append(Env.counter - motor.createdAtStep);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private static String inspectMyoMiniFilament(MyoMiniFilament mf) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"id\":").append(mf.thingInstanceId);
+        sb.append(",\"kind\":\"myoMiniFilament\"");
+        sb.append(String.format(",\"position\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}",
+                mf.coord.x, mf.coord.y, mf.coord.z));
+        sb.append(String.format(",\"orientation\":{\"ux\":%.5g,\"uy\":%.5g,\"uz\":%.5g}",
+                mf.uVec.x, mf.uVec.y, mf.uVec.z));
+        sb.append(String.format(",\"end1\":[%.5g,%.5g,%.5g]", mf.end1.x, mf.end1.y, mf.end1.z));
+        sb.append(String.format(",\"end2\":[%.5g,%.5g,%.5g]", mf.end2.x, mf.end2.y, mf.end2.z));
+        sb.append(",\"ageSteps\":").append(Env.counter - mf.createdAtStep);
+        // Collect IDs of motors currently bound to actin (onFil == true)
+        sb.append(",\"attachedMotorIds\":[");
+        boolean firstId = true;
+        for (int e = 0; e < 2; e++) {
+            MyosinDimer[] dimers = (e == 0) ? mf.myoDimersEnd1 : mf.myoDimersEnd2;
+            for (int d = 0; d < mf.numMyoDimersEachEnd; d++) {
+                MyosinDimer dimer = dimers[d];
+                if (dimer == null || dimer.removeMe) continue;
+                Myosin[] myos = { dimer.myo1, dimer.myo2 };
+                for (Myosin myo : myos) {
+                    if (myo == null || myo.removeMe || myo.myoMotor == null) continue;
+                    if (myo.myoMotor.onFil) {
+                        if (!firstId) sb.append(",");
+                        sb.append(myo.myoMotor.thingInstanceId);
+                        firstId = false;
+                    }
+                }
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
     private static String motorJson(MyoMotor mo) {
         String state;
         switch (mo.nucleotideState) {

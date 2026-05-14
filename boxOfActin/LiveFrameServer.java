@@ -101,11 +101,25 @@ public class LiveFrameServer extends WebSocketServer {
 
     @Override
     public void onMessage(WebSocket conn, String message) {
-        // C1: only action is subscribe; default is already subscribed to all topics.
-        // No state change needed — log if unexpected.
-        if (!message.contains("\"subscribe\"")) {
-            System.out.println("LiveFrameServer: unrecognised message: " + message);
+        if (message.contains("\"subscribe\"")) {
+            return;  // already subscribed to all topics by default
         }
+        if (message.contains("\"inspect\"")) {
+            // Parse {"action":"inspect","id":<N>} — extract the integer id field
+            int fieldIdx = message.indexOf("\"id\"");
+            if (fieldIdx >= 0) {
+                int colonIdx = message.indexOf(':', fieldIdx) + 1;
+                int end = colonIdx;
+                while (end < message.length() &&
+                       (Character.isDigit(message.charAt(end)) || message.charAt(end) == ' '))
+                    end++;
+                try {
+                    Env.inspectQueue.offer(Integer.parseInt(message.substring(colonIdx, end).trim()));
+                } catch (NumberFormatException ignored) {}
+            }
+            return;
+        }
+        System.out.println("LiveFrameServer: unrecognised message: " + message);
     }
 
     @Override
@@ -121,6 +135,24 @@ public class LiveFrameServer extends WebSocketServer {
     }
 
     // ── frame dispatch (called from simulation thread) ─────────────────────────
+
+    /**
+     * Wraps inspectJson in the inspectResult envelope and enqueues it for every
+     * connected client. Same non-blocking, drop-oldest semantics as dispatchFrame.
+     */
+    public static void dispatchInspectResult(String inspectJson) {
+        if (instance == null || !running || instance.clients.isEmpty()) return;
+        String msg = "{\"topic\":\"inspectResult\",\"payload\":" + inspectJson + "}";
+        for (Map.Entry<WebSocket, ClientState> entry : instance.clients.entrySet()) {
+            WebSocket conn = entry.getKey();
+            ClientState state = entry.getValue();
+            if (!conn.isOpen()) continue;
+            if (!state.queue.offer(msg)) {
+                state.queue.poll();
+                state.queue.offer(msg);
+            }
+        }
+    }
 
     /**
      * Wraps frameJson in the protocol envelope and enqueues it for every

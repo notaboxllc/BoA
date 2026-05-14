@@ -805,6 +805,8 @@ public class Env {
 	static boolean writeSimJSons2 = false;		// flag for writing second JSon Simularium style output or not
 	static String threeJSOutputDir = null;		// directory for Three.js per-frame JSON output; null = disabled
 	static int    threeJSLivePort  = -1;		// WebSocket port for live frame streaming; -1 = disabled
+	static final java.util.concurrent.ConcurrentLinkedQueue<Integer> inspectQueue =
+		new java.util.concurrent.ConcurrentLinkedQueue<>();  // C2: pending click-to-inspect IDs from viewer
 	static String jSonFileName = "coarse";
 	static String jSon2FileName = "fine";
 	static double simJSonsScale = 20.0;			// scale all output numbers for better Simularium rendering

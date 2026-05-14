@@ -244,6 +244,110 @@ Post-Session 10 correction: the myosin composite ID was changed from m.myoRod.th
 
 ---
 
+## Session 13 — Click-to-inspect (C2) (May 2026)
+
+### What was built
+
+Click-to-inspect: clicking any rendered object in the live viewer opens a side panel showing that object's state as reported by the simulation at the next loop boundary.
+
+### Thing identity infrastructure (`boxOfActin/Thing.java`)
+
+**`findByInstanceId` implementation** — Static `ConcurrentHashMap<Integer, Thing> instanceRegistry` added at class level. The constructor populates it (`instanceRegistry.put(thingInstanceId, this)`) immediately after the ID is assigned; `removeThing()` removes the entry before calling `sepaku()`. This is the simplest correct approach: O(1) lookup, no linear scan, and WeakReference is not needed because the registry entry is explicitly removed in the one code path that destroys Things (`removeThing()`).
+
+**`createdAtStep` field** — `final int createdAtStep` set to `Env.counter` in the constructor. Used by the inspection response to compute `ageSteps = Env.counter - createdAtStep`.
+
+**`findByInstanceId(int id)`** — `public static Thing findByInstanceId(int id)` returns `instanceRegistry.get(id)`, or null if unknown (object never existed or already destroyed).
+
+### Inspect queue (`boxOfActin/Env.java`)
+
+`static final ConcurrentLinkedQueue<Integer> inspectQueue` — the thread-safe queue for pending inspect IDs. WebSocket thread writes, simulation thread reads.
+
+### Loop-boundary drain (`boxOfActin/BoxOfActin.java`)
+
+**Drain point:** `doLoop()`, line immediately after `updateCounters()` and before `logAndDraw()`/`remoteLog()`:
+
+```java
+updateCounters();
+drainInspectQueue();
+// output to screen and/or files
+```
+
+This point is inside `synchronized(Env.safeO)` (held for the entire timestep body), all physics phases have completed, and cleanup has not yet run — so all Things are in a stable state and none of the to-be-removed Things have been destroyed yet. C3 pause/resume checks can be inserted at the same point.
+
+**`drainInspectQueue()`** — polls the queue until empty; for each ID calls `ThreeJSWriter.buildInspectJson(id)` and dispatches the result via `LiveFrameServer.dispatchInspectResult(json)`. Returns immediately if the WebSocket server is not running (no-op in file-only mode).
+
+### Inspect JSON builder (`boxOfActin/ThreeJSWriter.java`)
+
+`buildInspectJson(int requestedId)` dispatches on runtime type:
+
+| Instance type | `kind` string | Notes |
+|---|---|---|
+| `FilSegment` | `"filSegment"` | see below |
+| `MyoMotor` | `"myosin"` | motor's `thingInstanceId` is the canonical myosin ID in frame JSON |
+| `MyoMiniFilament` | `"myoMiniFilament"` | see below |
+| null or `removeMe==true` | `"notFound"` | destroyed between click and drain |
+| any other `Thing` subclass | `"unknown"` | e.g. MyoRod, MyoLever, ProteinNode |
+
+`removeMe` is checked in addition to null — the drain point is before cleanup, so a dying Thing may still be in the registry with `removeMe==true` and unreliable state.
+
+**filSegment fields:** `id`, `kind`, `position` {x,y,z}, `orientation` {ux,uy,uz}, `end1`/`end2` arrays, `filamentId` (filID), `segmentArrayPos` (position in global `theFilSegments[]` — not an intra-filament index; computing intra-filament index requires walking the end1/end2 chain and is omitted in C2), `monomerCount`, `notADPRatio` (fraction of monomers not in ADP state — aggregate nucleotide proxy; per-monomer nucleotide state is not stored per-segment), `cofilinCount`, `end2Capped`, `ageSteps`, `prevSegId`/`nextSegId` (null at filament ends).
+
+**myosin fields:** `id`, `kind`, `position`, `orientation`, `nucleotideState` (NONE/ATP/ADPPi/ADP), `onFil`, `inRigor`, `boundSegId` (null if unbound), `ageSteps`. Lever angle is omitted — computing it requires accessing the lever/rod orientation and comparing — deferred to a later session.
+
+**myoMiniFilament fields:** `id`, `kind`, `position`, `orientation`, `end1`/`end2`, `ageSteps`, `attachedMotorIds` (array of motor `thingInstanceId` values where `motor.onFil == true`, gathered by iterating `myoDimersEnd1[]` and `myoDimersEnd2[]`). Total count is implicit from the array length.
+
+### WebSocket protocol extension (`boxOfActin/LiveFrameServer.java`)
+
+**New action: `inspect`** — `onMessage()` now parses `{"action":"inspect","id":<N>}` using simple string search (no JSON library dependency). Extracts the `id` field by finding `"id"` then scanning digits; queues the result with `Env.inspectQueue.offer(id)`.
+
+**New method: `dispatchInspectResult(String inspectJson)`** — wraps payload in `{"topic":"inspectResult","payload":...}` and enqueues for all connected clients using the same non-blocking, drop-oldest semantics as `dispatchFrame()`.
+
+**`subscribe` compatibility** — A C1 viewer that subscribes with `topics:["frame"]` still works unchanged. The `inspectResult` topic simply never fires if no `inspect` actions are sent.
+
+### Viewer (`sim_viewer_boa.html`)
+
+**Module-level `ws`** — lifted from local variable inside `openSocket()` to module scope so the click handler can reference it. Set to `null` on `ws.onclose` before reconnect.
+
+**Subscribe update** — `onopen` now sends `{action:"subscribe",topics:["frame","inspectResult"]}`.
+
+**`onmessage` routing** — Added `else if (env.topic === 'inspectResult') { showInspectPanel(env.payload); }` branch.
+
+**Raycaster** — `THREE.Raycaster` declared at module scope. Pointer handlers distinguish click from drag: `pointerdown` saves client {x,y}; `pointerup` checks Manhattan distance ≤ 5px, then raycasts. `raycaster.intersectObjects([segMesh, rodMesh, leverMesh, motorMesh, minifilMesh], false)` returns the first hit. The hit mesh determines which reverse map to use:
+- `segMesh` → `segSlotToId.get(instanceId)` → FilSegment ID
+- `rodMesh` → `rodSlotToId.get(instanceId)` → myosin motor ID
+- `leverMesh` or `motorMesh` → `myoSlotToId.get(instanceId)` → myosin motor ID
+- `minifilMesh` → `miniSlotToId.get(instanceId)` → MyoMiniFilament ID
+
+**Inspect panel** — fixed `bottom: 60px; left: 12px` (above the controls bar in file mode; near bottom-left in live mode). Shows object `kind` and `id` in the title; fields in a two-column table (key | value). `fmt3()` formats `{x,y,z}` objects and arrays readably. Number formatting: 5 decimal places for floats, verbatim for integers and strings.
+
+**UX choices:**
+- Clicking on empty space (no intersection): panel is left as-is (not dismissed). Rationale: accidental misses shouldn't lose the last result.
+- Clicking another object: panel updates.
+- `Esc` key: dismisses panel.
+- ✕ button: dismisses panel.
+- `notFound` response: shows "(object no longer exists)" with explanatory text.
+
+**Nav hint updated** — "Click: inspect" appended to the existing hint text.
+
+### Test plan
+
+Verified by code inspection (simulation not run this session):
+- Multiple rapid clicks: each click adds to the queue; `ConcurrentLinkedQueue.offer()` is non-blocking; all are processed in order at the next drain point. Simulation cannot block.
+- Destroyed object: drain is before cleanup → `removeMe==true` check in `buildInspectJson` returns `notFound` for a dying Thing. After cleanup, the ID is removed from `instanceRegistry` → future lookups return `null` → also `notFound`.
+- C1 backward compatibility: `subscribe` handler checks `message.contains("\"subscribe\"")` first; `inspectResult` topic is simply not dispatched to clients that never send an inspect action.
+- File mode (no WebSocket): `drainInspectQueue()` returns immediately when `LiveFrameServer.isRunning()` is false. Click handler checks `ws && ws.readyState === WebSocket.OPEN` before sending — no-op if `ws` is null.
+
+### Field omissions documented
+
+| Omission | Reason |
+|---|---|
+| Intra-filament segment index (position within chain) | Requires walking end1/end2 chain — O(n) recomputation per request; use `filArrayPos` + `filamentId` instead |
+| Per-monomer nucleotide state for filSegment | Stored per-monomer, not per-segment; `notADPRatio` is the closest aggregate |
+| Lever angle for myosin | Requires computing rod-lever angle from orientation frames — deferred to C2+ |
+| Monomer inspection kind | Monomers are not rendered individually, so they are not click targets |
+
+---
+
 ## Session 12 — WebSocket live frame streaming (C1) (May 2026)
 
 ### What was built

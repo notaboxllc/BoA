@@ -164,20 +164,37 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void moveThing () {
+		// TELEPORT_DIAG — snapshot pre-step state so we can measure displacement after integration
+		Pt3D coordBefore = null, end1Before = null, end2Before = null;
+		Pt3D forceSumSnap = null, torqueSumSnap = null;
+		Pt3D randForcesSnap = null, randTorquesSnap = null;
+		Pt3D bTransGamSnap = null, bRotGamSnap = null;
+		if (Env.myoMiniTeleportDiag) {
+			coordBefore    = new Pt3D(coord.x,      coord.y,      coord.z);
+			end1Before     = new Pt3D(end1.x,       end1.y,       end1.z);
+			end2Before     = new Pt3D(end2.x,       end2.y,       end2.z);
+			forceSumSnap   = new Pt3D(forceSum.x,   forceSum.y,   forceSum.z);
+			torqueSumSnap  = new Pt3D(torqueSum.x,  torqueSum.y,  torqueSum.z);
+			randForcesSnap = new Pt3D(randForces.x, randForces.y, randForces.z);
+			randTorquesSnap= new Pt3D(randTorques.x,randTorques.y,randTorques.z);
+			bTransGamSnap  = new Pt3D(bTransGam.x,  bTransGam.y,  bTransGam.z);
+			bRotGamSnap    = new Pt3D(bRotGam.x,    bRotGam.y,    bRotGam.z);
+		}
+
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
-		
+
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) { 
-			talkln ("Crazy forceSum in " + this); 
+		if (!forceSum.checkPt3D()) {
+			talkln ("Crazy forceSum in " + this);
 			forceSum.zero();
 			forceSum.inc(randForces);
 		}
-		if (!torqueSum.checkPt3D()) { 
-			talkln ("Crazy torqueSum in " + this); 
+		if (!torqueSum.checkPt3D()) {
+			talkln ("Crazy torqueSum in " + this);
 			torqueSum.zero();
 			torqueSum.inc(randTorques);
 		}
-		
+
 		// Work in coordinates aligned with the minifilament... transform forces and torques into body-fixed axis....
 		bForceSum.XTox(this, forceSum);
 		bTorqueSum.XTox(this, torqueSum);
@@ -189,16 +206,16 @@ public class MyoMiniFilament extends Thing {
 		// now that the forces and torques are in the body fixed frame, we apply the eoms....
 		bVeloc.div(1.0e6, bForceSum, bTransGam);		// in micron/sec
 		bAngVeloc.div(bTorqueSum, bRotGam);			// in radians/sec
-			
+
 		// ** before progressing .... check that bVeloc and bAngVeloc are not NaN... exit if wacky
 		if (!bVeloc.checkPt3D()) { talkln ("** problem with bVeloc for " + this); return; }
 		if (!bAngVeloc.checkPt3D()) { talkln ("** problem with bAngVeloc for " + this); return; }
-		
+
 		// New Positions
 		// ....then transform back into fixed coordinate frame
 		veloc.xToX(this, bVeloc);
 		coord.inc(Env.deltaT.getValue(), veloc);
-		
+
 		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
 		// for uVec
 		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
@@ -206,15 +223,84 @@ public class MyoMiniFilament extends Thing {
 		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
-		
-		// for yVec 
+
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
 		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
+
 		initialize();
+
+		// TELEPORT_DIAG — check displacement; emit full state dump if threshold exceeded
+		if (Env.myoMiniTeleportDiag) {
+			double disp = Pt3D.ptDist(coordBefore, coord);
+			if (disp > Env.myoMiniTeleportThreshold) {
+				dumpTeleportDiag(coordBefore, end1Before, end2Before,
+						forceSumSnap, torqueSumSnap,
+						randForcesSnap, randTorquesSnap,
+						bTransGamSnap, bRotGamSnap, disp);
+			}
+		}
+	}
+
+	// TELEPORT_DIAG — emit one [TELEPORT] block to stderr; called only when disp > Env.myoMiniTeleportThreshold
+	private void dumpTeleportDiag(
+			Pt3D coordBefore, Pt3D end1Before, Pt3D end2Before,
+			Pt3D forceSumSnap, Pt3D torqueSumSnap,
+			Pt3D randForcesSnap, Pt3D randTorquesSnap,
+			Pt3D bTransGamSnap, Pt3D bRotGamSnap,
+			double disp) {
+		String p = "[TELEPORT] ";
+		System.err.println(p + String.format(
+				"t=%.4f step=%d minifil#%d disp=%.3eµm",
+				Env.simulationTime, Env.counter, myMyoMiniNumber, disp));
+		System.err.println(p + String.format(
+				"  coord:      (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				coordBefore.x, coordBefore.y, coordBefore.z,
+				coord.x, coord.y, coord.z));
+		System.err.println(p + String.format(
+				"  end1:       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				end1Before.x, end1Before.y, end1Before.z,
+				end1.x, end1.y, end1.z));
+		System.err.println(p + String.format(
+				"  end2:       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				end2Before.x, end2Before.y, end2Before.z,
+				end2.x, end2.y, end2.z));
+		System.err.println(p + String.format(
+				"  forceSum   = (%.3e, %.3e, %.3e)",
+				forceSumSnap.x, forceSumSnap.y, forceSumSnap.z));
+		System.err.println(p + String.format(
+				"  torqueSum  = (%.3e, %.3e, %.3e)",
+				torqueSumSnap.x, torqueSumSnap.y, torqueSumSnap.z));
+		System.err.println(p + String.format(
+				"  bForceSum  = (%.3e, %.3e, %.3e)",
+				bForceSum.x, bForceSum.y, bForceSum.z));
+		System.err.println(p + String.format(
+				"  bTorqueSum = (%.3e, %.3e, %.3e)",
+				bTorqueSum.x, bTorqueSum.y, bTorqueSum.z));
+		System.err.println(p + String.format(
+				"  randForces = (%.3e, %.3e, %.3e)",
+				randForcesSnap.x, randForcesSnap.y, randForcesSnap.z));
+		System.err.println(p + String.format(
+				"  randTorques= (%.3e, %.3e, %.3e)",
+				randTorquesSnap.x, randTorquesSnap.y, randTorquesSnap.z));
+		System.err.println(p + String.format(
+				"  bVeloc     = (%.3e, %.3e, %.3e)",
+				bVeloc.x, bVeloc.y, bVeloc.z));
+		System.err.println(p + String.format(
+				"  bAngVeloc  = (%.3e, %.3e, %.3e)",
+				bAngVeloc.x, bAngVeloc.y, bAngVeloc.z));
+		System.err.println(p + String.format(
+				"  bTransGam  = (%.3e, %.3e, %.3e)",
+				bTransGamSnap.x, bTransGamSnap.y, bTransGamSnap.z));
+		System.err.println(p + String.format(
+				"  bRotGam    = (%.3e, %.3e, %.3e)",
+				bRotGamSnap.x, bRotGamSnap.y, bRotGamSnap.z));
+		System.err.println(p + String.format(
+				"  collisionCt=%d lastCollTime=%.4f",
+				collisionCt, lastCollisionTime));
 	}
 	
 	public void biochemStep () {

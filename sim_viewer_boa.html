@@ -229,6 +229,47 @@
       color: #fff;
       flex-shrink: 0;
     }
+
+    /* ── inspect panel (C2) ────────────────────────────────────────────────── */
+    #inspectPanel {
+      position: absolute;
+      bottom: 60px;
+      left: 12px;
+      background: rgba(0,0,0,0.87);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 10px 14px;
+      z-index: 20;
+      display: none;
+      font: 12px/1.7 monospace;
+      color: #ccc;
+      min-width: 280px;
+      max-width: 420px;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+    #inspectPanel.open { display: block; }
+    #inspectPanel .ip-title {
+      font-size: 13px;
+      color: #fff;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #inspectPanel .ip-close {
+      cursor: pointer;
+      color: #666;
+      font-size: 15px;
+      line-height: 1;
+      padding: 0 2px;
+      flex-shrink: 0;
+    }
+    #inspectPanel .ip-close:hover { color: #fff; }
+    #inspectPanel table { width: 100%; border-collapse: collapse; }
+    #inspectPanel td { padding: 1px 4px; vertical-align: top; }
+    #inspectPanel td:first-child { color: #888; min-width: 140px; }
+    #inspectPanel td:last-child  { color: #eee; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -261,7 +302,7 @@
   <button id="btn30fps">30 fps</button>
 </div>
 
-<div id="navHint">Drag: rotate &nbsp;|&nbsp; Shift+drag: pan &nbsp;|&nbsp; Scroll: zoom</div>
+<div id="navHint">Drag: rotate &nbsp;|&nbsp; Shift+drag: pan &nbsp;|&nbsp; Scroll: zoom &nbsp;|&nbsp; Click: inspect</div>
 <button id="displayToggle">Display ▶</button>
 <div id="displayPanel">
   <label><span class="pLabel">Actin radius</span>    <input id="sActin"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vActin">1.00</span></label>
@@ -269,6 +310,14 @@
   <label><span class="pLabel">Motor head</span>      <input id="sMotor"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMotor">1.00</span></label>
   <label><span class="pLabel">Lever arm</span>       <input id="sLever"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vLever">1.00</span></label>
   <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
+</div>
+
+<div id="inspectPanel">
+  <div class="ip-title">
+    <span id="inspectKind">—</span>
+    <span class="ip-close" id="inspectClose">✕</span>
+  </div>
+  <table id="inspectTable"></table>
 </div>
 
 <script type="importmap">
@@ -288,6 +337,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const _liveParam = new URL(location.href).searchParams.get('live');
 const LIVE_MODE  = _liveParam !== null && _liveParam !== '';
 const LIVE_PORT  = LIVE_MODE ? (parseInt(_liveParam, 10) || 0) : 0;
+
+// module-level WebSocket ref — used by click-to-inspect handler (C2)
+let ws = null;
 
 // ── renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -386,6 +438,11 @@ const rodSlotToId  = new Map();  // reverse for rod mesh picking
 // Minifilaments: keyed by MyoMiniFilament.thingInstanceId
 const miniIdToSlot = new Map();
 const miniSlotToId = new Map();
+
+// ── raycaster for click-to-inspect (C2) ──────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const _mouse    = new THREE.Vector2();
+let   _ptrDown  = null;
 
 // ── reusable temporaries for per-frame matrix construction ────────────────────
 const dummy  = new THREE.Object3D();
@@ -703,6 +760,80 @@ function showError(msg) {
     'then open <code>http://localhost:8000/sim_viewer_boa.html</code>';
 }
 
+// ── inspect panel (C2) ────────────────────────────────────────────────────────
+const inspectPanel = document.getElementById('inspectPanel');
+const inspectKind  = document.getElementById('inspectKind');
+const inspectTable = document.getElementById('inspectTable');
+document.getElementById('inspectClose').addEventListener('click', () =>
+  inspectPanel.classList.remove('open'));
+
+function fmt3(v) {
+  if (v === null || v === undefined) return 'null';
+  if (Array.isArray(v))
+    return '[' + v.map(n => (typeof n === 'number' ? n.toFixed(5) : String(n))).join(', ') + ']';
+  if (typeof v === 'object')
+    return '(' + v.x.toFixed(5) + ', ' + v.y.toFixed(5) + ', ' + v.z.toFixed(5) + ')';
+  return String(v);
+}
+
+function showInspectPanel(data) {
+  if (data.kind === 'notFound') {
+    inspectKind.textContent = '(object no longer exists)';
+    inspectTable.innerHTML = '<tr><td colspan="2" style="color:#777;text-align:center">' +
+      'destroyed between click and processing</td></tr>';
+    inspectPanel.classList.add('open');
+    return;
+  }
+  if (data.kind === 'unknown') {
+    inspectKind.textContent = '(unknown object type)';
+    inspectTable.innerHTML = '';
+    inspectPanel.classList.add('open');
+    return;
+  }
+  inspectKind.textContent = data.kind + '  id=' + data.id;
+  const rows = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'kind' || k === 'id') continue;
+    let val;
+    if (v === null)                 val = 'null';
+    else if (Array.isArray(v))      val = '[' + v.join(', ') + ']';
+    else if (typeof v === 'object') val = fmt3(v);
+    else if (typeof v === 'number' && !Number.isInteger(v)) val = v.toFixed(5);
+    else                            val = String(v);
+    rows.push('<tr><td>' + k + '</td><td>' + val + '</td></tr>');
+  }
+  inspectTable.innerHTML = rows.join('');
+  inspectPanel.classList.add('open');
+}
+
+// ── click-to-inspect: pointer handlers (C2) ──────────────────────────────────
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  _ptrDown = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!_ptrDown) return;
+  const dx = e.clientX - _ptrDown.x;
+  const dy = e.clientY - _ptrDown.y;
+  _ptrDown = null;
+  if (Math.abs(dx) + Math.abs(dy) > 5) return;  // drag, not click
+  _mouse.x =  (e.clientX / innerWidth)  * 2 - 1;
+  _mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(_mouse, camera);
+  const hits = raycaster.intersectObjects(
+    [segMesh, rodMesh, leverMesh, motorMesh, minifilMesh], false);
+  if (hits.length === 0) return;  // empty-space click — leave panel as-is
+  const hit = hits[0];
+  let thingId;
+  if      (hit.object === segMesh)                           thingId = segSlotToId.get(hit.instanceId);
+  else if (hit.object === rodMesh)                           thingId = rodSlotToId.get(hit.instanceId);
+  else if (hit.object === leverMesh || hit.object === motorMesh) thingId = myoSlotToId.get(hit.instanceId);
+  else if (hit.object === minifilMesh)                       thingId = miniSlotToId.get(hit.instanceId);
+  if (thingId == null) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'inspect', id: thingId }));
+  }
+});
+
 // ── control wiring ────────────────────────────────────────────────────────────
 btnLoad.addEventListener('click', () => loadDirectory(dirInput.value));
 
@@ -751,6 +882,7 @@ bindScaleSlider('sLever',   'vLever',   v => { leverScale   = v; });
 bindScaleSlider('sRod',     'vRod',     v => { rodScale     = v; });
 
 window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { inspectPanel.classList.remove('open'); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
     e.preventDefault();
     dirInput.focus();
@@ -853,7 +985,6 @@ if (LIVE_MODE) {
   }
 
   function openSocket() {
-    let ws;
     try {
       ws = new WebSocket(`ws://localhost:${LIVE_PORT}`);
     } catch (_) {
@@ -862,7 +993,7 @@ if (LIVE_MODE) {
     }
     ws.onopen = () => {
       wsBackoff = 1000;
-      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame'] }));
+      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame', 'inspectResult'] }));
       setLiveState('connected');
     };
     ws.onmessage = (ev) => {
@@ -871,9 +1002,11 @@ if (LIVE_MODE) {
       if (env.topic === 'frame') {
         currentFrameData = env.payload;
         applyFrameData(env.payload);
+      } else if (env.topic === 'inspectResult') {
+        showInspectPanel(env.payload);
       }
     };
-    ws.onclose = () => { scheduleReconnect(); };
+    ws.onclose = () => { ws = null; scheduleReconnect(); };
     ws.onerror = () => { /* onclose fires after onerror */ };
   }
 

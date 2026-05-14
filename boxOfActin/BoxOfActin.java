@@ -371,7 +371,7 @@ public class BoxOfActin {
 					
 					
 					updateCounters();
-						
+					drainInspectQueue();
 					// output to screen and/or files
 					if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
 					
@@ -415,6 +415,18 @@ public class BoxOfActin {
 		
 	}
 	
+	// C2: drain pending inspect requests at a known-safe loop boundary — after all phases
+	// complete for this timestep and before cleanup removes Things. Safe because we are inside
+	// synchronized(Env.safeO). C3 pause/resume checks can be added at the same drain point.
+	private static void drainInspectQueue() {
+		if (!LiveFrameServer.isRunning()) return;
+		Integer id;
+		while ((id = Env.inspectQueue.poll()) != null) {
+			String json = ThreeJSWriter.buildInspectJson(id);
+			LiveFrameServer.dispatchInspectResult(json);
+		}
+	}
+
 	public static void updateCounters() {
 		//update counters and flags
 		paintedThisStep = false;

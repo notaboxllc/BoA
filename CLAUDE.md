@@ -91,7 +91,7 @@ http://localhost:8000/sim_viewer_boa.html?live=8081
 
 The viewer connects to `ws://localhost:8081`, displays incoming frames as they are generated, and reconnects automatically if the simulation restarts. Connection status (connected / reconnecting / disconnected) is shown in the top bar.
 
-## WebSocket Protocol (Session 12 — C1)
+## WebSocket Protocol (Sessions 12–13 — C1 + C2)
 
 Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` library.
 
@@ -99,23 +99,38 @@ Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` 
 
 **Server → client:**
 ```json
-{"topic": "frame", "payload": { ...per-frame JSON... }}
+{"topic": "frame",         "payload": { ...per-frame JSON... }}
+{"topic": "inspectResult", "payload": { ...inspection JSON... }}
 ```
 
-**Client → server (C1 only):**
+**Client → server:**
 ```json
-{"action": "subscribe", "topics": ["frame"]}
+{"action": "subscribe", "topics": ["frame", "inspectResult"]}
+{"action": "inspect",   "id": <thingInstanceId>}
 ```
 
 The `topic` / `action` discriminators are defined so future sessions can extend the protocol:
-- **C2 (click-to-inspect):** adds `inspectResult` topic and `inspect` action
 - **C3 (pause/resume):** adds `simState` topic and `pause` / `resume` / `kill` actions
 
 The server defaults to subscribing all clients to all topics on connect, so `subscribe` is optional but good practice.
 
+### C2: click-to-inspect
+
+Client clicks an object → raycasts → resolves `instanceId` to a stable `thingInstanceId` via the reverse slot maps → sends `{action:"inspect", id:<N>}`. The simulation queues the ID in `Env.inspectQueue`, drains it at the next loop-boundary (after all phases complete, inside `synchronized(Env.safeO)`, before cleanup), builds the inspect JSON via `ThreeJSWriter.buildInspectJson(id)`, and dispatches it as an `inspectResult` topic message.
+
+**inspectResult payload shape by `kind`:**
+
+`filSegment`: `id`, `kind`, `position` {x,y,z}, `orientation` {ux,uy,uz}, `end1`/`end2` [x,y,z], `filamentId`, `segmentArrayPos`, `monomerCount`, `notADPRatio`, `cofilinCount`, `end2Capped`, `ageSteps`, `prevSegId`/`nextSegId` (null at chain ends).
+
+`myosin`: `id`, `kind`, `position`, `orientation`, `nucleotideState` (NONE/ATP/ADPPi/ADP), `onFil`, `inRigor`, `boundSegId` (null if unbound), `ageSteps`.
+
+`myoMiniFilament`: `id`, `kind`, `position`, `orientation`, `end1`/`end2`, `ageSteps`, `attachedMotorIds` (array of motor IDs where `onFil==true`).
+
+`notFound`: `id`, `kind` — sent when the ID was destroyed between click and drain.
+
 ### Backpressure
 
-Each client has a bounded `ArrayBlockingQueue<String>(4)` and a per-client daemon sender thread. `dispatchFrame()` uses non-blocking `offer()` — if the queue is full it drops the oldest frame and inserts the newest. The simulation's `dispatchFrame()` call is always O(1) and never blocks, regardless of network conditions.
+Each client has a bounded `ArrayBlockingQueue<String>(4)` and a per-client daemon sender thread. Both `dispatchFrame()` and `dispatchInspectResult()` use non-blocking `offer()` — if the queue is full the oldest item is dropped. The simulation thread is always O(1) and never blocks, regardless of network conditions.
 
 ## Architecture
 
@@ -127,7 +142,7 @@ There is a top-level `BoxOfActin.java` (default package) and a `boxOfActin.BoxOf
 
 - **`boxOfActin/BoxOfActin.java`** — `begin()` parses args and sets up the simulation; `doLoop()` is the per-timestep orchestration. One `TimeLoop` thread drives everything. After Phase 3, this file no longer contains graphics orchestration, QK code, or the Swing timer.
 - **`boxOfActin/Env.java`** — global singleton with all physical constants, `Parameter` instances, thread counts, and timestep-phase integer constants (`meshFilsStart`, `stepStart`, etc.). Still has a few legacy graphics-flag fields (`paintOn`, `viewRotation`, etc.) that are harmless leftovers; they don't pull in Java3D.
-- **`boxOfActin/Thing.java`** — abstract superclass for every simulated object. Holds position, orientation, forces/torques, drag/diffusion tensors, and Brownian force calculation. All simulated objects live in the static `theThings[]` array. After Phase 1, this class has no Java3D fields. `drawYourself(Graphics, double, double[])` is an empty AWT-typed stub retained as the rendering hook for future use.
+- **`boxOfActin/Thing.java`** — abstract superclass for every simulated object. Holds position, orientation, forces/torques, drag/diffusion tensors, and Brownian force calculation. All simulated objects live in the static `theThings[]` array. After Phase 1, this class has no Java3D fields. `drawYourself(Graphics, double, double[])` is an empty AWT-typed stub retained as the rendering hook for future use. `thingInstanceId` is a stable, monotonically increasing ID assigned at construction and never reassigned (unlike `myThingNumber`, which changes on swap-compact cleanup). `findByInstanceId(int)` provides O(1) lookup via a static `ConcurrentHashMap` maintained in sync with the `theThings[]` lifecycle.
 - **`boxOfActin/Pt3D.java`** — 3D point / vector. After Phase 0, this is a standalone class with explicit `public double x, y, z;` fields and ~600 lines of pure-Java math (cross, dot, unit-vector, body-frame transforms via `Thing.transXTox` / `Thing.transxToX`, etc.). It is no longer `extends javax.vecmath.Point3d`.
 
 ### Simulated objects (all extend `Thing`)

@@ -10,6 +10,7 @@ import ec.util.MersenneTwisterFast;
 
 import java.util.Date;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Thing extends Object {
 	
@@ -22,7 +23,11 @@ public class Thing extends Object {
 	static final Pt3D yUnitVector = new Pt3D(0,1,0);	// unit vector along body-fixed y-axis
 	static final Pt3D zUnitVector = new Pt3D(0,0,1);	// unit vector along body-fixed z-axis
 	static final Pt3D zeroVec = new Pt3D();	// just a zero Pt3D
-	int myThingNumber;					// identifies where in "theThings" this Thing is
+	private static int nextThingInstanceId = 0;
+	private static final ConcurrentHashMap<Integer, Thing> instanceRegistry = new ConcurrentHashMap<>();
+	public final int thingInstanceId;     // stable identity; set once at construction, never reassigned (unlike myThingNumber)
+	final int createdAtStep;              // Env.counter at construction, for age reporting
+	int myThingNumber;					// identifies where in "theThings" this Thing is; reassigned on swap-cleanup
 	boolean removeMe = false;			// if true this Thing will be eliminated
 	Pt3D coord = new Pt3D();			// the x,y,and z position of the Thing
 	static Pt3D maxPos = Env.worldDimension;	// maximum x position this Thing can occupy
@@ -92,6 +97,9 @@ public class Thing extends Object {
 	static DecimalFormat expFormat = new DecimalFormat ("0.000E0");
 	
 	public Thing (Pt3D initCoord) {
+		this.thingInstanceId = nextThingInstanceId++;
+		this.createdAtStep   = Env.counter;
+		instanceRegistry.put(this.thingInstanceId, this);
 		this.coord.copy(initCoord);
 		addThing(this);
 	}
@@ -410,8 +418,13 @@ public class Thing extends Object {
 		int swapId = byeThing.myThingNumber;
 		theThings[swapId] = theThings[thingCt-1];
 		theThings[swapId].myThingNumber = swapId;
+		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();
 		thingCt--;
+	}
+
+	public static Thing findByInstanceId(int id) {
+		return instanceRegistry.get(id);
 	}
 	
 	public static void removeDeadThings () {
