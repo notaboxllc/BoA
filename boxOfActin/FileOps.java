@@ -966,11 +966,14 @@ public class FileOps {
 	}
 	
 	public static void closeJSons() {
-		//emptyGraphsJSon();
-		writeSimJSonPlots();
-		writeSimJSon2Plots();
-		closeSimulariumJSonFile();
-		closeSimulariumJSonFile2();
+		if (Env.writeSimJSons) {
+			writeSimJSonPlots();
+			closeSimulariumJSonFile();
+		}
+		if (Env.writeSimJSons2) {
+			writeSimJSon2Plots();
+			closeSimulariumJSonFile2();
+		}
 		System.out.println("Finished closing JSON plots!");
 	}
 	
