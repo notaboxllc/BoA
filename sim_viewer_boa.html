@@ -421,7 +421,7 @@ scene.add(leverMesh);
 
 const sphGeo = new THREE.SphereGeometry(1, 8, 6);
 const motorMesh = new THREE.InstancedMesh(sphGeo,
-  new THREE.MeshPhongMaterial({ vertexColors: true }), MAX_MYOSINS);
+  new THREE.MeshPhongMaterial({}), MAX_MYOSINS);
 motorMesh.count = 0;
 motorMesh.frustumCulled = false;
 scene.add(motorMesh);

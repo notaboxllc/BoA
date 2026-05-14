@@ -110,6 +110,51 @@ it uses a completely separate writer path (`ThreeJSWriter`).
 
 **Commit:** `1db1ad0`
 
+### Post-session rendering regression: vertexColors on motorMesh (fixed in same session)
+
+The Session 16 `vertexColors: THREE.VertexColors → true` change was a rendering
+regression. After a hard-refresh, myosin structures rendered shredded/fragmentary;
+actin filaments were unaffected.
+
+**What went wrong:**
+
+`motorMesh` uses Three.js `InstancedMesh` with per-instance colors set via
+`setColorAt()` (nucleotide-state colors: NONE=blue, ATP=yellow, ADPPi=orange,
+ADP=red). In Three.js r168 this path is gated by the internal `USE_INSTANCING_COLOR`
+shader define, which is enabled whenever `mesh.instanceColor !== null` —
+independent of the material's `vertexColors` flag.
+
+Setting `vertexColors: true` activates an additional, separate path: it tells the
+renderer to read a per-vertex `color` attribute from the geometry. `SphereGeometry`
+has no such attribute. The renderer or shader then operates on an unbound or
+zero-filled buffer for per-vertex colors, corrupting the geometry rendering —
+visible as shredding/fragmentation.
+
+The original code had `vertexColors: THREE.VertexColors`, where `THREE.VertexColors`
+is `undefined` in Three.js r168 (the constant was removed in r132). The material
+constructor received `undefined`, treated it as `false` (no vertex color attribute
+reads), and the motors rendered correctly via the instance-color path alone.
+The console warning was cosmetic; the behavior was correct.
+
+**The console warning was a red herring.** The right fix to silence it was not to
+replace `undefined` with `true` but to remove the property entirely, which is
+what the absent property default already does correctly.
+
+**Fix:** Remove `vertexColors` from the `motorMesh` material entirely:
+```javascript
+// was: new THREE.MeshPhongMaterial({ vertexColors: true })
+new THREE.MeshPhongMaterial({})
+```
+
+With no `vertexColors` property, the material defaults to `false`: no per-vertex
+geometry reads, no shader interference. The `instanceColor` machinery continues
+to apply nucleotide-state colors per-instance via `USE_INSTANCING_COLOR` as before.
+
+No change to the `instanceColor` setup (line 428) or `setColorAt` calls (line 701)
+— those were and remain correct.
+
+**Commit:** `(see below)`
+
 ### Exit-path audit (orderly-shutdown coverage)
 
 `TimeLoop.run()` has exactly this structure:
