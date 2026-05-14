@@ -199,7 +199,8 @@ public class Env {
 	static boolean paintOn = true;
 	static boolean fullSetToFile = true;
 	static boolean toFile = false;
-	static boolean paused = true;
+	static volatile boolean paused = true;
+	static volatile boolean terminating = false;   // C3: set by kill action; absorbing state
 	static boolean viewRotation = false;
 	static boolean orderedCentered = false;
 

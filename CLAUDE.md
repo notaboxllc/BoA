@@ -91,7 +91,7 @@ http://localhost:8000/sim_viewer_boa.html?live=8081
 
 The viewer connects to `ws://localhost:8081`, displays incoming frames as they are generated, and reconnects automatically if the simulation restarts. Connection status (connected / reconnecting / disconnected) is shown in the top bar.
 
-## WebSocket Protocol (Sessions 12–13 — C1 + C2)
+## WebSocket Protocol (Sessions 12–14 — C1 + C2 + C3)
 
 Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` library.
 
@@ -101,18 +101,40 @@ Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` 
 ```json
 {"topic": "frame",         "payload": { ...per-frame JSON... }}
 {"topic": "inspectResult", "payload": { ...inspection JSON... }}
+{"topic": "simState",      "payload": {"state": "running"|"paused"|"terminating", "step": <N>}}
 ```
 
 **Client → server:**
 ```json
-{"action": "subscribe", "topics": ["frame", "inspectResult"]}
+{"action": "subscribe", "topics": ["frame", "inspectResult", "simState"]}
 {"action": "inspect",   "id": <thingInstanceId>}
+{"action": "pause"}
+{"action": "resume"}
+{"action": "kill"}
 ```
 
-The `topic` / `action` discriminators are defined so future sessions can extend the protocol:
-- **C3 (pause/resume):** adds `simState` topic and `pause` / `resume` / `kill` actions
+The `topic` / `action` discriminators are the extension point for future sessions:
+- **C4 (parameter adjustment):** adds `paramUpdate` action and `paramAck` topic
 
-The server defaults to subscribing all clients to all topics on connect, so `subscribe` is optional but good practice.
+The server pushes all topics to all clients; `subscribe` is informational only (no per-topic filtering on the server side).
+
+### C3: pause / resume / kill
+
+`simState` is pushed to all clients on every state transition and to each new client on connect (so a late-joining viewer immediately knows whether the simulation is paused or running).
+
+State machine: `running` → `paused` (via `pause`) → `running` (via `resume`); either → `terminating` (via `kill`, absorbing). Redundant actions (pause-while-paused, resume-while-running) are no-ops.
+
+`kill` → server dispatches simState "terminating" → main loop exits at next safe-point check → `FileOps.closeJSons()` runs (output directory left valid) → `LiveFrameServer.stopServer()` waits 1500ms (flush window) → JVM exits.
+
+Viewer: Pause / Resume / Kill buttons in the live bar. Button enable/disable tracks simState. Kill prompts `confirm()` before sending. On simState "terminating", reconnect is suppressed; reload the page to connect to a new simulation.
+
+## Safe-Point Coordination Pattern
+
+The safe point is in `BoxOfActin.doLoop()`, inside `synchronized(Env.safeO)`, after `updateCounters()` completes for each timestep. All physics phases have finished for that step; cleanup has not yet run; all `Thing` objects are in a stable, inspectable state.
+
+Coordination at the safe point uses `Env.safeO.wait(50)` (releases the lock for up to 50ms; `notifyAll()` from the WebSocket thread wakes it immediately on state change). The order at the safe point is: **pause wait** (with inspect drain inside) → **kill check** → **inspect drain** → **logAndDraw**.
+
+Any future async coordination — C4 parameter adjustment, benchmark triggers, etc. — should use this same point rather than inventing new lock objects or new drain locations.
 
 ### C2: click-to-inspect
 

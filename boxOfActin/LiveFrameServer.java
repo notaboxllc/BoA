@@ -12,13 +12,19 @@ import java.util.Map;
 /**
  * WebSocket server for live frame streaming (-3jsLive flag).
  *
- * Protocol (C1):
- *   Server → client: {"topic":"frame","payload":{...frame JSON...}}
- *   Client → server: {"action":"subscribe","topics":["frame"]}
+ * Protocol (C1-C3):
+ *   Server → client: {"topic":"frame",        "payload":{...frame JSON...}}
+ *                    {"topic":"inspectResult", "payload":{...}}
+ *                    {"topic":"simState",      "payload":{"state":"running"|"paused"|"terminating","step":<N>}}
+ *   Client → server: {"action":"subscribe","topics":["frame","inspectResult","simState"]}
+ *                    {"action":"inspect","id":<N>}
+ *                    {"action":"pause"}
+ *                    {"action":"resume"}
+ *                    {"action":"kill"}
  *
  * Each client has a bounded outgoing queue (size 4). If a slow client falls
  * behind, the oldest queued frame is dropped to make room for the newest.
- * The simulation's dispatchFrame() call is always non-blocking.
+ * The simulation's dispatch*() calls are always non-blocking.
  */
 public class LiveFrameServer extends WebSocketServer {
 
@@ -87,6 +93,9 @@ public class LiveFrameServer extends WebSocketServer {
         state.senderThread = sender;
         sender.start();
 
+        // C3: send current simState immediately so late-joining viewer knows run state
+        state.queue.offer(buildSimStateMsg());
+
         System.out.println("LiveFrameServer: client connected " + conn.getRemoteSocketAddress());
     }
 
@@ -102,7 +111,7 @@ public class LiveFrameServer extends WebSocketServer {
     @Override
     public void onMessage(WebSocket conn, String message) {
         if (message.contains("\"subscribe\"")) {
-            return;  // already subscribed to all topics by default
+            return;  // subscribed to all topics on connect; subscribe is informational only
         }
         if (message.contains("\"inspect\"")) {
             // Parse {"action":"inspect","id":<N>} — extract the integer id field
@@ -116,6 +125,31 @@ public class LiveFrameServer extends WebSocketServer {
                 try {
                     Env.inspectQueue.offer(Integer.parseInt(message.substring(colonIdx, end).trim()));
                 } catch (NumberFormatException ignored) {}
+            }
+            return;
+        }
+        // C3: pause / resume / kill
+        if (message.contains("\"pause\"")) {
+            if (!Env.paused && !Env.terminating) {
+                Env.paused = true;
+                dispatchSimState("paused", Env.counter);
+            }
+            return;
+        }
+        if (message.contains("\"resume\"")) {
+            if (Env.paused && !Env.terminating) {
+                Env.paused = false;
+                synchronized (Env.safeO) { Env.safeO.notifyAll(); }
+                dispatchSimState("running", Env.counter);
+            }
+            return;
+        }
+        if (message.contains("\"kill\"")) {
+            if (!Env.terminating) {
+                Env.terminating = true;
+                Env.paused = false;   // wake any pause wait
+                synchronized (Env.safeO) { Env.safeO.notifyAll(); }
+                dispatchSimState("terminating", Env.counter);
             }
             return;
         }
@@ -134,7 +168,31 @@ public class LiveFrameServer extends WebSocketServer {
         System.out.println("LiveFrameServer: ready");
     }
 
-    // ── frame dispatch (called from simulation thread) ─────────────────────────
+    // ── dispatch helpers (called from simulation or WebSocket thread) ─────────
+
+    /** Builds the current simState message from Env flags. */
+    private static String buildSimStateMsg() {
+        String s = Env.terminating ? "terminating" : (Env.paused ? "paused" : "running");
+        return "{\"topic\":\"simState\",\"payload\":{\"state\":\"" + s + "\",\"step\":" + Env.counter + "}}";
+    }
+
+    /**
+     * Enqueues a simState message to all connected clients. Non-blocking,
+     * drop-oldest semantics — same as dispatchFrame/dispatchInspectResult.
+     */
+    public static void dispatchSimState(String state, int step) {
+        if (instance == null || !running || instance.clients.isEmpty()) return;
+        String msg = "{\"topic\":\"simState\",\"payload\":{\"state\":\"" + state + "\",\"step\":" + step + "}}";
+        for (Map.Entry<WebSocket, ClientState> entry : instance.clients.entrySet()) {
+            WebSocket conn = entry.getKey();
+            ClientState cs = entry.getValue();
+            if (!conn.isOpen()) continue;
+            if (!cs.queue.offer(msg)) {
+                cs.queue.poll();
+                cs.queue.offer(msg);
+            }
+        }
+    }
 
     /**
      * Wraps inspectJson in the inspectResult envelope and enqueues it for every

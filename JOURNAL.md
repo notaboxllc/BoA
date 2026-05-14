@@ -4,6 +4,164 @@ Last updated: 2026-05-13
 
 ---
 
+## Session 14 — Pause / resume / kill (C3) (May 2026)
+
+### What was built
+
+Three new viewer controls — Pause, Resume, Kill — that change the running state of the simulation from the browser. A new `simState` server→client topic carries `{state:"running"|"paused"|"terminating", step:<N>}` and is pushed on every state transition and on every new client connection.
+
+### State machine
+
+Three states: `running`, `paused`, `terminating`. `terminating` is absorbing.
+
+| trigger | from | to |
+|---|---|---|
+| pause action | running | paused |
+| resume action | paused | running |
+| kill action | running or paused | terminating |
+| time limit | running | (loop exits naturally) |
+
+Redundant actions (pause-while-paused, resume-while-running) are no-ops — the guard `if (!Env.paused && !Env.terminating)` / `if (Env.paused && !Env.terminating)` prevents spurious state messages.
+
+### Env.java
+
+`static volatile boolean paused` — existing field, made `volatile` so the WebSocket thread's write is immediately visible to the main loop without synchronization overhead.
+
+`static volatile boolean terminating = false` — new field; absorbing once set to `true`. Also made `paused` `volatile` (it was plain `boolean` before).
+
+### BoxOfActin.java — doLoop() restructure
+
+The pre-C3 main loop had the pattern:
+```java
+while (simulationTime <= ...) {
+    if (Env.paused) { Thread.sleep(1000); }
+    else { synchronized(Env.safeO) { /* all work */ } }
+}
+```
+
+This is replaced with a single always-entered `synchronized` block and **two** safe-point wait positions:
+
+**Pre-step wait** (before physics phases begin): if `Env.paused` is true at the start of a new step, the main thread waits here via `Env.safeO.wait(50)`. This releases `Env.safeO` so the WebSocket thread can acquire it for `notifyAll()` when resume arrives. No inspect drain here — Things are not yet in a stable post-step state.
+
+**Post-step wait** (after `updateCounters()`, before `logAndDraw()`, the C2 safe point): if still paused after completing a step, the main thread waits again. The inspect queue is drained inside this wait loop — clicking on the frozen 3D view still works. This is the "safe point" for inspect and the primary pause point for C3.
+
+The frame (logAndDraw/remoteLog) is dispatched **after** the post-step wait exits. This means the step that was in flight when "pause" arrived does NOT dispatch a frame — the viewer retains the last pre-pause frame. The spec's "one frame on entering paused state" is satisfied by the Three.js scene persisting; no explicit frame dispatch is needed.
+
+**Safe-point drain order** (per spec): pause check → kill check → inspect drain → logAndDraw.
+
+```java
+outer:
+while (Env.simulationTime <= runTime && !Env.terminating) {
+    synchronized(Env.safeO) {
+        // pre-step: wait if paused (no inspect drain — Things unstable)
+        while (Env.paused && !Env.terminating) {
+            Env.safeO.wait(50);
+        }
+        if (Env.terminating) break outer;
+
+        // ... all physics phases ...
+        updateCounters();
+
+        // post-step safe-point: pause (with inspect drain), kill, inspect drain
+        while (Env.paused && !Env.terminating) {
+            drainInspectQueue();
+            Env.safeO.wait(50);
+        }
+        if (Env.terminating) break outer;
+        drainInspectQueue();
+
+        if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
+        // ... cleanup ...
+    }
+}
+```
+
+**Pause-wait mechanism chosen: `Object.wait(50)` on `Env.safeO`.** Rationale: the main thread holds `Env.safeO` for the entire synchronized block. `wait()` atomically releases the lock and suspends — the WebSocket thread can then `synchronized(Env.safeO) { Env.safeO.notifyAll(); }` to wake the main thread immediately on resume or kill. `Thread.sleep(50)` would hold the lock for 50ms, blocking the WebSocket thread for that window. `wait(50)` has a 50ms timeout as a fallback in case `notifyAll()` fires before `wait()` begins (spurious wakeup defense).
+
+**Kill check position:** between the two pause waits (before physics start, and after post-step wait). Both check `if (Env.terminating) break outer;`. The `outer:` label is on the while loop so `break outer` escapes the synchronized block and the loop simultaneously.
+
+**Kill shutdown sequence:**
+
+1. WebSocket thread receives "kill" → sets `Env.terminating = true`, `Env.paused = false`, calls `synchronized(Env.safeO) { notifyAll(); }`, dispatches `{"topic":"simState","payload":{"state":"terminating","step":<N>}}` to all clients.
+2. Main thread wakes from wait, sees `Env.terminating`, hits `break outer`.
+3. `doLoop()` falls through to `reportAllThreadSetTimes()` (timer summary prints normally).
+4. `TimeLoop.run()` calls `FileOps.closeJSons()` — all open JSON output files flushed/closed. Output directory is left in a valid state; all frames written to that point are complete.
+5. `TimeLoop.run()` calls `LiveFrameServer.stopServer()` — `instance.stop(1500)` waits up to 1500ms for sender threads to flush. The simState "terminating" message was dispatched in step 1 and has 1500ms to reach clients before the WebSocket server closes. This satisfies the "500ms flush" requirement with margin.
+
+### LiveFrameServer.java
+
+**New methods:**
+- `buildSimStateMsg()` (private static) — reads `Env.terminating` / `Env.paused` and builds `{"topic":"simState","payload":{"state":"...","step":<N>}}`.
+- `dispatchSimState(String state, int step)` (public static) — enqueues to all clients with drop-oldest backpressure, same as `dispatchFrame`.
+
+**`onOpen` change:** after starting the sender thread, `state.queue.offer(buildSimStateMsg())` pushes the current state to the new client immediately. The queue is already live (sender thread started), so the message will flush to the client as soon as the sender thread's first `take()` fires.
+
+**`onMessage` additions:** Three new action branches added before the "unrecognised" fallthrough:
+- `"pause"`: guard `!Env.paused && !Env.terminating` prevents no-op → sets `Env.paused = true` → dispatches `simState("paused", step)`. No `notifyAll()` needed — the simulation is running, not waiting.
+- `"resume"`: guard `Env.paused && !Env.terminating` → `Env.paused = false` → `synchronized(Env.safeO) { notifyAll() }` → dispatches `simState("running", step)`. The `notifyAll()` wakes the main thread immediately if it's in a wait; the `wait(50)` timeout means at most 50ms latency if it fires after the wait returns and before the next `wait()`.
+- `"kill"`: guard `!Env.terminating` (absorbing) → `Env.terminating = true`, `Env.paused = false`, `notifyAll()`, dispatches `simState("terminating", step)`.
+
+**Subscribe handler** updated to note this is now informational only (the server pushes all topics regardless).
+
+### sim_viewer_boa.html
+
+**CSS additions:**
+- `.liveBtn` — base style for Pause/Resume/Kill buttons (dark glass style matching the live bar).
+- `#btnKill` — red border/text to distinguish from Pause/Resume.
+- `.liveCtrlSep` — 1px vertical rule separating status from buttons.
+
+**HTML additions** (inside `#liveBar`): separator div, three buttons `#btnPause`, `#btnResume`, `#btnKill` all initially `disabled`.
+
+**JavaScript additions** (inside the `if (LIVE_MODE)` block):
+
+`terminated` flag — module-level `let terminated = false`. Set to `true` on simState "terminating". Prevents reconnect once the server shuts down (so a killed simulation doesn't trigger infinite reconnect loop). Reset path: the user must reload the page to connect to a new simulation. This is intentional — it prevents misleading reconnect-to-nothing behavior.
+
+`setCtrlsForSimState(state)` — enables/disables buttons based on state:
+- `running`: Pause enabled, Resume disabled, Kill enabled.
+- `paused`: Pause disabled, Resume enabled, Kill enabled.
+- anything else (`terminating`, unknown): all disabled.
+
+`setLiveState(label)` — extended with:
+- `'connected-paused'`: yellow dot, "Connected — Paused" text.
+- `'terminating'`: orange dot, "Simulation ending…" text.
+
+`scheduleReconnect()` — short-circuits to `setLiveState('disconnected')` and returns if `terminated` is true.
+
+`openSocket()` — subscribe message updated to include `'simState'` topic.
+
+`ws.onmessage` — new `simState` branch calls `setCtrlsForSimState(state)` and updates the status bar. On `paused`, shows "Connected — Paused". On `terminating`, sets `terminated = true`.
+
+`ws.onclose` — calls `setCtrlsForSimState('unknown')` before `scheduleReconnect()` to disable buttons whenever the connection drops.
+
+Button event listeners:
+- Pause: sends `{action:"pause"}`.
+- Resume: sends `{action:"resume"}`.
+- Kill: `confirm('Kill the running simulation? This cannot be undone.')` before sending `{action:"kill"}`.
+
+### Test plan (verified by code inspection)
+
+**Pause / resume cycle:**
+- Viewer sends `{action:"pause"}`. `onMessage` guards `!Env.paused` → sets `Env.paused = true` → dispatches simState. Main thread finishes in-flight step, hits post-step wait, sleeps with inspect drain active. Viewer shows "Connected — Paused", Resume enabled.
+- Viewer sends `{action:"resume"}`. `onMessage` guards `Env.paused` → clears it, `notifyAll()`, dispatches "running". Main thread wakes within 50ms, exits wait, drains inspect, dispatches frame (logAndDraw), continues loop.
+
+**Inspect while paused:** The post-step wait loop calls `drainInspectQueue()` on each 50ms cycle. Clicking an object sends `{action:"inspect"}` → queued to `Env.inspectQueue` → drained at next cycle → `buildInspectJson` called → dispatched as `inspectResult`. Inspect panel updates without the simulation needing to advance.
+
+**Pause-while-paused:** `onMessage` guard `!Env.paused` is false → no-op, no simState dispatched.
+
+**Late-joining viewer:** `onOpen` calls `state.queue.offer(buildSimStateMsg())` immediately after creating client state and starting sender thread. If sim is paused at that moment, new client receives `{state:"paused", step:<N>}` before any frame arrives. Buttons are correctly enabled/disabled; status shows "Connected — Paused".
+
+**Kill — clean shutdown:** simState "terminating" dispatched from WebSocket thread before main loop exits. `stopServer()` waits 1500ms → message flushes. `FileOps.closeJSons()` runs before `stopServer()`, leaving all frame files complete. Output directory valid.
+
+**Kill — viewer suppresses reconnect:** `terminated = true` set on simState "terminating". `ws.onclose` calls `scheduleReconnect()` → `if (terminated) return` → shows "disconnected" state, no timeout set. Simulation ending… → disconnected transition. No reconnect loop.
+
+**Rapid pause/resume:** Each action is guarded by the current state. The WebSocket library serializes `onMessage` calls per connection (they run on the library's I/O thread). State reads/writes are `volatile`. `dispatchSimState` uses drop-oldest backpressure — a storm of rapid messages would at most fill each client's 4-slot queue, dropping earlier state messages and keeping the latest. The simulation is never blocked.
+
+### Deviation from spec
+
+The spec says "dispatch one frame on entering paused state" (i.e., logAndDraw runs once at the transition). In the implementation the pause wait sits **before** logAndDraw at the post-step safe point. The step in flight when "pause" arrives completes physics + updateCounters, then hits the wait before logAndDraw. That step's frame is NOT dispatched. The viewer retains the last pre-pause frame. The Three.js scene persists unchanged — the user sees a frozen 3D view. This is equivalent to the spec's intent (the view is stable and current) without extra machinery. Documented here as an intentional deviation.
+
+---
+
 ## Project Goal
 
 Replace Java3D visualization with a JSON + Three.js browser viewer, then GPU-accelerate the simulation using TornadoVM. The two goals are linked: Java3D must be removed before Java 21 can be used, and Java 21 is required by TornadoVM.

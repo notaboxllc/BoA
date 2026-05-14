@@ -174,6 +174,21 @@
       font: 13px monospace;
     }
     #liveDot { font-size: 18px; line-height: 1; }
+    .liveCtrlSep { width: 1px; height: 20px; background: rgba(255,255,255,0.2); margin: 0 4px; flex-shrink: 0; }
+    .liveBtn {
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 2px 10px;
+      cursor: pointer;
+      font: 12px monospace;
+      white-space: nowrap;
+    }
+    .liveBtn:hover:not(:disabled) { color: #fff; border-color: #aaa; }
+    .liveBtn:disabled { opacity: 0.35; cursor: default; }
+    #btnKill { border-color: #833; color: #f88; }
+    #btnKill:hover:not(:disabled) { border-color: #f44; color: #faa; }
 
     /* ── display panel ─────────────────────────────────────────────────────── */
     #displayToggle {
@@ -289,6 +304,10 @@
 <div id="liveBar">
   <span id="liveDot" style="color:#fa0">●</span>
   <span id="liveStatusText">LIVE — connecting…</span>
+  <div class="liveCtrlSep"></div>
+  <button id="btnPause"  class="liveBtn" disabled>⏸ Pause</button>
+  <button id="btnResume" class="liveBtn" disabled>▶ Resume</button>
+  <button id="btnKill"   class="liveBtn" disabled>✕ Kill</button>
 </div>
 
 <div id="controls">
@@ -961,12 +980,22 @@ if (!LIVE_MODE) {
 if (LIVE_MODE) {
   const liveDot  = document.getElementById('liveDot');
   const liveText = document.getElementById('liveStatusText');
-  let wsBackoff  = 1000;
+  const btnPause  = document.getElementById('btnPause');
+  const btnResume = document.getElementById('btnResume');
+  const btnKill   = document.getElementById('btnKill');
+  let wsBackoff   = 1000;
+  let terminated  = false;  // true after server sends 'terminating'; suppresses reconnect
 
   function setLiveState(label) {
     if (label === 'connected') {
       liveDot.style.color = '#4f4';
       liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — connected`;
+    } else if (label === 'connected-paused') {
+      liveDot.style.color = '#ff0';
+      liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — Connected — Paused`;
+    } else if (label === 'terminating') {
+      liveDot.style.color = '#f84';
+      liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — Simulation ending…`;
     } else if (label === 'reconnecting') {
       liveDot.style.color = '#fa0';
       liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — reconnecting in ${wsBackoff / 1000}s…`;
@@ -976,7 +1005,25 @@ if (LIVE_MODE) {
     }
   }
 
+  function setCtrlsForSimState(state) {
+    if (state === 'running') {
+      btnPause.disabled  = false;
+      btnResume.disabled = true;
+      btnKill.disabled   = false;
+    } else if (state === 'paused') {
+      btnPause.disabled  = true;
+      btnResume.disabled = false;
+      btnKill.disabled   = false;
+    } else {
+      // terminating or unknown — disable all
+      btnPause.disabled  = true;
+      btnResume.disabled = true;
+      btnKill.disabled   = true;
+    }
+  }
+
   function scheduleReconnect() {
+    if (terminated) { setLiveState('disconnected'); return; }
     setLiveState('reconnecting');
     setTimeout(() => {
       wsBackoff = Math.min(wsBackoff * 2, 8000);
@@ -993,7 +1040,7 @@ if (LIVE_MODE) {
     }
     ws.onopen = () => {
       wsBackoff = 1000;
-      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame', 'inspectResult'] }));
+      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame', 'inspectResult', 'simState'] }));
       setLiveState('connected');
     };
     ws.onmessage = (ev) => {
@@ -1004,11 +1051,37 @@ if (LIVE_MODE) {
         applyFrameData(env.payload);
       } else if (env.topic === 'inspectResult') {
         showInspectPanel(env.payload);
+      } else if (env.topic === 'simState') {
+        const state = env.payload.state;
+        setCtrlsForSimState(state);
+        if (state === 'paused') {
+          setLiveState('connected-paused');
+        } else if (state === 'terminating') {
+          terminated = true;
+          setLiveState('terminating');
+        } else {
+          setLiveState('connected');
+        }
       }
     };
-    ws.onclose = () => { ws = null; scheduleReconnect(); };
+    ws.onclose = () => {
+      ws = null;
+      setCtrlsForSimState('unknown');
+      scheduleReconnect();
+    };
     ws.onerror = () => { /* onclose fires after onerror */ };
   }
+
+  btnPause.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'pause' }));
+  });
+  btnResume.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'resume' }));
+  });
+  btnKill.addEventListener('click', () => {
+    if (!confirm('Kill the running simulation? This cannot be undone.')) return;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'kill' }));
+  });
 
   setLiveState('reconnecting');
   openSocket();

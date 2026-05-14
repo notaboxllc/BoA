@@ -276,137 +276,150 @@ public class BoxOfActin {
 		double collisionTime = 0;
 		double myosinTime = 0;
 		
-		while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump)) {
-			if (Env.paused) {
-				try { Thread.sleep(1000); } catch (InterruptedException e) { talkln ("error sleeping"); }
-			} else {
-				synchronized(Env.safeO) {
-					// set biophysical values needed for this next time step
-					FilSegment.setBiophysValues();
-					 // Meshed Collisions
-					if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) { 
-						 collisionMeshTimer.start();
-						 
-						 startAllThreadSets(Env.meshFilsStart);
-						 waitOnAllThreadSets(Env.meshFilsStop);
-						 startAllThreadSets(Env.meshNodesStart);
-						 waitOnAllThreadSets(Env.meshNodesStop);
-						 startAllThreadSets(Env.meshMotorsStart);
-						 waitOnAllThreadSets(Env.meshMotorsStop);
-						 
-						 startAllThreadSets(Env.meshCollStart);
-						 waitOnAllThreadSets(Env.meshCollStop);
-						 
-						 collisionCkCounter = 0;
-						 collisionMeshTimer.stopInc();
-					}
-					
-					// Motor domain - filament collisions... check every time-step
-					motorsAndFilsColTimer.start();
-					startAllThreadSets(Env.motCollStart);
-					waitOnAllThreadSets(Env.motCollStop);
-					motorsAndFilsColTimer.stopInc();
-					
-					// Brownian Motion
-					if (applyBrownianForcesCounter >= Thing.brownianApplyInt | Env.simulationTime == 0) {
-						brownianTimer.start();
-						startAllThreadSets(Env.bForcesStart);
-						waitOnAllThreadSets(Env.bForcesStop);
-						brownianTimer.stopInc();
-					}
-					
-					// Crosslinkers and Arp2/3 branches and ActAs
-					xLinkTimer.start();
-					FilSegment.zeroAllLinkCts();
-					startAllThreadSets(Env.xLinkStart);
-					waitOnAllThreadSets(Env.xLinkStop);
-					xLinkTimer.stopInc();
-					
-					// Membrane links
+		// C3: label lets break escape from inside synchronized when kill is detected
+		outer:
+		while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump) && !Env.terminating) {
+			synchronized(Env.safeO) {
+				// C3: pre-step pause wait — blocks between timesteps, releases the lock
+				// so the WebSocket thread can set Env.paused/terminating and notifyAll()
+				while (Env.paused && !Env.terminating) {
+					try { Env.safeO.wait(50); } catch (InterruptedException e) { break; }
+				}
+				if (Env.terminating) break outer;
+
+				// set biophysical values needed for this next time step
+				FilSegment.setBiophysValues();
+				 // Meshed Collisions
+				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
+					 collisionMeshTimer.start();
+
+					 startAllThreadSets(Env.meshFilsStart);
+					 waitOnAllThreadSets(Env.meshFilsStop);
+					 startAllThreadSets(Env.meshNodesStart);
+					 waitOnAllThreadSets(Env.meshNodesStop);
+					 startAllThreadSets(Env.meshMotorsStart);
+					 waitOnAllThreadSets(Env.meshMotorsStop);
+
+					 startAllThreadSets(Env.meshCollStart);
+					 waitOnAllThreadSets(Env.meshCollStop);
+
+					 collisionCkCounter = 0;
+					 collisionMeshTimer.stopInc();
+				}
+
+				// Motor domain - filament collisions... check every time-step
+				motorsAndFilsColTimer.start();
+				startAllThreadSets(Env.motCollStart);
+				waitOnAllThreadSets(Env.motCollStop);
+				motorsAndFilsColTimer.stopInc();
+
+				// Brownian Motion
+				if (applyBrownianForcesCounter >= Thing.brownianApplyInt | Env.simulationTime == 0) {
+					brownianTimer.start();
+					startAllThreadSets(Env.bForcesStart);
+					waitOnAllThreadSets(Env.bForcesStop);
+					brownianTimer.stopInc();
+				}
+
+				// Crosslinkers and Arp2/3 branches and ActAs
+				xLinkTimer.start();
+				FilSegment.zeroAllLinkCts();
+				startAllThreadSets(Env.xLinkStart);
+				waitOnAllThreadSets(Env.xLinkStop);
+				xLinkTimer.stopInc();
+
+				// Membrane links
+				startAllThreadSets(Env.membraneLinksStart);
+				waitOnAllThreadSets(Env.membraneLinksStop);
+
+				// actual myosin joints
+				startAllThreadSets(Env.myoJoints1Start);
+				waitOnAllThreadSets(Env.myoJoints1Stop);
+
+				// connections to other things
+				startAllThreadSets(Env.myoJoints2Start);
+				waitOnAllThreadSets(Env.myoJoints2Stop);
+
+				// Thing.step() calls
+				stepTimer.start();
+				startAllThreadSets(Env.stepStart);
+				waitOnAllThreadSets(Env.stepStop);
+				stepTimer.stopInc();
+
+				moveTimer.start();
+				startAllThreadSets(Env.moveStart);
+				waitOnAllThreadSets(Env.moveStop);
+				moveTimer.stopInc();
+
+				biochemTimer.start();
+				startAllThreadSets(Env.biochemStart);
+				waitOnAllThreadSets(Env.biochemStop);
+				biochemTimer.stopInc();
+
+				startAllThreadSets(Env.resetCtStart);
+				waitOnAllThreadSets(Env.resetCtStop);
+
+				// Membrane relaxation loop... special passes to allow forces to propogate/move nodes, especially laterally at collisions
+				int mPass = 0;
+				NodeLink.maxStrain = 10;
+				while (NodeLink.maxStrain > Env.membraneMaxLinkStrain.getValue() && mPass < Env.maxMembranePasses.getIntValue()) {
+					NodeLink.maxStrain = 0;	// zero before each pass... values set in NodeLink.enforceLink()
+
 					startAllThreadSets(Env.membraneLinksStart);
 					waitOnAllThreadSets(Env.membraneLinksStop);
+					//System.out.println("max membrane strain = " + NodeLink.maxStrain);
 
-					// actual myosin joints
-					startAllThreadSets(Env.myoJoints1Start);
-					waitOnAllThreadSets(Env.myoJoints1Stop);
-					
-					// connections to other things
-					startAllThreadSets(Env.myoJoints2Start);
-					waitOnAllThreadSets(Env.myoJoints2Stop);
-					
-					// Thing.step() calls
-					stepTimer.start();
-					startAllThreadSets(Env.stepStart);
-					waitOnAllThreadSets(Env.stepStop);
-					stepTimer.stopInc();
-					
-					moveTimer.start();
-					startAllThreadSets(Env.moveStart);
-					waitOnAllThreadSets(Env.moveStop);
-					moveTimer.stopInc();
-					
-					biochemTimer.start();
-					startAllThreadSets(Env.biochemStart);
-					waitOnAllThreadSets(Env.biochemStop);
-					biochemTimer.stopInc();
-					
-					startAllThreadSets(Env.resetCtStart);
-					waitOnAllThreadSets(Env.resetCtStop);
-					
-					// Membrane relaxation loop... special passes to allow forces to propogate/move nodes, especially laterally at collisions
-					int mPass = 0;
-					NodeLink.maxStrain = 10;
-					while (NodeLink.maxStrain > Env.membraneMaxLinkStrain.getValue() && mPass < Env.maxMembranePasses.getIntValue()) {
-						NodeLink.maxStrain = 0;	// zero before each pass... values set in NodeLink.enforceLink()
-						
-						startAllThreadSets(Env.membraneLinksStart);
-						waitOnAllThreadSets(Env.membraneLinksStop);
-						//System.out.println("max membrane strain = " + NodeLink.maxStrain);
-						
-						startAllThreadSets(Env.membraneMoveStart);
-						waitOnAllThreadSets(Env.membraneMoveStop);
-						
-						mPass++;
-					} 
-					
-					
-					updateCounters();
-					drainInspectQueue();
-					// output to screen and/or files
-					if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
-					
-					//**** Clean Up ****
-					cleanupTimer1.start();
-					// large-scale removal of stuff at prescribed rates
-					ProteinNode.cleanUpNodes();
-					MyoMiniFilament.cleanUpMyoMinis();
-					//if (Env.randomNodesOn && (Math.random() < 0.01)) { MyoMiniFilament.removeRandomMiniFil();	} 
-					
-					// remove Things AFTER the graphical update... can safely detach graphics objects of dead things this way
-					// the order is important here... conglomerates of smaller things first, since removal can cascade that direction
-					ProteinNode.cleanUpNodes();
-					MyoMiniFilament.cleanUpMyoMinis();
-					MyosinDimer.cleanupMyoDimers();  // 
-					Myosin.cleanupMyos(); 		// ditto above
-					MyoMotor.cleanupMyoMotors();  // compact motor array
-					Thing.removeDeadThings();		// get rid of dead things
-					FilLink.setInactiveFilLinks();	// register inactive links
-					NodeLink.setInactiveNodeLinks();
-					Arp23.setInactiveArp23s();
-					cleanupTimer1.stopInc();
-					
-					ActA.cleanUpActAs();
-					
-					if (Env.simulationTime > 0 && StickyNode.sphericalGeometry) { FillNode.addFillNodeToCell(); }   // fill cell as appropriate
-			
-					
-					// create new Things
-					if (Env.kRdmNuc.isActive()) { FilSegment.spawnRdmFilaments(); }
-					if (Env.kNodeNuc.isActive()) { ProteinNode.spawnNodeFilaments(); }
-					
-					ProteinNode.equilibrateNodeNumber();
-					MyoMiniFilament.equilibrateMyoMiniNumber();
+					startAllThreadSets(Env.membraneMoveStart);
+					waitOnAllThreadSets(Env.membraneMoveStop);
+
+					mPass++;
 				}
+
+				updateCounters();
+
+				// C3: safe-point — pause check (with inspect drain while waiting),
+				// kill check, then final inspect drain. Order: pause > kill > inspect.
+				while (Env.paused && !Env.terminating) {
+					drainInspectQueue();   // inspect still works on the frozen view
+					try { Env.safeO.wait(50); } catch (InterruptedException e) { break; }
+				}
+				if (Env.terminating) break outer;
+				drainInspectQueue();
+
+				// output to screen and/or files
+				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
+
+				//**** Clean Up ****
+				cleanupTimer1.start();
+				// large-scale removal of stuff at prescribed rates
+				ProteinNode.cleanUpNodes();
+				MyoMiniFilament.cleanUpMyoMinis();
+				//if (Env.randomNodesOn && (Math.random() < 0.01)) { MyoMiniFilament.removeRandomMiniFil();	}
+
+				// remove Things AFTER the graphical update... can safely detach graphics objects of dead things this way
+				// the order is important here... conglomerates of smaller things first, since removal can cascade that direction
+				ProteinNode.cleanUpNodes();
+				MyoMiniFilament.cleanUpMyoMinis();
+				MyosinDimer.cleanupMyoDimers();  //
+				Myosin.cleanupMyos(); 		// ditto above
+				MyoMotor.cleanupMyoMotors();  // compact motor array
+				Thing.removeDeadThings();		// get rid of dead things
+				FilLink.setInactiveFilLinks();	// register inactive links
+				NodeLink.setInactiveNodeLinks();
+				Arp23.setInactiveArp23s();
+				cleanupTimer1.stopInc();
+
+				ActA.cleanUpActAs();
+
+				if (Env.simulationTime > 0 && StickyNode.sphericalGeometry) { FillNode.addFillNodeToCell(); }   // fill cell as appropriate
+
+
+				// create new Things
+				if (Env.kRdmNuc.isActive()) { FilSegment.spawnRdmFilaments(); }
+				if (Env.kNodeNuc.isActive()) { ProteinNode.spawnNodeFilaments(); }
+
+				ProteinNode.equilibrateNodeNumber();
+				MyoMiniFilament.equilibrateMyoMiniNumber();
 			}
 		}
 		System.out.println("collisionTime = " + collisionTime);
@@ -415,9 +428,9 @@ public class BoxOfActin {
 		
 	}
 	
-	// C2: drain pending inspect requests at a known-safe loop boundary — after all phases
-	// complete for this timestep and before cleanup removes Things. Safe because we are inside
-	// synchronized(Env.safeO). C3 pause/resume checks can be added at the same drain point.
+	// C2/C3: drain pending inspect requests at the safe-point — after all physics phases
+	// complete and before cleanup removes Things, inside synchronized(Env.safeO).
+	// C3 pause/kill waits use this same point; both pause wait loops call this directly.
 	private static void drainInspectQueue() {
 		if (!LiveFrameServer.isRunning()) return;
 		Integer id;
