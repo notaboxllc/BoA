@@ -129,7 +129,7 @@ The server pushes all topics to all clients; `subscribe` is informational only (
 - Parse failure → immediate error: `"parse error: <details>"`.
 - Valid → queued in `Env.paramQueue`; success ack dispatched at next safe point.
 
-**Orientation key consistency:** Frame payload uses `end1`/`end2` array pairs for geometry (no orientation field). `inspectResult` uses `{ux, uy, uz}` for orientation. No conflict — different data shapes, no overlap.
+**Orientation key consistency:** The `frame` and `inspectResult` payloads represent segment geometry differently by design: `frame` uses `end1`/`end2` endpoint pairs (the viewer derives orientation from them for rendering); `inspectResult` uses an explicit `{ux, uy, uz}` long-axis unit vector (for the inspection text readout). These are complementary, not redundant — do not "unify" them.
 
 ### C3: pause / resume / kill
 
