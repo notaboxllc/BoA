@@ -4,6 +4,41 @@ Last updated: 2026-05-14
 
 ---
 
+## 2026-05-14 — Planner: C-track complete; integration testing arc; F1 is next
+
+The full C-track (WebSocket live observation) is done and validated:
+C1 transport, C2 click-to-inspect, C3 pause/resume/kill, C4 mid-run parameter
+adjustment. Integration testing (Session 15A) plus the bugfix sessions (16, 17)
+were inserted mid-track after testing surfaced real bugs.
+
+Findings worth carrying forward:
+- The orderly-shutdown path had never run end-to-end before Session 16. Both
+  finalization paths NPE'd; Ctrl-C bypassed finalization entirely. Now fixed.
+  Exit-path audit table is in the Session 16 entry.
+- Two "minor" fixes turned out not to be minor: Bug 1's field-name drift
+  (ux/uy/uz vs x/y/z in inspectResult) and the vertexColors rendering
+  regression. Both would have been caught by visual verification before commit.
+- C4's parameter survey classified all 234 parameters. Only toFileInterval is
+  confirmed mutable. The biologically interesting rate constants (kNodeNuc,
+  cofilinRate, cofilinConc, tropoOnRate/OffRate, fracMove) are in the "unclear,
+  likely mutable" bucket — they need a usage-graph trace before promotion.
+- Step 7 audit: frame and inspectResult payloads use different geometry
+  representations by design (endpoints vs axis vector) — no conflict.
+
+Tracked someday-items:
+- Ctrl-C shutdown hook (Runtime.addShutdownHook → stopServer() + flush
+  ThreeJSWriter).
+- Parameter promotion: trace usage graph for the "unclear" rate constants,
+  promote the safe ones to mutableAtRuntime. May become an F-track dependency
+  if F1's benchmark design needs live rate-constant control.
+
+Next: F1 — benchmark design session. Planner + user, not a Claude Code handoff.
+User uploads their actin-benchmarking publication; design the assay data flow,
+cache schema, pop-up window, and message protocol together. F1's outcome
+decides whether parameter promotion jumps the queue.
+
+---
+
 ## Session 18 — Mid-run parameter adjustment (C4) (May 2026)
 
 ### Overview
