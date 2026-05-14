@@ -385,6 +385,7 @@ public class BoxOfActin {
 				}
 				if (Env.terminating) break outer;
 				drainInspectQueue();
+				drainParamQueue();  // C4: apply pending parameter changes, dispatch acks
 
 				// output to screen and/or files
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
@@ -437,6 +438,24 @@ public class BoxOfActin {
 		while ((id = Env.inspectQueue.poll()) != null) {
 			String json = ThreeJSWriter.buildInspectJson(id);
 			LiveFrameServer.dispatchInspectResult(json);
+		}
+	}
+
+	// C4: drain pending parameter changes at the safe-point — after inspect drain,
+	// before logAndDraw. Each entry was validated on the WebSocket thread; apply,
+	// then dispatch the success ack to all clients.
+	private static void drainParamQueue() {
+		if (!LiveFrameServer.isRunning()) return;
+		Env.PendingParamChange change;
+		while ((change = Env.paramQueue.poll()) != null) {
+			double oldValue = change.param.getValue();
+			change.param.setValue(change.newValue);
+			// Special counter reset: when toFileInterval changes, advance the counter
+			// to newInterval-1 so the next step's logAndDraw fires immediately.
+			if ("toFileInterval".equals(change.param.label)) {
+				threeJSCounter = (int) change.newValue - 1;
+			}
+			LiveFrameServer.dispatchParamAck(change.param.label, oldValue, change.newValue);
 		}
 	}
 

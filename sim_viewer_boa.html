@@ -245,6 +245,77 @@
       flex-shrink: 0;
     }
 
+    /* ── param panel (C4) ─────────────────────────────────────────────────── */
+    #paramPanel {
+      position: absolute;
+      top: 44px;
+      right: 12px;
+      background: rgba(0,0,0,0.87);
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px 14px;
+      z-index: 15;
+      display: none;
+      font: 12px/1.9 monospace;
+      color: #ccc;
+      min-width: 340px;
+      max-width: 440px;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    #paramPanel.open { display: block; }
+    #paramPanel h3 {
+      font-size: 12px;
+      color: #aaa;
+      margin: 0 0 6px 0;
+      border-bottom: 1px solid #333;
+      padding-bottom: 4px;
+    }
+    .pp-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 2px 0;
+    }
+    .pp-name {
+      flex: 1;
+      min-width: 0;
+      color: #aaa;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pp-input {
+      width: 80px;
+      background: #1a1a1a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 2px 5px;
+      font: 12px monospace;
+      outline: none;
+      flex-shrink: 0;
+    }
+    .pp-input:focus { border-color: #4a7aaa; color: #fff; }
+    .pp-apply {
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 1px 8px;
+      cursor: pointer;
+      font: 11px monospace;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .pp-apply:hover { color: #fff; border-color: #aaa; }
+    .pp-msg {
+      font-size: 11px;
+      min-width: 60px;
+      flex-shrink: 0;
+      text-align: right;
+    }
+
     /* ── inspect panel (C2) ────────────────────────────────────────────────── */
     #inspectPanel {
       position: absolute;
@@ -308,6 +379,13 @@
   <button id="btnPause"  class="liveBtn" disabled>⏸ Pause</button>
   <button id="btnResume" class="liveBtn" disabled>▶ Resume</button>
   <button id="btnKill"   class="liveBtn" disabled>✕ Kill</button>
+  <div class="liveCtrlSep"></div>
+  <button id="btnParams" class="liveBtn">Params ▶</button>
+</div>
+
+<div id="paramPanel">
+  <h3>Mutable parameters</h3>
+  <div id="paramRows"></div>
 </div>
 
 <div id="controls">
@@ -1040,7 +1118,8 @@ if (LIVE_MODE) {
     }
     ws.onopen = () => {
       wsBackoff = 1000;
-      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame', 'inspectResult', 'simState'] }));
+      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame', 'inspectResult', 'simState', 'paramAck', 'paramList'] }));
+      ws.send(JSON.stringify({ action: 'queryParams' }));
       setLiveState('connected');
     };
     ws.onmessage = (ev) => {
@@ -1062,6 +1141,10 @@ if (LIVE_MODE) {
         } else {
           setLiveState('connected');
         }
+      } else if (env.topic === 'paramList') {
+        buildParamPanel(env.payload);
+      } else if (env.topic === 'paramAck') {
+        handleParamAck(env.payload);
       }
     };
     ws.onclose = () => {
@@ -1082,6 +1165,102 @@ if (LIVE_MODE) {
     if (!confirm('Kill the running simulation? This cannot be undone.')) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'kill' }));
   });
+
+  // ── C4: parameter panel ───────────────────────────────────────────────────
+  const btnParams  = document.getElementById('btnParams');
+  const paramPanel = document.getElementById('paramPanel');
+  const paramRows  = document.getElementById('paramRows');
+
+  btnParams.addEventListener('click', () => {
+    const open = paramPanel.classList.toggle('open');
+    btnParams.textContent = open ? 'Params ▼' : 'Params ▶';
+    // refresh on open
+    if (open && ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ action: 'queryParams' }));
+  });
+
+  // Periodic refresh of param values (~5s) while panel is open
+  setInterval(() => {
+    if (paramPanel.classList.contains('open') && ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ action: 'queryParams' }));
+  }, 5000);
+
+  function buildParamPanel(params) {
+    // Keep input values that the user has typed (don't clobber pending edits)
+    const pending = new Map();
+    paramRows.querySelectorAll('.pp-input').forEach(inp => {
+      pending.set(inp.dataset.name, inp.value);
+    });
+
+    paramRows.innerHTML = '';
+    const mutableParams = params.filter(p => p.mutable);
+    if (mutableParams.length === 0) {
+      paramRows.innerHTML = '<div style="color:#555;padding:4px 0">No mutable parameters</div>';
+      return;
+    }
+    for (const p of mutableParams) {
+      const row = document.createElement('div');
+      row.className = 'pp-row';
+      row.dataset.name = p.name;
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'pp-name';
+      nameEl.title = p.displayName + ' [' + p.type + ']';
+      nameEl.textContent = p.name;
+
+      const inp = document.createElement('input');
+      inp.className = 'pp-input';
+      inp.type = 'text';
+      inp.dataset.name = p.name;
+      inp.value = pending.has(p.name) ? pending.get(p.name) : String(p.value);
+
+      const btn = document.createElement('button');
+      btn.className = 'pp-apply';
+      btn.textContent = 'Apply';
+
+      const msg = document.createElement('span');
+      msg.className = 'pp-msg';
+      msg.id = 'pp-msg-' + p.name;
+
+      btn.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'setParam', name: p.name, value: inp.value }));
+          msg.style.color = '#888';
+          msg.textContent = '…';
+        }
+      });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') btn.click();
+      });
+
+      row.appendChild(nameEl);
+      row.appendChild(inp);
+      row.appendChild(btn);
+      row.appendChild(msg);
+      paramRows.appendChild(row);
+    }
+  }
+
+  function handleParamAck(ack) {
+    const msgEl = document.getElementById('pp-msg-' + ack.name);
+    if (ack.success) {
+      // Update the input to reflect confirmed new value
+      const inp = paramRows.querySelector('.pp-input[data-name="' + ack.name + '"]');
+      if (inp) inp.value = String(ack.newValue);
+      if (msgEl) {
+        msgEl.style.color = '#4f4';
+        msgEl.textContent = '✓';
+        setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
+      }
+    } else {
+      if (msgEl) {
+        msgEl.style.color = '#f84';
+        msgEl.textContent = '✗';
+        msgEl.title = ack.error || 'error';
+        setTimeout(() => { if (msgEl) { msgEl.textContent = ''; msgEl.title = ''; } }, 4000);
+      }
+    }
+  }
 
   setLiveState('reconnecting');
   openSocket();

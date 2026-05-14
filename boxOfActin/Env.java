@@ -212,7 +212,9 @@ public class Env {
 												// JPEG output
 
 	static final Parameter drawInterval = new Parameter("drawInterval"," To Screen Interval", drawInterval_init, "time steps", Parameter.INT);
-	static final Parameter toFileInterval = new Parameter("toFileInterval"," Image to File Interval", toFileInterval_init, "time steps", Parameter.INT);
+	// C4: toFileInterval is the only confirmed mid-run mutable parameter.
+	// It is a pure counter threshold (threeJSCounter >= toFileInterval) with no cached derivatives.
+	static final Parameter toFileInterval = new Parameter("toFileInterval"," Image to File Interval", toFileInterval_init, "time steps", Parameter.INT).setMutableAtRuntime();
 	static final Parameter jpegQuality = new Parameter("jpegQuality"," JPEG Quality", jpegQuality_init, " (1.0 is best)");
 	static final Parameter remoteReportInterval = new Parameter("remoteWriteInterval", " Remote Reporting Interval",remoteReportInterval_init, "time steps", Parameter.INT);
 	static final Parameter rotationPerWrite = new Parameter("rotationPerWrite", " Rotation Per Image Write",0, "degrees", Parameter.DOUBLE);
@@ -808,6 +810,19 @@ public class Env {
 	static int    threeJSLivePort  = -1;		// WebSocket port for live frame streaming; -1 = disabled
 	static final java.util.concurrent.ConcurrentLinkedQueue<Integer> inspectQueue =
 		new java.util.concurrent.ConcurrentLinkedQueue<>();  // C2: pending click-to-inspect IDs from viewer
+
+	/** C4: a validated, ready-to-apply parameter change queued by LiveFrameServer. */
+	static class PendingParamChange {
+		final Parameter param;
+		final double newValue;
+		PendingParamChange(Parameter param, double newValue) {
+			this.param = param;
+			this.newValue = newValue;
+		}
+	}
+	/** C4: pending mid-run parameter changes from WebSocket setParam actions. */
+	static final java.util.concurrent.ConcurrentLinkedQueue<PendingParamChange> paramQueue =
+		new java.util.concurrent.ConcurrentLinkedQueue<>();
 	static String jSonFileName = "coarse";
 	static String jSon2FileName = "fine";
 	static double simJSonsScale = 20.0;			// scale all output numbers for better Simularium rendering

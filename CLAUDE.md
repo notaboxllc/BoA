@@ -14,7 +14,7 @@ As of Phase 4 (commit `dd4314f`), Java3D has been fully removed from the codebas
 
 The codebase compiles with stock Java — no Java3D, no JOGLAndj3D classpath. Source lives in the default package (top-level `BoxOfActin.java`) and the `boxOfActin/` subpackage, plus bundled libraries in `ec/util/`, `edu/cornell/lassp/houle/RngPack/`, and `infoCCD/`.
 
-The WebSocket server (`-3jsLive`) requires two jars in `libs/`. The `*.jar` rule in `.gitignore` excludes them from the repository — download them on a fresh checkout:
+The WebSocket server (`-3jsLive`) requires three jars in `libs/`. The `*.jar` rule in `.gitignore` excludes them from the repository — download them on a fresh checkout:
 
 ```
 mkdir -p libs
@@ -22,23 +22,26 @@ curl -L -o libs/Java-WebSocket-1.5.7.jar \
   https://repo1.maven.org/maven2/org/java-websocket/Java-WebSocket/1.5.7/Java-WebSocket-1.5.7.jar
 curl -L -o libs/slf4j-api-2.0.6.jar \
   https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.6/slf4j-api-2.0.6.jar
+curl -L -o libs/json-20231013.jar \
+  https://repo1.maven.org/maven2/org/json/json/20231013/json-20231013.jar
 ```
 
 - `libs/Java-WebSocket-1.5.7.jar` — org.java-websocket WebSocket server/client (140 KB)
 - `libs/slf4j-api-2.0.6.jar` — SLF4J API required by java-websocket (63 KB); prints a harmless NOP warning to stderr at startup if no SLF4J provider is on the classpath
+- `libs/json-20231013.jar` — org.json JSON parser used for C4 setParam/queryParams actions (75 KB)
 
 ```
-javac -XDignore.symbol.file -cp ".:libs/Java-WebSocket-1.5.7.jar:libs/slf4j-api-2.0.6.jar" boxOfActin/*.java *.java
+javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
 ```
 
-`-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries.
+`-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries. The `libs/*` glob picks up all three jars.
 
 If you are not using `-3jsLive`, you can still compile and run without the jars on the classpath (the server class is loaded lazily). But the simplest practice is to always include them.
 
 ### Build (post-Phase 5, once Java 21 is installed)
 
 ```
-javac --release 21 --enable-preview -XDignore.symbol.file -cp ".:libs/Java-WebSocket-1.5.7.jar:libs/slf4j-api-2.0.6.jar" boxOfActin/*.java *.java
+javac --release 21 --enable-preview -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
 ```
 
 Phase 5 has not yet been performed. The MBP needs `brew install openjdk@21` before this command will work. Once Java 21 is installed and the codebase is validated under it, this becomes the canonical build command and `--enable-preview` is required for TornadoVM compatibility (TornadoVM's `FloatArray` is a Java 21 preview feature).
@@ -91,7 +94,7 @@ http://localhost:8000/sim_viewer_boa.html?live=8081
 
 The viewer connects to `ws://localhost:8081`, displays incoming frames as they are generated, and reconnects automatically if the simulation restarts. Connection status (connected / reconnecting / disconnected) is shown in the top bar.
 
-## WebSocket Protocol (Sessions 12–14 — C1 + C2 + C3)
+## WebSocket Protocol (Sessions 12–18 — C1 + C2 + C3 + C4)
 
 Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` library.
 
@@ -102,21 +105,31 @@ Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` 
 {"topic": "frame",         "payload": { ...per-frame JSON... }}
 {"topic": "inspectResult", "payload": { ...inspection JSON... }}
 {"topic": "simState",      "payload": {"state": "running"|"paused"|"terminating", "step": <N>}}
+{"topic": "paramList",     "payload": [{"name":"<label>","displayName":"<name>","type":"double"|"int"|"boolean","value":<v>,"mutable":<bool>}, ...]}
+{"topic": "paramAck",      "payload": {"success":true,  "name":"<label>","oldValue":<v>,"newValue":<v>}}
+{"topic": "paramAck",      "payload": {"success":false, "name":"<label>","error":"<reason>"}}
 ```
 
 **Client → server:**
 ```json
-{"action": "subscribe", "topics": ["frame", "inspectResult", "simState"]}
+{"action": "subscribe", "topics": ["frame", "inspectResult", "simState", "paramAck", "paramList"]}
 {"action": "inspect",   "id": <thingInstanceId>}
 {"action": "pause"}
 {"action": "resume"}
 {"action": "kill"}
+{"action": "queryParams"}
+{"action": "setParam", "name": "<label>", "value": "<stringValue>"}
 ```
 
-The `topic` / `action` discriminators are the extension point for future sessions:
-- **C4 (parameter adjustment):** adds `paramUpdate` action and `paramAck` topic
+The server pushes all topics to all clients; `subscribe` is informational only (no per-topic filtering on the server side). Unknown actions are logged and discarded.
 
-The server pushes all topics to all clients; `subscribe` is informational only (no per-topic filtering on the server side).
+**setParam validation** (on WebSocket thread, before safe point):
+- Unknown label → immediate `paramAck` error: `"unknown parameter"`.
+- Known but not `mutableAtRuntime` → immediate error: `"not mid-run mutable"`.
+- Parse failure → immediate error: `"parse error: <details>"`.
+- Valid → queued in `Env.paramQueue`; success ack dispatched at next safe point.
+
+**Orientation key consistency:** Frame payload uses `end1`/`end2` array pairs for geometry (no orientation field). `inspectResult` uses `{ux, uy, uz}` for orientation. No conflict — different data shapes, no overlap.
 
 ### C3: pause / resume / kill
 
@@ -128,13 +141,21 @@ State machine: `running` → `paused` (via `pause`) → `running` (via `resume`)
 
 Viewer: Pause / Resume / Kill buttons in the live bar. Button enable/disable tracks simState. Kill prompts `confirm()` before sending. On simState "terminating", reconnect is suppressed; reload the page to connect to a new simulation.
 
+### C4: mid-run parameter adjustment (Session 18)
+
+The viewer shows a "Params ▶" button in the live bar. Clicking it opens a floating panel populated from `queryParams`. Only parameters marked `mutableAtRuntime` appear with an editable input + Apply button.
+
+`setParam` validation is immediate on the WebSocket thread (unknown name, immutable, or parse error → instant error ack). Valid changes are queued in `Env.paramQueue` and applied at the safe point. Success ack is dispatched after application.
+
+The panel refreshes automatically every 5s while open, and on each reconnect. `paramAck` error tooltips appear for 4s. `paramAck` success updates the displayed value and shows `✓` for 2s.
+
 ## Safe-Point Coordination Pattern
 
 The safe point is in `BoxOfActin.doLoop()`, inside `synchronized(Env.safeO)`, after `updateCounters()` completes for each timestep. All physics phases have finished for that step; cleanup has not yet run; all `Thing` objects are in a stable, inspectable state.
 
-Coordination at the safe point uses `Env.safeO.wait(50)` (releases the lock for up to 50ms; `notifyAll()` from the WebSocket thread wakes it immediately on state change). The order at the safe point is: **pause wait** (with inspect drain inside) → **kill check** → **inspect drain** → **logAndDraw**.
+Coordination at the safe point uses `Env.safeO.wait(50)` (releases the lock for up to 50ms; `notifyAll()` from the WebSocket thread wakes it immediately on state change). The order at the safe point is: **pause wait** (with inspect drain inside) → **kill check** → **inspect drain** → **param drain** → **logAndDraw**.
 
-Any future async coordination — C4 parameter adjustment, benchmark triggers, etc. — should use this same point rather than inventing new lock objects or new drain locations.
+The param drain is after the inspect drain so that a same-step inspect sees the pre-change state, keeping inspectResult coherent with the frame being dispatched. Any further async coordination (F-track benchmarks, GPU triggers, etc.) should use this same point.
 
 ### C2: click-to-inspect
 
@@ -153,6 +174,22 @@ Client clicks an object → raycasts → resolves `instanceId` to a stable `thin
 ### Backpressure
 
 Each client has a bounded `ArrayBlockingQueue<String>(4)` and a per-client daemon sender thread. Both `dispatchFrame()` and `dispatchInspectResult()` use non-blocking `offer()` — if the queue is full the oldest item is dropped. The simulation thread is always O(1) and never blocks, regardless of network conditions.
+
+## Mid-run Mutable Parameters
+
+Parameters are annotated with `.setMutableAtRuntime()` in their `Env.java` declaration. The `Parameter.getAllMutable()` method returns all annotated parameters. `LiveFrameServer.buildParamListJson()` serializes the full list for `queryParams` responses. `LiveFrameServer.handleSetParam()` validates and queues changes; `BoxOfActin.drainParamQueue()` applies them at the safe point.
+
+**Whitelist (Session 18) — conservative by design:**
+
+| Parameter label | Type | Justification |
+|---|---|---|
+| `toFileInterval` | int | Pure counter threshold (`threeJSCounter >= value`) in `logAndDraw`/`remoteLog`. No cached derivatives. No physics effect. Counter reset to `newValue-1` on application so the next step fires immediately. |
+
+**Promotion criteria for future sessions:** A parameter can be added to the whitelist if: (a) every usage is `getValue()` at call time (not a stored-once derivative), and (b) no per-run initialization captures the value into a local or static field used for the rest of the run. Grep for `p.label` across all source files and trace each hit.
+
+**Confirmed immutable (cached derivatives prevent safe mid-run change):** `deltaT`, `biochemDeltaT`, `collisionDeltaT`, `brownianDeltaT` (all drive `Thing.biochemCheckInt`/`collisionCheckInt`/`brownianApplyInt`), `nVBlobPerBug` (drives `blobTransGam`/`blobRotGam`), `aeta` (drives `bTransGamViscBlob`/`bRotGamViscBlob`), `nodeRadius` (drives `nodeTransDiff_init`/`nodeRotDiff_init`), all box/bug/topology parameters (applied only in `makeCrucible()`/`makeInitialThings()`).
+
+**Unclear (likely mutable after audit):** `kNodeNuc`, `kRdmNuc`, `cofilinRate`, `cofilinConc`, `tropoOnRate`, `tropoOffRate`, `tropoConc`, `fracMove`/`fracR`/`fracMoveTorq`, `remoteReportInterval`, and the actin biochem rate constants (`kATPOn1/2`, `kATPOff1/2`, `kADPOff1/2`). These appear to be read fresh each step but require a complete usage-graph trace before promoting.
 
 ## Architecture
 

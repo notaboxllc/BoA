@@ -22,8 +22,29 @@ public class Parameter {
 	boolean dependent = false;
 	Parameter dependsOn;
 	Object syncO = new Object();
+	private boolean mutableAtRuntime = false;  // C4: safe to change via setParam mid-run
 
-	
+
+	// C4: builder-style setter; returns this so callers can chain in field init
+	public Parameter setMutableAtRuntime() {
+		this.mutableAtRuntime = true;
+		return this;
+	}
+
+	public boolean isMutableAtRuntime() {
+		return mutableAtRuntime;
+	}
+
+	/** C4: Returns all Parameters that have been marked mutableAtRuntime. */
+	public static java.util.List<Parameter> getAllMutable() {
+		java.util.List<Parameter> result = new java.util.ArrayList<>();
+		for (int i = 0; i < paramCt; i++) {
+			if (theParams[i] != null && theParams[i].mutableAtRuntime)
+				result.add(theParams[i]);
+		}
+		return result;
+	}
+
 	public Parameter (String label, String parameterName, double defaultValue, String units) {
 		basicInit(label,parameterName,defaultValue,units);
 		addParameter(this);

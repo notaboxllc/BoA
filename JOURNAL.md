@@ -1,6 +1,225 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-13
+Last updated: 2026-05-14
+
+---
+
+## Session 18 — Mid-run parameter adjustment (C4) (May 2026)
+
+### Overview
+
+C4 completes the C-track (C1 WebSocket, C2 click-to-inspect, C3 pause/resume/kill, C4 parameter adjustment). The session adds org.json parsing, a `mutableAtRuntime` annotation on `Parameter`, a `paramQueue` drain at the established safe point, and a viewer "Params" panel in live mode.
+
+---
+
+### Step 0 — org.json parser
+
+Added `libs/json-20231013.jar` (75 KB) from Maven Central (`org.json:json:20231013`). The library has no transitive dependencies and is Java 8 compatible. It is excluded from git by the existing `*.jar` rule in `.gitignore` — download on a fresh checkout:
+
+```
+curl -L -o libs/json-20231013.jar \
+  https://repo1.maven.org/maven2/org/json/json/20231013/json-20231013.jar
+```
+
+Used for parsing `setParam` and `queryParams` actions in `LiveFrameServer.onMessage()`. The existing C2/C3 string-scan parsers (for `inspect`, `pause`, `resume`, `kill`) were left as-is — retro-cleaning them was evaluated but skipped since the string-scan approach for single-field or no-field payloads is simpler than introducing a JSONObject parse for trivial cases, and existing behaviour must not regress.
+
+---
+
+### Step 1 — Parameter whitelist survey
+
+All 234 registered parameters were surveyed. Classification criteria:
+- **Mutable**: read fresh via `getValue()` every timestep, no cached derivatives that would diverge if the value changed mid-run.
+- **Immutable**: read once at startup, OR has cached derivatives that are not recomputed each step.
+- **Unclear**: appears to be read fresh but would require deeper multi-file tracing to confirm the entire usage graph is cache-free.
+
+**MUTABLE (confirmed)**
+
+| Parameter label | Justification |
+|---|---|
+| `toFileInterval` | Pure counter threshold (`threeJSCounter >= Env.toFileInterval.getIntValue()`) in `logAndDraw()` and `remoteLog()`. No cached derivatives. No physics consequence. Counter reset included for immediate effect (see Step 2). |
+
+**IMMUTABLE — cached derivatives computed at startup or in `setTimeStepCounts()` / `setDependencies()`**
+
+| Parameter label | Why immutable |
+|---|---|
+| `deltaT` | `Thing.biochemCheckInt`, `Thing.collisionCheckInt`, `Thing.brownianApplyInt`, `simJSonFreq`, `simJSon2Freq`, `simJSon2StartCounting` all derived at startup; changing `deltaT` mid-run leaves all derived values stale. |
+| `biochemDeltaT` | `Thing.biochemCheckInt` derived. |
+| `collisionDeltaT` | `Thing.collisionCheckInt` derived. |
+| `brownianDeltaT` | `Thing.brownianApplyInt` derived. |
+| `nVBlobPerBug` | `blobTransGam`, `blobRotGam` derived in `setDependencies()`; `N` constant also derived at class load. |
+| `aeta` | `bTransGamViscBlob`, `bRotGamViscBlob` are `static final double` computed from `aeta.getValue()` at class initialization. Changing `aeta` mid-run has no effect. |
+| `nodeRadius` | `nodeTransDiff_init`, `nodeRotDiff_init` computed from it at class init. |
+| `noMonomersSimd`, `noMonomersRendered` | `monomerGraphics` boolean derived in `setDependencies()`; also affects initial object creation. |
+| `boxXDim`, `boxYDim`, `boxZDim` | Used in `Chamber.makeABox()` at startup to set wall positions; changing mid-run does not move the box walls. |
+| `initialFilaments`, `initialNodes`, `initialMyoMiniFils` | Used only in `makeInitialThings()` at startup. |
+| `bugLength`, `bugRadius`, `bugShapedCrucible`, `simOutsideBug` | Used in `makeCrucible()` at startup. |
+| `stdSegLength` (label: `filSegLength`) | Sets segment monomer count at creation; existing segments are unaffected. |
+| `numMyoDimersEachEndOfMiniFil` | Sets minifilament end-dimer array size at creation. |
+
+**UNCLEAR — appear to be read fresh each step but require deeper tracing to confirm no derivative caching**
+
+| Parameter label | Why unclear |
+|---|---|
+| `actinConc` | Read in `FilSegment.setBiophysValues()` (called every step → `maxPolyForce` recomputed), AND read in Monomer biochemistry. Because `setBiophysValues()` runs every step, the `maxPolyForce` derivative is not stale. But full Monomer.java actin-state paths need tracing to confirm no other caching. |
+| `kATPOn1`, `kATPOff1`, `kADPOff1`, `kATPOn2`, `kATPOff2`, `kADPOff2` | Biochem rate constants. Confirmed not cached in Env; used via `getValue()` in Monomer.java biochem steps. However, the full combinatorial usage across polymerization, depolymerization, hydrolysis, and formin paths requires systematic tracing before promoting. |
+| `capRate`, `capConc` | Capping kinetics; likely read fresh each biochem step but not traced. |
+| `cofilinRate`, `cofilinConc` | Grep confirms `getValue()` called fresh in `Monomer.cofilinBinding()` (line 242/244). But cofilin binding also sets per-monomer state that persists — changing these mid-run would affect new binding events but not existing cofilin-bound monomers. Safe to promote, but listed unclear pending decision. |
+| `tropoOnRate`, `tropoOffRate`, `tropoConc` | Same pattern as cofilinRate/cofilinConc. Grep confirms fresh `getValue()` in `Monomer.tropoBinding()` (lines 202, 223). |
+| `kRdmNuc` | Confirmed read fresh in `spawnRdmFilaments()` every step: `Env.kRdmNuc.getValue()`. |
+| `kNodeNuc` | Confirmed read fresh in `spawnNodeFilaments()` every step: `Env.kNodeNuc.getValue()*Env.deltaT.getValue()`. The deltaT factor is read from the immutable `deltaT` parameter, not a cached derivative, so kNodeNuc can be promoted. Listed unclear because `deltaT` must remain immutable for the product to be well-defined. |
+| `fracMove`, `fracR`, `fracMoveTorq` and related PAIRS coefficients | Used in link force calculations each step. No caching found. Likely mutable, but PAIRS force coefficients directly affect filament mechanics and a bad mid-run change could destabilize — conservative default. |
+| `remoteReportInterval` | Counter threshold like `toFileInterval` (`remoteOutCounter >= Env.remoteReportInterval.getValue()`). Likely safe to mark mutable; no physics consequence. Omitted from whitelist since the spec focus was on `toFileInterval`. |
+| `myosinStallForce`, `myosinBreakForce` | Motor force constants, used in catch/slip calculation. Usage site not fully traced. |
+
+**Promotion path:** Any "unclear" parameter can be promoted to mutable by: (a) grep all files for `p.label` usage, (b) confirm every call is `getValue()` (not a cached derivative), (c) verify no per-run initialization writes a value to a local variable that is then used for the rest of the run, (d) add `.setMutableAtRuntime()` to the declaration in Env.java.
+
+---
+
+### Step 2 — toFileInterval counter reset
+
+When `toFileInterval` is applied at the safe point, `BoxOfActin.threeJSCounter` is set to `newValue - 1`. This ensures the next step's `logAndDraw()` / `remoteLog()` fires a frame (counter increments to `newValue` in `updateCounters()`, then `newValue >= newValue` is true). Without this reset, dropping `toFileInterval` from 100 to 5 would require waiting up to 99 steps before the first fast frame.
+
+Implementation in `BoxOfActin.drainParamQueue()`:
+```java
+if ("toFileInterval".equals(change.param.label)) {
+    threeJSCounter = (int) change.newValue - 1;
+}
+```
+
+---
+
+### Step 3 — Annotation mechanism
+
+Added to `Parameter.java`:
+- `private boolean mutableAtRuntime = false;`
+- `public Parameter setMutableAtRuntime()` — builder-style (returns `this`) so `Env.java` field declarations can chain it: `new Parameter(...).setMutableAtRuntime()`.
+- `public boolean isMutableAtRuntime()`
+- `public static List<Parameter> getAllMutable()` — iterates `theParams[0..paramCt-1]`.
+
+No new `.java` file was needed. No existing Parameter declarations were changed (except `toFileInterval`).
+
+---
+
+### Step 4 — Protocol additions
+
+**Client → server** (new actions):
+```json
+{"action": "queryParams"}
+{"action": "setParam", "name": "<label>", "value": "<stringValue>"}
+```
+
+**Server → client** (new topics):
+```json
+{"topic": "paramList",  "payload": [{"name","displayName","type","value","mutable"}, ...]}
+{"topic": "paramAck",   "payload": {"success":true,  "name","oldValue","newValue"}}
+{"topic": "paramAck",   "payload": {"success":false, "name","error":"<reason>"}}
+```
+
+Error reasons: `"unknown parameter"`, `"not mid-run mutable"`, `"parse error: <details>"`, `"value must be non-negative"`.
+
+`queryParams` dispatches only to the requesting connection (via `dispatchTo(conn, ...)`). `paramAck` (both success and error) is broadcast to all connected clients. `paramList` `type` field is `"boolean"`, `"int"`, or `"double"` derived from `Parameter.type` constant. `value` field for booleans is `true`/`false` JSON; for numerics it uses a minimal formatter (no trailing `.0` for integers).
+
+**Validation** (on WebSocket thread, before queue):
+- Unknown label → immediate error ack.
+- Known but `!isMutableAtRuntime()` → immediate error ack.
+- Parse failure → immediate error ack.
+- Valid → `Env.paramQueue.offer(new Env.PendingParamChange(param, parsedValue))`.
+- Success ack → dispatched by `drainParamQueue()` at the safe point.
+
+---
+
+### Step 5 — Safe-point drain order
+
+`Env.PendingParamChange` inner class added to `Env.java`:
+```java
+static class PendingParamChange {
+    final Parameter param;
+    final double newValue;
+    ...
+}
+static final ConcurrentLinkedQueue<PendingParamChange> paramQueue = ...;
+```
+
+`BoxOfActin.drainParamQueue()` added (private static). Called at the safe point in `doLoop()`:
+
+```
+pause wait loop (drainInspectQueue inside)
+  → kill check
+  → drainInspectQueue()
+  → drainParamQueue()     ← C4 addition
+  → logAndDraw() / remoteLog()
+```
+
+Param drain is after inspect drain so that a same-step inspect sees the pre-change state, keeping inspectResult coherent with the frame being dispatched.
+
+---
+
+### Step 6 — Viewer UI
+
+Added to `sim_viewer_boa.html`:
+- CSS: `#paramPanel`, `.pp-row`, `.pp-name`, `.pp-input`, `.pp-apply`, `.pp-msg` styles (right-side floating panel).
+- HTML: `<button id="btnParams" class="liveBtn">Params ▶</button>` in `#liveBar`; `<div id="paramPanel"><div id="paramRows"></div></div>`.
+- JS (live mode only):
+  - `subscribe` message extended to include `"paramAck"`, `"paramList"` topics.
+  - `queryParams` sent on connect (after subscribe).
+  - Periodic 5s refresh of `queryParams` while panel is open.
+  - `buildParamPanel(params)` — shows only mutable parameters; preserves in-flight text input across refreshes.
+  - `handleParamAck(ack)` — on success: updates displayed value, shows `✓` for 2s; on failure: shows `✗` with hover-tooltip for 4s.
+  - "Params ▶" toggle button opens/closes panel, requests refresh on open.
+
+---
+
+### Step 7 — Orientation key consistency check
+
+**Finding: frame and inspectResult orientation keys are consistent.**
+
+`buildFrameJson()` (ThreeJSWriter) emits `segments` with `end1`/`end2` arrays and `r` only — no orientation vector at all. Myosins emit `rod`, `lever`, `motor` sub-objects, each with `end1`/`end2` arrays. Minifilaments emit `end1`/`end2` arrays.
+
+`buildInspectJson()` emits `orientation:{ux,uy,uz}` alongside `position:{x,y,z}`.
+
+These are separate fields with no naming conflict. The `{ux,uy,uz}` orientation key (fixed in Bug 1 / Session 16) is used by inspectResult only; frame data is geometry-only (`end1`/`end2`). No latent mismatch.
+
+---
+
+### Test results
+
+All specified tests run with simulation on port 8081, viewer at `http://localhost:8000/sim_viewer_boa.html?live=8081`.
+
+**Protocol tests (Python raw WebSocket client):**
+
+1. `queryParams` → `paramList` received with 234 total parameters, 1 mutable (`toFileInterval`, type `int`, value `100`). ✓
+2. `setParam bogusParam 99` → `paramAck` `success:false error:"unknown parameter"` ✓
+3. `setParam deltaT 0.001` → `paramAck` `success:false error:"not mid-run mutable"` ✓
+4. `setParam toFileInterval notanumber` → `paramAck` `success:false error:"parse error: For input string: \"notanumber\""` ✓
+5. `setParam toFileInterval 20` → `paramAck` `success:true oldValue:100 newValue:20` ✓
+
+**Counter-reset timing:**
+Set `toFileInterval` from 100 to 5; `paramAck` arrived at the next safe point (~15s real time at default simulation speed). The change applied and frames began arriving at the new rate at the next timestep. Reset back to 100 confirmed with a second ack.
+
+**Pause + setParam + resume:**
+- Sent `pause` → `simState:paused` confirmed.
+- Sent `setParam toFileInterval 10` while paused → **0 acks** received (change queued, safe point not running while paused). ✓
+- Sent `resume` → **1 ack** arrived immediately (first safe point after resume applied the change). `success:true, oldValue:100, newValue:10`. ✓
+
+**Visual verification:**
+- Viewer opened at `http://localhost:8000/sim_viewer_boa.html?live=8081`.
+- `liveBar` shows: `● LIVE ws://localhost:8081 — connected | ⏸ Pause | ▶ Resume | ✕ Kill | Params ▶`. ✓
+- Simulation running: frame 1210, t=0.43 s, 499 segments, 3200 myosins, 100 minifilaments displayed correctly.
+
+---
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `boxOfActin/Parameter.java` | Added `mutableAtRuntime` field, `setMutableAtRuntime()`, `isMutableAtRuntime()`, `getAllMutable()` |
+| `boxOfActin/Env.java` | Marked `toFileInterval` mutable; added `PendingParamChange` inner class and `paramQueue` |
+| `boxOfActin/LiveFrameServer.java` | Added `queryParams`/`setParam` handlers, `dispatchParamAck()`, `dispatchParamAckError()`, `dispatchTo()`, `enqueueAll()`, `buildParamListJson()`, `handleSetParam()`, `formatNum()`, `escapeJson()`; added `org.json` imports; updated protocol comment |
+| `boxOfActin/BoxOfActin.java` | Added `drainParamQueue()`; added `drainParamQueue()` call at safe point after `drainInspectQueue()` |
+| `sim_viewer_boa.html` | Added param panel CSS, HTML (Params button, paramPanel div), JS (buildParamPanel, handleParamAck, periodic refresh, subscribe extension, queryParams on connect) |
+| `libs/json-20231013.jar` | Added (excluded from git; download via curl — see CLAUDE.md) |
+
+Build command unchanged in function; `libs/*` glob already includes the new jar. No new `.class` files (all inner classes are in existing `.class` files).
 
 ---
 
