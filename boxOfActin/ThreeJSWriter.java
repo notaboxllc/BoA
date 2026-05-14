@@ -52,70 +52,89 @@ public class ThreeJSWriter {
         }
     }
 
-    public static void writeFrame() {
-        if (Env.threeJSOutputDir == null) return;
-        if (!dirResolved) resolveOutputDir();
+    /**
+     * Builds the frame JSON string for the current frame number without any
+     * side effects (no file I/O, no frameNumber increment).  Called by
+     * writeFrame() so both consumers (file and WebSocket) share one build.
+     */
+    public static String buildFrameJson() {
+        StringBuilder sb = new StringBuilder(4096);
+        sb.append("{\"frame\":").append(frameNumber);
+        sb.append(String.format(",\"t\":%.6g", Env.simulationTime));
+        sb.append(String.format(",\"bounds\":{\"xDim\":%.5g,\"yDim\":%.5g,\"zDim\":%.5g}",
+                Env.boxXDim.getValue(), Env.boxYDim.getValue(), Env.boxZDim.getValue()));
+        sb.append(",\"segments\":[");
 
-        String path = String.format("%s%sframe_%06d.json",
-                Env.threeJSOutputDir, File.separator, frameNumber);
-
-        try (PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(path)))) {
-            pw.print("{\"frame\":");
-            pw.print(frameNumber);
-            pw.printf(",\"t\":%.6g", Env.simulationTime);
-            pw.printf(",\"bounds\":{\"xDim\":%.5g,\"yDim\":%.5g,\"zDim\":%.5g}",
-                    Env.boxXDim.getValue(), Env.boxYDim.getValue(), Env.boxZDim.getValue());
-            pw.print(",\"segments\":[");
-
-            boolean first = true;
-            for (int i = 0; i < FilSegment.filSegmentCt; i++) {
-                FilSegment fs = FilSegment.theFilSegments[i];
-                if (fs == null || fs.removeMe) continue;
-                if (!first) pw.print(",");
-                pw.printf("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035}",
-                        fs.thingInstanceId,
-                        fs.end1.x, fs.end1.y, fs.end1.z,
-                        fs.end2.x, fs.end2.y, fs.end2.z);
-                first = false;
-            }
-
-            pw.print("],\"myosins\":[");
-            boolean firstMyo = true;
-            for (int i = 0; i < Myosin.myoCt; i++) {
-                Myosin m = Myosin.theMyosins[i];
-                if (m == null || m.removeMe) continue;
-                if (!firstMyo) pw.print(",");
-                pw.printf("{\"id\":%d,\"rod\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
-						m.myoMotor.thingInstanceId,  // motor's stable ID; carries the biologically interesting state
-                        m.myoRod.end1.x, m.myoRod.end1.y, m.myoRod.end1.z,
-                        m.myoRod.end2.x, m.myoRod.end2.y, m.myoRod.end2.z,
-                        MyoRod.radius, m.myoRod.rodInvisible);
-                pw.printf(",\"lever\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
-                        m.myoLever.end1.x, m.myoLever.end1.y, m.myoLever.end1.z,
-                        m.myoLever.end2.x, m.myoLever.end2.y, m.myoLever.end2.z,
-                        MyoLever.radius);
-                pw.print(",\"motor\":");
-                pw.print(motorJson(m.myoMotor));
-                pw.print("}");
-                firstMyo = false;
-            }
-            pw.print("],\"minifilaments\":[");
-            boolean firstMiniFil = true;
-            for (int i = 0; i < MyoMiniFilament.myoMiniFilCt; i++) {
-                MyoMiniFilament mf = MyoMiniFilament.myoMiniFils[i];
-                if (mf == null || mf.removeMe) continue;
-                if (!firstMiniFil) pw.print(",");
-                pw.printf("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
-                        mf.thingInstanceId,
-                        mf.end1.x, mf.end1.y, mf.end1.z,
-                        mf.end2.x, mf.end2.y, mf.end2.z,
-                        MyoMiniFilament.radius);
-                firstMiniFil = false;
-            }
-            pw.print("]}");
-        } catch (IOException e) {
-            System.err.println("ThreeJSWriter: " + e.getMessage());
+        boolean first = true;
+        for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+            FilSegment fs = FilSegment.theFilSegments[i];
+            if (fs == null || fs.removeMe) continue;
+            if (!first) sb.append(",");
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035}",
+                    fs.thingInstanceId,
+                    fs.end1.x, fs.end1.y, fs.end1.z,
+                    fs.end2.x, fs.end2.y, fs.end2.z));
+            first = false;
         }
+
+        sb.append("],\"myosins\":[");
+        boolean firstMyo = true;
+        for (int i = 0; i < Myosin.myoCt; i++) {
+            Myosin m = Myosin.theMyosins[i];
+            if (m == null || m.removeMe) continue;
+            if (!firstMyo) sb.append(",");
+            sb.append(String.format(
+                    "{\"id\":%d,\"rod\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
+                    m.myoMotor.thingInstanceId,  // motor's stable ID; carries the biologically interesting state
+                    m.myoRod.end1.x, m.myoRod.end1.y, m.myoRod.end1.z,
+                    m.myoRod.end2.x, m.myoRod.end2.y, m.myoRod.end2.z,
+                    MyoRod.radius, m.myoRod.rodInvisible));
+            sb.append(String.format(
+                    ",\"lever\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                    m.myoLever.end1.x, m.myoLever.end1.y, m.myoLever.end1.z,
+                    m.myoLever.end2.x, m.myoLever.end2.y, m.myoLever.end2.z,
+                    MyoLever.radius));
+            sb.append(",\"motor\":").append(motorJson(m.myoMotor)).append("}");
+            firstMyo = false;
+        }
+        sb.append("],\"minifilaments\":[");
+        boolean firstMiniFil = true;
+        for (int i = 0; i < MyoMiniFilament.myoMiniFilCt; i++) {
+            MyoMiniFilament mf = MyoMiniFilament.myoMiniFils[i];
+            if (mf == null || mf.removeMe) continue;
+            if (!firstMiniFil) sb.append(",");
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                    mf.thingInstanceId,
+                    mf.end1.x, mf.end1.y, mf.end1.z,
+                    mf.end2.x, mf.end2.y, mf.end2.z,
+                    MyoMiniFilament.radius));
+            firstMiniFil = false;
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /**
+     * Generates frame JSON once and dispatches to all active consumers:
+     * file-based output (if -3js was given) and/or WebSocket (if -3jsLive was
+     * given).  Increments frameNumber after dispatch.
+     */
+    public static void writeFrame() {
+        String json = buildFrameJson();
+
+        if (Env.threeJSOutputDir != null) {
+            if (!dirResolved) resolveOutputDir();
+            String path = String.format("%s%sframe_%06d.json",
+                    Env.threeJSOutputDir, File.separator, frameNumber);
+            try (PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(path)))) {
+                pw.print(json);
+            } catch (IOException e) {
+                System.err.println("ThreeJSWriter: " + e.getMessage());
+            }
+        }
+
+        LiveFrameServer.dispatchFrame(json);
+
         frameNumber++;
     }
 

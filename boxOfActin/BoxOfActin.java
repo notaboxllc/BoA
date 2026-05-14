@@ -64,6 +64,9 @@ public class BoxOfActin {
 	// it parses no arguments itself and immediately calls this begin(args). Run with: java -Xmx800M BoxOfActin
 	public static void begin (String[] args) {
 		parseArgs(args);
+		if (Env.threeJSLivePort > 0) {
+			LiveFrameServer.startServer(Env.threeJSLivePort);
+		}
 		System.err.println("[TELEPORT_DIAG] enabled=" + Env.myoMiniTeleportDiag
     + " threshold=" + Env.myoMiniTeleportThreshold);
 		
@@ -100,6 +103,7 @@ public class BoxOfActin {
 				talkln (" -lf -logfile -logFile (directory) : create specified directory and save all output files to there");
 				talkln (" -biochem : run the simulation without any collisions, forces, or brownian motion");
 				talkln (" -3js (directory) : write Three.js per-frame JSON files to the specified directory (auto-increments .001 suffix if exists)");
+				talkln (" -3jsLive (port)  : start WebSocket server on specified port for live frame streaming to sim_viewer_boa.html?live=<port>");
 				talkln (" -oc : ordered filaments (in a biochem only run) are centered");
 				System.exit(0);
 			}
@@ -181,6 +185,15 @@ public class BoxOfActin {
 			if (args[i].equals("-3js")) {
 				Env.threeJSOutputDir = args[i + 1];
 			}
+
+			if (args[i].equals("-3jsLive")) {
+				try {
+					Env.threeJSLivePort = Integer.parseInt(args[i + 1]);
+				} catch (NumberFormatException e) {
+					talkln("Invalid port for -3jsLive: " + args[i + 1]);
+					System.exit(1);
+				}
+			}
 		}
 	}
 	
@@ -188,8 +201,9 @@ public class BoxOfActin {
 	
 		public void run() {
 			doLoop();
-			
+
 			FileOps.closeJSons();
+			LiveFrameServer.stopServer();
 			//System.exit(0);
 		}
 	}
@@ -446,7 +460,7 @@ public class BoxOfActin {
 			jSon2Ct = 0;
 		}
 
-		if (Env.threeJSOutputDir != null && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			threeJSCounter = 0;
 		}
@@ -515,7 +529,7 @@ public class BoxOfActin {
 			remoteOutCounter = 0;
 		}
 
-		if (Env.threeJSOutputDir != null && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			threeJSCounter = 0;
 		}

@@ -14,16 +14,31 @@ As of Phase 4 (commit `dd4314f`), Java3D has been fully removed from the codebas
 
 The codebase compiles with stock Java — no Java3D, no JOGLAndj3D classpath. Source lives in the default package (top-level `BoxOfActin.java`) and the `boxOfActin/` subpackage, plus bundled libraries in `ec/util/`, `edu/cornell/lassp/houle/RngPack/`, and `infoCCD/`.
 
+The WebSocket server (`-3jsLive`) requires two jars in `libs/`. The `*.jar` rule in `.gitignore` excludes them from the repository — download them on a fresh checkout:
+
 ```
-javac -XDignore.symbol.file boxOfActin/*.java *.java
+mkdir -p libs
+curl -L -o libs/Java-WebSocket-1.5.7.jar \
+  https://repo1.maven.org/maven2/org/java-websocket/Java-WebSocket/1.5.7/Java-WebSocket-1.5.7.jar
+curl -L -o libs/slf4j-api-2.0.6.jar \
+  https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.6/slf4j-api-2.0.6.jar
+```
+
+- `libs/Java-WebSocket-1.5.7.jar` — org.java-websocket WebSocket server/client (140 KB)
+- `libs/slf4j-api-2.0.6.jar` — SLF4J API required by java-websocket (63 KB); prints a harmless NOP warning to stderr at startup if no SLF4J provider is on the classpath
+
+```
+javac -XDignore.symbol.file -cp ".:libs/Java-WebSocket-1.5.7.jar:libs/slf4j-api-2.0.6.jar" boxOfActin/*.java *.java
 ```
 
 `-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries.
 
+If you are not using `-3jsLive`, you can still compile and run without the jars on the classpath (the server class is loaded lazily). But the simplest practice is to always include them.
+
 ### Build (post-Phase 5, once Java 21 is installed)
 
 ```
-javac --release 21 --enable-preview -XDignore.symbol.file boxOfActin/*.java *.java
+javac --release 21 --enable-preview -XDignore.symbol.file -cp ".:libs/Java-WebSocket-1.5.7.jar:libs/slf4j-api-2.0.6.jar" boxOfActin/*.java *.java
 ```
 
 Phase 5 has not yet been performed. The MBP needs `brew install openjdk@21` before this command will work. Once Java 21 is installed and the codebase is validated under it, this becomes the canonical build command and `--enable-preview` is required for TornadoVM compatibility (TornadoVM's `FloatArray` is a Java 21 preview feature).
@@ -31,16 +46,16 @@ Phase 5 has not yet been performed. The MBP needs `brew install openjdk@21` befo
 ### Run
 
 ```
-java -Xmx800M BoxOfActin
-java -Xmx800M BoxOfActin -r                                  # headless / no graphics
-java -Xmx800M BoxOfActin -pf ParameterFiles/boa10-64Seg      # load parameter file
-java -Xmx800M BoxOfActin -o myOutputDir                      # save logs and source
-java -Xmx800M BoxOfActin -3js myThreeJSDir                   # write Three.js JSON frames
-java -Xmx800M BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/run1
-java -Xmx800M BoxOfActin -help                               # full option list
+java -Xmx800M -cp ".:libs/Java-WebSocket-1.5.7.jar:libs/slf4j-api-2.0.6.jar" BoxOfActin
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r
+java -Xmx800M -cp ".:libs/*" BoxOfActin -pf ParameterFiles/boa10-64Seg
+java -Xmx800M -cp ".:libs/*" BoxOfActin -3js myThreeJSDir
+java -Xmx800M -cp ".:libs/*" BoxOfActin -3jsLive 8081          # live WebSocket streaming
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/run1 -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -help                  # full option list
 ```
 
-The full command-line option list, as of Phase 3:
+The full command-line option list, as of Session 12:
 
 | flag | effect |
 |---|---|
@@ -51,19 +66,56 @@ The full command-line option list, as of Phase 3:
 | `-lf <dir>` (also `-logfile`, `-logFile`) | save log files to this directory |
 | `-biochem` | run without collisions, forces, or Brownian motion |
 | `-3js <dir>` | write Three.js per-frame JSON files; directory auto-increments `.001` suffix if it exists |
+| `-3jsLive <port>` | start WebSocket server on the given port; viewer connects via `?live=<port>` |
 | `-oc` | ordered filaments (in a biochem-only run) are centered |
+
+Both `-3js` and `-3jsLive` can be given together. Frame JSON is generated once and dispatched to both consumers.
 
 The QK (quickstate) save/resume flags (`-qk`, `-qkN`, `-ic`) were removed in Phase 3 along with the QK serialization code in `FileOps.java`.
 
 ### Viewing Three.js output
 
-In the directory containing the `-3js` output folder:
+**File-based (existing):** In the directory containing the `-3js` output folder:
 
 ```
 python3 sim_server.py 8000
 ```
 
 Then open `http://localhost:8000/sim_viewer_boa.html`. The viewer auto-discovers run directories via `/api/simulations`.
+
+**Live WebSocket (Session 12):** Start the sim with `-3jsLive <port>` (e.g. `8081`), then open the viewer with:
+
+```
+http://localhost:8000/sim_viewer_boa.html?live=8081
+```
+
+The viewer connects to `ws://localhost:8081`, displays incoming frames as they are generated, and reconnects automatically if the simulation restarts. Connection status (connected / reconnecting / disconnected) is shown in the top bar.
+
+## WebSocket Protocol (Session 12 — C1)
+
+Implemented in `boxOfActin/LiveFrameServer.java` using the `org.java-websocket` library.
+
+### Message shapes
+
+**Server → client:**
+```json
+{"topic": "frame", "payload": { ...per-frame JSON... }}
+```
+
+**Client → server (C1 only):**
+```json
+{"action": "subscribe", "topics": ["frame"]}
+```
+
+The `topic` / `action` discriminators are defined so future sessions can extend the protocol:
+- **C2 (click-to-inspect):** adds `inspectResult` topic and `inspect` action
+- **C3 (pause/resume):** adds `simState` topic and `pause` / `resume` / `kill` actions
+
+The server defaults to subscribing all clients to all topics on connect, so `subscribe` is optional but good practice.
+
+### Backpressure
+
+Each client has a bounded `ArrayBlockingQueue<String>(4)` and a per-client daemon sender thread. `dispatchFrame()` uses non-blocking `offer()` — if the queue is full it drops the oldest frame and inserts the newest. The simulation's `dispatchFrame()` call is always O(1) and never blocks, regardless of network conditions.
 
 ## Architecture
 

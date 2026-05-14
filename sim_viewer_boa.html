@@ -157,6 +157,24 @@
       z-index: 10;
     }
 
+    /* ── live mode bar ─────────────────────────────────────────────────────── */
+    #liveBar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 36px;
+      background: rgba(0, 0, 0, 0.75);
+      display: none;
+      align-items: center;
+      padding: 0 14px;
+      gap: 8px;
+      z-index: 10;
+      color: #ccc;
+      font: 13px monospace;
+    }
+    #liveDot { font-size: 18px; line-height: 1; }
+
     /* ── display panel ─────────────────────────────────────────────────────── */
     #displayToggle {
       position: absolute;
@@ -227,6 +245,11 @@
   <button id="btnLoad">Load</button>
 </div>
 
+<div id="liveBar">
+  <span id="liveDot" style="color:#fa0">●</span>
+  <span id="liveStatusText">LIVE — connecting…</span>
+</div>
+
 <div id="controls">
   <button id="btnPlay">&#9654; Play</button>
   <div class="sep">|</div>
@@ -260,6 +283,11 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── live WebSocket mode: ?live=<port> activates live streaming ────────────────
+const _liveParam = new URL(location.href).searchParams.get('live');
+const LIVE_MODE  = _liveParam !== null && _liveParam !== '';
+const LIVE_PORT  = LIVE_MODE ? (parseInt(_liveParam, 10) || 0) : 0;
 
 // ── renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -342,6 +370,23 @@ const motorColors = {
   'ADP':   new THREE.Color(0xff0000),
 };
 
+// ── identity maps — rebuilt each frame from JSON "id" fields ──────────────────
+// Forward (id → slot): lets future code find the render slot for a given stable ID.
+// Reverse (slot → id): lets a raycast hit (instanceId) resolve to a stable ID.
+// The reverse maps are the picking attachment point for future WebSocket click-to-inspect.
+// Segments: keyed by FilSegment.thingInstanceId
+const segIdToSlot  = new Map();
+const segSlotToId  = new Map();
+// Myosins: keyed by MyoRod.thingInstanceId (canonical ID for the rod/lever/motor composite;
+//   Myosin is not a Thing subclass, so its rod's stable ID is used as the group key).
+const myoIdToSlot  = new Map();  // lever+motor slot (lever is never invisible)
+const myoSlotToId  = new Map();  // reverse for lever/motor mesh picking
+const rodIdToSlot  = new Map();  // rod slot (separate: rod can be invisible)
+const rodSlotToId  = new Map();  // reverse for rod mesh picking
+// Minifilaments: keyed by MyoMiniFilament.thingInstanceId
+const miniIdToSlot = new Map();
+const miniSlotToId = new Map();
+
 // ── reusable temporaries for per-frame matrix construction ────────────────────
 const dummy  = new THREE.Object3D();
 const _end1  = new THREE.Vector3();
@@ -377,6 +422,13 @@ const speedBtns    = {
   10: document.getElementById('btn10fps'),
   30: document.getElementById('btn30fps'),
 };
+
+// ── live mode: hide file controls, show live bar ──────────────────────────────
+if (LIVE_MODE) {
+  document.getElementById('dirBar').style.display   = 'none';
+  document.getElementById('controls').style.display = 'none';
+  document.getElementById('liveBar').style.display  = 'flex';
+}
 
 // ── display scale factors (updated by panel sliders) ─────────────────────────
 let actinScale   = 1.0;
@@ -497,10 +549,17 @@ function applyFrameData(data) {
     scene.add(boundsObj);
   }
 
+  // Segments — identity-keyed; maps rebuilt from scratch each frame
+  segIdToSlot.clear();
+  segSlotToId.clear();
   let count = 0;
   for (const seg of data.segments) {
-    if (count < MAX_SEGMENTS && setCylinderMatrix(seg.end1, seg.end2, seg.r * actinScale))
-      segMesh.setMatrixAt(count++, dummy.matrix);
+    if (count >= MAX_SEGMENTS) break;
+    if (!setCylinderMatrix(seg.end1, seg.end2, seg.r * actinScale)) continue;
+    segMesh.setMatrixAt(count, dummy.matrix);
+    segIdToSlot.set(seg.id, count);
+    segSlotToId.set(count, seg.id);
+    count++;
   }
   segMesh.count = count;
   segMesh.instanceMatrix.needsUpdate = true;
@@ -516,14 +575,35 @@ function applyFrameData(data) {
 }
 
 function updateMyosinData(myosins, minifilaments) {
-  let rodCt = 0, leverCt = 0, motorCt = 0, minifilCt = 0;
+  // Myosins — identity-keyed by m.id (= MyoRod.thingInstanceId, the composite's stable key).
+  // Rod, lever, motor have separate slot counters because rod can be invisible.
+  // myoIdToSlot/myoSlotToId track the lever slot; motor uses the same slot (lever is never skipped).
+  // rodIdToSlot/rodSlotToId are separate for picking on the rod mesh.
+  myoIdToSlot.clear();
+  myoSlotToId.clear();
+  rodIdToSlot.clear();
+  rodSlotToId.clear();
+  let rodCt = 0, leverCt = 0, motorCt = 0;
 
   if (myosins) {
     for (const m of myosins) {
-      if (!m.rod.invisible && rodCt < MAX_MYOSINS && setCylinderMatrix(m.rod.end1, m.rod.end2, m.rod.r * rodScale))
-        rodMesh.setMatrixAt(rodCt++, dummy.matrix);
-      if (leverCt < MAX_MYOSINS && setCylinderMatrix(m.lever.end1, m.lever.end2, m.lever.r * leverScale, m.lever.r * leverScale * 2))
-        leverMesh.setMatrixAt(leverCt++, dummy.matrix);
+      // Rod (may be invisible)
+      if (!m.rod.invisible && rodCt < MAX_MYOSINS &&
+          setCylinderMatrix(m.rod.end1, m.rod.end2, m.rod.r * rodScale)) {
+        rodMesh.setMatrixAt(rodCt, dummy.matrix);
+        rodIdToSlot.set(m.id, rodCt);
+        rodSlotToId.set(rodCt, m.id);
+        rodCt++;
+      }
+      // Lever (canonical myosin slot; motor always rendered in the same slot)
+      if (leverCt < MAX_MYOSINS &&
+          setCylinderMatrix(m.lever.end1, m.lever.end2, m.lever.r * leverScale, m.lever.r * leverScale * 2)) {
+        leverMesh.setMatrixAt(leverCt, dummy.matrix);
+        myoIdToSlot.set(m.id, leverCt);
+        myoSlotToId.set(leverCt, m.id);  // also valid for motorMesh (same slot index)
+        leverCt++;
+      }
+      // Motor
       if (motorCt < MAX_MYOSINS) {
         const mo = m.motor;
         _end1.set(mo.end1[0], mo.end1[1], mo.end1[2]);
@@ -548,10 +628,18 @@ function updateMyosinData(myosins, minifilaments) {
     }
   }
 
+  // Minifilaments — identity-keyed by mf.id (= MyoMiniFilament.thingInstanceId)
+  miniIdToSlot.clear();
+  miniSlotToId.clear();
+  let minifilCt = 0;
   if (minifilaments) {
     for (const mf of minifilaments) {
-      if (minifilCt < MAX_MINIFILAMENTS && setCylinderMatrix(mf.end1, mf.end2, mf.r * minifilScale))
-        minifilMesh.setMatrixAt(minifilCt++, dummy.matrix);
+      if (minifilCt >= MAX_MINIFILAMENTS) break;
+      if (!setCylinderMatrix(mf.end1, mf.end2, mf.r * minifilScale)) continue;
+      minifilMesh.setMatrixAt(minifilCt, dummy.matrix);
+      miniIdToSlot.set(mf.id, minifilCt);
+      miniSlotToId.set(minifilCt, mf.id);
+      minifilCt++;
     }
   }
 
@@ -714,26 +802,84 @@ requestAnimationFrame(animate);
 // ── boot ──────────────────────────────────────────────────────────────────────
 setSpeed(2);
 
-(async () => {
-  try {
-    const r = await fetch('/api/simulations');
-    if (!r.ok) throw new Error('no API');
-    const sims = await r.json();
+if (!LIVE_MODE) {
+  (async () => {
+    try {
+      const r = await fetch('/api/simulations');
+      if (!r.ok) throw new Error('no API');
+      const sims = await r.json();
 
-    if (sims.length > 0) {
-      apiPopulated = true;
-      recentSel.title = 'Available simulations';
-      recentSel.options[0].text = `${sims.length} found ▾`;
-      sims.forEach(s =>
-        recentSel.add(new Option(`${s.name}  (${s.frameCount} frames)`, s.name)));
-      loadDirectory(sims[0].name);
-    } else {
+      if (sims.length > 0) {
+        apiPopulated = true;
+        recentSel.title = 'Available simulations';
+        recentSel.options[0].text = `${sims.length} found ▾`;
+        sims.forEach(s =>
+          recentSel.add(new Option(`${s.name}  (${s.frameCount} frames)`, s.name)));
+        loadDirectory(sims[0].name);
+      } else {
+        discoverFrames();
+      }
+    } catch (_) {
       discoverFrames();
     }
-  } catch (_) {
-    discoverFrames();
+  })();
+}
+
+// ── WebSocket live streaming (LIVE_MODE only) ─────────────────────────────────
+if (LIVE_MODE) {
+  const liveDot  = document.getElementById('liveDot');
+  const liveText = document.getElementById('liveStatusText');
+  let wsBackoff  = 1000;
+
+  function setLiveState(label) {
+    if (label === 'connected') {
+      liveDot.style.color = '#4f4';
+      liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — connected`;
+    } else if (label === 'reconnecting') {
+      liveDot.style.color = '#fa0';
+      liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — reconnecting in ${wsBackoff / 1000}s…`;
+    } else {
+      liveDot.style.color = '#f44';
+      liveText.textContent = `LIVE ws://localhost:${LIVE_PORT} — disconnected`;
+    }
   }
-})();
+
+  function scheduleReconnect() {
+    setLiveState('reconnecting');
+    setTimeout(() => {
+      wsBackoff = Math.min(wsBackoff * 2, 8000);
+      openSocket();
+    }, wsBackoff);
+  }
+
+  function openSocket() {
+    let ws;
+    try {
+      ws = new WebSocket(`ws://localhost:${LIVE_PORT}`);
+    } catch (_) {
+      scheduleReconnect();
+      return;
+    }
+    ws.onopen = () => {
+      wsBackoff = 1000;
+      ws.send(JSON.stringify({ action: 'subscribe', topics: ['frame'] }));
+      setLiveState('connected');
+    };
+    ws.onmessage = (ev) => {
+      let env;
+      try { env = JSON.parse(ev.data); } catch (_) { return; }
+      if (env.topic === 'frame') {
+        currentFrameData = env.payload;
+        applyFrameData(env.payload);
+      }
+    };
+    ws.onclose = () => { scheduleReconnect(); };
+    ws.onerror = () => { /* onclose fires after onerror */ };
+  }
+
+  setLiveState('reconnecting');
+  openSocket();
+}
 </script>
 </body>
 </html>

@@ -231,6 +231,8 @@ public class Env {
 	static boolean nodeBrownianMotionOff = false;
 	static boolean bugBrownianMotionOff = false;
 	static boolean myoMiniFilBrownianMotionOff = false;
+	static boolean myoMiniTeleportDiag = false;       // TELEPORT_DIAG toggle; set true to log large single-step minifilament displacements
+	static double  myoMiniTeleportThreshold = 0.1;    // TELEPORT_DIAG µm; displacement per step that triggers a [TELEPORT] dump
 	static boolean twoNodesOneFil = false;
 	static boolean actinAndMyoMinis = false;
 	static boolean twoByTwoNodes = false;
@@ -802,6 +804,7 @@ public class Env {
 	static boolean writeSimJSons = false;		// flag for writing Simularium style output or not
 	static boolean writeSimJSons2 = false;		// flag for writing second JSon Simularium style output or not
 	static String threeJSOutputDir = null;		// directory for Three.js per-frame JSON output; null = disabled
+	static int    threeJSLivePort  = -1;		// WebSocket port for live frame streaming; -1 = disabled
 	static String jSonFileName = "coarse";
 	static String jSon2FileName = "fine";
 	static double simJSonsScale = 20.0;			// scale all output numbers for better Simularium rendering
