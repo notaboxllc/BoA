@@ -26,7 +26,7 @@ public class FilSegment extends Thing {
 	static int filSegRenderCt = 0;		// for rendering only
 	static double monosize=Env.actinMonoDiam;  
 	static double halfmono=Env.actinMonoRadius;
-	static double radius = Env.actinWidth;		// (nm) radius of actin filament
+	static double radius = Env.actinWidth/2.0;		// (nm) radius of actin filament
 	static final Object filSync = new Object();	// for synchronizing filament creation
 	Object filLinkOSync = new Object();  // for synchronizing filLink bookkeeping
 	
@@ -3700,7 +3700,7 @@ public class FilSegment extends Thing {
 	// in constructors and biochemistry each step). Returns the segment array so BoxOfActin
 	// can store first/mid/last references without creating a circular class dependency.
 	public static FilSegment[] makeBenchmarkChain(int n) {
-		int monCt = Env.stdSegLength.getIntValue();
+		int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
 		double segLen = (monCt + 1) * halfmono; // µm
 		double totalLen = n * segLen;
 		Pt3D xAxis = new Pt3D(1, 0, 0);

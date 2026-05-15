@@ -257,6 +257,7 @@ public class Env {
 	static int benchmarkNSegs = 11;       // odd → midpoint segment is exactly at midspan
 	static double benchmarkForceFrac = 0.01; // target deflection as fraction of span
 	static int benchmarkSettleSteps = 5000;  // steps before first measurement
+	static int benchmarkMonomerCt = 0;       // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;
@@ -454,7 +455,7 @@ public class Env {
 	// **** Actin Filaments Geometry ****
 	static final double actinMonoDiam = 0.0054; // (microns)
 	static final double actinMonoRadius = actinMonoDiam / 2.0; // (microns)
-	static final double actinWidth = 0.008; // (�m) radius of actin filament
+	static final double actinWidth = 0.007; // (�m) thickness of actin filament
 	static final double helixWaveLength = 0.036; // (�m) length for one turn of
 													// helical filament
 	static final double monsPerHelixTurn = helixWaveLength / actinMonoRadius;

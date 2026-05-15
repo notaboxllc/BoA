@@ -228,6 +228,9 @@ public class BoxOfActin {
 			if (args[i].equals("-bm") || args[i].equals("-benchmark")) {
 				Env.benchmarkFilament = true;
 			}
+			if (args[i].equals("-bmMonomer") && i + 1 < args.length) {
+				Env.benchmarkMonomerCt = Integer.parseInt(args[++i]);
+			}
 		}
 	}
 	

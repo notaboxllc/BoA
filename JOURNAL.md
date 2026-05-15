@@ -1820,3 +1820,157 @@ This project uses a two-Claude workflow:
 - **Claude Code** (implementer): file editing, compilation, execution, multi-file refactors
 
 Restart Claude Code at task boundaries to avoid context bloat. `CLAUDE.md` and `JOURNAL.md` carry context forward across Claude Code sessions and across the planner / Claude Code boundary. Push them to GitHub at the end of any session that changed them, so the planner's next session can fetch a current view.
+
+---
+
+## F1 sidebar — monomerCt sensitivity sweep (May 2026)
+
+All runs use `actinWidth = 0.007 µm`, `fracR = 0.3`. The only variable is monomers per segment. Three configurations: the current default (32), 64, and 128.
+
+---
+
+### Part A — monomerCt in the benchmark chain
+
+`makeBenchmarkChain()` reads `Env.stdSegLength.getIntValue()` (default `stdSegLength_init = 32`). Segment length formula: `(monCt + 1) * halfmono` where `halfmono = Env.actinMonoRadius = actinMonoDiam / 2 = 0.0054 / 2 = 0.0027 µm`.
+
+| Quantity | Value |
+|---|---|
+| monomerCt per segment | 32 |
+| halfmono | 0.0027 µm |
+| Per-segment length | (32+1) × 0.0027 = **0.0891 µm** = 89.1 nm |
+| 11-segment span | 11 × 0.0891 = **0.9801 µm** ≈ 980 nm |
+
+For the other two configs:
+
+| monomerCt | Segment length | 11-seg span |
+|---|---|---|
+| 32 | 0.0891 µm | 0.9801 µm |
+| 64 | 65 × 0.0027 = 0.1755 µm | 1.9305 µm |
+| 128 | 129 × 0.0027 = 0.3483 µm | 3.8313 µm |
+
+The spans scale proportionally because the number of segments is held at 11. The analytic target deflection = forceFrac × span = 0.01 × span.
+
+---
+
+### Part B — Override mechanism added
+
+A one-line static field was added to `Env.java`:
+
+```java
+static int benchmarkMonomerCt = 0; // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
+```
+
+`FilSegment.makeBenchmarkChain()` reads it:
+
+```java
+int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+```
+
+`BoxOfActin.java` parses a new `-bmMonomer N` flag. These changes are **left in the codebase** (not reverted) because the mechanism is generally useful — the planner can drive monomerCt from the CLI for future benchmark runs without editing source.
+
+---
+
+### Part C — Matrix run results
+
+**Config 1 — monomerCt = 32 (current default)**
+
+Command: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bm`
+
+```
+[BENCH] 11-seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+iter=0  fracMoveTorq=2.000E-2  ratio=4.5175  lo=2.000E-2  hi=?
+iter=1  fracMoveTorq=8.000E-2  ratio=3.6970  lo=8.000E-2  hi=?
+iter=2  fracMoveTorq=3.200E-1  ratio=2.1221  lo=3.200E-1  hi=?
+iter=3  fracMoveTorq=1.280E0   ratio=0.7547  lo=3.200E-1  hi=1.280E0
+iter=4  fracMoveTorq=8.000E-1  ratio=1.1674  lo=8.000E-1  hi=1.280E0
+iter=5  fracMoveTorq=1.040E0   ratio=0.9264  lo=8.000E-1  hi=1.040E0
+iter=6  fracMoveTorq=9.200E-1  ratio=1.0597  lo=9.200E-1  hi=1.040E0
+iter=7  fracMoveTorq=9.800E-1  ratio=1.0151  lo=9.800E-1  hi=1.040E0
+iter=8  fracMoveTorq=1.010E0   ratio=0.9944  lo=9.800E-1  hi=1.040E0
+CONVERGED  fracMoveTorq=1.010E0  ratio=0.9944  iters=9  fracR=3.000E-1
+```
+
+Result: **fracMoveTorq = 1.010**, converged in 9 iterations. Consistent with the sidebar benchmark (same config, same result).
+
+---
+
+**Config 2 — monomerCt = 64**
+
+Command: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bm -bmMonomer 64`
+
+```
+[BENCH] 11-seg chain, span=1.9305 µm, F=7.953e-15 N, analytic δ=0.0193 µm
+iter=0  fracMoveTorq=2.000E-2  ratio=0.5631  lo=2.000E-2  hi=2.000E-2
+iter=1  fracMoveTorq=2.000E-2  ratio=0.8691  lo=2.000E-2  hi=2.000E-2
+iter=2  fracMoveTorq=2.000E-2  ratio=0.9730  lo=2.000E-2  hi=2.000E-2
+iter=3  fracMoveTorq=2.000E-2  ratio=1.0349  lo=2.000E-2  hi=2.000E-2
+...
+iter=18  fracMoveTorq=2.000E-2  ratio=1.5441  lo=2.000E-2  hi=2.000E-2
+iter=25  fracMoveTorq=2.000E-2  ratio=1.5443  lo=2.000E-2  hi=2.000E-2
+[killed at iter=62]
+```
+
+**SEARCH FAILED — infinite loop.** Root cause: at iter=0, ratio=0.563 < 1−tol set `benchSearchHi = 0.02` before any lo bracket was established. `benchSearchLo` was initialized to the starting fracMoveTorq (0.02). With lo=hi=0.02, bisection gives (0.02+0.02)/2=0.02 forever. The algorithm has no downward-search path.
+
+Box adequacy: span=1.9305 µm < 2 µm box x-dimension (35 nm clearance each side). No wall collision issue.
+
+**Emerging ratio trend at fracMoveTorq=0.02:** The ratio was NOT stable early (0.563 at iter=0, rising to ~1.54 by iter=18, then plateauing). This is a transient settling effect: after the chain is reset to straight at iter=0, 5000 steps is insufficient to reach equilibrium deflection. The chain deflects further toward equilibrium across subsequent evaluations due to state that persists across the reset (likely ValueTracker history in `end2SegDist`/`end2SegAng` or thread-ordering non-determinism). By iter≈20, the ratio stabilizes to **~1.54** — this is the approximate equilibrium ratio at fracMoveTorq=0.02 for monomerCt=64.
+
+Key implication: at fracMoveTorq=0.02, monomerCt=64 is **too soft** (ratio=1.54 > 1). The calibrated fracMoveTorq would be **above 0.02**. The search direction was correct (starting at lo=0.02 and looking upward), but the transient at iter=0 fooled the search into setting hi=0.02.
+
+**Two problems must be fixed before this config can converge:**
+1. Search algorithm bug: when ratio < 1 at iter=0 (transient, not equilibrium), the search incorrectly sets hi=lo=starting_value and loops forever.
+2. Insufficient settle time: 5000 steps is not enough for monomerCt=64 to reach deflection equilibrium; the warm-up period is ~18 evaluations × 5000 steps ≈ 90,000 steps = 9 seconds of sim time.
+
+---
+
+**Config 3 — monomerCt = 128**
+
+Command: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bm -bmMonomer 128`
+
+```
+[BENCH] 11-seg chain, span=3.8313 µm, F=2.019e-15 N, analytic δ=0.0383 µm
+iter=0  fracMoveTorq=2.000E-2  ratio=0.5353  lo=2.000E-2  hi=2.000E-2
+iter=1  fracMoveTorq=2.000E-2  ratio=0.2518  lo=2.000E-2  hi=2.000E-2
+iter=2  fracMoveTorq=2.000E-2  ratio=0.8737  lo=2.000E-2  hi=2.000E-2
+iter=3  fracMoveTorq=2.000E-2  ratio=1.8529  lo=2.000E-2  hi=2.000E-2
+iter=4  fracMoveTorq=2.000E-2  ratio=2.7135
+...
+iter=10  fracMoveTorq=2.000E-2  ratio=4.1692  lo=2.000E-2  hi=2.000E-2
+[plateau: ratio ≈ 4.06–4.07 from iter≈25 onward]
+[killed at iter=62]
+```
+
+**SEARCH FAILED — two issues.**
+
+*Issue 1 — box overflow:* span=3.8313 µm > 2 µm box x-dimension. The chain endpoints extend to ±1.916 µm but the box walls are at ±1 µm. All segments have endpoints outside the box. Wall collision forces fire every step, fighting against the benchmark pin restore. The first few evals show erratic ratios (0.54, 0.25, 0.87, 1.85...) consistent with collision-force contamination. The box must be enlarged (to ≥4 µm × 4 µm) before this config is physically valid.
+
+*Issue 2 — same search algorithm bug:* ratio < 1 at iter=0 triggers lo=hi=0.02, infinite loop.
+
+*Observed plateau:* After ~10 evals, the ratio stabilizes at approximately **4.06–4.07** at fracMoveTorq=0.02. This number is contaminated by wall collision forces and cannot be taken at face value, but it is > 1 (chain appears too soft), suggesting the calibrated fracMoveTorq for monomerCt=128 at the physical chain length would also be > 0.02.
+
+---
+
+### Part D — Interpretation
+
+**The three notional calibrated values (monomerCt = 32, 64, 128):**
+
+| monomerCt | Status | Converged fracMoveTorq | Approx equilibrium ratio at fracMoveTorq=0.02 |
+|---|---|---|---|
+| 32 | Converged | **1.010** | 4.52 |
+| 64 | Failed (search bug + settle transient) | N/A | ~1.54 (plateau) |
+| 128 | Failed (search bug + box overflow) | N/A | ~4.07 (contaminated) |
+
+**Trend at fracMoveTorq=0.02:** ratios are 4.52 → 1.54 → 4.07 for monomerCt 32 → 64 → 128. The non-monotonic pattern (64 is stiffer than both 32 and 128 at the same fracMoveTorq) is striking.
+
+Physical interpretation sketch: the effective bending stiffness in this simulation comes from two sources: (a) link force torques via the moment arm `0.5 × length × fracR` (scales ∝ length²), and (b) the torsional spring via `fracMoveTorq × bRotGam.y / deltaT` (scales ∝ length³). For monomerCt=64, source (a) dominates (making the chain stiffer relative to monomerCt=32, so ratio drops from 4.52 to 1.54). For monomerCt=128, source (b) may come back to dominate, and/or wall collision contamination drives the ratio back up. Without a clean (box-enlarged, algorithm-fixed, adequate-settle) monomerCt=128 run, this remains a hypothesis.
+
+**The historical fracMoveTorq=0.0976 (calibrated for monomerCt=128 at fracR=0.14):** this session used fracR=0.3 (not 0.14), so direct comparison is not meaningful. The change in fracR alone can shift the calibrated fracMoveTorq by a significant factor. The confirmed single calibration point is: monomerCt=32, fracR=0.3, actinWidth=0.007 → fracMoveTorq=1.010.
+
+**What's needed for a valid sweep:**
+1. Search algorithm fix: detect ratio < 1 at iter=0 (transient not equilibrium) — either by: (a) running a longer initial settle before the FIRST measurement, or (b) not setting hi when ratio < 1 at iter=0 and instead treating it as a transient and waiting for the ratio to stabilize before starting the geometric search.
+2. For monomerCt=128: enlarge the benchmark box to ≥4 µm × 4 µm (a box-enlargement pass in `makeInitialThings()` based on total chain span, or a dedicated `-bmBoxMul N` flag).
+3. Increase `BENCH_SEARCH_SETTLE` for longer chains (e.g., scale it with monomerCt²).
+
+These are planner-level decisions. This session reports the observed failures and their root causes.
+
