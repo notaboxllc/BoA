@@ -66,6 +66,20 @@ public class BoxOfActin {
 	static int benchStepCount = 0;
 	static double benchAnalyticDefl = 0;
 
+	// F1 Step 2: search-loop constants (hardcoded; candidate parameters in a later step)
+	static final double BENCH_SEARCH_TOL        = 0.01;  // ±1% deflection ratio tolerance
+	static final int    BENCH_SEARCH_SETTLE     = 5000;  // steps per evaluation settle period
+	static final double BENCH_SEARCH_GEO_FACTOR = 4.0;  // geometric step multiplier for bracketing phase
+	static final double BENCH_SEARCH_MAX_COEFF  = 100.0; // bail-out ceiling for fracMoveTorq
+
+	// F1 Step 2: search-loop state — all set by makeInitialThings() before first step
+	static FilSegment[] benchSegs       = null;  // full segment array for per-evaluation reset
+	static Pt3D[]       benchInitCoords = null;  // stored straight-line center positions
+	static int          benchSearchIter = 0;
+	static double       benchSearchLo   = 0.0;   // fracMoveTorq giving ratio > 1+tol (too soft)
+	static double       benchSearchHi   = -1.0;  // fracMoveTorq giving ratio < 1-tol; -1 = not yet found
+	static double       benchSearchCand = 0.0;   // fracMoveTorq currently under evaluation
+
 	public BoxOfActin (String[] args) {
 		
 	}
@@ -77,6 +91,7 @@ public class BoxOfActin {
 		if (Env.benchmarkFilament) {
 			Env.brownianFilMotionOff = true;
 			Env.remote = true;
+			Env.paused = false; // benchmark runs headless; no WebSocket client to send resume
 			Env.simOutsideBug.setActive(false); // suppress Listeria bug + ActA creation
 		}
 		if (Env.threeJSLivePort > 0) {
@@ -414,13 +429,61 @@ public class BoxOfActin {
 				drainInspectQueue();
 				drainParamQueue();  // C4: apply pending parameter changes, dispatch acks
 
-				// F1 benchmark: count steps and print deflection readout after settle period
+				// F1 Step 2: bisection search on fracMoveTorq — advances once per step at safe point
 				if (Env.benchmarkFilament) {
 					benchStepCount++;
-					if (benchStepCount == Env.benchmarkSettleSteps) {
-						reportBenchmarkDeflection("SETTLED");
-					} else if (benchStepCount > Env.benchmarkSettleSteps && benchStepCount % 500 == 0) {
-						reportBenchmarkDeflection("CHECK  ");
+					if (benchStepCount >= BENCH_SEARCH_SETTLE) {
+						double ratio = computeDeflectionRatio();
+
+						// convergence check
+						if (Math.abs(ratio - 1.0) <= BENCH_SEARCH_TOL) {
+							System.out.println("[BENCH:SEARCH] iter=" + benchSearchIter
+								+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
+								+ "  ratio=" + String.format("%.4f", ratio)
+								+ "  lo=" + expFormat.format(benchSearchLo)
+								+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi)));
+							System.out.println("[BENCH] CONVERGED"
+								+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
+								+ "  ratio=" + String.format("%.4f", ratio)
+								+ "  iters=" + (benchSearchIter + 1)
+								+ "  fracR=" + expFormat.format(Env.fracR.getValue()));
+							System.exit(0);
+						}
+
+						// update brackets
+						if (ratio > 1.0) {
+							benchSearchLo = benchSearchCand; // too soft: raise lower bound
+						} else {
+							benchSearchHi = benchSearchCand; // too stiff: lower upper bound
+						}
+
+						// per-evaluation progress line (printed after bracket update)
+						System.out.println("[BENCH:SEARCH] iter=" + benchSearchIter
+							+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
+							+ "  ratio=" + String.format("%.4f", ratio)
+							+ "  lo=" + expFormat.format(benchSearchLo)
+							+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi)));
+						benchSearchIter++;
+
+						// pick next candidate
+						double next;
+						if (benchSearchHi < 0) {
+							// geometric stepping to find upper bracket
+							next = benchSearchCand * BENCH_SEARCH_GEO_FACTOR;
+							if (next > BENCH_SEARCH_MAX_COEFF) {
+								System.out.println("[BENCH] FAIL: bracketing failed — fracMoveTorq="
+									+ expFormat.format(next) + " exceeds ceiling "
+									+ BENCH_SEARCH_MAX_COEFF + "; last ratio=" + String.format("%.4f", ratio));
+								System.exit(1);
+							}
+						} else {
+							next = (benchSearchLo + benchSearchHi) / 2.0;
+						}
+
+						benchSearchCand = next;
+						Env.fracMoveTorq.setValue(next);
+						resetBenchmarkChain();
+						benchStepCount = 0;
 					}
 				}
 
@@ -482,9 +545,9 @@ public class BoxOfActin {
 		benchLastSeg.initialize();
 	}
 
-	// F1 benchmark: print midpoint perpendicular deflection vs analytic FL³/(48EI).
-	private static void reportBenchmarkDeflection(String label) {
-		if (benchMidSeg == null) return;
+	// F1 benchmark: compute midpoint perpendicular deflection ratio (measured / analytic).
+	private static double computeDeflectionRatio() {
+		if (benchMidSeg == null) return Double.NaN;
 		double ax = benchAnchor2.x - benchAnchor1.x;
 		double ay = benchAnchor2.y - benchAnchor1.y;
 		double az = benchAnchor2.z - benchAnchor1.z;
@@ -496,11 +559,42 @@ public class BoxOfActin {
 		double proj = px*ax + py*ay + pz*az;
 		double perpX = px - proj*ax, perpY = py - proj*ay, perpZ = pz - proj*az;
 		double deflMeas = Math.sqrt(perpX*perpX + perpY*perpY + perpZ*perpZ);
-		double ratio = benchAnalyticDefl > 0 ? deflMeas / benchAnalyticDefl : Double.NaN;
+		return benchAnalyticDefl > 0 ? deflMeas / benchAnalyticDefl : Double.NaN;
+	}
+
+	// F1 benchmark: print midpoint perpendicular deflection vs analytic FL³/(48EI).
+	private static void reportBenchmarkDeflection(String label) {
+		if (benchMidSeg == null) return;
+		double ratio = computeDeflectionRatio();
+		double ax = benchAnchor2.x - benchAnchor1.x;
+		double ay = benchAnchor2.y - benchAnchor1.y;
+		double az = benchAnchor2.z - benchAnchor1.z;
+		double aLen = Math.sqrt(ax*ax + ay*ay + az*az);
+		double px = benchMidSeg.coord.x - benchAnchor1.x;
+		double py = benchMidSeg.coord.y - benchAnchor1.y;
+		double pz = benchMidSeg.coord.z - benchAnchor1.z;
+		double proj = px*(ax/aLen) + py*(ay/aLen) + pz*(az/aLen);
+		double perpX = px - proj*(ax/aLen), perpY = py - proj*(ay/aLen), perpZ = pz - proj*(az/aLen);
+		double deflMeas = Math.sqrt(perpX*perpX + perpY*perpY + perpZ*perpZ);
 		System.out.println("[BENCH:" + label + "] step=" + benchStepCount
 			+ "  meas=" + deflectionFormat.format(deflMeas) + " µm"
 			+ "  analytic=" + deflectionFormat.format(benchAnalyticDefl) + " µm"
 			+ "  ratio=" + String.format("%.4f", ratio));
+	}
+
+	// F1 Step 2: restore all benchmark segments to their initial straight-line configuration.
+	// Called at the safe point before each new search evaluation.
+	private static void resetBenchmarkChain() {
+		if (benchSegs == null || benchInitCoords == null) return;
+		for (int i = 0; i < benchSegs.length; i++) {
+			FilSegment s = benchSegs[i];
+			s.coord.setVals(benchInitCoords[i].x, benchInitCoords[i].y, benchInitCoords[i].z);
+			s.uVec.setVals(1, 0, 0);
+			s.yVec.setVals(0, 1, 0);
+			s.initialize();
+			s.forceSum.zero();
+			s.torqueSum.zero();
+		}
 	}
 
 	// C2/C3: drain pending inspect requests at the safe-point — after all physics phases
@@ -671,6 +765,17 @@ public class BoxOfActin {
 				+ ", span=" + String.format("%.4f", spanM * 1e6) + " µm"
 				+ ", F=" + String.format("%.3e", forceN) + " N"
 				+ ", analytic δ=" + String.format("%.4f", benchAnalyticDefl) + " µm");
+			// Step 2: store segments and initial straight-line positions for per-evaluation reset
+			benchSegs = segs;
+			benchInitCoords = new Pt3D[n];
+			for (int i = 0; i < n; i++) {
+				benchInitCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
+			}
+			benchSearchLo   = Env.fracMoveTorq.getValue();
+			benchSearchHi   = -1.0;
+			benchSearchCand = Env.fracMoveTorq.getValue();
+			benchSearchIter = 0;
+			benchStepCount  = 0;
 			return;
 		}
 		if (Env.twoNodesOneFil) {

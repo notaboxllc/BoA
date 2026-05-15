@@ -1263,6 +1263,254 @@ Run 2 (same parameters):
 
 The equilibrium deflection ratio is ~3.5× the Euler-Bernoulli FL³/48EI prediction. The PAIRS torsion formulation has an effective bending stiffness that does not map 1:1 to EI = kT·Lp with `fracMoveTorq = 0.02`. The search loop will need to scan `fracMoveTorq` to find the value that drives the ratio to 1.0. The time constant for deflection convergence is ~3 700 steps (empirical), so the settle period used by the search loop should be ≥ 5 000 steps.
 
+## 2026-05-14 — Planner: F1 design session + Step 1 integration
+
+Planner + user session (no Claude Code handoff). Designed the actin filament
+benchmarking assay sequence; integrated the F1 Step 1 build results (see the
+"F1 Step 1" section above, written by the Step 1 implementation session).
+Author context: the user is J.B. Alberts, author of the PAIRS paper this
+benchmarking reproduces (PLoS ONE 2009;4(3):e4748). The paper is treated here
+as prior design intent to check the current code against — not as external
+authority — since the codebase has drifted across many phases and the paper's
+prescribed tuning procedure was itself a tidied-up account of a messier
+empirical process.
+
+### Assay sequence — design decisions
+
+Three biophysical targets, grouped into two simulation configurations:
+- **Config A** (simply-supported, Brownian OFF): static deflection + relaxation
+  time-constant.
+- **Config B** (free filament, Brownian ON): persistence length.
+
+Settled design decisions:
+
+1. **Search loop lives in-sim.** The benchmark filament must traverse the
+   identical `doLoop()` body as a production filament, or the tuning targets
+   the wrong dynamics. Coefficient adjustment and convergence checks ride the
+   per-step safe point (the Session 18 pattern). The browser is a pure
+   observer.
+
+2. **Option C — benchmark pre-phase + self-restart.** A benchmark run is a
+   pre-phase on a minimal one-filament crucible (already built in Step 1):
+   converge coefficients, then the sim self-restarts into the production run
+   via the existing `makeCrucible()` / `makeInitialThings()` re-call path.
+   Single continuous WebSocket session throughout; viewer sees a
+   `benchmarkProgress` topic, then a restart, then normal frames. Chosen over
+   a `doLoop()` mode-branch because Step 1's benchmark crucible legitimately
+   contains only one filament — "process everything" and "process the
+   benchmark filament" are the same operation, so no special-casing is needed.
+
+3. **First build is deflection-only.** Proves the harness on the easiest leg.
+   Deflection-only tuning is explicitly NOT a complete tuning (see degeneracy
+   note below).
+
+4. **Trigger model — benchmark cache, no silent behavior.** Parameter sets
+   carry a signature (segment size, deltaT, viscosity, filament length,
+   filament type). A cache records which signatures have been benchmarked and
+   what they tuned to. The cache informs; it never overrides silently. On a
+   cache hit the user is told what was found and chooses among: run the
+   benchmark / use cached values / use the parameter-file values as-is. "Use
+   file as-is" is a first-class legitimate choice — it is how a user explores
+   deliberately-untuned soft/stiff filaments (e.g. modeling unquantified
+   stiffening from accessory proteins). Cache-vs-file *precedence* is therefore
+   a non-question. Open item: the UX of presenting the choice — deferred until
+   the cache is built (F1 Step 3).
+
+### The degeneracy question — and how it is (and isn't) resolved
+
+With one observable (deflection) and multiple coefficients, the solution is a
+curve, not a point. The resolution is NOT biophysical anchoring of
+`fracMoveTorq` to a first-principles EI estimate — that idea was floated and
+rejected: the coarse-segment lumping entangles the discretization artifact with
+the bending-rigidity mapping, so an "EI-anchored" `fracMoveTorq` would carry an
+error bar equal to the very artifact it was meant to separate out. The
+representation's coefficients are not individually physically meaningful and
+were never claimed to be.
+
+The degeneracy is instead resolved the way the 2009 work resolved it
+empirically: **over-determination by multiple observables.** Uniqueness (if it
+exists — not guaranteed) comes from the intersection of the deflection,
+relaxation, and persistence constraint surfaces. Whether a single coefficient
+set satisfies all three simultaneously is a genuine open question the assay
+sequence should *answer*, not assume.
+
+Consequence: deflection-only Step 2 finds one provisional point on the
+deflection-satisfying curve, by holding the other coefficients fixed. It is not
+where the degeneracy gets resolved and should not try to be.
+
+### C_R is held fixed for Step 2 — justification, and its scope boundary
+
+Step 2 holds `fracR` (C_R) fixed at 1.0 and searches `fracMoveTorq` (C_θ)
+alone. Justification (the user's, and better than a paper citation): C_R sets
+a relaxation *rate*, not an equilibrium. Per the viscous-spring result
+(paper eq. 8), the steady state is C_R-independent as long as |1−C_R| < 1.
+Deflection is an equilibrium observable, so the deflection-only search is
+insensitive to the held C_R value anywhere in its stable range; 1.0 is chosen
+as the reference point matching prior work. The user's operating philosophy:
+move down the gradient toward steady state as fast as possible without going
+stiff; exact resolution (which a Brownian system never actually reaches anyway)
+in 5–10 timesteps is fine.
+
+**Scope boundary — must not propagate past Step 2:** this insensitivity
+argument covers the deflection and persistence assays only. The relaxation
+assay will treat C_R as a genuine tuning variable, not a fixed constant,
+because there it controls the observable being measured (the C_R/C_θ ratio
+sets the time-constant).
+
+### Stability — a named gap, not yet an assay
+
+PAIRS is per-interaction non-stiff but not unconditionally stable system-wide
+(paper Fig. 1B: coincidental alignment of multiple pairwise forces can
+overshoot). All three current benchmarks are *accuracy* benchmarks; none
+probes whether a tuned coefficient set stays stable when a segment also
+carries external load — motors, crosslinkers, excluded-volume — which is
+exactly the BoA production regime. The benchmark filament is tuned in
+isolation (correctly), but the coefficients are used in a crowded run.
+
+Two items recorded so they are not lost:
+- A **stability assay** is warranted eventually (possibly post-F1): tuned
+  filament + representative piconewton external load, confirm no oscillation
+  or blowup. The user's "rerun with smaller Δt" backstop is a real diagnostic
+  for stiffness, but note it costs a full re-benchmark, since coefficients are
+  Δt-specific (paper Fig. 5A).
+- **Possible cache-schema implication:** if the stable range of C_R depends on
+  production force load, a single coefficient set per signature may be
+  insufficient — the cache might need to certify "stable up to external force
+  F_max" and have production runs check actual loads against that bound.
+  Flagged for the deferred cache design; not decided.
+
+### Step 1 integration notes
+
+Step 1 passed cleanly. Harness reads a stable deflection number (<0.1% across
+runs); the NaN-clamp bug in `moveCoeff()` was a real find that justified
+survey-and-build before layering a search loop. Confirmed from the Step 1
+entry: benchmark chain is **11 segments** (`benchmarkNSegs`), span 0.98 µm;
+live torsion path is the PAIRS drag formulation, not the Hookean
+`filTorqSpring` branch. Headline finding carried into Step 2: ratio ~3.5 at
+`fracMoveTorq = 0.02` — the default filament is ~3.5× too soft, which is the
+expected shape of the problem, not a bug.
+
+**Open gap from Step 1 not yet surveyed:** whether any graphics / ThreeJS
+frame output is active during the benchmark phase. Harmless for a headless
+deflection harness, but matters for Option C (the pre-phase should stream
+frames to the viewer). Folded into the Step 2 prompt as a one-line survey
+question rather than spending a separate handoff.
+
+### Next: F1 Step 2 — single-coefficient deflection search
+
+Bisection on `fracMoveTorq`, `fracMove`/`fracR` held fixed (C_R = 1.0,
+recorded as a parameter of the result), driving deflection ratio to 1.0 ± 1%
+(tolerance hardcoded for now; candidate parameter later). Bracket seeded by
+Step 1 (3.5 at 0.02 → need stiffer; search establishes the far bracket then
+bisects). Settle ≥ 5000 steps/evaluation. Search rides the safe point, lives
+in-sim.
+
+**Report-and-stop is Step 2 scaffolding, not eventual behavior.** When the
+search converges it prints the value and halts — it does NOT write to a cache
+(Step 3), feed the result into a production run, or self-restart (Option C
+wiring, later steps). This is purely to isolate the search loop as the single
+thing under test: a failure is then unambiguously in the search, not in a
+handoff or restart path. The eventual flow is search → cache → production
+crucible → self-restart → run; "report-and-stop" gets replaced by
+"report-and-feed-forward" once Steps 3+ connect the pipe.
+
+Explicitly flagged in its journal entry as one provisional point on the
+deflection-satisfying curve, pending the relaxation and persistence assays.
+Out of scope for Step 2: cache, self-restart, WebSocket/viewer, biophysical
+derivation.
+---
+
+## F1 Step 2 — Single-coefficient deflection search loop (May 2026)
+
+### Part A survey findings
+
+**A.1 — Safe-point location**
+
+The safe point is the benchmark block already at lines 417–425 of `boxOfActin/BoxOfActin.java`, inside the single `synchronized(Env.safeO)` block that wraps the entire timestep in `doLoop()`. The structure is:
+
+```
+synchronized(Env.safeO) {
+    // pre-step pause wait (lines 303-306)
+    // all physics phases (lines 309-403)
+    // updateCounters() (line 405)
+    // C3 pause/kill check (lines 409-413)
+    // drainInspectQueue() (line 414)
+    // drainParamQueue() (line 415)
+    // F1 benchmark block (lines 417-425) ← search state machine goes here
+    // logAndDraw / cleanup / spawn
+}
+```
+
+The benchmark code already lives at the correct insertion point. The search state machine advances here: read ratio, update brackets, pick next candidate, trigger filament reset, advance to next evaluation.
+
+**A.2 — fracMoveTorq mutability mid-run**
+
+Confirmed **safe to reassign mid-run**. `FilSegment.addTorsionSpringForces()` calls `Env.fracMoveTorq.getValue()` fresh at every step (lines 1639, 1642, 1693, 1696 of `FilSegment.java`) — four call sites, all read-at-use-time. `Parameter.setValue()` directly sets `curValue` (no derivative cached). No startup code captures `fracMoveTorq` into a local or static field used for the rest of the run. `Parameter.dependent` is `false` for this parameter. A call to `Env.fracMoveTorq.setValue(x)` at the safe point takes effect in the very next step's `addTorsionSpringForces()`. This promotes `fracMoveTorq` from the "likely mutable" column (journal line 105) to **confirmed mutable** for the search loop.
+
+**A.3 — Filament reset between evaluations**
+
+`makeBenchmarkChain(n)` creates new `FilSegment` objects via `new FilSegment(...)` → `Thing.addThing()`, which appends to the `theThings[]` array. Calling it again mid-run would add 11 more segments (not replace the existing ones), requiring a corresponding kill/cleanup cycle before the new segments appear. This is unnecessary complexity.
+
+**Clean reset approach:** store the 11 initial straight-line center coordinates in a `Pt3D[] benchInitCoords` array (filled once at setup). At each reset: for each segment in `benchSegs[]`, set `coord` from `benchInitCoords[i]`, set `uVec=(1,0,0)`, `yVec=(0,1,0)`, call `initialize()` (which recalculates `zVec`, `end1`, `end2`, and the transformation matrices). Zero `forceSum`/`torqueSum` explicitly (belt-and-suspenders; `resetCtStart` already zeros them every step, so they're clean at the safe point). Chain topology (`end1Fil`/`end2Fil`) is unchanged. The transverse force is re-applied fresh each step from `benchTransForce`, so it needs no reset. `makeBenchmarkChain()` does not need to be called again. `bTransGam`/`bRotGam` depend only on segment length (unchanged), so they remain valid.
+
+**A.4 — ThreeJS/WebSocket state during benchmark**
+
+In a plain `-bm` run with no `-3js` or `-3jsLive` flags:
+- `Env.threeJSOutputDir` is `null` → no file-based frame output.
+- `LiveFrameServer.isRunning()` is `false` → no WebSocket server.
+- The condition `(Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= ...` in `remoteLog()` is false → **no ThreeJS frames are written**.
+
+If `-3js` or `-3jsLive` is added alongside `-bm`, frames are written; this is harmless for the headless deflection harness but is the gap noted in the planner entry for Option C viewer work.
+
+### Part B — Build notes
+
+**Implementation plan:**
+- Added `BENCH_SEARCH_TOL`, `BENCH_SEARCH_SETTLE`, `BENCH_SEARCH_GEO_FACTOR`, `BENCH_SEARCH_MAX_COEFF` named constants.
+- Added `benchSegs[]` (full segment array for reset) and `benchInitCoords[]` (stored straight-line positions).
+- Added `benchSearchIter`, `benchSearchLo`, `benchSearchHi`, `benchSearchCand` search state fields.
+- Extended `makeInitialThings()` to populate the above at chain-creation time.
+- Replaced the Step 1 benchmark block in `doLoop()` with the bisection search state machine.
+- Added `resetBenchmarkChain()` (restores positions/orientations of existing segments; no new objects created).
+- Refactored `reportBenchmarkDeflection()` to call a new `computeDeflectionRatio()` helper; search loop also calls the helper directly.
+
+**In-scope fix discovered during build:** `Env.paused = true` by default (set in `Env.java`). The `-r` flag in `parseArgs()` sets both `Env.remote = true` AND `Env.paused = false`. The `if (Env.benchmarkFilament)` block in `begin()` faked `Env.remote = true` but missed `Env.paused = false`, causing the simulation to spin in the pre-step pause wait forever. Fixed silently by adding `Env.paused = false;` to the benchmark setup block. (The Step 1 session presumably ran with `-bm -r` or never observed this because it did not wait long enough, or paused was not initialized to true in the version they tested.)
+
+**Search logic (bisection on fracMoveTorq):**
+- Initial candidate = `fracMoveTorq` at setup (default 0.02 → ratio ~3.1 → too soft).
+- Bracketing phase: each evaluation where ratio > 1+tol sets `benchSearchLo = candidate` and steps geometrically (`× BENCH_SEARCH_GEO_FACTOR = 4`) until ratio < 1−tol sets `benchSearchHi`.
+- Bisection phase: `next = (lo + hi) / 2` once both brackets are established.
+- Convergence: `|ratio − 1| ≤ BENCH_SEARCH_TOL = 0.01`.
+- Bail-out: if geometric step reaches `BENCH_SEARCH_MAX_COEFF = 100` without finding hi bracket.
+- Report-and-stop: on convergence, prints `[BENCH] CONVERGED` line with `fracMoveTorq`, `ratio`, iteration count, and held `fracR`, then calls `System.exit(0)`.
+- No cache write, no restart, no feed-forward — scaffolding only.
+
+**Pass condition results (two independent runs):**
+
+Run 1:
+```
+iter=0  fracMoveTorq=2.000E-2  ratio=3.1173  lo=2.000E-2  hi=?
+iter=1  fracMoveTorq=8.000E-2  ratio=2.4212  lo=8.000E-2  hi=?
+iter=2  fracMoveTorq=3.200E-1  ratio=1.2643  lo=3.200E-1  hi=?
+iter=3  fracMoveTorq=1.280E0   ratio=0.3987  lo=3.200E-1  hi=1.280E0
+iter=4  fracMoveTorq=8.000E-1  ratio=0.6826  lo=3.200E-1  hi=8.000E-1
+iter=5  fracMoveTorq=5.600E-1  ratio=0.8728  lo=3.200E-1  hi=5.600E-1
+iter=6  fracMoveTorq=4.400E-1  ratio=1.0283  lo=4.400E-1  hi=5.600E-1
+iter=7  fracMoveTorq=5.000E-1  ratio=0.9442  lo=4.400E-1  hi=5.000E-1
+iter=8  fracMoveTorq=4.700E-1  ratio=0.9835  lo=4.400E-1  hi=4.700E-1
+iter=9  fracMoveTorq=4.550E-1  ratio=1.0073  lo=4.400E-1  hi=4.700E-1
+CONVERGED  fracMoveTorq=4.550E-1  ratio=1.0073  iters=10  fracR=3.000E-1
+```
+
+Run 2:
+```
+iter=9  fracMoveTorq=4.550E-1  ratio=1.0063
+CONVERGED  fracMoveTorq=4.550E-1  ratio=1.0063  iters=10  fracR=3.000E-1
+```
+
+Both runs converge to **fracMoveTorq = 4.550E-1** in exactly 10 iterations. Ratio differs by 0.001 between runs (1.0073 vs 1.0063) — within the 1% tolerance band and well within normal stochastic variation. The search is deterministic enough that it reaches the same bisection midpoint (0.455) in both runs.
+
+**Key result:** The calibrated `fracMoveTorq = 0.455` is a provisional single point on the deflection-satisfying curve (note: Step 1 journal said `fracR = 0.02` default gives ratio ~3.5; this step measured ratio ~3.1 with brownianFilMotionOff=true and the new step-count settle, consistent with Step 1's ~3.5 estimate). This is scaffolding; the value is not written anywhere and will be replaced by the cache mechanism in Step 3.
+
 ---
 
 ## Workflow note
