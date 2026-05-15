@@ -1420,6 +1420,152 @@ Out of scope for Step 2: cache, self-restart, WebSocket/viewer, biophysical
 derivation.
 ---
 
+## 2026-05-15 — Planner: F1 Step 2 integration + viewer experiment + conceptual corrections
+
+Planner + user session. Integrated F1 Step 2's results (see Step 2 entry above
+or below depending on commit order), ran the live viewer experiment, and
+worked through two conceptual corrections that came up in discussion. No
+Claude Code handoff this session.
+
+### F1 Step 2 result
+
+Bisection search converged `fracMoveTorq = 0.455` in 10 iterations, with
+deflection ratio 1.007 and 1.006 on two independent runs. Tolerance was 1%;
+hit well inside it. Run-to-run determinism to four decimal places — the search
+is reliable, not noisy. `Env.paused = false` was a small in-scope discovery
+handled silently by Claude Code (the `-bm` setup wasn't unpausing, unlike the
+`-r` path); documented in the Step 2 entry.
+
+**Provisional in the precise sense agreed in the design session:** this is one
+point on the deflection-satisfying surface, held at `fracR = 0.3` (the
+production-realistic parameter default — note that the design session called
+for `fracR = 1.0` but Claude Code held it at the parameter default; the result
+is therefore more directly applicable to production than originally framed).
+Still provisional pending the relaxation and persistence assays, which will
+pull `fracR` into being a free tuning variable.
+
+### Conceptual correction 1 — stability margin is redistributed, not gained
+
+User raised: "I never likely ran simulations with `fracMove = 1` or `fracR = 1`
+— doesn't that give us more headroom?" Worked through, and the answer is no in
+a useful way:
+
+Lowering `fracR` (and likewise lowering `fracMove`) reduces the alignment
+contribution from the link force, requiring `fracMoveTorq` to *increase* to
+compensate for the deflection observable. So moving to production-realistic
+`fracR = 0.3` and `fracMove = 0.3` (current `Env.java` defaults) pushes the
+deflection-tuned `fracMoveTorq` further *toward* the paper's 0.5 stability
+ceiling, not away from it.
+
+The right metric to track is therefore **the minimum stability margin across
+all coefficients**, not headroom on any single one. Trading comfortable `fracR`
+for uncomfortable `fracMoveTorq` doesn't help; it just relocates the squeeze.
+
+The Step 2 result of `fracMoveTorq = 0.455` was obtained at the
+production-realistic `fracR = 0.3` (Claude Code held `fracR` at its parameter
+default rather than the design-session-specified 1.0). At this configuration,
+the converged `fracMoveTorq` sits at 91% of the paper's 0.5 stability ceiling
+— narrow but viable margin, not the over-the-ceiling failure that an
+`fracR = 1.0` run might have suggested. The minimum-margin metric across all
+coefficients is still the right framing, but the 11-segment discretization
+appears to be tunable in the production regime, not too coarse as initially
+feared.
+
+This sharpens the immediate next steps (see "Next" below).
+
+### Conceptual correction 2 — benchmarking is method-agnostic
+
+Discussion clarified that PAIRS is not a foundational commitment of the
+codebase — it's a method choice, replaceable. The benchmarks measure
+biophysical truths (deflection FL³/48EI, relaxation time from the
+hydrodynamic beam equation, persistence length from worm-like-chain) that hold
+independent of the numerical method producing the simulated filament. The
+assays test the *biology*, not the *numerics*; the numerics are an
+implementation detail under test against the biology.
+
+This is the right framing for v2, where different entity types (microtubules,
+intermediate filaments, membranes) will use different constraint-resolution
+schemes. The benchmark framework can be common across them; the implementer
+brings the method, the framework owns the verdict. Nothing about current BoA
+work commits in the wrong direction here — the assays are already
+biophysics-vs-prediction, not PAIRS-internals checks.
+
+### Stability monitoring — v2 diagnostics-subsystem sketch (not BoA work)
+
+The stability question came up via "did you ever derive a stability criterion
+for PAIRS?" — the user has not, and the conversation arrived at: deriving a
+useful closed-form multi-interaction criterion isn't tractable (the failure
+mode is geometric, depending on per-step force-direction distributions that
+change every step). The single-interaction criterion is already in the paper
+implicitly (C_δ, C_R, C_θ each < 1, ≤ 0.5 with margin). The right response
+isn't a theorem but a *runtime diagnostic*.
+
+Three monitors sketched for v2 — cheap, all quantities already computed:
+- Link-spring δ rolling-window growth (constraint residual)
+- Torsion-spring angular misalignment rolling-window growth (constraint residual)
+- Per-segment step displacement sign-flip with growing amplitude
+  (Fig. 1B-style overshoot signature)
+
+Don't compute total system energy — wrong quantity for overdamped systems
+with high Brownian noise.
+
+This is a v2 architectural note, not a BoA task. BoA's empirical envelope is
+well-mapped; the diagnostic matters when non-original contributors bring force
+regimes outside the original author's experience. Recording the sketch so
+it's available when v2 starts taking shape.
+
+### Viewer experiment — pipeline works; visualization affordances needed
+
+Ran `java ... BoxOfActin -bm -3jsLive 8001` with browser at
+`sim_viewer_boa.html?live=8001`. Results:
+
+- Compile required adding `libs/json-20231013.jar` to the classpath — the
+  canonical compile command in `CLAUDE.md` predates the JSON dependency
+  introduced (probably) by C-track WebSocket work. **CLAUDE.md needs a
+  one-line update** to reflect this (deferred to next CLAUDE.md edit; also
+  consider switching to `libs/*` wildcard syntax to future-proof).
+- Pipeline end-to-end works: filament renders, WebSocket connects, the
+  ~10-cycle search is observable.
+- At the principled 1% deflection target the bending was visually subtle —
+  initially appeared as "not much happening." User raised the force to 10%
+  (`benchmarkForceFrac = 0.1`); deflection then clearly visible.
+- **The default camera orientation put the bending along the line-of-sight**,
+  making even the visible deflection nearly invisible until the user rotated
+  the view. The 1% deflection was probably present all along, edge-on.
+
+The third bullet is the most important takeaway. A benchmark visualization
+that requires the user to know to rotate the camera is not really a benchmark
+visualization. The fix is to choose the force direction in benchmark setup so
+that deflection happens in a plane the default camera shows broadside — or
+have the camera auto-orient to that plane. This belongs in the next
+visualization prompt.
+
+### Compile command drift
+
+Tonight's `javac` failed because the JSON jar was missing from the user's
+classpath. Claude Code's recent sessions compiled successfully because its
+own invocation included it. The compile commands in CLAUDE.md need updating;
+filed as a one-line task.
+
+### Next — agreed ordering for next session(s)
+
+1. **Small prompt: visualization affordances for the benchmark viewer.**
+   Force-vector arrow at midpoint segment, pin-support cones at the two
+   anchor points, default camera framing the filament with deflection in the
+   viewing plane. Possibly a `benchmarkProgress` WebSocket topic showing
+   iteration count and current ratio.
+
+2. **Then decide: cache (Step 3) vs. relaxation assay (Step 4).** Original
+   plan was to decide this after Step 2. The discretization diagnostic (item 1
+   in the old list) turned out to be already answered — fracMoveTorq = 0.455
+   at production-realistic fracR = 0.3 is viable — so the choice between cache
+   and relaxation can be made now rather than after a re-run.
+
+### CLAUDE.md updates needed
+
+- Compile command needs `libs/json-20231013.jar` (or `libs/*` wildcard).
+
+
 ## F1 Step 2 — Single-coefficient deflection search loop (May 2026)
 
 ### Part A survey findings
