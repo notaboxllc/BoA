@@ -1659,6 +1659,160 @@ Both runs converge to **fracMoveTorq = 4.550E-1** in exactly 10 iterations. Rati
 
 ---
 
+## F1 sidebar — actinWidth survey post-edit (May 2026)
+
+### 1. Two-line change confirmed
+
+**`boxOfActin/Env.java:457`** (pre-edit: `0.008`):
+```java
+static final double actinWidth = 0.007; // (µm) thickness of actin filament
+```
+
+**`boxOfActin/FilSegment.java:29`** (pre-edit: `= Env.actinWidth`):
+```java
+static double radius = Env.actinWidth/2.0;   // (nm) radius of actin filament
+```
+
+Together: `actinWidth` is now unambiguously the filament diameter (7 nm); `FilSegment.radius` is now unambiguously the radius (3.5 nm). No further source edits were made.
+
+---
+
+### 2. Part A — Full enumeration table
+
+All uses of `Env.actinWidth`, `FilSegment.radius` (and the local `radiusM` derived from it) across the codebase. Sorted by file then line.
+
+| File:Line | Code | Interpretation | Verdict |
+|---|---|---|---|
+| `Env.java:457` | `static final double actinWidth = 0.007;` | Definition — now a diameter in µm | Correct by definition |
+| `Env.java:463` | `helixMonOffset = (actinWidth - actinMonoDiam) / 2` | `(diam_fil - diam_mono) / 2` = radial gap between filament OD and monomer OD. Cosmetic-only (see Part C). | Physically correct after change |
+| `FilSegment.java:29` | `static double radius = Env.actinWidth/2.0;` | Definition — now radius = diam/2 = 3.5 nm | Correct by definition |
+| `FilSegment.java:324` | `double radiusM = radius*1.0e-6;` | Converts µm radius → m radius for hydrodynamic formulas | Physically correct after change |
+| `FilSegment.java:325` | `Math.log(asIfLengthM/(2*radiusM))` | Slender-body log(L/2r); expects r in meters | Physically correct after change |
+| `FilSegment.java:326` | `bTransGam.x = 2π η L / (log + aParallel)` | Parallel translation drag; uses log term with r | Physically correct after change |
+| `FilSegment.java:327–328` | `bTransGam.y/z = 4π η L / (log + aOrthog)` | Orthogonal translation drag; uses log term with r | Physically correct after change |
+| `FilSegment.java:329` | `bRotGam.x = 4π η r² L` | Spin drag about long axis; explicitly r² | Physically correct after change |
+| `FilSegment.java:330–331` | `bRotGam.y/z = π η L³ / (3*(log + aTurning))` | Bending drag; uses log term with r | Physically correct after change |
+| `FilSegment.java:1145` | `theBox.amICollidingOuter(cE, end1, radius)` | Passes radius as wall-clearance half-width | Physically correct after change |
+| `FilSegment.java:1149` | `theBox.amICollidingOuter(cE, end2, radius)` | Same | Physically correct after change |
+| `FilSegment.java:1154` | `lmBug.amICollidingFromOutside(cE, end1, radius)` | Passes radius as collision half-width vs bug surface | Physically correct after change |
+| `FilSegment.java:1163` | `lmBug.amICollidingFromOutside(cE, end2, radius)` | Same | Physically correct after change |
+
+No other uses of `Env.actinWidth` were found. No hardcoded `0.008` or `0.004` shadow constants exist in any `.java` file. (The literal `0.008` appears only for `myoLeverLength` in `Env.java`, unrelated to filament radius.)
+
+---
+
+### 3. Part B — Collision-radius survey
+
+All three collision implementations treat the `R` parameter as the **radius** (half-width) of the incoming object:
+
+**`Chamber.amICollidingOuter` (`Chamber.java:125–138`):**
+```java
+lcE.forceUVec.setVals(Math.signum(x)*(dims.x/2 - R), ...)
+```
+The position limit is `dims/2 - R`: the filament endpoint is bounced at the wall minus one radius. Old behavior: 8 nm clearance. New behavior: 3.5 nm clearance. Segments do **not** clip into walls — the check still fires before contact; the exclusion zone simply shrank to the physically correct value. Qualitative behavior unchanged; quantitative boundary is tighter.
+
+**`Bug.amICollidingOuter` (`Bug.java:463`):**
+```java
+if (yzDist + R < radius) { return; }  // not colliding
+```
+`R` is the filament half-width; `radius` is the Bug cylinder's radius. Same semantics as Chamber: old code used `R = 0.008`, adding 8 nm of unintended buffer before triggering the push-back force. New code: 3.5 nm buffer. Physically correct.
+
+**`Bug.amICollidingFromOutside` (`Bug.java:547`):**
+```java
+lcE.delta = yzDist - R - radius;  // negative → collision
+```
+`R` is again the filament endpoint half-width. The collision triggers when a filament endpoint penetrates within `R` of the bug surface. Same tightening effect. Clearance before collision: 8 nm → 3.5 nm.
+
+**Impact assessment:** All three callers pass `FilSegment.radius` directly. The halving of `radius` means filaments are now allowed ~4.5 nm closer to all boundaries before the collision force fires. This is the physically correct behavior — the old code was using the diameter as the radius, effectively doubling the exclusion zone. The change will not cause segments to clip through walls; the check remains a >= 0 delta test. However, in a normal box-of-actin run, filament tips will cluster visibly closer to walls and the bug surface than before. This is a real physics change, not a regression.
+
+---
+
+### 4. Part C — helixMonOffset trace; derived quantities in Env.java
+
+**`helixMonOffset = (actinWidth - actinMonoDiam) / 2`**
+
+Old: `(0.008 - 0.0054) / 2 = 0.0013 µm`
+New: `(0.007 - 0.0054) / 2 = 0.0008 µm`
+
+The formula is geometrically: radial gap = (filament OD − monomer OD) / 2. This is the transverse offset of the monomer center from the filament centerline in the body frame of the segment.
+
+Used exclusively in `FilSegment.ptFromHelixPos()`:
+```java
+pt.y = Env.helixMonOffset * Math.cos(curAng);
+pt.z = Env.helixMonOffset * Math.sin(curAng);
+```
+
+Called from:
+- `updateMonomerPositions()` → `updateAllMonomerPositions()` — sets `Monomer.position` for Simularium output only. Not called from physics loop.
+- `updateMonomerGraphics()` — legacy AWT graphics (no longer rendered in normal runs). Gated by `Env.monomerGraphics`.
+
+CLAUDE.md confirms: "Monomers track biochemical state only; their 3D positions are computed from the FilSegment body frame at output time only." **`helixMonOffset` is cosmetic only.** It does not feed into forces, collisions, crosslink rest lengths, or any physics calculation. The numeric shift from 1.3 nm to 0.8 nm changes only how the helix ribbon looks in Simularium output.
+
+**Other derived quantities in Env.java that use `actinWidth`:** none. The full grep found exactly two uses — the definition (line 457) and `helixMonOffset` (line 463). No other `static final` or static-initialized field in `Env.java` reads `actinWidth`.
+
+---
+
+### 5. Part D — Rendering pipeline
+
+`ThreeJSWriter.buildFrameJson()` (`ThreeJSWriter.java:73`):
+```java
+sb.append(String.format("{\"id\":%d,\"end1\":[...],\"end2\":[...],\"r\":0.035}", ...));
+```
+
+The `r` field for filament segments in the Three.js frame JSON is **hardcoded as `0.035` (µm)**. It does **not** read from `FilSegment.radius` (0.0035 µm) or `Env.actinWidth` (0.007 µm). The viewer renders filament tubes at this fixed visual thickness (35 nm rendered radius = ~5 × the biological diameter, chosen for legibility). The rendering is fully decoupled from the physics radius.
+
+The `inspectResult` payload for filaments (`buildInspectJson`) does not include an `r` field at all — it reports endpoints, orientation, biochem state, and chain links.
+
+After the user's two-line edit, the Three.js viewer will render filaments at exactly the same visual thickness as before. The rendering change that the planner expected ("filaments will render at half the previous thickness") does **not** occur with the current hardcoded literal. Whether `0.035` should be changed to reference `FilSegment.radius` (scaled for visibility) is a separate aesthetic decision for the planner.
+
+---
+
+### 6. Part E — Verdict: CLEAN
+
+No "physically broken" case was found. Every site that uses `FilSegment.radius` in physics (drag tensors, collision checks) treats it as a radius and receives a radius. The single cosmetic side-effect (`helixMonOffset` decreasing from 1.3 nm to 0.8 nm) is correct by the same geometric logic: the filament is narrower, so the monomer centerline sits closer to the filament axis. No shadow constants (no hardcoded 0.008 or 0.004 for actin radius anywhere in the codebase).
+
+The two-line edit is complete and self-consistent as a physics change. The only remaining action is documentation.
+
+**Recommended CLAUDE.md wording for the "Biological Context" line (~line 380):**
+
+Replace:
+> - **Actin filaments**: ~8 nm radius, modeled as rigid rods (FilSegment chains)
+
+With:
+> - **Actin filaments**: ~7 nm diameter (3.5 nm radius), modeled as rigid rods (FilSegment chains). `Env.actinWidth` is the filament diameter in µm; `FilSegment.radius = actinWidth/2` is the physics radius used in drag tensors and collision checks.
+
+Evidence: `Env.actinWidth = 0.007` µm (survey line 1), `FilSegment.radius = actinWidth/2 = 0.0035` µm (survey line 3), all drag/collision sites confirmed to receive and use the radius correctly (survey lines 4–13).
+
+---
+
+### 7. -bm benchmark sanity check (post-edit)
+
+Command: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bm`
+
+Full search trace:
+```
+iter=0  fracMoveTorq=2.000E-2  ratio=4.5204  lo=2.000E-2  hi=?
+iter=1  fracMoveTorq=8.000E-2  ratio=3.6913  lo=8.000E-2  hi=?
+iter=2  fracMoveTorq=3.200E-1  ratio=2.1183  lo=3.200E-1  hi=?
+iter=3  fracMoveTorq=1.280E0   ratio=0.8037  lo=3.200E-1  hi=1.280E0
+iter=4  fracMoveTorq=8.000E-1  ratio=1.1668  lo=8.000E-1  hi=1.280E0
+iter=5  fracMoveTorq=1.040E0   ratio=0.9437  lo=8.000E-1  hi=1.040E0
+iter=6  fracMoveTorq=9.200E-1  ratio=1.0590  lo=9.200E-1  hi=1.040E0
+iter=7  fracMoveTorq=9.800E-1  ratio=1.0143  lo=9.800E-1  hi=1.040E0
+iter=8  fracMoveTorq=1.010E0   ratio=0.9941  lo=9.800E-1  hi=1.040E0
+CONVERGED  fracMoveTorq=1.010E0  ratio=0.9941  iters=9  fracR=3.000E-1
+```
+
+**New calibrated value: `fracMoveTorq = 1.010` (vs. pre-edit value of 0.455)**
+
+The shift is in the expected direction and scale: `bRotGam.x` (spin drag) scales as r² and decreased by (3.5/8)² ≈ 0.19×. The bending drag `bRotGam.y/z` also decreased (larger log term L/2r). To maintain the same deflection ratio, more torsional stiffness is required — hence the higher `fracMoveTorq`. The factor of ~2.2× increase in the calibrated coefficient is plausible given the coupled r²-and-log dependence of the drag tensor.
+
+Convergence was clean: no NaN, no exception, no unexpected warnings. Exit code 0. No bail-out triggers were activated.
+
+**Planner note:** The F1 Step 2 recorded result (`fracMoveTorq = 0.455, fracR = 0.3`) was calibrated against the old radius (8 nm as if it were a radius, so 8 nm actually used). The new benchmark shows the correct calibrated value is **1.010** at `fracR = 0.3`. Whether to record this as the updated Step 2 result, or treat it as Step 2 revised, is a planner decision.
+
+---
+
 ## Workflow note
 
 This project uses a two-Claude workflow:
