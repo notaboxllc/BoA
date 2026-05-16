@@ -442,6 +442,12 @@ public class BoxOfActin {
 				if (Env.benchmarkFilament && benchMidSeg != null && Env.benchmarkForceOn.getValue() != 0) {
 					benchMidSeg.incForceSum(benchTransForce);
 				}
+				// Round 3 diagnostic: trace force application path
+				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
+					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f)%n",
+						benchStepCount, benchMidSeg.forceSum.x, benchMidSeg.forceSum.y, benchMidSeg.forceSum.z,
+						benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z);
+				}
 
 				moveTimer.start();
 				startAllThreadSets(Env.moveStart);
@@ -450,6 +456,11 @@ public class BoxOfActin {
 
 				// F1 benchmark: restore pinned endpoints after integration
 				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
+				// Round 3 diagnostic: midpoint coord after integration + pin correction
+				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
+					System.err.printf("[BENCH:POST] step=%d coord=(%.4f,%.4f,%.4f)%n",
+						benchStepCount, benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z);
+				}
 
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
@@ -981,6 +992,13 @@ public class BoxOfActin {
 			tauMeas = Double.NaN;
 			tauMeasFrozen = false;
 			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", tauTheo, zetaPerp);
+
+			// Round 3 diagnostic: print each segment's center coord, length, and anchor flag
+			for (int i = 0; i < n; i++) {
+				boolean isAnchor = (segs[i] == benchFirstSeg || segs[i] == benchLastSeg);
+				System.err.printf("[BENCH:CHAIN] i=%d coord=(%.4f,%.4f,%.4f) length=%.4f isAnchor=%b%n",
+					i, segs[i].coord.x, segs[i].coord.y, segs[i].coord.z, segs[i].length, isAnchor);
+			}
 
 			if (Env.benchmarkManual) {
 				// Manual tuning mode — no search loop; params stay at their current (param-file) values
