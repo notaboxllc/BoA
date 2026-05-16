@@ -128,11 +128,11 @@ public class Env {
 	static private double fracMoveTorq_init = 0.02; // as above, but for torsion springs only.. bigger numbers are stiffer faster response times
 
 	static final Parameter fracMove = new Parameter("fracMove",
-			" Coeff. for PAIRS movement", fracMove_init, "");
+			" Coeff. for PAIRS movement", fracMove_init, "").setMutableAtRuntime();
 	static final Parameter fracR = new Parameter("fracR",
-			" Coeff. torque arm for PAIRS movement", fracR_init, "");
+			" Coeff. torque arm for PAIRS movement", fracR_init, "").setMutableAtRuntime();
 	static final Parameter fracMoveTorq = new Parameter("fracMoveTorq",
-			" Coeff. for PAIRS torque movement", fracMoveTorq_init, "");
+			" Coeff. for PAIRS torque movement", fracMoveTorq_init, "").setMutableAtRuntime();
 
 	static final Parameter myoJ1FracMove = new Parameter("myoJ1FracMove",
 			" PAIRS Coeff: myosin lever-motor joint", 0.4, "");
@@ -259,6 +259,11 @@ public class Env {
 	static int benchmarkSettleSteps = 5000;  // steps before first measurement
 	static int benchmarkMonomerCt = 0;       // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
 	static boolean benchmarkDiag = false;    // -bmDiag: fixed-param equilibrium diagnostic, no search
+	static boolean benchmarkManual = false;  // -bmManual: no search loop; user tunes live from viewer
+
+	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work
+	static final Parameter benchmarkForceOn = new Parameter("benchmarkForceOn",
+			" Benchmark: apply midpoint force", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;

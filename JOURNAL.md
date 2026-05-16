@@ -1974,3 +1974,263 @@ Physical interpretation sketch: the effective bending stiffness in this simulati
 
 These are planner-level decisions. This session reports the observed failures and their root causes.
 
+## 2026-05-15 — Planner: F1 Step 2 hits a ceiling; pivoting to joint bisection
+
+The single-parameter bisection on fracMoveTorq alone works at monomerCt = 32
+but cannot satisfy ratio = 1.0 at monomerCt = 64. The monomerCt = 64
+diagnostic and the subsequent search run together established the cause:
+at fracR = 0.3, the chain has residual bending stiffness governed by fracR
+that is independent of fracMoveTorq. As fracMoveTorq → 0, ratio asymptotes
+to ~0.92 — the chain cannot become soft enough to match FL³/48EI regardless
+of torsional stiffness.
+
+This is a design limitation of F1 Step 2 as written, not a numerical bug.
+The L³ settle scaling, box auto-sizing, and equilibrium-detection are all
+working correctly. The benchmark just can't satisfy its pass condition with
+the current degrees of freedom.
+
+The user's historical hand-tuning (fracMove=0.4, fracR=0.14,
+fracMoveTorq=0.0976 at monomerCt=128) used three parameters in concert.
+The benchmark's one-parameter design captured only one of those degrees
+of freedom.
+
+Pivot for next session: joint bisection. Replace single-parameter search
+on fracMoveTorq with a single coefficient c where fracR = c AND
+fracMoveTorq = c. Hold fracMove fixed at 0.5. Start c at 0.1. This is a
+trivial code change but a meaningful conceptual one — it treats the two
+bending-stiffness contributions as coupled rather than independent.
+
+Open question deferred: persistence length consequences. Tuning to
+ratio = 1.0 for static deflection guarantees that observable only.
+Persistence length depends on thermal fluctuations of bending modes,
+which the static benchmark cannot separately measure. After we have
+matrix data from the joint-bisection runs, we should think about whether
+a second observable (Lp from fluctuation analysis) needs to be added to
+F1, or whether the static deflection benchmark plus the user's prior
+knowledge of well-tuned values is sufficient.
+
+Prompt for next session is drafted in this chat and ready to send.
+
+---
+
+## 2026-05-16 — Manual benchmarking apparatus
+
+Session goal: wire `-bm` and `-3jsLive` together as a live manual tuning
+instrument. Four increments; all code written and compiled clean. Browser
+verification deferred to user (see below).
+
+---
+
+### Increment 1 — Deflection HUD (`benchmark` WebSocket topic)
+
+**What changed:**
+
+- `BoxOfActin.java` — Added `BenchmarkSnapshot` static inner class
+  `{double observed, expected, ratio}`.  Refactored `computeDeflectionRatio()`
+  into `computeBenchmarkSnapshot()` (returns the struct) plus a thin
+  `computeDeflectionRatio()` wrapper that extracts `.ratio`.  This also
+  eliminated the duplicated perpendicular-deflection arithmetic that had
+  lived inside `reportBenchmarkDeflection()`.
+
+- Added `buildBenchmarkJson()` — builds the per-frame `benchmark` topic
+  payload.  Increment 4 relaxation-timer transition detection also lives
+  here (see below).
+
+- In `remoteLog()` and `logAndDraw()`, immediately after
+  `ThreeJSWriter.writeFrame()`, dispatch the benchmark topic when
+  `Env.benchmarkFilament && LiveFrameServer.isRunning()`.  Same cadence
+  as the frame topic; no separate counter.
+
+- `LiveFrameServer.java` — Added `dispatchBenchmark(String benchmarkJson)`.
+  Same non-blocking `enqueueAll()` semantics as all other dispatch methods.
+
+- `sim_viewer_boa.html` — Added CSS (`#benchmarkHud`, positioned `top: 78px;
+  right: 12px` to sit below the `displayToggle` button without overlapping
+  the `paramPanel`), HTML element (`#benchmarkHud`, `#bmHudRows`,
+  `#bmRelaxRow`, `#btnBenchForce`), and JS handler for the `benchmark`
+  topic (`updateBenchmarkHud(payload)`).  The HUD is hidden (`display:none`)
+  until the first `benchmark` message arrives, so it is invisible in
+  non-benchmark live runs.
+
+**Smoke test (compiled, CLI only):**
+
+```
+BENCHMARK TOPIC RECEIVED:
+{
+  "observedDeflection": 0.0033,
+  "expectedDeflection": 0.0098,
+  "ratio": 0.34,
+  "forceOn": true,
+  "stepCount": 101
+}
+```
+
+Payload shape is correct.  `ratio = 0.34` at step 101 is expected (chain
+still settling from straight initial position; equilibrium at default
+coefficients is well above 1.0).
+
+---
+
+### Increment 2 — Bending coefficients runtime-mutable
+
+**Survey findings (all three confirmed safe to promote):**
+
+| Parameter | Label | Call sites in FilSegment.java | Caching status |
+|---|---|---|---|
+| `fracMove` | `fracMove` | Lines 1354, 1416, 1492, 1556, 2060, 2091, 2145, 2196, 2241 | Read fresh via `getValue()` at every call site. No startup capture. |
+| `fracR` | `fracR` | Lines 1362, 1370, 1373, 1424, 1433, 1436 | Read fresh via `getValue()` at every call site. No startup capture. |
+| `fracMoveTorq` | `fracMoveTorq` | Lines 1639, 1642, 1693, 1696, 2271 | Read fresh via `getValue()` at every call site. No startup capture. |
+
+All three use the PAIRS drag formulation: each force/torque is computed from
+`Env.*.getValue()` inside the per-step force methods, with no intermediate
+local or static variable that would need re-caching. The fourth mutable param
+added this session (`benchmarkForceOn`) is a plain boolean read in the force
+application guard and in `buildBenchmarkJson()` — also no caching.
+
+**No special handling needed in `drainParamQueue()`** for any of the three
+bending params (unlike `toFileInterval`, which needs a counter reset). The
+`setValue()` call alone is sufficient; the change takes effect at the next
+step's force computation.
+
+**Changes:** Three `.setMutableAtRuntime()` calls added in `Env.java`:
+```java
+static final Parameter fracMove     = new Parameter(...).setMutableAtRuntime();
+static final Parameter fracR        = new Parameter(...).setMutableAtRuntime();
+static final Parameter fracMoveTorq = new Parameter(...).setMutableAtRuntime();
+```
+
+Also added `benchmarkForceOn` Parameter (Increment 4, but declared here):
+```java
+static final Parameter benchmarkForceOn = new Parameter("benchmarkForceOn",
+    " Benchmark: apply midpoint force", 1.0, "", Parameter.BOOLEAN)
+    .setMutableAtRuntime();
+```
+
+`benchmarkForceOn` appears in the Params panel during non-benchmark live
+runs as well; this is acceptable since the name is self-documenting and
+changing it in non-benchmark mode is a no-op.
+
+---
+
+### Increment 3 — `-bmManual` flag; structural conflict with `-bm`
+
+**Structural conflict found (as anticipated):** plain `-bm` calls
+`System.exit(0)` when the bisection converges, which would terminate the
+WebSocket session within a few minutes and prevent sustained manual tuning.
+
+**Resolution:** new `-bmManual` CLI flag. Differences from `-bm`:
+
+| | `-bm` | `-bmManual` |
+|---|---|---|
+| Search loop | Yes — bisection on joint c | No |
+| `fracMove` forced to 0.5 | Yes | No — stays at param-file value |
+| `fracR` / `fracMoveTorq` reset to `initC = 0.1` | Yes | No — stays at param-file value |
+| `System.exit(0)` on convergence | Yes | No |
+| `runTime` set | No (uses param default 120s) | Yes — 600s sim seconds |
+| Steps until termination | Search converges, then exits | User clicks Kill in viewer |
+
+In `begin()`:
+```java
+if (!Env.benchmarkManual) { Env.fracMove.setValue(0.5); }
+if (Env.benchmarkManual)  { Env.runTime.setValue(600); }
+```
+
+In `makeInitialThings()`, the manual early-return precedes the search setup
+block, so `fracR`/`fracMoveTorq` are not overwritten to 0.1:
+```java
+if (Env.benchmarkManual) {
+    System.out.printf("[BENCH:MANUAL] chain ready: span=%.4f µm  ...");
+    return;
+}
+// search setup only runs for -bm / -bmDiag
+```
+
+In `doLoop()`, the bisection block is guarded:
+```java
+if (Env.benchmarkFilament && !Env.benchmarkDiag && !Env.benchmarkManual) { ... }
+if (Env.benchmarkManual) { benchStepCount++; }
+```
+
+The three step-counter increments (diag / search / manual) are mutually
+exclusive by construction.
+
+**Smoke test:**
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081
+
+[BENCH] 11-seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+[BENCH] box auto-sized to 2.94 × 2.94 × 0.100 µm
+[BENCH:MANUAL] chain ready: span=0.9801 µm  fracMove=0.3000  fracR=0.3000  fracMoveTorq=0.0200
+Eulerian Mesh stats: nXBins=11 ...
+LiveFrameServer: client connected /127.0.0.1:...
+```
+
+No search iterations, no `System.exit`. WebSocket server running, `benchmark`
+topic delivered (payload verified above).
+
+---
+
+### Increment 4 — Force on/off toggle + relaxation timer
+
+**`forceOn` plumbing:** `Env.benchmarkForceOn` is a BOOLEAN Parameter marked
+`mutableAtRuntime`.  The force-application line in `doLoop()` is now:
+```java
+if (Env.benchmarkFilament && benchMidSeg != null && Env.benchmarkForceOn.getValue() != 0) {
+    benchMidSeg.incForceSum(benchTransForce);
+}
+```
+
+The user toggles it via either the dedicated "Force: ON / Force: OFF" button
+in the benchmark HUD (cleaner than the Params panel text input for a boolean)
+or via the Params panel directly.  Both paths use the existing `setParam`
+WebSocket action.
+
+**Relaxation timer state** in `BoxOfActin`:
+- `benchPrevForceOn` — tracks previous toggle state for transition detection
+- `benchReleaseStep` — step count at the `true → false` transition
+- `benchReleaseDeflection` — observed deflection at that transition
+
+Transition detection runs inside `buildBenchmarkJson()`, which is called at
+the safe point after `drainParamQueue()` has already applied any pending
+`setParam benchmarkForceOn` change.  One-step lag between force removal and
+the HUD reflecting it is negligible.
+
+When `forceOn = false` and a release event has occurred, two extra fields
+are included in the payload:
+```json
+"relaxationStepsElapsed": 350,
+"relaxationFraction": 0.7183
+```
+
+Viewer HUD displays: `Relax: 350 steps, 71.8%` in amber text.  Row is
+hidden when `forceOn = true` or no release event is active.
+
+---
+
+### In-scope discoveries handled silently
+
+- `reportBenchmarkDeflection()` duplicated the full perpendicular-deflection
+  computation from `computeDeflectionRatio()`.  Eliminated by refactoring
+  both to use `BenchmarkSnapshot`.
+
+- The bisection block in `makeInitialThings()` previously initialized
+  `benchStepCount = 0` inside the search-specific section.  Moved to the
+  common preamble so all three benchmark modes share it.
+
+- `benchPrevForceOn`, `benchReleaseStep`, `benchReleaseDeflection` initialized
+  in `makeInitialThings()` common preamble (not in the per-mode branches),
+  so a future `restartRun()` path would reset them correctly.
+
+---
+
+### Remaining verification (user-driven, not yet done)
+
+- `queryParams` response includes `fracMoveTorq`, `fracR`, `fracMove`,
+  `benchmarkForceOn` with `mutable: true`.
+- Browser HUD renders correctly and updates each frame interval.
+- Applying `fracMoveTorq = 0.10` in Params panel changes the ratio
+  (expected direction: ratio decreases — stiffer chain).
+- Force toggle changes button appearance and relaxation row appears/disappears.
+
+See verification guide in the planner's handoff note for this session.

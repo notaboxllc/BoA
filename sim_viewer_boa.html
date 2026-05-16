@@ -356,6 +356,35 @@
     #inspectPanel td { padding: 1px 4px; vertical-align: top; }
     #inspectPanel td:first-child { color: #888; min-width: 140px; }
     #inspectPanel td:last-child  { color: #eee; word-break: break-all; }
+
+    /* ── benchmark HUD (Increment 1) ──────────────────────────────────────── */
+    #benchmarkHud {
+      position: absolute;
+      top: 78px;
+      right: 12px;
+      background: rgba(0,0,0,0.70);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 10px;
+      z-index: 10;
+      display: none;
+      font: 12px/1.9 monospace;
+      color: #ddd;
+      text-align: right;
+      min-width: 210px;
+      pointer-events: none;
+    }
+    #benchmarkHud.active { display: block; pointer-events: auto; }
+    #benchmarkHud .bm-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 3px; padding-bottom: 2px; }
+    #benchmarkHud .bm-relax { color: #fa0; margin-top: 3px; }
+    #btnBenchForce {
+      display: block;
+      width: 100%;
+      margin-top: 5px;
+      pointer-events: auto;
+    }
+    #btnBenchForce.force-off { border-color: #833; color: #f88; }
+    #btnBenchForce.force-off:hover:not(:disabled) { border-color: #f44; color: #faa; }
   </style>
 </head>
 <body>
@@ -386,6 +415,13 @@
 <div id="paramPanel">
   <h3>Mutable parameters</h3>
   <div id="paramRows"></div>
+</div>
+
+<div id="benchmarkHud">
+  <div class="bm-title">— Benchmark —</div>
+  <div id="bmHudRows"></div>
+  <div id="bmRelaxRow" class="bm-relax" style="display:none"></div>
+  <button id="btnBenchForce" class="liveBtn">Force: ON</button>
 </div>
 
 <div id="controls">
@@ -1145,6 +1181,8 @@ if (LIVE_MODE) {
         buildParamPanel(env.payload);
       } else if (env.topic === 'paramAck') {
         handleParamAck(env.payload);
+      } else if (env.topic === 'benchmark') {
+        updateBenchmarkHud(env.payload);
       }
     };
     ws.onclose = () => {
@@ -1261,6 +1299,45 @@ if (LIVE_MODE) {
       }
     }
   }
+
+  // ── Increment 1+4: benchmark HUD ─────────────────────────────────────────
+  let bmForceOn = true;   // local shadow so the button can toggle without waiting for a round-trip
+
+  const benchmarkHud   = document.getElementById('benchmarkHud');
+  const bmHudRows      = document.getElementById('bmHudRows');
+  const bmRelaxRow     = document.getElementById('bmRelaxRow');
+  const btnBenchForce  = document.getElementById('btnBenchForce');
+
+  function updateBenchmarkHud(bm) {
+    benchmarkHud.classList.add('active');
+    bmForceOn = bm.forceOn;
+
+    // Update force button label and style
+    btnBenchForce.textContent = bmForceOn ? 'Force: ON' : 'Force: OFF';
+    btnBenchForce.classList.toggle('force-off', !bmForceOn);
+
+    // Main rows
+    bmHudRows.innerHTML =
+      `obs: ${bm.observedDeflection.toFixed(4)} µm<br>` +
+      `exp: ${bm.expectedDeflection.toFixed(4)} µm<br>` +
+      `ratio: ${bm.ratio.toFixed(3)}<br>` +
+      `step: ${bm.stepCount}`;
+
+    // Relaxation timer (Increment 4)
+    if (!bm.forceOn && bm.relaxationStepsElapsed !== undefined) {
+      const pct = (bm.relaxationFraction * 100).toFixed(1);
+      bmRelaxRow.textContent = `Relax: ${bm.relaxationStepsElapsed} steps, ${pct}%`;
+      bmRelaxRow.style.display = '';
+    } else {
+      bmRelaxRow.style.display = 'none';
+    }
+  }
+
+  btnBenchForce.addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'setParam', name: 'benchmarkForceOn', value: bmForceOn ? 'false' : 'true' }));
+    }
+  });
 
   setLiveState('reconnecting');
   openSocket();
