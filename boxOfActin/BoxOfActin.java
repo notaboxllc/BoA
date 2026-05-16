@@ -942,6 +942,9 @@ public class BoxOfActin {
 				+ ", span=" + String.format("%.4f", spanM * 1e6) + " µm"
 				+ ", F=" + String.format("%.3e", forceN) + " N"
 				+ ", analytic δ=" + String.format("%.4f", benchAnalyticDefl) + " µm");
+			System.err.printf("[BENCH:FORCE] benchTransForce=(%.4e, %.4e, %.4e) N  EI=%.4e  frac=%.4f  spanM=%.4e%n",
+				benchTransForce.x, benchTransForce.y, benchTransForce.z,
+				Env.EI, Env.benchmarkForceFrac, spanM);
 			// Step 2: store segments and initial straight-line positions for per-evaluation reset
 			benchSegs = segs;
 			benchInitCoords = new Pt3D[n];
