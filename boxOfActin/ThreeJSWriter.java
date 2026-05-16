@@ -72,10 +72,18 @@ public class ThreeJSWriter {
             FilSegment fs = FilSegment.theFilSegments[i];
             if (fs == null || fs.removeMe) continue;
             if (!first) sb.append(",");
-            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035}",
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035",
                     fs.thingInstanceId,
                     fs.end1.x, fs.end1.y, fs.end1.z,
                     fs.end2.x, fs.end2.y, fs.end2.z));
+            if (Env.benchmarkFilament) {
+                sb.append(String.format(
+                    ",\"axisX\":[%.4g,%.4g,%.4g],\"axisY\":[%.4g,%.4g,%.4g],\"axisZ\":[%.4g,%.4g,%.4g]",
+                    fs.uVec.x, fs.uVec.y, fs.uVec.z,
+                    fs.yVec.x, fs.yVec.y, fs.yVec.z,
+                    fs.zVec.x, fs.zVec.y, fs.zVec.z));
+            }
+            sb.append("}");
             first = false;
         }
 

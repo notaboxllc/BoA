@@ -65,6 +65,7 @@ public class BoxOfActin {
 	static Pt3D benchTransForce = new Pt3D();
 	static int benchStepCount = 0;
 	static double benchAnalyticDefl = 0;
+	static double benchChainSpanMicrons = 0;  // total span L in µm; set in makeInitialThings, sent in benchmark topic
 
 	// Increment 1: snapshot struct returned by computeBenchmarkSnapshot()
 	static class BenchmarkSnapshot {
@@ -148,6 +149,11 @@ public class BoxOfActin {
 			Env.equilNodes.setValue(0);                // equilibrateNodeNumber
 			Env.kRdmNuc.setActive(false);              // spawnRdmFilaments
 			Env.kNodeNuc.setActive(false);             // spawnNodeFilaments
+			// Revert to calibrated baseline: 32 monomers/segment, ignoring param-file filSegLength.
+			// -bmMonomer flag (benchmarkMonomerCt > 0) still overrides when explicitly given.
+			if (Env.benchmarkMonomerCt <= 0) {
+				Env.stdSegLength.setValue(32);
+			}
 		}
 
 		// reset dependent parameters, etc
@@ -734,9 +740,12 @@ public class BoxOfActin {
 				tauMeasFrozen = true;
 			}
 		}
-		StringBuilder sb = new StringBuilder(220);
+		StringBuilder sb = new StringBuilder(256);
 		sb.append(String.format(
-			"{\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
+			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f",
+			Env.benchmarkNSegs, benchMonCt, benchChainSpanMicrons));
+		sb.append(String.format(
+			",\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
 			snap.observed, snap.expected, snap.ratio, forceOn, (long) benchStepCount));
 		if (!Double.isNaN(tauTheo)) {
 			sb.append(String.format(",\"tauTheo\":%.4f", tauTheo));
@@ -950,10 +959,8 @@ public class BoxOfActin {
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac / (spanM * spanM);
 			benchTransForce.setVals(0, forceN, 0); // Y: in-plane, visible from default camera (was Z)
 			benchAnalyticDefl = Env.benchmarkForceFrac * spanM * 1e6; // µm
-			System.out.println("[BENCH] " + n + "-seg chain"
-				+ ", span=" + String.format("%.4f", spanM * 1e6) + " µm"
-				+ ", F=" + String.format("%.3e", forceN) + " N"
-				+ ", analytic δ=" + String.format("%.4f", benchAnalyticDefl) + " µm");
+			System.out.printf("[BENCH] %d-seg × %d-mon/seg chain, span=%.4f µm, F=%.3e N, analytic δ=%.4f µm%n",
+				n, benchMonCt, spanM * 1e6, forceN, benchAnalyticDefl);
 			System.err.printf("[BENCH:FORCE] benchTransForce=(%.4e, %.4e, %.4e) N  EI=%.4e  frac=%.4f  spanM=%.4e%n",
 				benchTransForce.x, benchTransForce.y, benchTransForce.z,
 				Env.EI, Env.benchmarkForceFrac, spanM);
@@ -969,6 +976,7 @@ public class BoxOfActin {
 
 			// Fix 2: auto-size box to 3× chain span along X and Y so wall collisions never contaminate
 			double totalSpan = Pt3D.ptDist(benchAnchor1, benchAnchor2); // µm
+			benchChainSpanMicrons = totalSpan;
 			double benchBoxDim = Math.max(totalSpan * 3.0, Env.boxXDim.getValue());
 			if (Thing.theBox instanceof Chamber) {
 				Chamber.dimX = benchBoxDim;

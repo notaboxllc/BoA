@@ -511,3 +511,41 @@ Param-file *physical* values (box dims, viscosity, temperature, Lp, deltaT, mono
 **Fix 3 — suppress wireframe.** `ThreeJSWriter.buildFrameJson()` now omits the `"bounds"` field when `Env.benchmarkFilament` is true. The viewer's `applyFrameData()` now guards wireframe creation with `if (!boundsObj && data.bounds)` to handle the absent field gracefully.
 
 **Smoke test.** Compiled clean. Population suppression verified by inspection of the call graph. End-to-end visual verification (chain only, no minifilaments, no wireframe) deferred to user.
+
+### Manual benchmarking round 4: revert to 11×32 chain, add config HUD, add per-segment axes (2026-05-16)
+
+**Prior calibrated chain config.** The F1 bisection search (Step 2 final) confirmed: 11-segment × 32-monomer chain, span = 0.9801 µm, analytic δ = 0.0098 µm. Calibrated: `fracMoveTorq = 1.010`, `fracR = 0.3` (from the auto-search with `brownianFilMotionOff`, actinWidth=0.007 µm). The user's historical hand-tuning values are `fracMove=0.4, fracR=0.14`; the search-derived value (`fracR=0.3, fracMoveTorq=1.010`) supersedes these.
+
+**Bug context.** After Round 3 (clean environment), running `-bmManual -pf boa10-64Seg` produced obs ≈ 0 nm at ratio 0.005 even with maximally soft coefficients (fracMoveTorq=0.00001, fracR=1.0). This is not a tuning problem — the chain was not deflecting at all. The 64-monomer configuration is unverified; the 32-monomer config has a confirmed working calibration. Round 4 reverts to the known-good baseline while the bug is investigated.
+
+**Deliverable 1 — monomerCt=32 override.** Mechanism: `makeBenchmarkChain()` reads `benchmarkMonomerCt` if > 0, else falls back to `stdSegLength.getIntValue()`. The param file `boa10-64Seg` sets `filSegLength:true:64.0`, which loads into `stdSegLength`. Fix: in `begin()`, after `loadParamConfig()`, the existing benchmark override block now also sets `Env.stdSegLength.setValue(32)` when `benchmarkMonomerCt <= 0`. The `-bmMonomer` flag (explicit override) still takes priority because it sets `benchmarkMonomerCt > 0`. Physical parameters from the param file (viscosity, deltaT, box dims, etc.) are all still honored — only `filSegLength` is clamped for benchmark mode.
+
+**Deliverable 2 — `benchmark` topic payload additions.** Three new fields emitted from `buildBenchmarkJson()` on every frame:
+```json
+"chainSegments":      11,
+"monomersPerSegment": 32,
+"chainSpanMicrons":   0.9801
+```
+`chainSegments` = `Env.benchmarkNSegs` (static). `monomersPerSegment` = `benchMonCt` (resolved at chain construction, after `-bmMonomer` override). `chainSpanMicrons` = stored in new static `benchChainSpanMicrons` set in `makeInitialThings()`. Viewer HUD: a new `#bmChainInfo` div (class `bm-chain`, grey text) appears above a thin `bm-divider` rule and the existing metric rows. Shows:
+```
+chain: 11 seg × 32 mon
+span: 0.98 µm
+─────
+obs: 9.81 nm
+…
+```
+
+**Deliverable 3 — per-segment local axes.** `ThreeJSWriter.buildFrameJson()` now appends `axisX`, `axisY`, `axisZ` (each a 3-element float array in world coordinates) to each segment JSON entry when `Env.benchmarkFilament` is true. The vectors are `fs.uVec` (long axis / body-X), `fs.yVec` (body-Y), `fs.zVec` (body-Z) — package-accessible fields declared in `Thing`. Bandwidth: 9 floats × 11 segments = 99 extra floats per frame; negligible at benchmark cadence.
+
+Viewer: `updateAxisLines(segments)` creates or updates three `THREE.LineSegments` objects (X=red #ff5555, Y=green #55ff55, Z=blue #5555ff). Each axis indicator is a line from centroid−0.3×halfLen×axis to centroid+0.3×halfLen×axis. The `#chkAxes` checkbox in the Display panel controls `showAxes`; it defaults OFF and is automatically enabled (checked) on the first `benchmark` topic message.
+
+**Startup log (updated).** Now prints:
+```
+[BENCH] 11-seg × 32-mon/seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+```
+
+**Smoke test.** Compiled clean. End-to-end visual verification (axes visible, config HUD, 32-monomer span) deferred to user. Launch:
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg
+```
+Expected: HUD shows `chain: 11 seg × 32 mon`, `span: 0.98 µm`, `exp: 9.8 nm`. Three colored axis indicators visible at each segment centroid.

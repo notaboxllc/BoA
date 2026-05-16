@@ -376,6 +376,8 @@
     }
     #benchmarkHud.active { display: block; pointer-events: auto; }
     #benchmarkHud .bm-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 3px; padding-bottom: 2px; }
+    #benchmarkHud .bm-chain { color: #aaa; line-height: 1.7; }
+    #benchmarkHud .bm-divider { border-top: 1px solid #444; margin: 4px 0; }
     #benchmarkHud .bm-relax { color: #fa0; margin-top: 3px; }
     #btnBenchForce {
       display: block;
@@ -419,6 +421,8 @@
 
 <div id="benchmarkHud">
   <div class="bm-title">— Benchmark —</div>
+  <div id="bmChainInfo"></div>
+  <div class="bm-divider"></div>
   <div id="bmHudRows"></div>
   <div id="bmTauMeasRow" class="bm-relax" style="display:none"></div>
   <div id="bmTauTheoRow" class="bm-relax" style="display:none"></div>
@@ -444,6 +448,7 @@
   <label><span class="pLabel">Motor head</span>      <input id="sMotor"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMotor">1.00</span></label>
   <label><span class="pLabel">Lever arm</span>       <input id="sLever"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vLever">1.00</span></label>
   <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
+  <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"   type="checkbox"></label>
 </div>
 
 <div id="inspectPanel">
@@ -555,6 +560,17 @@ const motorColors = {
   'ADPPi': new THREE.Color(0xff9900),
   'ADP':   new THREE.Color(0xff0000),
 };
+
+// ── per-segment local axis lines (benchmark mode) ─────────────────────────────
+// Three LineSegments objects (X=red, Y=green, Z=blue) rebuilt each frame when
+// axis data is present. axisLines[i] is null until first benchmark frame arrives.
+const axisLineMats = [
+  new THREE.LineBasicMaterial({ color: 0xff5555 }), // X axis — red
+  new THREE.LineBasicMaterial({ color: 0x55ff55 }), // Y axis — green
+  new THREE.LineBasicMaterial({ color: 0x5555ff }), // Z axis — blue
+];
+let axisLines = [null, null, null]; // THREE.LineSegments, one per axis color
+let showAxes = false;               // toggled by #chkAxes; enabled on first benchmark frame
 
 // ── identity maps — rebuilt each frame from JSON "id" fields ──────────────────
 // Forward (id → slot): lets future code find the render slot for a given stable ID.
@@ -756,6 +772,7 @@ function applyFrameData(data) {
   segMesh.instanceMatrix.needsUpdate = true;
 
   updateMyosinData(data.myosins, data.minifilaments);
+  updateAxisLines(data.segments);
 
   hud.innerHTML =
     `frame ${data.frame}<br>` +
@@ -763,6 +780,47 @@ function applyFrameData(data) {
     `segments: ${count}` +
     (data.myosins      ? `<br>myosins: ${data.myosins.length}`           : '') +
     (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '');
+}
+
+function updateAxisLines(segments) {
+  // Only draw axes when the payload carries axis data and the toggle is on.
+  if (!showAxes || !segments || !segments.length || !segments[0].axisX) {
+    for (let a = 0; a < 3; a++) {
+      if (axisLines[a]) axisLines[a].visible = false;
+    }
+    return;
+  }
+
+  const axes = ['axisX', 'axisY', 'axisZ'];
+  for (let a = 0; a < 3; a++) {
+    const pts = [];
+    for (const seg of segments) {
+      if (!seg.axisX) continue;
+      // Centroid = midpoint of end1/end2
+      const cx = (seg.end1[0] + seg.end2[0]) / 2;
+      const cy = (seg.end1[1] + seg.end2[1]) / 2;
+      const cz = (seg.end1[2] + seg.end2[2]) / 2;
+      // Half-length of the axis indicator: 0.3 × half-segment-length
+      const dx = seg.end2[0] - seg.end1[0];
+      const dy = seg.end2[1] - seg.end1[1];
+      const dz = seg.end2[2] - seg.end1[2];
+      const halfLen = 0.3 * Math.sqrt(dx*dx + dy*dy + dz*dz) / 2;
+      const av = seg[axes[a]];
+      pts.push(cx - av[0]*halfLen, cy - av[1]*halfLen, cz - av[2]*halfLen,
+               cx + av[0]*halfLen, cy + av[1]*halfLen, cz + av[2]*halfLen);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    if (axisLines[a]) {
+      axisLines[a].geometry.dispose();
+      axisLines[a].geometry = geo;
+      axisLines[a].visible = true;
+    } else {
+      axisLines[a] = new THREE.LineSegments(geo, axisLineMats[a]);
+      axisLines[a].frustumCulled = false;
+      scene.add(axisLines[a]);
+    }
+  }
 }
 
 function updateMyosinData(myosins, minifilaments) {
@@ -1305,17 +1363,36 @@ if (LIVE_MODE) {
   let bmForceOn = true;   // local shadow so the button can toggle without waiting for a round-trip
 
   const benchmarkHud   = document.getElementById('benchmarkHud');
+  const bmChainInfo    = document.getElementById('bmChainInfo');
   const bmHudRows      = document.getElementById('bmHudRows');
   const bmTauMeasRow   = document.getElementById('bmTauMeasRow');
   const bmTauTheoRow   = document.getElementById('bmTauTheoRow');
   const btnBenchForce  = document.getElementById('btnBenchForce');
+  const chkAxes        = document.getElementById('chkAxes');
+
+  // Axes toggle — defaults off; enabled automatically on first benchmark frame.
+  chkAxes.addEventListener('change', () => { showAxes = chkAxes.checked; });
 
   function updateBenchmarkHud(bm) {
     benchmarkHud.classList.add('active');
     bmForceOn = bm.forceOn;
 
+    // Enable axes on first benchmark message and sync checkbox.
+    if (!showAxes && bm.chainSegments !== undefined) {
+      showAxes = true;
+      chkAxes.checked = true;
+    }
+
     btnBenchForce.textContent = bmForceOn ? 'Force: ON' : 'Force: OFF';
     btnBenchForce.classList.toggle('force-off', !bmForceOn);
+
+    // Chain config block (static during run, but sent every frame for simplicity).
+    if (bm.chainSegments !== undefined) {
+      bmChainInfo.className = 'bm-chain';
+      bmChainInfo.innerHTML =
+        `chain: ${bm.chainSegments} seg × ${bm.monomersPerSegment} mon<br>` +
+        `span: ${bm.chainSpanMicrons !== undefined ? bm.chainSpanMicrons.toFixed(2) : '—'} µm`;
+    }
 
     // Main rows: deflection in nm (protocol carries µm)
     bmHudRows.innerHTML =
