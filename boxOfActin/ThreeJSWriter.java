@@ -61,8 +61,10 @@ public class ThreeJSWriter {
         StringBuilder sb = new StringBuilder(4096);
         sb.append("{\"frame\":").append(frameNumber);
         sb.append(String.format(",\"t\":%.6g", Env.simulationTime));
-        sb.append(String.format(",\"bounds\":{\"xDim\":%.5g,\"yDim\":%.5g,\"zDim\":%.5g}",
-                Env.boxXDim.getValue(), Env.boxYDim.getValue(), Env.boxZDim.getValue()));
+        if (!Env.benchmarkFilament) {
+            sb.append(String.format(",\"bounds\":{\"xDim\":%.5g,\"yDim\":%.5g,\"zDim\":%.5g}",
+                    Env.boxXDim.getValue(), Env.boxYDim.getValue(), Env.boxZDim.getValue()));
+        }
         sb.append(",\"segments\":[");
 
         boolean first = true;

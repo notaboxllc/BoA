@@ -469,3 +469,45 @@ The deflection measurement (`computeBenchmarkSnapshot()`) computes the full perp
 **Expected τ_theo magnitude.** For the default boa10-64Seg parameter file (monCt=64, span≈1.93 µm, η=0.1 Pa·s, Lp=15 µm): τ_theo ≈ 0.7 s. This is the first bending mode. The measured τ_meas will include higher modes and may differ; compare them to assess how well the single-mode approximation holds.
 
 **Smoke test.** Compiled clean with `javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java`. Code paths verified by inspection. End-to-end verification (τ_meas vs τ_theo comparison, force direction visual) deferred to user as in Round 1.
+
+### Manual benchmarking round 3: clean benchmark environment (2026-05-16)
+
+**Problem.** Launching `-bmManual -pf ParameterFiles/boa10-64Seg` crowded the benchmark chain with unrelated objects (100 minifilaments, active kNodeNuc, etc.), making the deflection ratio meaningless.
+
+**Survey — population sites.**
+
+| Creation site | Mechanism | Guarded by benchmarkFilament? |
+|---|---|---|
+| `makeInitialThings()` non-benchmark path: `makeInitialFilaments`, `makeInitialMyoMiniFils`, `makeInitialProteinNodes` | Called in the else-of-benchmark block | Yes — already returns early |
+| `Chamber()` constructor: `makeMyosinHeads()`, `makeMyosinDimers()` | Always called in `makeCrucible()` via constructor | **No** |
+| `doLoop()`: `MyoMiniFilament.equilibrateMyoMiniNumber()` | Runs unconditionally every step; adds minifilaments until count reaches `initialMyoMiniFils` | **No** |
+| `doLoop()`: `ProteinNode.equilibrateNodeNumber()` | Runs unconditionally every step; adds nodes until count reaches `equilNodes` | **No** |
+| `doLoop()`: `FilSegment.spawnRdmFilaments()` | Guarded by `kRdmNuc.isActive()` | Yes (flag basis) |
+| `doLoop()`: `ProteinNode.spawnNodeFilaments()` | Guarded by `kNodeNuc.isActive()` | Yes (flag basis) |
+| ActA | Created only inside `Bug.makeListeriaBug()` | Yes — `simOutsideBug.setActive(false)` already set |
+| Arp2/3 | Created dynamically during branching events; requires filaments+nodes to branch from | Indirectly suppressed by clearing filaments/nodes |
+
+For `boa10-64Seg`: `numChamberFixedMyos/Dimers` default to 0 (not in that param file). The live issues were `initialMyoMiniFils:100`, `kNodeNuc:true`, and `equilNodes` (defaulting to 0 but worth zeroing defensively).
+
+**Fix 1 — population suppression.** In `begin()`, after `FileOps.loadParamConfig()` (so it overrides whatever the param file set) and before `makeCrucible()`:
+
+```java
+if (Env.benchmarkFilament) {
+    Env.numChamberFixedMyos.setValue(0);
+    Env.numChamberFixedMyoDimers.setValue(0);
+    Env.initialMyoMiniFils.setValue(0);
+    Env.equilNodes.setValue(0);
+    Env.kRdmNuc.setActive(false);
+    Env.kNodeNuc.setActive(false);
+}
+```
+
+Param-file *physical* values (box dims, viscosity, temperature, Lp, deltaT, monomerCt, etc.) continue to be honored — only the population counts are zeroed.
+
+**Survey — wall collision code.** `FilSegment.checkBugOrBoxCollision()` is called unconditionally in `step()` for every FilSegment. No feature flag. With `simOutsideBug.setActive(false)` (already set in benchmark mode), it uses `checkBugCollisionFromInside()` → `Chamber.amICollidingOuter()`. That method computes a penetration vector; if the endpoint is inside all walls, `delta = 0` and `bugForcesFromInside()` is never called. The benchmark auto-sizes the box to 3× chain span, so the chain (max deflection ≈ 1% of span) never contacts the walls. **No code change needed.**
+
+**Survey — chamber wireframe.** Built in `applyFrameData()` (viewer) from `data.bounds = {xDim, yDim, zDim}`. The JSON source is `ThreeJSWriter.buildFrameJson()` which always emitted this field. Note: the emitted dims are from `Env.boxXDim/YDim/ZDim` (param-file values), not from `Chamber.dimX/dimY` (which the benchmark auto-sizes to 3× span). So even before this fix, the wireframe showed the param-file box, not the actual collision boundary — a pre-existing inconsistency.
+
+**Fix 3 — suppress wireframe.** `ThreeJSWriter.buildFrameJson()` now omits the `"bounds"` field when `Env.benchmarkFilament` is true. The viewer's `applyFrameData()` now guards wireframe creation with `if (!boundsObj && data.bounds)` to handle the absent field gracefully.
+
+**Smoke test.** Compiled clean. Population suppression verified by inspection of the call graph. End-to-end visual verification (chain only, no minifilaments, no wireframe) deferred to user.

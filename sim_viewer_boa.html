@@ -729,8 +729,8 @@ function loadDirectory(dir) {
 
 // ── frame loading ─────────────────────────────────────────────────────────────
 function applyFrameData(data) {
-  // Build box wireframe from first frame; bounds are constant per run.
-  if (!boundsObj) {
+  // Build box wireframe from first frame; absent in benchmark mode.
+  if (!boundsObj && data.bounds) {
     const { xDim, yDim, zDim } = data.bounds;
     const boxGeo   = new THREE.BoxGeometry(xDim, yDim, zDim);
     const edgesGeo = new THREE.EdgesGeometry(boxGeo);

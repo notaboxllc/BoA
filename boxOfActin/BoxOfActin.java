@@ -136,7 +136,20 @@ public class BoxOfActin {
 		
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }
-		
+
+		// Benchmark mode: zero all population parameters after param file (overrides whatever it set).
+		// makeInitialThings() already returns early in benchmark mode, so makeInitialFilaments /
+		// makeInitialMyoMiniFils / makeInitialProteinNodes are never reached.
+		// Chamber() constructor and doLoop equilibration are not guarded — suppress them here.
+		if (Env.benchmarkFilament) {
+			Env.numChamberFixedMyos.setValue(0);       // Chamber::makeMyosinHeads
+			Env.numChamberFixedMyoDimers.setValue(0);  // Chamber::makeMyosinDimers
+			Env.initialMyoMiniFils.setValue(0);        // equilibrateMyoMiniNumber
+			Env.equilNodes.setValue(0);                // equilibrateNodeNumber
+			Env.kRdmNuc.setActive(false);              // spawnRdmFilaments
+			Env.kNodeNuc.setActive(false);             // spawnNodeFilaments
+		}
+
 		// reset dependent parameters, etc
 		Env.setTimeStepCounts();
 		Env.setDependencies();
