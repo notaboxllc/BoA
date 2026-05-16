@@ -377,7 +377,7 @@ Java3D removal is complete (Sessions 3–8). The only remaining blocker to Torna
 
 ## Biological Context
 
-- **Actin filaments**: ~8 nm radius, modeled as rigid rods (FilSegment chains)
+- **Actin filaments**: ~7 nm diameter (~3.5 nm radius), modeled as rigid rods (FilSegment chains). The radius is derived in `FilSegment.java:29` as `Env.actinWidth / 2`; `Env.actinWidth` is the filament *diameter* in microns (0.007 µm).
 - **Myosin II structure**: rod (~200nm) → lever/neck (~8nm) → motor head (~20nm). Each Myosin object has MyoRod, MyoLever, MyoMotor sub-objects with end1/end2
 - **MyoMiniFilament**: bundles multiple Myosin dimers; its own end1/end2 spans the full structure. Individual MyoRod objects inside have `rodInvisible=true`
 - **Motor nucleotide cycle**: NONE→ATP(unbound)→ADPPi(cocked)→ADP(power stroke)→NONE
@@ -393,3 +393,43 @@ paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
 // If isActive=false, parameter falls back to Java default regardless of value
 // bugOff does NOT control bug creation — use simOutsideBug:false:0.0
 ```
+
+## F1 Benchmark Journal
+
+### F1 sidebar — monomerCt=64 equilibrium diagnostic (2026-05-15)
+
+**Question:** At fracMoveTorq=0.02, monomerCt=64, fracR=0.3 — is the plateau ratio≈1.54 seen in the stuck bisection loop true equilibrium, or a false plateau?
+
+**Procedure:** Added `-bmDiag` CLI flag (no bisection, fixed parameters, print ratio every 5000 steps, cap 5M steps). Run: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bmDiag -bmMonomer 64`.  Parameters: fracMoveTorq=0.02, monomerCt=64, fracR=0.3, span=1.9305 µm, box auto-sized to 5.79×5.79 µm.
+
+**Per-5000-step data (steps 5000–125000):**
+
+| step | simT (s) | ratio | defl (µm) | dRatio/5000 |
+|------|----------|-------|-----------|-------------|
+| 5000 | 0.50 | 0.5197 | 0.010032 | N/A |
+| 10000 | 1.00 | 0.7115 | 0.013735 | +0.1918 |
+| 15000 | 1.50 | 0.7993 | 0.015430 | +0.0878 |
+| 20000 | 2.00 | 0.8396 | 0.016209 | +0.0403 |
+| 25000 | 2.50 | 0.8588 | 0.016580 | +0.0192 |
+| 30000 | 3.00 | 0.8671 | 0.016740 | +0.0083 |
+| 35000 | 3.50 | 0.8708 | 0.016811 | +0.0037 |
+| 40000 | 4.00 | 0.8738 | 0.016868 | +0.0030 |
+| 45000 | 4.50 | 0.8745 | 0.016882 | +0.0007 |
+| 50000 | 5.00 | 0.8747 | 0.016886 | +0.0002 |
+| 55000–125000 | — | 0.875 ± 0.001 | — | noise floor (±0.001) |
+
+**Two-timescale transient:** The ratio shows a fast initial rise (0→0.52 in 5000 steps, driven by rapid local segment straightening) followed by a slow exponential approach to equilibrium. Two-point fit from steps 35000–45000 gives τ_slow ≈ 3500 steps (0.35 simulated seconds).
+
+**Interpretation: TRUE EQUILIBRIUM at ratio ≈ 0.875.** The derivative reached the noise floor (±0.001) by step 50000 and showed no trend through step 125000. The plateau ratio≈1.54 reported by the stuck bisection loop was a **false plateau**: the convergence criterion (0.5% between consecutive 1000-step checks) fired at ~21000 steps while the chain was in a fast-mode quasi-steady state around ratio=0.85, not at the true equilibrium.
+
+**Implication:** At fracMoveTorq=0.02, the monomerCt=64 chain is stiffer than the analytic target (ratio < 1). The calibrated fracMoveTorq satisfying ratio=1 is below 0.02, estimated ~0.0175 from r_eq ≈ f_cal/f (linear spring model). The bisection was searching in the correct direction [0, 0.02], but the settle window (benchMinSettleSteps=20000 = ~5.7τ at 0.02, but only ~2.9τ at 0.01) was insufficient for candidates well below 0.02.
+
+**Root cause of bisection failure (monomerCt=64/128):** τ_slow ∝ L_seg³/fracMoveTorq. The old settle window scaled as monomerCt², but the physics requires monomerCt³. For monomerCt=64, τ_slow(0.02) ≈ 3500 steps; minSettleSteps=20000 (from L² formula) was 5.7τ at the initial candidate but only 2.9τ halfway into the search. **Fix applied (2026-05-15):** Changed exponent from 2 to 3. New minSettleSteps: 5000 (32), 40000 (64), 320000 (128).
+
+### F1 sidebar — monomerCt sensitivity sweep results (2026-05-14)
+
+**monomerCt=32:** Converged in 9 iterations. fracMoveTorq_cal ≈ 1.010, ratio=1.000 ± 0.01.
+
+**monomerCt=64:** Stuck at lo=hi=0.02 in old code (false convergence at ratio≈1.544). After L³ scaling fix: pending rerun.
+
+**monomerCt=128:** Did not complete initial settle in old code. After L³ scaling fix: pending rerun.

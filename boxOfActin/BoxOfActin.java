@@ -66,19 +66,25 @@ public class BoxOfActin {
 	static int benchStepCount = 0;
 	static double benchAnalyticDefl = 0;
 
-	// F1 Step 2: search-loop constants (hardcoded; candidate parameters in a later step)
-	static final double BENCH_SEARCH_TOL        = 0.01;  // ±1% deflection ratio tolerance
-	static final int    BENCH_SEARCH_SETTLE     = 5000;  // steps per evaluation settle period
-	static final double BENCH_SEARCH_GEO_FACTOR = 4.0;  // geometric step multiplier for bracketing phase
-	static final double BENCH_SEARCH_MAX_COEFF  = 100.0; // bail-out ceiling for fracMoveTorq
+	// F1 Step 2: search-loop constants
+	static final double BENCH_SEARCH_TOL            = 0.01;   // ±1% deflection ratio tolerance
+	static final int    BENCH_SETTLE_BASE            = 5000;   // base settle steps (calibrated for monomerCt=32)
+	static final int    BENCH_SETTLE_REF_MONOMER_CT  = 32;
+	static final int    BENCH_SETTLE_CHECK_INTERVAL  = 1000;   // steps between consecutive settle checks
+	static final double BENCH_SETTLE_CONV_TOL        = 0.005;  // 0.5% consecutive-check convergence
+	static final int    BENCH_SEARCH_MAX_SETTLE      = 500000; // absolute per-eval step cap
+	static final double BENCH_SEARCH_GEO_FACTOR      = 4.0;   // geometric step multiplier for bracketing phase
+	static final double BENCH_SEARCH_MAX_COEFF       = 100.0;  // bail-out ceiling for fracMoveTorq
 
 	// F1 Step 2: search-loop state — all set by makeInitialThings() before first step
-	static FilSegment[] benchSegs       = null;  // full segment array for per-evaluation reset
-	static Pt3D[]       benchInitCoords = null;  // stored straight-line center positions
-	static int          benchSearchIter = 0;
-	static double       benchSearchLo   = 0.0;   // fracMoveTorq giving ratio > 1+tol (too soft)
-	static double       benchSearchHi   = -1.0;  // fracMoveTorq giving ratio < 1-tol; -1 = not yet found
-	static double       benchSearchCand = 0.0;   // fracMoveTorq currently under evaluation
+	static FilSegment[] benchSegs           = null;        // full segment array for per-evaluation reset
+	static Pt3D[]       benchInitCoords     = null;        // stored straight-line center positions
+	static int          benchSearchIter     = 0;
+	static double       benchSearchLo       = 0.0;         // fracMoveTorq giving ratio > 1+tol (too soft)
+	static double       benchSearchHi       = -1.0;        // fracMoveTorq giving ratio < 1-tol; -1 = not yet found
+	static double       benchSearchCand     = 0.0;         // fracMoveTorq currently under evaluation
+	static int          benchMinSettleSteps = BENCH_SETTLE_BASE; // computed from monomerCt in makeInitialThings
+	static double       benchPrevCheckRatio = Double.NaN;  // ratio at previous settle check
 
 	public BoxOfActin (String[] args) {
 		
@@ -93,6 +99,9 @@ public class BoxOfActin {
 			Env.remote = true;
 			Env.paused = false; // benchmark runs headless; no WebSocket client to send resume
 			Env.simOutsideBug.setActive(false); // suppress Listeria bug + ActA creation
+		}
+		if (Env.benchmarkDiag) {
+			Env.runTime.setValue(600); // 6M steps at deltaT=1e-4; diag exits at 5M via System.exit
 		}
 		if (Env.threeJSLivePort > 0) {
 			LiveFrameServer.startServer(Env.threeJSLivePort);
@@ -230,6 +239,10 @@ public class BoxOfActin {
 			}
 			if (args[i].equals("-bmMonomer") && i + 1 < args.length) {
 				Env.benchmarkMonomerCt = Integer.parseInt(args[++i]);
+			}
+			if (args[i].equals("-bmDiag")) {
+				Env.benchmarkDiag = true;
+				Env.benchmarkFilament = true; // reuses chain/box setup
 			}
 		}
 	}
@@ -432,19 +445,64 @@ public class BoxOfActin {
 				drainInspectQueue();
 				drainParamQueue();  // C4: apply pending parameter changes, dispatch acks
 
-				// F1 Step 2: bisection search on fracMoveTorq — advances once per step at safe point
-				if (Env.benchmarkFilament) {
+				// -bmDiag: fixed-parameter equilibrium diagnostic — no search, just report ratio every 5000 steps
+				if (Env.benchmarkDiag) {
 					benchStepCount++;
-					if (benchStepCount >= BENCH_SEARCH_SETTLE) {
+					if (benchStepCount % 5000 == 0) {
 						double ratio = computeDeflectionRatio();
+						double defl = benchAnalyticDefl * ratio;
+						double dRatio = Double.isNaN(benchPrevCheckRatio) ? Double.NaN : ratio - benchPrevCheckRatio;
+						System.out.printf("[BMDIAG] step=%8d  simT=%8.2fs  ratio=%.6f  defl=%.6fµm  dRatio=%s%n",
+							benchStepCount, Env.simulationTime, ratio, defl,
+							Double.isNaN(dRatio) ? "      N/A" : String.format("%+.6f", dRatio));
+						System.out.flush();
+						benchPrevCheckRatio = ratio;
+					}
+					if (benchStepCount >= 5_000_000) {
+						System.out.printf("[BMDIAG] DONE: %d steps  simT=%.1fs  final ratio=%.6f%n",
+							benchStepCount, Env.simulationTime, computeDeflectionRatio());
+						System.exit(0);
+					}
+				}
 
-						// convergence check
+				// F1 Step 2: bisection search on fracMoveTorq — advances at safe point when chain has settled
+				if (Env.benchmarkFilament && !Env.benchmarkDiag) {
+					benchStepCount++;
+
+					// Settle convergence check: every BENCH_SETTLE_CHECK_INTERVAL steps after minimum warmup
+					boolean doEval = false;
+					double evalRatio = Double.NaN;
+					if (benchStepCount >= benchMinSettleSteps && benchStepCount % BENCH_SETTLE_CHECK_INTERVAL == 0) {
+						double r = computeDeflectionRatio();
+						if (!Double.isNaN(benchPrevCheckRatio)) {
+							double avg = (r + benchPrevCheckRatio) / 2.0;
+							if (avg > 0 && Math.abs(r - benchPrevCheckRatio) / avg <= BENCH_SETTLE_CONV_TOL) {
+								doEval = true;
+								evalRatio = r;
+							}
+						}
+						benchPrevCheckRatio = r;
+					}
+
+					// Hard cap: force eval if max settle steps reached
+					if (!doEval && benchStepCount >= BENCH_SEARCH_MAX_SETTLE) {
+						evalRatio = computeDeflectionRatio();
+						doEval = true;
+						System.out.println("[BENCH:WARN] settle cap hit at step " + benchStepCount
+							+ " for iter=" + benchSearchIter + "; ratio=" + String.format("%.4f", evalRatio));
+					}
+
+					if (doEval) {
+						double ratio = evalRatio;
+
+						// convergence check (bisection has converged to target)
 						if (Math.abs(ratio - 1.0) <= BENCH_SEARCH_TOL) {
 							System.out.println("[BENCH:SEARCH] iter=" + benchSearchIter
 								+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
 								+ "  ratio=" + String.format("%.4f", ratio)
 								+ "  lo=" + expFormat.format(benchSearchLo)
-								+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi)));
+								+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi))
+								+ "  settleSteps=" + benchStepCount);
 							System.out.println("[BENCH] CONVERGED"
 								+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
 								+ "  ratio=" + String.format("%.4f", ratio)
@@ -460,12 +518,13 @@ public class BoxOfActin {
 							benchSearchHi = benchSearchCand; // too stiff: lower upper bound
 						}
 
-						// per-evaluation progress line (printed after bracket update)
+						// per-evaluation progress line
 						System.out.println("[BENCH:SEARCH] iter=" + benchSearchIter
 							+ "  fracMoveTorq=" + expFormat.format(benchSearchCand)
 							+ "  ratio=" + String.format("%.4f", ratio)
 							+ "  lo=" + expFormat.format(benchSearchLo)
-							+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi)));
+							+ "  hi=" + (benchSearchHi < 0 ? "?" : expFormat.format(benchSearchHi))
+							+ "  settleSteps=" + benchStepCount);
 						benchSearchIter++;
 
 						// pick next candidate
@@ -487,6 +546,7 @@ public class BoxOfActin {
 						Env.fracMoveTorq.setValue(next);
 						resetBenchmarkChain();
 						benchStepCount = 0;
+						benchPrevCheckRatio = Double.NaN;
 					}
 				}
 
@@ -774,11 +834,41 @@ public class BoxOfActin {
 			for (int i = 0; i < n; i++) {
 				benchInitCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
 			}
-			benchSearchLo   = Env.fracMoveTorq.getValue();
-			benchSearchHi   = -1.0;
-			benchSearchCand = Env.fracMoveTorq.getValue();
-			benchSearchIter = 0;
-			benchStepCount  = 0;
+
+			// Settle window scales as L_seg³ ∝ monomerCt³: τ_slow ∝ ζ_rot/fracMoveTorq ∝ L_seg³/fracMoveTorq
+			int benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+			benchMinSettleSteps = (int)Math.min(
+				BENCH_SETTLE_BASE * Math.pow((double)benchMonCt / BENCH_SETTLE_REF_MONOMER_CT, 3.0),
+				BENCH_SEARCH_MAX_SETTLE * 2.0 / 3.0);
+			System.out.println("[BENCH] minSettleSteps=" + benchMinSettleSteps + "  monomerCt=" + benchMonCt);
+
+			// Fix 2: auto-size box to 3× chain span along X and Y so wall collisions never contaminate
+			double totalSpan = Pt3D.ptDist(benchAnchor1, benchAnchor2); // µm
+			double benchBoxDim = Math.max(totalSpan * 3.0, Env.boxXDim.getValue());
+			if (Thing.theBox instanceof Chamber) {
+				Chamber.dimX = benchBoxDim;
+				Chamber.dimY = Math.max(benchBoxDim, Env.boxYDim.getValue());
+				Chamber.dims.x = Chamber.dimX;
+				Chamber.dims.y = Chamber.dimY;
+				System.out.println("[BENCH] box auto-sized to "
+					+ String.format("%.2f", Chamber.dimX) + " × "
+					+ String.format("%.2f", Chamber.dimY) + " × "
+					+ String.format("%.3f", Chamber.dimZ) + " µm");
+			}
+
+			// Fix 3: lo=0 ensures a downward-search path is always available if starting cand is too stiff
+			benchSearchLo       = 0.0;
+			benchSearchHi       = -1.0;
+			benchSearchCand     = Env.fracMoveTorq.getValue();
+			benchSearchIter     = 0;
+			benchStepCount      = 0;
+			benchPrevCheckRatio = Double.NaN;
+			if (Env.benchmarkDiag) {
+				System.out.printf("[BMDIAG] fixed-param diagnostic: fracMoveTorq=%.4f  monomerCt=%d  fracR=%.4f  span=%.4f µm%n",
+					Env.fracMoveTorq.getValue(), benchMonCt, Env.fracR.getValue(), totalSpan);
+				System.out.printf("[BMDIAG] analytic δ=%.6f µm  reporting every 5000 steps  cap=5,000,000 steps%n",
+					benchAnalyticDefl);
+			}
 			return;
 		}
 		if (Env.twoNodesOneFil) {

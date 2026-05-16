@@ -258,6 +258,7 @@ public class Env {
 	static double benchmarkForceFrac = 0.01; // target deflection as fraction of span
 	static int benchmarkSettleSteps = 5000;  // steps before first measurement
 	static int benchmarkMonomerCt = 0;       // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
+	static boolean benchmarkDiag = false;    // -bmDiag: fixed-param equilibrium diagnostic, no search
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;
