@@ -444,9 +444,10 @@ public class BoxOfActin {
 				}
 				// Round 3 diagnostic: trace force application path
 				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
-					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f)%n",
+					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f) veloc.y=%.4e%n",
 						benchStepCount, benchMidSeg.forceSum.x, benchMidSeg.forceSum.y, benchMidSeg.forceSum.z,
-						benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z);
+						benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z,
+						benchMidSeg.veloc.y);
 				}
 
 				moveTimer.start();
@@ -458,8 +459,8 @@ public class BoxOfActin {
 				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
 				// Round 3 diagnostic: midpoint coord after integration + pin correction
 				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
-					System.err.printf("[BENCH:POST] step=%d coord=(%.4f,%.4f,%.4f)%n",
-						benchStepCount, benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z);
+					System.err.printf("[BENCH:POST] step=%d coord.y=%.6e veloc.y=%.4e%n",
+						benchStepCount, benchMidSeg.coord.y, benchMidSeg.veloc.y);
 				}
 
 				biochemTimer.start();
