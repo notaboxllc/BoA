@@ -249,7 +249,7 @@
     #paramPanel {
       position: absolute;
       top: 44px;
-      right: 12px;
+      left: 12px;
       background: rgba(0,0,0,0.87);
       border: 1px solid #444;
       border-radius: 4px;
@@ -420,7 +420,8 @@
 <div id="benchmarkHud">
   <div class="bm-title">— Benchmark —</div>
   <div id="bmHudRows"></div>
-  <div id="bmRelaxRow" class="bm-relax" style="display:none"></div>
+  <div id="bmTauMeasRow" class="bm-relax" style="display:none"></div>
+  <div id="bmTauTheoRow" class="bm-relax" style="display:none"></div>
   <button id="btnBenchForce" class="liveBtn">Force: ON</button>
 </div>
 
@@ -1300,36 +1301,38 @@ if (LIVE_MODE) {
     }
   }
 
-  // ── Increment 1+4: benchmark HUD ─────────────────────────────────────────
+  // ── benchmark HUD ────────────────────────────────────────────────────────
   let bmForceOn = true;   // local shadow so the button can toggle without waiting for a round-trip
 
   const benchmarkHud   = document.getElementById('benchmarkHud');
   const bmHudRows      = document.getElementById('bmHudRows');
-  const bmRelaxRow     = document.getElementById('bmRelaxRow');
+  const bmTauMeasRow   = document.getElementById('bmTauMeasRow');
+  const bmTauTheoRow   = document.getElementById('bmTauTheoRow');
   const btnBenchForce  = document.getElementById('btnBenchForce');
 
   function updateBenchmarkHud(bm) {
     benchmarkHud.classList.add('active');
     bmForceOn = bm.forceOn;
 
-    // Update force button label and style
     btnBenchForce.textContent = bmForceOn ? 'Force: ON' : 'Force: OFF';
     btnBenchForce.classList.toggle('force-off', !bmForceOn);
 
-    // Main rows
+    // Main rows: deflection in nm (protocol carries µm)
     bmHudRows.innerHTML =
-      `obs: ${bm.observedDeflection.toFixed(4)} µm<br>` +
-      `exp: ${bm.expectedDeflection.toFixed(4)} µm<br>` +
+      `obs: ${(bm.observedDeflection * 1000).toFixed(1)} nm<br>` +
+      `exp: ${(bm.expectedDeflection * 1000).toFixed(1)} nm<br>` +
       `ratio: ${bm.ratio.toFixed(3)}<br>` +
       `step: ${bm.stepCount}`;
 
-    // Relaxation timer (Increment 4)
-    if (!bm.forceOn && bm.relaxationStepsElapsed !== undefined) {
-      const pct = (bm.relaxationFraction * 100).toFixed(1);
-      bmRelaxRow.textContent = `Relax: ${bm.relaxationStepsElapsed} steps, ${pct}%`;
-      bmRelaxRow.style.display = '';
-    } else {
-      bmRelaxRow.style.display = 'none';
+    // Amber rows: τ_meas and τ_theo — hidden when force on or no release active
+    const showRelax = bm.tauMeas !== undefined;
+    bmTauMeasRow.style.display = showRelax ? '' : 'none';
+    bmTauTheoRow.style.display = showRelax ? '' : 'none';
+    if (showRelax) {
+      bmTauMeasRow.textContent = bm.tauMeasFrozen
+        ? `τ_meas: ${bm.tauMeas.toFixed(2)} s (crossed)`
+        : `τ_meas: ${bm.tauMeas.toFixed(2)} s…`;
+      bmTauTheoRow.textContent = `τ_theo: ${bm.tauTheo !== undefined ? bm.tauTheo.toFixed(2) : '—'} s`;
     }
   }
 

@@ -435,3 +435,37 @@ paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
 **monomerCt=64:** Stuck at lo=hi=0.02 in old code (false convergence at ratio≈1.544). After L³ scaling fix: pending rerun.
 
 **monomerCt=128:** Did not complete initial settle in old code. After L³ scaling fix: pending rerun.
+
+### Manual benchmarking round 2: nm display, in-plane force, relaxation time (2026-05-16)
+
+**Drag formula survey.** BoA uses Slender Body Theory for perpendicular drag per segment:
+
+```
+ζ_perp_seg = bTransGam.y = 4π η L_seg / (ln(L_seg / 2r) + 0.84)
+```
+
+where η = `Env.aeta` (Pa·s), L_seg = segment length (m), r = `actinWidth/2` (m), and 0.84 = `aOrthog` (empirical fit constant in `FilSegment.java`). This is the body-frame y-direction drag (perpendicular to the segment axis); `bTransGam.z = bTransGam.y` by symmetry.
+
+For a pinned-pinned beam with distributed transverse drag c [N·s/m²] and bending stiffness EI, the first-mode relaxation time is τ = c L⁴ / (EI π⁴). Writing c = N_segs × ζ_perp_seg / L_span:
+
+```
+τ_theo = N_segs × ζ_perp_seg × L_span³ / (EI × π⁴)
+```
+
+This is computed once in `makeInitialThings()` after the chain is created and printed in the `[BENCH] τ_theo=…` startup line.
+
+**Persistence-length parameter used.** `Env.persistenceLength = 15` µm (static final constant in `Env.java`, line ≈503). Used as `EI = kT × Lp ≈ 6.2e-26 N·m²` at 25°C. No user-tunable Parameter wraps this; it is compile-time constant.
+
+**Force direction change.** Old vector: `benchTransForce.setVals(0, 0, forceN)` (Z axis, into/out of screen). New vector: `benchTransForce.setVals(0, forceN, 0)` (Y axis, in-plane). Axis convention: chain aligned along world X, camera at (0, 0, 15) looking at origin; Y is up and in-plane with the default view. Z force produced deflection into the screen — not visible without rotating the camera. Y force produces a visible curve in the X-Y plane without any camera adjustment.
+
+The deflection measurement (`computeBenchmarkSnapshot()`) computes the full perpendicular distance from the chord regardless of direction, so no change to measurement code was needed.
+
+**Payload schema change.** Fields removed: `relaxationStepsElapsed` (int, step count), `relaxationFraction` (float, obs/release ratio). Fields added: `tauTheo` (float, seconds, always present once chain is initialized), `tauMeas` (float, seconds, only present when force is off and a release event is active), `tauMeasFrozen` (boolean, alongside `tauMeas`). WebSocket protocol still carries `observedDeflection` and `expectedDeflection` in µm; nm conversion is display-layer only in the viewer.
+
+**Display changes.** Benchmark HUD now shows deflection in nm (multiply µm × 1000). Two amber rows (τ_meas and τ_theo) replace the old "Relax: N steps, X%" row. Both are hidden when force is on or no release event is active (`tauMeas` absent from payload). τ_meas counts up in simulated seconds; after the deflection decays to 1/e of the release value it freezes and shows "(crossed)". τ_theo is a fixed value from chain initialization. Params panel moved from `right: 12px` to `left: 12px` to avoid overlap with the benchmark HUD.
+
+**Calibration intuition (from user).** At fracR ≈ 0.3, increasing fracR softens the chain while increasing fracMoveTorq stiffens it. This is counterintuitive from naming alone and worth recording: fracR controls the fractional displacement applied per timestep by the link restoring force, so smaller fracR → weaker restoring force → softer. fracMoveTorq controls torsional stiffness; larger → stiffer.
+
+**Expected τ_theo magnitude.** For the default boa10-64Seg parameter file (monCt=64, span≈1.93 µm, η=0.1 Pa·s, Lp=15 µm): τ_theo ≈ 0.7 s. This is the first bending mode. The measured τ_meas will include higher modes and may differ; compare them to assess how well the single-mode approximation holds.
+
+**Smoke test.** Compiled clean with `javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java`. Code paths verified by inspection. End-to-end verification (τ_meas vs τ_theo comparison, force direction visual) deferred to user as in Round 1.

@@ -77,6 +77,12 @@ public class BoxOfActin {
 	static long benchReleaseStep = -1;
 	static double benchReleaseDeflection = Double.NaN;
 
+	// Round 2: τ_meas / τ_theo relaxation timing
+	static double tauTheo = Double.NaN;        // theoretical first-mode relaxation time (s)
+	static double tauMeas = Double.NaN;        // measured 1/e relaxation time (s)
+	static boolean tauMeasFrozen = false;      // true once 1/e crossing is detected
+	static final double RELAX_INV_E = 1.0 / Math.E;
+
 	// F1 Step 2: search-loop constants
 	static final double BENCH_SEARCH_TOL            = 0.01;   // ±1% deflection ratio tolerance
 	static final int    BENCH_SETTLE_BASE            = 5000;   // base settle steps (calibrated for monomerCt=32)
@@ -673,8 +679,8 @@ public class BoxOfActin {
 			+ "  ratio=" + String.format("%.4f", snap.ratio));
 	}
 
-	// Increment 1: build the benchmark WebSocket topic payload JSON.
-	// Also handles Increment 4 relaxation timer transition detection.
+	// Build the benchmark WebSocket topic payload JSON.
+	// Handles force-toggle state transitions and 1/e relaxation-time detection.
 	private static String buildBenchmarkJson() {
 		BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 		if (snap == null) return null;
@@ -683,20 +689,40 @@ public class BoxOfActin {
 			if (!forceOn) {
 				benchReleaseStep = benchStepCount;
 				benchReleaseDeflection = snap.observed;
+				tauMeas = Double.NaN;
+				tauMeasFrozen = false;
 			} else {
 				benchReleaseStep = -1;
 				benchReleaseDeflection = Double.NaN;
+				tauMeas = Double.NaN;
+				tauMeasFrozen = false;
 			}
 			benchPrevForceOn = forceOn;
 		}
-		StringBuilder sb = new StringBuilder(160);
+		// Detect 1/e crossing (tauMeas freeze)
+		if (!forceOn && benchReleaseStep >= 0 && !tauMeasFrozen
+				&& !Double.isNaN(benchReleaseDeflection) && benchReleaseDeflection > 0) {
+			double fraction = snap.observed / benchReleaseDeflection;
+			if (fraction <= RELAX_INV_E) {
+				long elapsed = (long) benchStepCount - benchReleaseStep;
+				tauMeas = elapsed * Env.deltaT.getValue();
+				tauMeasFrozen = true;
+			}
+		}
+		StringBuilder sb = new StringBuilder(220);
 		sb.append(String.format(
 			"{\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
 			snap.observed, snap.expected, snap.ratio, forceOn, (long) benchStepCount));
+		if (!Double.isNaN(tauTheo)) {
+			sb.append(String.format(",\"tauTheo\":%.4f", tauTheo));
+		}
 		if (!forceOn && benchReleaseStep >= 0) {
-			long elapsed = (long) benchStepCount - benchReleaseStep;
-			double fraction = benchReleaseDeflection > 0 ? snap.observed / benchReleaseDeflection : Double.NaN;
-			sb.append(String.format(",\"relaxationStepsElapsed\":%d,\"relaxationFraction\":%.4f", elapsed, fraction));
+			if (tauMeasFrozen) {
+				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":true", tauMeas));
+			} else {
+				long elapsed = (long) benchStepCount - benchReleaseStep;
+				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":false", elapsed * Env.deltaT.getValue()));
+			}
 		}
 		sb.append("}");
 		return sb.toString();
@@ -897,7 +923,7 @@ public class BoxOfActin {
 			benchAnchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
 			double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac / (spanM * spanM);
-			benchTransForce.setVals(0, 0, forceN);
+			benchTransForce.setVals(0, forceN, 0); // Y: in-plane, visible from default camera (was Z)
 			benchAnalyticDefl = Env.benchmarkForceFrac * spanM * 1e6; // µm
 			System.out.println("[BENCH] " + n + "-seg chain"
 				+ ", span=" + String.format("%.4f", spanM * 1e6) + " µm"
@@ -931,6 +957,14 @@ public class BoxOfActin {
 			benchPrevForceOn = true;
 			benchReleaseStep = -1;
 			benchReleaseDeflection = Double.NaN;
+
+			// Round 2: τ_theo = N × ζ_perp_seg × L³ / (EI × π⁴)  (first bending mode, pinned-pinned)
+			// ζ_perp_seg = bTransGam.y (perpendicular drag per segment, N·s/m; set in calculateProperties())
+			double zetaPerp = benchMidSeg.bTransGam.y;
+			tauTheo = n * zetaPerp * Math.pow(spanM, 3) / (Env.EI * Math.pow(Math.PI, 4));
+			tauMeas = Double.NaN;
+			tauMeasFrozen = false;
+			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", tauTheo, zetaPerp);
 
 			if (Env.benchmarkManual) {
 				// Manual tuning mode — no search loop; params stay at their current (param-file) values
