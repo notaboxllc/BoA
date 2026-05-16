@@ -83,8 +83,9 @@ public class BoxOfActin {
 	static double       benchSearchLo       = 0.0;         // fracMoveTorq giving ratio > 1+tol (too soft)
 	static double       benchSearchHi       = -1.0;        // fracMoveTorq giving ratio < 1-tol; -1 = not yet found
 	static double       benchSearchCand     = 0.0;         // fracMoveTorq currently under evaluation
-	static int          benchMinSettleSteps = BENCH_SETTLE_BASE; // computed from monomerCt in makeInitialThings
+	static int          benchMinSettleSteps = BENCH_SETTLE_BASE; // updated dynamically: max(5τ_slow, base)
 	static double       benchPrevCheckRatio = Double.NaN;  // ratio at previous settle check
+	static int          benchMonCt          = BENCH_SETTLE_REF_MONOMER_CT; // stored for dynamic settle updates
 
 	public BoxOfActin (String[] args) {
 		
@@ -547,6 +548,7 @@ public class BoxOfActin {
 						resetBenchmarkChain();
 						benchStepCount = 0;
 						benchPrevCheckRatio = Double.NaN;
+						benchMinSettleSteps = benchDynamicSettle(next);
 					}
 				}
 
@@ -643,6 +645,16 @@ public class BoxOfActin {
 			+ "  meas=" + deflectionFormat.format(deflMeas) + " µm"
 			+ "  analytic=" + deflectionFormat.format(benchAnalyticDefl) + " µm"
 			+ "  ratio=" + String.format("%.4f", ratio));
+	}
+
+	// Dynamic settle: 5τ_slow where τ_slow ≈ N²/f ≈ 100/f steps (N=10 joints, drag cancels in torsion formula).
+	// Floor is the monomerCt³-scaled base to ensure adequate settle at the initial candidate.
+	private static int benchDynamicSettle(double fracMoveTorq) {
+		int dynSettle = (int)Math.min(500.0 / fracMoveTorq, BENCH_SEARCH_MAX_SETTLE * 2.0 / 3.0);
+		int baseSettle = (int)Math.min(
+			BENCH_SETTLE_BASE * Math.pow((double)benchMonCt / BENCH_SETTLE_REF_MONOMER_CT, 3.0),
+			BENCH_SEARCH_MAX_SETTLE * 2.0 / 3.0);
+		return Math.max(dynSettle, baseSettle);
 	}
 
 	// F1 Step 2: restore all benchmark segments to their initial straight-line configuration.
@@ -835,11 +847,10 @@ public class BoxOfActin {
 				benchInitCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
 			}
 
-			// Settle window scales as L_seg³ ∝ monomerCt³: τ_slow ∝ ζ_rot/fracMoveTorq ∝ L_seg³/fracMoveTorq
-			int benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
-			benchMinSettleSteps = (int)Math.min(
-				BENCH_SETTLE_BASE * Math.pow((double)benchMonCt / BENCH_SETTLE_REF_MONOMER_CT, 3.0),
-				BENCH_SEARCH_MAX_SETTLE * 2.0 / 3.0);
+			// benchMonCt stored for dynamic settle updates in doLoop
+			benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+			// Initial settle: use dynamic formula for starting candidate (fracMoveTorq default)
+			benchMinSettleSteps = benchDynamicSettle(Env.fracMoveTorq.getValue());
 			System.out.println("[BENCH] minSettleSteps=" + benchMinSettleSteps + "  monomerCt=" + benchMonCt);
 
 			// Fix 2: auto-size box to 3× chain span along X and Y so wall collisions never contaminate

@@ -424,7 +424,9 @@ paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
 
 **Implication:** At fracMoveTorq=0.02, the monomerCt=64 chain is stiffer than the analytic target (ratio < 1). The calibrated fracMoveTorq satisfying ratio=1 is below 0.02, estimated ~0.0175 from r_eq ≈ f_cal/f (linear spring model). The bisection was searching in the correct direction [0, 0.02], but the settle window (benchMinSettleSteps=20000 = ~5.7τ at 0.02, but only ~2.9τ at 0.01) was insufficient for candidates well below 0.02.
 
-**Root cause of bisection failure (monomerCt=64/128):** τ_slow ∝ L_seg³/fracMoveTorq. The old settle window scaled as monomerCt², but the physics requires monomerCt³. For monomerCt=64, τ_slow(0.02) ≈ 3500 steps; minSettleSteps=20000 (from L² formula) was 5.7τ at the initial candidate but only 2.9τ halfway into the search. **Fix applied (2026-05-15):** Changed exponent from 2 to 3. New minSettleSteps: 5000 (32), 40000 (64), 320000 (128).
+**Root cause of bisection failure (monomerCt=64/128):** The torsion-spring formula divides by `(mob_self + mob_neighbor) × deltaT`, which causes drag to cancel. The net angular change per step is exactly `fracMoveTorq × θ`, independent of L_seg. Consequently τ_slow ≈ N²/fracMoveTorq ≈ 100/fracMoveTorq steps (N=10 joints), independent of monomerCt. The bisection searches toward smaller fracMoveTorq where τ_slow grows proportionally. A fixed settle window fails as soon as candidates reach ~f/2 of the initial value.
+
+**Fix (2026-05-15):** Dynamic settle: `benchMinSettleSteps = max(5×100/f, monomerCt³-base)` updated after each candidate selection. This gives 5τ_slow throughout the search (5×10000=50000 at f=0.01, 5×20000=100000 at f=0.005, etc.). The monomerCt³ base floors the initial candidate to the same scale as before.
 
 ### F1 sidebar — monomerCt sensitivity sweep results (2026-05-14)
 
