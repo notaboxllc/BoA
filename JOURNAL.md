@@ -2895,3 +2895,365 @@ longer sci-notation strings. `_makeLabel` now measures `ctx.measureText(text).wi
 before committing `cv.width` (= measured width + 24 px padding), and returns
 `{ texture, aspect }`. Both call sites in `update` use `scale(0.22 * aspect, 0.22, 1)` —
 height stays constant so on-screen size is unchanged; width scales with text length.
+
+---
+
+## 2026-05-17 — Persistence length benchmark: design proposal
+
+Survey-and-design session. No code changes. Phase 2 will implement after review.
+
+---
+
+### 1. Filament construction
+
+**Segment length formula (from `FilSegment.java:28`)**
+
+```
+halfmono = Env.actinMonoRadius = actinMonoDiam / 2 = 0.0054 / 2 = 0.0027 µm
+segLen   = (monCt + 1) × halfmono
+```
+
+At **monCt = 32** (the benchmark default, enforced in `begin()` when `benchmarkMonomerCt <= 0`):
+- segLen = 33 × 0.0027 = **0.0891 µm**
+- For ~8 µm: 8.0 / 0.0891 ≈ 89.79 → **n = 90 segments → exact length = 8.019 µm**
+
+At monCt = 64 (if `-bmMonomer 64` is passed):
+- segLen = 65 × 0.0027 = 0.1755 µm
+- n = 46 → 8.073 µm
+
+Phase 2 should compute n at runtime: `n = (int) Math.round(8.0 / segLen)` so the target holds for any `-bmMonomer` value.
+
+**Files to edit in Phase 2:**
+
+| File | Change |
+|---|---|
+| `boxOfActin/FilSegment.java` | Add `makeLpChain(int n, double yOff, double zOff)` factory |
+| `boxOfActin/BoxOfActin.java` | LP chain state fields, creation in `makeInitialThings()`, accumulation + JSON build in logAndDraw path |
+| `boxOfActin/LiveFrameServer.java` | Add `dispatchLpBenchmark(String json)` (3-line clone of `dispatchBenchmark`) |
+| `sim_viewer_boa.html` | New LP panel, canvas decay-curve plot, `updateLpPanel()` handler |
+| `boxOfActin/ThreeJSWriter.java` | Minor: add `"chainType":"defl"` or `"chainType":"lp"` flag per segment in benchmark mode (see §8) |
+| `boxOfActin/Env.java` | No change |
+
+**Spatial placement:**
+
+- Deflection chain: n=11 segs, span ≈ 0.98 µm, centered at (0, 0, 0).
+- LP chain: n=90 segs, span ≈ 8.019 µm, centered at **(0, −1.5, −0.5) µm**.
+  - Y = −1.5 µm: places LP chain 1.5 µm below deflection chain in the default XY view. Both chains visible from camera at (0,0,15).
+  - Z = −0.5 µm: depth separation so the chains don't appear to overlap when the camera is slightly rotated.
+  - Physical non-interaction: guaranteed. Filament collision radius ≈ 0.0035 µm (physics); spatial mesh bins ≈ 0.011 µm wide. A 1.5 µm Y gap is ~430× the collision radius; the two chains will never occupy the same mesh cells.
+
+**Box sizing:** Current code in `makeInitialThings()` auto-sizes to `max(deflSpan × 3, boxXDim)`. With LP chain 8.019 µm, the box auto-sizes to ~24 µm, but only if the LP span drives the calculation. Fix: take `max(deflFil.chainSpanMicrons, lpFil.contourLength) × 3` for the box dimension.
+
+---
+
+### 2. Per-filament configuration abstraction
+
+Two purpose-specific static inner classes in `BoxOfActin.java`:
+
+```java
+// Deflection benchmark: pinned ends, applied midpoint force, static-deflection measurement.
+static class DeflFil {
+    FilSegment[] segs;
+    FilSegment firstSeg, lastSeg, midSeg;
+    final Pt3D anchor1 = new Pt3D(), anchor2 = new Pt3D();
+    final Pt3D transForce = new Pt3D();
+    Pt3D[] initCoords;           // for per-evaluation reset in search mode
+    double analyticDefl;         // µm
+    double chainSpanMicrons;     // µm
+    double tauTheo = Double.NaN, tauMeas = Double.NaN;
+    boolean tauMeasFrozen = false;
+    long releaseStep = -1;
+    double releaseDefl = Double.NaN;
+    boolean prevForceOn = true;
+}
+static final DeflFil deflFil = new DeflFil();
+
+// Persistence-length benchmark: free BCs, Brownian forces, tangent-correlation measurement.
+static class LpFil {
+    FilSegment[] segs;
+    int nSegs;
+    double segLen, contourLength;  // µm
+    double[] sumCC;  // sumCC[k] = Σ (t̂_i · t̂_{i+k}) for all valid i; k = 0..nSegs-1
+    int[]    ctCC;   // ctCC[k] = sample count at separation k
+    int sampleCount; // number of time-frames accumulated
+}
+static LpFil lpFil = null;  // null until makeInitialThings() creates it
+```
+
+**Why two classes:** The two chains have incompatible state. A unified class with optional nullable fields for pinning/force (deflection only) and C(s) accumulators (LP only) would be half-populated and confusing. Two classes are self-documenting.
+
+**Migration of existing `bench*` fields** (mechanical rename, low-risk):
+
+| Current `BoxOfActin` field | Moves to |
+|---|---|
+| `benchFirstSeg`, `benchLastSeg`, `benchMidSeg` | `deflFil.firstSeg`, `.lastSeg`, `.midSeg` |
+| `benchAnchor1`, `benchAnchor2` | `deflFil.anchor1`, `.anchor2` |
+| `benchTransForce` | `deflFil.transForce` |
+| `benchSegs`, `benchInitCoords` | `deflFil.segs`, `.initCoords` |
+| `benchAnalyticDefl`, `benchChainSpanMicrons` | `deflFil.analyticDefl`, `.chainSpanMicrons` |
+| `tauTheo`, `tauMeas`, `tauMeasFrozen` | `deflFil.tauTheo`, `.tauMeas`, `.tauMeasFrozen` |
+| `benchReleaseStep`, `benchReleaseDeflection` | `deflFil.releaseStep`, `.releaseDefl` |
+| `benchPrevForceOn` | `deflFil.prevForceOn` |
+
+The bisection-search fields (`benchSearchIter`, `benchSearchLo/Hi/Cand`, `benchMinSettleSteps`, etc.) stay as top-level `BoxOfActin` static fields — they are search-loop state, not filament description.
+
+`benchMonCt` and `benchStepCount` are also search/diag state and stay at the `BoxOfActin` level.
+
+---
+
+### 3. Boundary condition control
+
+**Pinning (deflection chain only):** `applyBenchmarkPins()` is updated to reference `deflFil.*`. LP chain has no pins — no new code needed.
+
+**Force application (deflection chain only):** In `doLoop()`:
+```java
+if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
+    deflFil.midSeg.incForceSum(deflFil.transForce);
+}
+```
+LP chain receives no programmatic force.
+
+**Brownian forces — critical incompatibility discovered:**
+
+`begin()` currently sets `Env.brownianFilMotionOff = true` for all benchmark modes (including `-bmManual`). This global flag suppresses Brownian forces in `FilSegment.step()` for every filament. The LP chain requires Brownian forces to generate thermal fluctuations — the whole measurement depends on them.
+
+**Required fix:** Make Brownian suppression per-segment.
+
+*Java side:*
+1. Add `boolean brownianOff = false;` to `FilSegment` (defaults `false` → no impact on existing code).
+2. In `FilSegment.step()`, change:
+   ```java
+   if (!Env.brownianFilMotionOff) {
+   ```
+   to:
+   ```java
+   if (!Env.brownianFilMotionOff && !brownianOff) {
+   ```
+3. In `begin()`, remove the `Env.brownianFilMotionOff = true;` line inside `if (Env.benchmarkFilament)`.
+4. After `makeBenchmarkChain()` for the deflection chain: `for (FilSegment s : deflFil.segs) s.brownianOff = true;`
+5. LP chain segments keep `brownianOff = false` (default) — they receive Brownian forces.
+
+This change is safe. The global `Env.brownianFilMotionOff` flag is unchanged for non-benchmark modes that use it (e.g. `-biochem` mode). All existing non-benchmark FilSegments keep `brownianOff = false`.
+
+**Complete list of implicit single-chain assumptions:**
+
+| Location | Assumption | Phase 2 action |
+|---|---|---|
+| `BoxOfActin.applyBenchmarkPins()` | Global `bench*` fields | Rename to `deflFil.*` |
+| `BoxOfActin.makeInitialThings()` | Single chain block | Add LP chain creation block after deflection block |
+| `BoxOfActin.buildBenchmarkJson()` | All state from global `bench*` | Rename to `deflFil.*`; LP state goes in new `buildLpJson()` |
+| `BoxOfActin.resetBenchmarkChain()` | Resets `benchSegs` | Rename to `deflFil.segs` |
+| `BoxOfActin.doLoop()` force application | `benchMidSeg` | → `deflFil.midSeg` |
+| `BoxOfActin.makeInitialThings()` box sizing | Uses deflection span only | Use `max(deflection span, LP contour length)` |
+| `ThreeJSWriter.buildFrameJson()` axis overlay | Applied to ALL segs in benchmark mode | Add `chainType` field (see §8) |
+| `ThreeJSWriter.buildFrameJson()` `pinnedEndpoints` | `BoxOfActin.benchAnchor1/2` | → `BoxOfActin.deflFil.anchor1/2` |
+| `ThreeJSWriter.buildFrameJson()` `forceArrows` | `BoxOfActin.benchMidSeg`, `benchTransForce` | → `deflFil.midSeg`, `deflFil.transForce` |
+| `begin()` `brownianFilMotionOff = true` | Global suppression | Remove; replace with per-segment `brownianOff = true` on deflection chain |
+| `drainParamQueue()` aeta-change handler | Recalculates `tauTheo` from global `bench*` | Rename to `deflFil.*` |
+| `drainParamQueue()` `benchmarkForceFrac` handler | Updates `benchTransForce`, `benchAnalyticDefl` | → `deflFil.transForce`, `deflFil.analyticDefl` |
+
+---
+
+### 4. Tangent correlation computation
+
+**Where:** New method `accumulateLpData()` in `BoxOfActin.java`. Called from both `logAndDraw()` and `remoteLog()` once per output frame, at the same call site as `buildBenchmarkJson()`. Both paths are inside `synchronized(Env.safeO)` — safe to read segment `uVec` state.
+
+**Algorithm:**
+
+```java
+private static void accumulateLpData() {
+    if (lpFil == null) return;
+    int n = lpFil.nSegs;
+    FilSegment[] segs = lpFil.segs;
+    for (int k = 1; k < n; k++) {
+        for (int i = 0; i + k < n; i++) {
+            lpFil.sumCC[k] += Pt3D.Dot(segs[i].uVec, segs[i + k].uVec);
+            lpFil.ctCC[k]++;
+        }
+    }
+    lpFil.sampleCount++;
+}
+```
+
+`Pt3D.Dot(vec1, vec2)` is confirmed present at `Pt3D.java:223`. No new methods needed.
+
+**Computational cost:** At n=90, each call does Σ_{k=1}^{89} (90-k) = 90×89/2 = 4005 dot products per output frame. Negligible. `k=0` slot (`sumCC[0]`) is initialized to 0 and never written; `ctCC[0]` stays 0; C(0) = 1.0 is hardcoded in `buildLpJson()`.
+
+**Memory footprint:** 89 doubles (sumCC) + 89 ints (ctCC) + 1 int (sampleCount) = ~1 KB. Trivial.
+
+**Serialization:** `buildLpJson()` is called once per output frame, returns a `String` dispatched via `LiveFrameServer.dispatchLpBenchmark(json)`. The `lpBenchmark` WebSocket topic payload:
+
+```json
+{
+  "nSegs": 90,
+  "segLen": 0.0891,
+  "contourLength": 8.019,
+  "lpTheo": 15.0,
+  "lpMeas": 14.8,
+  "samples": 4200,
+  "cc": [1.0, 0.994, 0.989, 0.983, ...]
+}
+```
+
+The `cc` array has `nSegs` entries, index 0..nSegs-1. Index 0 is always `1.0` (hardcoded; C(0) = self-correlation = 1 by definition). Index k ≥ 1: `sumCC[k] / ctCC[k]` if `ctCC[k] > 0`, else `1.0` (pre-data placeholder that the viewer can treat as absent). JSON size at n=90: ~650 bytes. Fine.
+
+---
+
+### 5. Lp fit
+
+**Method: log-linear regression with outlier exclusion.**
+
+Theory: C(s) = exp(−s / Lp) → log C(s) = −s / Lp. Fit log(C) = a + b × s by ordinary least squares. The intercept `a` is theoretically 0 but may deviate slightly due to segmentation; including it gives a better Lp estimate. Result: Lp_meas = −1 / b.
+
+**Implementation in `buildLpJson()`:**
+
+```java
+// Build (s_k, logC_k) pairs, excluding invalid/noisy points
+double sumS = 0, sumLogC = 0, sumS2 = 0, sumSlogC = 0;
+int nFit = 0;
+double[] cc = new double[n];
+cc[0] = 1.0;
+for (int k = 1; k < n; k++) {
+    double ck = (ctCC[k] > 0) ? sumCC[k] / ctCC[k] : 1.0;
+    cc[k] = ck;
+    if (ctCC[k] > 0 && ck > 0.01) {  // exclude nonpositive and near-zero
+        double sk = k * segLen;
+        double logC = Math.log(ck);
+        sumS += sk; sumLogC += logC;
+        sumS2 += sk * sk; sumSlogC += sk * logC;
+        nFit++;
+    }
+}
+double lpMeas = Double.NaN;
+if (nFit >= 2) {
+    double meanS = sumS / nFit, meanLogC = sumLogC / nFit;
+    double denom = sumS2 - nFit * meanS * meanS;
+    if (Math.abs(denom) > 1e-30) {
+        double b = (sumSlogC - nFit * meanS * meanLogC) / denom;
+        if (b < 0) lpMeas = -1.0 / b;  // positive Lp only
+    }
+}
+```
+
+**Numerical pitfalls and mitigations:**
+
+1. C(s) < 0 at large s (noise) → `if (ck > 0.01)` excludes these; log of negative/zero is undefined.
+2. C(s) = 1.0 (no data yet, ctCC[k]=0) → excluded by `ctCC[k] > 0` check; viewer shows "—" when sampleCount=0.
+3. b ≥ 0 (degenerate fit, e.g. very few samples) → `if (b < 0)` guard; lpMeas stays NaN → viewer shows "—".
+4. nFit < 2 → regression undefined → lpMeas = NaN.
+5. Very small denom (all s_k equal, impossible here) → `Math.abs(denom) > 1e-30` guard.
+
+**Expected Lp_meas at equilibrium:** With `Env.persistenceLength = 15` µm and well-calibrated `fracMoveTorq`/`fracR`, the measured value should converge to ~15 µm. Agreement within ~10% after a few thousand samples is expected from the WLC theory.
+
+---
+
+### 6. Viewer LP panel
+
+**Structure:**
+
+```html
+<div id="lpPanel">
+  <div class="lp-title">— Persistence Length —</div>
+  <canvas id="lpCanvas" width="220" height="130"></canvas>
+  <div id="lpReadout"></div>
+  <button id="btnPersist" class="liveBtn">Persist: ON</button>
+</div>
+```
+
+**CSS placement:** `position: absolute; bottom: 80px; right: 12px;` — lower right, above the playback controls bar. No overlap with `benchmarkHud` (top right, `top:72px, right:280px`) or `paramPanel` on normal screen widths.
+
+**Canvas2D** preferred over SVG: the decay curve is redrawn from scratch each frame via `clearRect` + redraw. Canvas2D is simpler than SVG DOM manipulation for a continuously updating plot.
+
+**Canvas layout (220 × 130 px):**
+- Plot area: x ∈ [30, 210], y ∈ [5, 110] (30px left margin for Y labels, 20px bottom for X labels).
+- X axis: s from 0 to `contourLength` µm; tick labels every 2 µm.
+- Y axis: C(s) from −0.1 to 1.05; gridlines at C = 0 (dashed grey) and C = 1 (thin grey).
+- Measured C(s): solid cyan/blue line connecting points where `cc[k] > 0`; gaps (line broken) where cc[k] ≤ 0.
+- Theoretical exp(−s / lpTheo): thin dashed white line (always shown once `lpTheo` is known).
+
+**Numerical readout (below canvas, inside `#lpReadout`):**
+
+```
+EI:      6.18e-26 N·m²
+Lp_theo: 15.0 µm
+Lp_meas: 14.8 µm
+samples:  4200
+```
+
+EI is computed viewer-side from `Env.Boltz × Env.tempK × lpTheo_µm × 1e-6`. Actually, EI is not directly sent in the JSON — the viewer derives it from `lpTheo`: `EI = kT × Lp = 4.1e-21 J × 15e-6 m ≈ 6.15e-26 N·m²`. Or, simpler: include `"EI"` in the JSON payload (Java: `Env.EI` in N·m²). Recommend including it directly.
+
+**Toggle:**
+- `Persist: ON/OFF` button hides/shows `#lpPanel` (client-side only — panel `display:none` when OFF).
+- Java always accumulates C(s) data when `lpFil != null`. No server-side parameter needed in Phase 2.
+- Panel starts hidden; becomes visible on first `lpBenchmark` topic message (mirrors how `benchmarkHud` appears on first `benchmark` message).
+
+**Topic dispatch in viewer:** Add to the `ws.onmessage` switch:
+```javascript
+} else if (env.topic === 'lpBenchmark') {
+    updateLpPanel(env.payload);
+}
+```
+
+---
+
+### 7. Toggle integration
+
+**`Force: ON/OFF` → `Deflection: ON/OFF`:**
+- Button text: `Force: ON` / `Force: OFF` → `Deflection: ON` / `Deflection: OFF`.
+- Handler: unchanged — still sends `{action:"setParam", name:"benchmarkForceOn", value:...}`.
+- CSS class: rename `force-off` → `defl-off` in both CSS and JS for consistency (1-line each).
+- Pinning remains active regardless of the deflection toggle — this is existing behavior (pins are always applied in `applyBenchmarkPins()`; only the transverse force is toggled).
+
+**`Persist: ON/OFF` (new):**
+- Viewer-side only: clicking hides/shows `#lpPanel` and sets a local `let lpActive = true` flag.
+- Java does not need a mutable parameter for Phase 2. C(s) accumulates unconditionally.
+- Future Phase 3 can add `lpBenchmarkActive` as a mutable parameter to pause/reset accumulation from the viewer.
+
+**Where the existing Force button handler lives:** `btnBenchForce.addEventListener('click', ...)` at line ~1608. Just update the button `textContent` string and CSS class name. No logic change.
+
+---
+
+### 8. In-scope discoveries
+
+**`brownianFilMotionOff` incompatibility (most critical).** Detailed above in §3. The per-segment `brownianOff` flag is necessary and non-optional.
+
+**Axis overlay applies to ALL segments.** `ThreeJSWriter.buildFrameJson()` emits `axisX/Y/Z` for every FilSegment when `Env.benchmarkFilament` is true. With 90 LP segments, this produces 270 colored axis-indicator line segments overlaid on the LP chain — visually cluttered. Recommended fix: add a field `"chainType":"defl"` or `"chainType":"lp"` to each segment's JSON object in benchmark mode. In `FilSegment`, add `boolean isLpSeg = false;`; set it to `true` on all LP chain segments after creation. In `buildFrameJson()`, change axis emission to:
+```java
+if (Env.benchmarkFilament && !fs.isLpSeg) {
+    // emit axisX/Y/Z
+}
+```
+Viewer: only draw axis lines for segments with `chainType === "defl"` (or where `axisX` is present in the JSON). Alternatively, always emit the field but have the viewer's Display `Segment axes` checkbox apply only to deflection-chain segments.
+
+**`Pt3D.Dot()` is static:** Call as `Pt3D.Dot(segs[i].uVec, segs[i+k].uVec)` — confirmed present at `Pt3D.java:223`.
+
+**Box sizing driven by deflection span only:** See §1. Fix required: use `max(deflection span, LP contour length)` for box dimension calculation.
+
+**LP chain factory placement:** `FilSegment.makeBenchmarkChain(int n)` creates segs centered at (0,0,0) along X. A separate `makeLpChain(int n, double yOff, double zOff)` factory is cleaner than a combined factory with an offset parameter that has no meaning for the deflection chain. The LP factory body: identical to `makeBenchmarkChain` except centroid y: `new Pt3D(cx, yOff, zOff)`.
+
+**`EI` field for LP panel:** `Env.EI` in Java is `Boltz × tempK × persistenceLength × 1e-6` (in N·m²). The viewer currently receives `lpTheo` and can derive EI = kT × Lp = 4.1e-21 × Lp_m. But including `"EI"` directly in the payload avoids viewer-side constants. Recommend: add `"EI": <Env.EI>` to the `lpBenchmark` JSON.
+
+**`makeLpChain` in benchmark-only mode:** The LP chain is only created when `Env.benchmarkFilament` is true (same gate as the deflection chain). It does not appear in normal simulation runs. The `Env.noMonomersSimd.setActive(true)` call at the top of `makeInitialThings()`'s benchmark block suppresses Monomer creation for both chains — no change needed there.
+
+**Free-chain drift:** A free filament under Brownian forces will undergo center-of-mass diffusion. Over a long run the LP chain may drift outside the auto-sized box. With box = 24 µm and D_trans ≈ kT / (N × ζ_perp) ≈ small, this is unlikely to matter within a reasonable run. If it becomes an issue, add a soft center-of-mass restoring force or re-centering step. Not needed for Phase 2.
+
+**`FilSegment.step()` bounds-collision code:** `checkBugOrBoxCollision()` is called every step for every FilSegment. For the LP chain, this is fine — if the chain drifts near a wall, it gets a small repulsion. No change needed.
+
+---
+
+### Implementation sequence for Phase 2
+
+1. Add `boolean brownianOff = false` to `FilSegment`; update `step()` condition.
+2. Remove `Env.brownianFilMotionOff = true` from `begin()` benchmark block.
+3. Add `boolean isLpSeg = false` to `FilSegment`; update `buildFrameJson()` axis emission.
+4. Rename all `bench*` fields in `BoxOfActin` to `deflFil.*` (mechanical; update all call sites including `ThreeJSWriter`, `drainParamQueue`, etc.).
+5. Add `FilSegment.makeLpChain(n, yOff, zOff)` factory.
+6. In `makeInitialThings()`, add LP chain creation block after deflection block: create chain, store in `lpFil`, set `isLpSeg=true` on all its segments.
+7. Update box sizing to use max span.
+8. Add `accumulateLpData()` and `buildLpJson()` to `BoxOfActin`; call them from `logAndDraw()` and `remoteLog()`.
+9. Add `dispatchLpBenchmark()` to `LiveFrameServer`.
+10. Update `doLoop()` `benchMidSeg` → `deflFil.midSeg`.
+11. Viewer: add LP panel HTML/CSS, `updateLpPanel()` + canvas decay-curve draw, topic handler.
+12. Rename Force button text and CSS to Deflection.
+
+Steps 1–3 are prerequisite; steps 4–10 can be done in order; step 11 is independent.
