@@ -4,6 +4,20 @@ Last updated: 2026-05-17
 
 ---
 
+## 2026-05-17 — Viewer UI polish round 3
+
+HTML/JS only. No Java changes.
+
+1. **Params panel alignment** — switched from left-edge to right-edge alignment with the `Params ▼` button. CSS changed from `left: 280px` to `right: 400px` (fallback); JS click handler now sets `paramPanel.style.left = 'auto'` and `paramPanel.style.right = (window.innerWidth - rect.right) + 'px'`. Panel sits to the left of the Benchmark panel with no overlap.
+
+2. **Panel top** — `#paramPanel` and `#benchmarkHud` both moved from `top: 66px` to `top: 72px`, matching `#displayPanel { top: 72px }`. All three panels now share the same top baseline.
+
+3. **Force arrow tail length** — `_totalLen` halved from `0.70` to `0.425` µm (`shaftLen` drops from 0.55 to 0.275 µm; head unchanged at 0.15 µm / radius 0.060 µm).
+
+4. **Conical supports** — `_coneGeo` scaled to 60% of prior dimensions: `ConeGeometry(0.108, 0.228, 16)` (was 0.18, 0.38). Centroid offset updated from `pt.y − 0.19` to `pt.y − 0.114` to keep apex at the pinned endpoint.
+
+---
+
 ## 2026-05-17 — Viewer UI polish round 2
 
 ### 1. Panel vertical position

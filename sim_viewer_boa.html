@@ -248,8 +248,8 @@
     /* ── param panel (C4) ─────────────────────────────────────────────────── */
     #paramPanel {
       position: absolute;
-      top: 66px;
-      left: 280px;
+      top: 72px;
+      right: 400px; /* fallback; JS overrides on click to align right edge with Params button */
       background: rgba(0,0,0,0.87);
       border: 1px solid #444;
       border-radius: 4px;
@@ -360,7 +360,7 @@
     /* ── benchmark HUD (Increment 1) ──────────────────────────────────────── */
     #benchmarkHud {
       position: absolute;
-      top: 66px;
+      top: 72px;
       right: 280px;
       background: rgba(0,0,0,0.70);
       border: 1px solid #555;
@@ -579,7 +579,7 @@ let showSupports  = true;  // toggled by #chkSupports
 let showForceArrow = true; // toggled by #chkArrow
 
 // Conical supports at pinned endpoints: apex-up triangles (mechanics-textbook style).
-const _coneGeo = new THREE.ConeGeometry(0.18, 0.38, 16);
+const _coneGeo = new THREE.ConeGeometry(0.108, 0.228, 16); // 60% of original (0.18, 0.38)
 const _coneMat = new THREE.MeshPhongMaterial({ color: 0x7799bb });
 let benchSupportMeshes = []; // up to 2 THREE.Mesh objects, created lazily
 
@@ -601,8 +601,8 @@ class ForceArrow {
     this._lastLabel = null;
     this._toggleVisible = true;
     this._dataVisible   = false;
-    // Proportions (µm): shaft + head = totalLen; head is ~21% of total.
-    this._totalLen = 0.70;
+    // Proportions (µm): shaft + head = totalLen; head is ~35% of total.
+    this._totalLen = 0.425;
     this._headH    = 0.15;
     this._headR    = 0.060;
     this._shaftR   = 0.024;
@@ -939,9 +939,9 @@ function updateBenchmarkScene(data) {
     }
     for (let i = 0; i < data.pinnedEndpoints.length; i++) {
       const pt = data.pinnedEndpoints[i];
-      // ConeGeometry: apex at +Y/2, base at -Y/2 (height 0.38).
-      // Shift centroid down 0.19 so apex touches the pinned endpoint.
-      benchSupportMeshes[i].position.set(pt.x, pt.y - 0.19, pt.z);
+      // ConeGeometry: apex at +Y/2, base at -Y/2 (height 0.228).
+      // Shift centroid down 0.114 so apex touches the pinned endpoint.
+      benchSupportMeshes[i].position.set(pt.x, pt.y - 0.114, pt.z);
       benchSupportMeshes[i].visible = showSupports;
     }
     for (let i = data.pinnedEndpoints.length; i < benchSupportMeshes.length; i++) {
@@ -1421,8 +1421,10 @@ if (LIVE_MODE) {
     const open = paramPanel.classList.toggle('open');
     btnParams.textContent = open ? 'Params ▼' : 'Params ▶';
     if (open) {
-      // Align panel left edge with button left edge.
-      paramPanel.style.left = btnParams.getBoundingClientRect().left + 'px';
+      // Align panel right edge with button right edge.
+      const rect = btnParams.getBoundingClientRect();
+      paramPanel.style.left  = 'auto';
+      paramPanel.style.right = (window.innerWidth - rect.right) + 'px';
       if (ws && ws.readyState === WebSocket.OPEN)
         ws.send(JSON.stringify({ action: 'queryParams' }));
     }
