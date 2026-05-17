@@ -1,6 +1,72 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-14
+Last updated: 2026-05-17
+
+---
+
+## 2026-05-17 — Manual benchmarking round 7: viscous-blob mechanism removed (was the 50-mon discontinuity)
+
+### The bug
+
+Segments with `monomerCt >= vBlobMinMons` (default 50) stopped rotating entirely, producing a
+stepped chain shape instead of a smooth bending curve. The `[BENCH:DIAG1000]` diagnostic
+(commit `e25baa5`) showed the exact signature:
+
+- At `filSegLength=49`: `bRotGam.y = 1.12e-22` N·m·s/rad — normal SBT value for a ~50-monomer segment.
+- At `filSegLength=50`: `bRotGam.y = 6.30e-20` N·m·s/rad — **560× larger**, explaining why `bAngVeloc`
+  was effectively zero and the chain could not bend.
+
+### Root cause
+
+`FilSegment.calculateProperties()` added viscous-blob drag on top of the SBT drag tensors when
+`Env.useViscousBlob.isActive()`. Each blob contributed `Env.blobRotGam` — the rotational drag of a
+1 µm-diameter sphere — to `bRotGam`. The blob count `numViscBlobs` accumulated stochastically in
+`biochemStep()` whenever `length > vBlobMinMons × actinMonoRadius`. At 50 monomers, the first blob
+could attach and immediately cause a 560× drag increase in the same step.
+
+The threshold check (`length > vBlobMinMons * actinMonoRadius`) made the discontinuity exactly at
+`monomerCt = vBlobMinMons = 50`. The parameter's default was 50; the boa10-64Seg param file did not
+override it, so the benchmark chain at `filSegLength=50` always crossed the threshold immediately.
+
+Crucially, `useViscousBlob` defaulted to **active** (`Parameter.BOOLEAN, true` → `isActive() = true`).
+It was never suppressed in benchmark mode, so the mechanism ran throughout all benchmark testing.
+
+### Why the mechanism existed
+
+The viscous-blob scheme was a hack introduced for a Listeria motility paper (with Susanne Rafelski).
+The idea: Listeria-nucleated actin filaments in live cells are implicitly crosslinked to other cellular
+components not modeled in the simulation; adding stochastic sphere-drag blobs was a way to represent
+this effective friction without modeling those components explicitly. It was tagged in comments as
+"the one currently turned on and used for the paper."
+
+### Why it was removed
+
+The mechanism is experiment-specific and has no place in a general-purpose actin filament code. Its
+default-on state (isActive=true) means it silently corrupts any benchmark or calibration run unless
+explicitly suppressed. The commented-out code (FilSegment.java, Env.java) is the reference
+implementation if the mechanism is ever needed again (e.g., as a v2 plugin for Listeria simulations).
+
+### Changes made
+
+- **`boxOfActin/FilSegment.java`**: Commented out `numViscBlobs` field, the `calculateProperties()`
+  blob-drag addition block, the `biochemStep()` call to `viscousBlobSim()`, and the `viscousBlobSim()`
+  method body. Each commented block has a note referencing this journal entry.
+- **`boxOfActin/Env.java`**: Commented out the entire `**** Viscous Blobs Params ****` section:
+  `useViscousBlob`, `nVBlobPerBug`, `vBlobMinMons`, `lengthForOneBlobPerSecond`, `vBlobOnRate`,
+  `vBlobOffRate`, `maxVBlobs`, `blobGamScaleFactor`, `blobRotGamScaleFactor`, `bTransGamViscBlob`,
+  `bRotGamViscBlob`, `N`, `blobTransGam`, `blobRotGam` parameters and constants; also commented out
+  the `setupEnvForRun()` rebuild of `blobTransGam`/`blobRotGam`.
+- **`boxOfActin/BoxOfActin.java`**: Updated the aeta-change comment to remove the stale reference to
+  `bTransGamViscBlob`/`blobTransGam`. Removed the `[BENCH:DIAG1000]` diagnostic prints (commit
+  `e25baa5`) — they served their purpose.
+- Compiled clean after all changes.
+
+### Diagnostic that pinpointed it
+
+The `[BENCH:DIAG1000]` print (added in commit `e25baa5`, removed in this commit) logged `bRotGam.y`,
+`monomerCt`, and `torqueSum` at step 1000. The 560× jump in `bRotGam.y` between 49 and 50 monomers
+was unambiguous: the only code path that could change `bRotGam` between two segment lengths that close
+was the viscous-blob addition, which gated on `monomerCt >= vBlobMinMons`.
 
 ---
 

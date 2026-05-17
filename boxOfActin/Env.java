@@ -481,21 +481,24 @@ public class Env {
 	static private final double arpTorqSpring_init = 1e-18; // N/radian, elastic torque spring for Arp2/3 branches														
 	static final Parameter arpTorqSpring = new Parameter("arpTorqSpring", " Torque Spring To Constrain Mother/Daughter Arp2/3 Relationship",arpTorqSpring_init, " N/rad", Parameter.DOUBLE, true);
 	
-	//**** Viscous Blobs Params ***
-	static final Parameter useViscousBlob = new Parameter("useViscousBlob", " Actin filaments accumulate viscous blobs", 0,"", Parameter.BOOLEAN,true);
-	static final Parameter nVBlobPerBug = new Parameter("nVBlobPerBug"," Number of vicous blobs equal to bug drag", 1000, "", Parameter.INT);
-	static final Parameter vBlobMinMons = new Parameter("vBlobMinMons"," Don't Apply viscous blobs until filament has this many monomers", 50, "", Parameter.INT);
-	static final double lengthForOneBlobPerSecond = 0.25*Env.actinMonoRadius;	// reference length... one viscous blob per second will add to this length
-	static final double vBlobOnRate = 1/lengthForOneBlobPerSecond;		// (blobs/s-micron) viscous blob on rate per second-micron (of effective length)
-	static final double vBlobOffRate = 0.5;				// (blobs/s)
-	static final int maxVBlobs = 200;				// can't get locked down more than this
-	static final double blobGamScaleFactor = 1; 	//based on fact that blobs need drag scaled up by a standard value (1000) similar to lisTransGamScaleFactor but does not change
-	static final double blobRotGamScaleFactor = 1; 	//default is 1000; like blobGamScaleFactor but can adjust the rotGam for the viscous blobs separately (to test fil alignment, March2007)
-	static final double bTransGamViscBlob = 6*Math.PI*Env.aeta.getValue()*1.0e-6*0.5*blobGamScaleFactor;			//viscous drag based on a sphere of 1um diameter - the default for viscous blobs
-	static final double bRotGamViscBlob = 8*Math.PI*Env.aeta.getValue()*Math.pow(1.0e-6*0.5,3)*blobRotGamScaleFactor;	//viscous drag based on a sphere of 1um diameter - the default for viscous blobs
-	static final double N = 1.0/Env.nVBlobPerBug.getIntValue();
-	static Pt3D blobTransGam = new Pt3D(N*bTransGamViscBlob, N*bTransGamViscBlob, N*bTransGamViscBlob);
-	static Pt3D blobRotGam = new Pt3D(N*bRotGamViscBlob, N*bRotGamViscBlob, N*bRotGamViscBlob);
+	// **** Viscous Blobs — removed 2026-05-17 (Round 7); see JOURNAL.md. ****
+	// Listeria-specific hack: filaments accumulate sphere-drag blobs to simulate implicit
+	// crosslinking to unlisted cellular components. bRotGam jumped 560× at vBlobMinMons=50,
+	// stopping segment rotation entirely. Not appropriate for general-purpose actin code.
+	// static final Parameter useViscousBlob = new Parameter("useViscousBlob", ...);
+	// static final Parameter nVBlobPerBug = new Parameter("nVBlobPerBug", ...);
+	// static final Parameter vBlobMinMons = new Parameter("vBlobMinMons", ...);
+	// static final double lengthForOneBlobPerSecond = 0.25*Env.actinMonoRadius;
+	// static final double vBlobOnRate = 1/lengthForOneBlobPerSecond;
+	// static final double vBlobOffRate = 0.5;
+	// static final int maxVBlobs = 200;
+	// static final double blobGamScaleFactor = 1;
+	// static final double blobRotGamScaleFactor = 1;
+	// static final double bTransGamViscBlob = 6*Math.PI*Env.aeta.getValue()*1.0e-6*0.5*blobGamScaleFactor;
+	// static final double bRotGamViscBlob = 8*Math.PI*Env.aeta.getValue()*Math.pow(1.0e-6*0.5,3)*blobRotGamScaleFactor;
+	// static final double N = 1.0/Env.nVBlobPerBug.getIntValue();
+	// static Pt3D blobTransGam = new Pt3D(N*bTransGamViscBlob, N*bTransGamViscBlob, N*bTransGamViscBlob);
+	// static Pt3D blobRotGam = new Pt3D(N*bRotGamViscBlob, N*bRotGamViscBlob, N*bRotGamViscBlob);
 		
 
 	// **** Actin Mechanics ****
@@ -1017,9 +1020,10 @@ public class Env {
 			monomerGraphics = false;
 		}
 		
-		double N = 1.0/Env.nVBlobPerBug.getIntValue();
-		blobTransGam = new Pt3D(N*bTransGamViscBlob, N*bTransGamViscBlob, N*bTransGamViscBlob);
-		blobRotGam = new Pt3D(N*bRotGamViscBlob, N*bRotGamViscBlob, N*bRotGamViscBlob);
+		// Viscous-blob drag tensor rebuild — removed 2026-05-17 (Round 7); see JOURNAL.md.
+		// double N = 1.0/Env.nVBlobPerBug.getIntValue();
+		// blobTransGam = new Pt3D(N*bTransGamViscBlob, N*bTransGamViscBlob, N*bTransGamViscBlob);
+		// blobRotGam = new Pt3D(N*bRotGamViscBlob, N*bRotGamViscBlob, N*bRotGamViscBlob);
 		
 		simJSonFreq = (int)(Math.ceil((1.0/deltaT.getValue())*(1.0/simJSonSavesPerSec))); 	// number of integration steps between Simularium jSon saves
 		simJSon2Freq = (int)(Math.ceil((1.0/deltaT.getValue())*(1.0/simJSon2SavesPerSec))); 	// number of integration steps between Simularium jSon saves for second file

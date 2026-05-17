@@ -83,7 +83,8 @@ public class FilSegment extends Thing {
 	double notADPRatio = 1.0;   // set to track ratio of monomer not in ADP state
 	
 	// hack for locking actin filaments to "other stuff" not in the simulation
-	int numViscBlobs = 0;
+	// Removed 2026-05-17 (Round 7): mechanism fully commented out; see JOURNAL.md.
+	// int numViscBlobs = 0;
 	
 	// Arp2/3 bookkeeping
 	static double arpSeparation = 6*Env.actinMonoRadius;  // arp2/3s can't be closer together than this
@@ -330,15 +331,15 @@ public class FilSegment extends Thing {
 		bRotGam.y = (Math.PI*Env.aeta.getValue()*Math.pow(asIfLengthM,3))/(3*(denomLogTerm + aTurning));
 		bRotGam.z = bRotGam.y;
 		
-		//viscous blob based drag modifications... a hack to simulate filaments binding to "other stuff" not explicit in the simulation
-		//of all the schemes for fixing filaments in space, slowly, this is the one currently turned on and used for paper with Susanne Rafelski
-		if (Env.useViscousBlob.isActive()) {
-			//System.out.print("old bTransGam.x = " + bTransGam.x + " and blobAddition with " + numViscBlobs + " makes it "  );
-			bTransGam.add(bTransGam,numViscBlobs,Env.blobTransGam);
-			bRotGam.add(bRotGam,numViscBlobs,Env.blobRotGam);
-			//System.out.println (bTransGam.x);
-
-		}	
+		// Viscous-blob drag addition — removed 2026-05-17 (Round 7); see JOURNAL.md.
+		// Was a hack for Listeria motility experiments (Rafelski paper): filaments
+		// accumulate sphere-drag blobs representing implicit crosslinks to unlisted
+		// cellular components. Caused bRotGam to jump 560× at vBlobMinMons (default 50),
+		// stopping rotation entirely and producing the "stepped chain" artifact.
+		// if (Env.useViscousBlob.isActive()) {
+		//     bTransGam.add(bTransGam,numViscBlobs,Env.blobTransGam);
+		//     bRotGam.add(bRotGam,numViscBlobs,Env.blobRotGam);
+		// }
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
@@ -418,7 +419,8 @@ public class FilSegment extends Thing {
 	public void biochemStep () {
 		biochemCheckCt++;
 		
-		if (Env.useViscousBlob.isActive() && length > Env.vBlobMinMons.getIntValue()*Env.actinMonoRadius) { this.viscousBlobSim(length, Env.biochemDeltaT.getValue()); }  // uses lengthChanged flag to signal recalculation of drag etc
+		// Viscous-blob stochastic update — removed 2026-05-17 (Round 7); see JOURNAL.md.
+		// if (Env.useViscousBlob.isActive() && length > Env.vBlobMinMons.getIntValue()*Env.actinMonoRadius) { this.viscousBlobSim(length, Env.biochemDeltaT.getValue()); }
 		
 		if (!Env.noMonomersSimd.isActive() && biochemCheckCt >= biochemCheckInt) {
 			hydrolizeInFilaments();		// monomer-by-monomer hydrolysis and dissociate
@@ -1092,21 +1094,16 @@ public class FilSegment extends Thing {
 		return true;
 	}
 	
-	public void viscousBlobSim (double effectiveLength, double dT) {
-		// simulate addition of blobs
-		if (numViscBlobs < Env.maxVBlobs) {
-			double blobAddProb = effectiveLength*Env.vBlobOnRate*dT;
-			if (myPRNG.nextDouble() < blobAddProb) { numViscBlobs++; lengthChanged = true;}  // use lengthChanged to trigger recalc. of drag
-		}
-		
-		// simulate detaching blobs
-		if (numViscBlobs == 0) return;  // don't waste time below if no more visc blobs
-		double blobRemoveProb = Env.vBlobOffRate*dT;
-		if (myPRNG.nextDouble() < blobRemoveProb) { 
-			numViscBlobs--; 
-			lengthChanged = true;
-		}
-	}
+	// viscousBlobSim removed 2026-05-17 (Round 7): Listeria-specific hack; see JOURNAL.md.
+	// public void viscousBlobSim (double effectiveLength, double dT) {
+	//     if (numViscBlobs < Env.maxVBlobs) {
+	//         double blobAddProb = effectiveLength*Env.vBlobOnRate*dT;
+	//         if (myPRNG.nextDouble() < blobAddProb) { numViscBlobs++; lengthChanged = true; }
+	//     }
+	//     if (numViscBlobs == 0) return;
+	//     double blobRemoveProb = Env.vBlobOffRate*dT;
+	//     if (myPRNG.nextDouble() < blobRemoveProb) { numViscBlobs--; lengthChanged = true; }
+	// }
 	
 	public double getHelixAngleAtLoc(double loc) {
 		return (helixAng + (loc/Env.actinMonoRadius)*Env.helixAngInc);// %(2*Math.PI);
