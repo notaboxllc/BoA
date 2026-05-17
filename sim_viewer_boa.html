@@ -586,11 +586,23 @@ let benchSupportMeshes = []; // up to 2 THREE.Mesh objects, created lazily
 // ForceArrow: push-convention arrow (cylinder shaft + cone head, both Mesh so shaft has real thickness).
 // "Push" means the cone apex (tip) is at the force application point; the shaft trails
 // back in −dir. The pN label sits beyond the tail end.
-// update() called each benchmark frame; setToggleVisible() called by the Display checkbox.
+//
+// Constructor: (scene, point, direction, magnitudeN, options)
+//   point, direction  — initial geometry ({x,y,z} objects)
+//   magnitudeN        — force magnitude in Newtons
+//   options.showLabel    boolean     show a pN label (default true)
+//   options.labelOverride string|null  use this text verbatim when set (default null = auto)
+//   options.color        hex         material color (default 0xffffff)
+//
+// update(point, direction, magnitudeN, dataVisible) — called each benchmark frame.
+// setToggleVisible(v) — called by the Display checkbox.
 class ForceArrow {
-  constructor(scene) {
-    this._scene = scene;
-    const mat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+  constructor(scene, point, direction, magnitudeN, options = {}) {
+    this._scene         = scene;
+    this._showLabel     = options.showLabel     !== undefined ? options.showLabel     : true;
+    this._labelOverride = options.labelOverride !== undefined ? options.labelOverride : null;
+    const color = options.color !== undefined ? options.color : 0xffffff;
+    const mat = new THREE.MeshPhongMaterial({ color });
     this._shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12, 1), mat);
     this._head  = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 12, 1), mat);
     this._shaft.frustumCulled = false;
@@ -606,6 +618,12 @@ class ForceArrow {
     this._headH    = 0.15;
     this._headR    = 0.060;
     this._shaftR   = 0.024;
+    this.update(point, direction, magnitudeN, false);
+  }
+  _computeLabel(magnitudeN) {
+    if (!this._showLabel) return null;
+    if (this._labelOverride !== null) return this._labelOverride;
+    return magnitudeN > 0 ? (magnitudeN * 1e12).toFixed(2) + ' pN' : 'F';
   }
   _makeLabel(text) {
     const cv = document.createElement('canvas');
@@ -618,7 +636,7 @@ class ForceArrow {
     ctx.fillText(text, 64, 24);
     return new THREE.CanvasTexture(cv);
   }
-  update(point, direction, magnitudeN, label, dataVisible) {
+  update(point, direction, magnitudeN, dataVisible) {
     this._dataVisible = dataVisible;
     const shouldShow = this._toggleVisible && this._dataVisible;
 
@@ -646,25 +664,27 @@ class ForceArrow {
     this._head.scale.set(this._headR, this._headH, this._headR);
     this._head.visible = shouldShow;
 
-    // Label: force in pN, placed just beyond the tail in −dir.
-    const labelText = magnitudeN > 0
-      ? (magnitudeN * 1e12).toFixed(2) + ' pN'
-      : (label || 'F');
-    if (!this._sprite) {
-      const smat = new THREE.SpriteMaterial({ map: this._makeLabel(labelText), depthTest: false, transparent: true });
-      this._sprite = new THREE.Sprite(smat);
-      this._sprite.scale.set(0.60, 0.22, 1);
-      this._sprite.frustumCulled = false;
-      this._scene.add(this._sprite);
-      this._lastLabel = labelText;
-    } else if (labelText !== this._lastLabel) {
-      this._sprite.material.map.dispose();
-      this._sprite.material.map = this._makeLabel(labelText);
-      this._sprite.material.needsUpdate = true;
-      this._lastLabel = labelText;
+    // Label: derived from constructor options via _computeLabel().
+    const labelText = this._computeLabel(magnitudeN);
+    if (labelText === null) {
+      if (this._sprite) this._sprite.visible = false;
+    } else {
+      if (!this._sprite) {
+        const smat = new THREE.SpriteMaterial({ map: this._makeLabel(labelText), depthTest: false, transparent: true });
+        this._sprite = new THREE.Sprite(smat);
+        this._sprite.scale.set(0.60, 0.22, 1);
+        this._sprite.frustumCulled = false;
+        this._scene.add(this._sprite);
+        this._lastLabel = labelText;
+      } else if (labelText !== this._lastLabel) {
+        this._sprite.material.map.dispose();
+        this._sprite.material.map = this._makeLabel(labelText);
+        this._sprite.material.needsUpdate = true;
+        this._lastLabel = labelText;
+      }
+      this._sprite.position.copy(tailPt).addScaledVector(dir, -0.14);
+      this._sprite.visible = shouldShow;
     }
-    this._sprite.position.copy(tailPt).addScaledVector(dir, -0.14);
-    this._sprite.visible = shouldShow;
   }
   setToggleVisible(v) {
     this._toggleVisible = v;
@@ -952,14 +972,15 @@ function updateBenchmarkScene(data) {
   }
   // Force arrows.
   if (data.forceArrows && data.forceArrows.length > 0) {
+    const fa = data.forceArrows[0];
     if (!benchForceArrow) {
-      benchForceArrow = new ForceArrow(scene);
+      benchForceArrow = new ForceArrow(scene, fa.point, fa.direction, fa.magnitude,
+        {showLabel: true, color: 0xffffff});
       benchForceArrow.setToggleVisible(showForceArrow);
     }
-    const fa = data.forceArrows[0];
-    benchForceArrow.update(fa.point, fa.direction, fa.magnitude, fa.label, fa.visible);
+    benchForceArrow.update(fa.point, fa.direction, fa.magnitude, fa.visible);
   } else if (benchForceArrow) {
-    benchForceArrow.update({x:0,y:0,z:0}, {x:0,y:-1,z:0}, 0, 'F', false);
+    benchForceArrow.update({x:0,y:0,z:0}, {x:0,y:-1,z:0}, 0, false);
   }
 }
 

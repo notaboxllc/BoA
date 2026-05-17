@@ -4,6 +4,37 @@ Last updated: 2026-05-17
 
 ---
 
+## 2026-05-17 — ForceArrow label refactor; force value diagnosis
+
+HTML/JS only. No Java changes, compile clean.
+
+### Force value diagnosis
+
+User reported that the arrow label shows `0.01 pN` — suspicious because `benchmarkForceFrac = 0.01`. Full value-chain trace:
+
+1. `BoxOfActin.makeInitialThings()` sets `benchTransForce = (0, -forceN, 0)` where `forceN = 48 × EI × frac / spanM²` in Newtons. A `[BENCH:FORCE]` stderr printout was added to make this inspectable.
+2. `ThreeJSWriter.buildFrameJson()` emits `magnitude = |benchTransForce|` in Newtons (SI).
+3. Viewer multiplies by `1e12` for pN display.
+
+The `0.01 pN` value is **correct physics**, not a bug. For the 64-monomer chain (span ≈ 1.96 µm, EI ≈ 6.17e-26 N·m²): F = 48 × 6.17e-26 × 0.01 / (1.96e-6)² ≈ 7.7e-15 N = 0.0077 pN → rounds to `0.01 pN`. Numerical coincidence with `frac = 0.01`, not a wiring error. `benchAnalyticDefl = frac × span_µm` is also correct: 0.01 × 1.96 µm = 19.6 nm (64-mon) or 9.8 nm (32-mon). Historical `1.9 nm` observation was from a prior run at different parameters; `[BENCH:FORCE]` stderr will confirm on next run.
+
+### ForceArrow class refactor
+
+`ForceArrow` constructor signature changed from `(scene)` to `(scene, point, direction, magnitudeN, options)`. The class now owns full label responsibility.
+
+**New constructor options:**
+- `showLabel: boolean` — whether to show a label at all (default `true`)
+- `labelOverride: string|null` — use this text verbatim; if `null`, auto-format as `"X.XX pN"` (default `null`)
+- `color: hex` — material color for shaft and head (default `0xffffff`)
+
+**New private method `_computeLabel(magnitudeN)`** — returns `null` (hide), `labelOverride`, or auto-formatted pN string based on stored options. Replaces the inline ternary that was in `update()`.
+
+**`update()` signature** — `label` parameter removed. Label text is now derived from constructor options, not passed per-frame.
+
+**Caller update** — `benchForceArrow` creation site restructured: `fa` is extracted before the `!benchForceArrow` guard so it can be passed to the constructor. Fallback `update()` call drops the `'F'` literal argument.
+
+---
+
 ## 2026-05-17 — Viewer UI polish round 3
 
 HTML/JS only. No Java changes.
