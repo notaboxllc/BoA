@@ -123,9 +123,9 @@ public class Env {
 	// **** "Alberts Force", or Pairwise Agent Interaction with Rational
 	// Superposition (PAIRS) related ****
 	static double nodeFracMove = 0.5;
-	static private double fracMove_init = 0.3; // fraction of the calculated AlbertsForce distance to move in a time-step... < 1 for  stability
-	static private double fracR_init = 0.3; // as above, but for torque from link force .. bigger numbers are stiffer / faster response times
-	static private double fracMoveTorq_init = 0.02; // as above, but for torsion springs only.. bigger numbers are stiffer faster response times
+	static private double fracMove_init = 0.5; // fraction of the calculated AlbertsForce distance to move in a time-step... < 1 for  stability
+	static private double fracR_init = 0.1; // as above, but for torque from link force .. bigger numbers are stiffer / faster response times
+	static private double fracMoveTorq_init = 0.265; // as above, but for torsion springs only.. bigger numbers are stiffer faster response times
 
 	static final Parameter fracMove = new Parameter("fracMove",
 			" Coeff. for PAIRS movement", fracMove_init, "").setMutableAtRuntime();
@@ -355,7 +355,7 @@ public class Env {
 	static final Parameter actinConc = new Parameter("actinConc"," Actin Concentration", actinConc_init, concUnits,Parameter.DOUBLE, Parameter.CHANGE_VALUE);
 	static final Parameter actinConcNonHydro = new Parameter("actinConcNonHydro", " Non-hydrolyzable Actin Concentration",actinConcNonHydro_init, concUnits, Parameter.DOUBLE,Parameter.CHANGE_VALUE);
 	static final Parameter actinConcX = new Parameter("actinConcX"," Actin Concentration XFactor", 1.0, " ", Parameter.DOUBLE);
-	static final Parameter aeta = new Parameter("aeta", " Viscosity in Bug",aeta_init, "Pa-s (1e-3 is water)");
+	static final Parameter aeta = new Parameter("aeta", " Viscosity in Bug",aeta_init, "Pa-s (1e-3 is water)").setMutableAtRuntime();
 	static final Parameter capConc = new Parameter("capConc"," Cap Concentration", capConc_init, concUnits, Parameter.DOUBLE);
 
 	// **** The Protein Nodes ****

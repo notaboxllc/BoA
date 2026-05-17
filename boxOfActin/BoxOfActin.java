@@ -742,8 +742,8 @@ public class BoxOfActin {
 		}
 		StringBuilder sb = new StringBuilder(256);
 		sb.append(String.format(
-			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f",
-			Env.benchmarkNSegs, benchMonCt, benchChainSpanMicrons));
+			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f,\"viscosity\":%.4f",
+			Env.benchmarkNSegs, benchMonCt, benchChainSpanMicrons, Env.aeta.getValue()));
 		sb.append(String.format(
 			",\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
 			snap.observed, snap.expected, snap.ratio, forceOn, (long) benchStepCount));
@@ -812,6 +812,23 @@ public class BoxOfActin {
 			// to newInterval-1 so the next step's logAndDraw fires immediately.
 			if ("toFileInterval".equals(change.param.label)) {
 				threeJSCounter = (int) change.newValue - 1;
+			}
+			// Drag tensor refresh: when aeta changes, recompute bTransGam/bRotGam for all
+			// FilSegments. Safe at the safe point — all worker threads are idle. Also
+			// refresh tauTheo for the benchmark HUD if a benchmark chain is active.
+			// Note: bTransGamViscBlob / blobTransGam and nodeTransDiff/RotDiff are NOT
+			// updated here — they are static finals set at class load. Viscous-blob runs
+			// and protein-node drag would need a fuller recalculation on aeta change.
+			if ("aeta".equals(change.param.label)) {
+				for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+					FilSegment.theFilSegments[i].calculateProperties();
+				}
+				if (Env.benchmarkFilament && benchMidSeg != null && benchSegs != null) {
+					double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+					double zetaPerp = benchMidSeg.bTransGam.y;
+					tauTheo = benchSegs.length * zetaPerp * Math.pow(spanM, 3)
+						/ (Env.EI * Math.pow(Math.PI, 4));
+				}
 			}
 			LiveFrameServer.dispatchParamAck(change.param.label, oldValue, change.newValue);
 		}

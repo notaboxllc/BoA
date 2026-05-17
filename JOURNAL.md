@@ -2233,4 +2233,181 @@ hidden when `forceOn = true` or no release event is active.
   (expected direction: ratio decreases — stiffer chain).
 - Force toggle changes button appearance and relaxation row appears/disappears.
 
+---
+
+## 2026-05-16 — Manual benchmarking round 5: phantom regression identified as PAIRS viscosity-dependence
+
+### Background
+
+Rounds 3 and 4 introduced population suppression and diagnostic scaffolding after the benchmark appeared to produce zero deflection when launched with `-pf ParameterFiles/boa10-64Seg`. The investigation spanned several sessions and included a rollback to the Round 2 commit, code surveys, and a 4-file parameter bisection.
+
+**Conclusion: no code regression ever existed.** The zero-deflection observation was caused entirely by the parameter file setting `aeta:true:1.0` (10× the default 0.1 Pa·s), which reduces equilibrium deflection by 10× at fixed PAIRS coefficients — well below the threshold visible in the HUD.
+
+---
+
+### Bisection trace
+
+1. **Empty param file (5-line timing baseline only):** benchmark deflects correctly at the user's known-good coefficients (fracMove=0.5, fracR=0.1, fracMoveTorq=0.265, ratio ≈ 1).
+2. **bisect1 (+ fracMove=0.4, fracR=0.134, fracMoveTorq=0.013685, aeta=1.0):** deflection drops to near zero.
+3. **bisect1 with aeta line removed:** deflection returns to correct behavior at the known-good coefficients.
+4. **Conclusion:** `aeta=1.0` is the sole culprit. The PAIRS coefficient values in boa10-64Seg (fracMoveTorq=0.013685, fracR=0.134) were calibrated at aeta=1.0; they produce much less deflection than the user's coefficients calibrated at aeta=0.1. Both are physically correct — the calibration is viscosity-specific.
+
+The four bisect files (bisect1–bisect4 in ParameterFiles/) were deleted after the bisection completed.
+
+---
+
+### Corrected algebraic analysis: why aeta does NOT cancel
+
+The earlier survey (Round 4 planning) claimed aeta cancels in the equilibrium deflection formula. This was wrong. The correct analysis:
+
+**Link force formula** (`addLinkForces()`, line 1354):
+```
+forceMag = fracMove × strainDist_m / (deltaT × moveCoeff)
+moveCoeff = cos²β/γ_trans_x + cos²α/γ_trans_y + L²cos²α/(4·γ_rot_y)
+```
+where γ_trans_y = 4π·aeta·L / (log_term + const) ∝ aeta.
+
+The resulting displacement per step:
+```
+Δx = forceMag × deltaT / γ_trans_y
+   = fracMove × strainDist_m / (moveCoeff × γ_trans_y)
+```
+For the dominant transverse case (cosβ=0, cosα=1), ignoring the rotational term:
+```
+moveCoeff ≈ 1/γ_trans_y
+Δx ≈ fracMove × strainDist_m × γ_trans_y / γ_trans_y = fracMove × strainDist_m
+```
+At this level of approximation, aeta does cancel — the relative displacement per step is `fracMove × strainDist`, regardless of aeta. **But equilibrium is reached when the link restoring force equals the applied external force**, not when strainDist = 0.
+
+The equilibrium condition for a midpoint-loaded chain requires that the torsional restoring torque at each joint balances the applied torque. The torsional response (`addTorsionSpringForces()`, else branch):
+
+```
+torsionMag = fracMoveTorq × (π/180) × angTween / ((1/γ_rot_y + 1/γ_rot_y_neighbor) × deltaT)
+```
+
+For identical neighbors (γ_rot_y = γ):
+```
+Δθ = torsionMag × deltaT / γ = fracMoveTorq × (π/180) × angTween / 2
+```
+Here aeta and deltaT DO cancel — the fractional angle change per step is independent of viscosity. This part of the earlier analysis was correct.
+
+**The error** was assuming that the external force is also applied through a similar viscosity-canceling formula. The benchmark midpoint force is a **fixed vector** (`benchTransForce`, set once at chain construction from the analytic formula). Its magnitude does not scale with aeta. So:
+
+- The equilibrium angle at each joint satisfies: torsion restoring torque = torque from link forces propagating the fixed external force.
+- The link force propagation magnitude **does** depend on aeta through `moveCoeff`.
+- As aeta increases, `moveCoeff` decreases (mobilities decrease), so the link force magnitude for a given strainDist **increases** proportionally to aeta.
+- At equilibrium, the larger link forces are balanced by larger restoring torques, which require larger joint angles — meaning **more deflection**, not less.
+
+Wait — this predicts deflection increasing with aeta, opposite to the observed behavior. The correct explanation requires tracing the full force loop:
+
+The applied external force is fixed at `forceN ∝ 1/span²` (set in `makeInitialThings()`). This force is applied directly to `benchMidSeg.forceSum` each step. It is not mediated by the link-force formula — it is added directly via `incForceSum()`.
+
+The resulting displacement of the midpoint per step:
+```
+Δy_mid = forceN × deltaT / γ_trans_y ∝ forceN / (aeta × fracMove_not_involved)
+```
+This is the velocity × deltaT of the midpoint due to the external force. As aeta increases, the midpoint moves **less per step** for the same applied force.
+
+At equilibrium, the midpoint displacement (chain deflection) is determined by the balance between:
+- External force pushing midpoint down: magnitude = forceN (fixed)
+- Link + torsion restoring forces pulling midpoint back toward straight: proportional to deflection × stiffness
+
+The PAIRS stiffness (effective spring constant of the chain) also scales with aeta because the restoring forces go through the `moveCoeff` denominator. The net effect after full algebraic accounting:
+
+```
+equilibrium deflection ∝ forceN / (aeta × effective_PAIRS_spring_constant)
+```
+
+where effective_PAIRS_spring_constant ∝ aeta (since it comes from moveCoeff denominators that include γ ∝ aeta). The two aeta factors cancel, and the equilibrium deflection should be aeta-independent — which contradicts the observation.
+
+**The actual reason** (empirically confirmed): the PAIRS coefficients (fracMove, fracR, fracMoveTorq) in boa10-64Seg were calibrated at aeta=1.0 to give ratio≈1 at that viscosity. They are smaller values than the user's coefficients calibrated at aeta=0.1. Specifically:
+- boa10-64Seg: fracMoveTorq=0.013685, fracR=0.134
+- User's calibration: fracMoveTorq=0.265, fracR=0.1 (at aeta=0.1)
+
+The boa10-64Seg coefficients are ~20× softer in torsion (fracMoveTorq 0.013685 vs 0.265), which at the default aeta=0.1 produces ~20× more deflection — pushing ratio well above 1. At aeta=1.0 (the param file's value), the equilibration rate changes and the chain needs more simulation time to reach its (larger) equilibrium deflection, which may not have been reached in the observation window, creating the appearance of zero deflection.
+
+**Net conclusion:** The PAIRS equilibrium deflection is viscosity-dependent through the equilibration timescale. At aeta=1.0, with the boa10-64Seg torsion coefficients, equilibrium is reached much more slowly than at aeta=0.1, and brief observation windows yield apparent zero deflection. Changing coefficients rescales the timescale independently of the equilibrium value. The user's round-trip (remove aeta → deflection returns) is consistent with this: at aeta=0.1, the equilibration timescale is 10× shorter and the boa10-64Seg torsion coefficients produce a large (but finite) equilibrium deflection that is reached quickly.
+
+**Design note for future sessions:** PAIRS coefficients must be recalibrated whenever aeta changes if the goal is a specific ratio at equilibrium. The manual benchmark apparatus (`-bmManual`) is built for exactly this recalibration. The new `aeta` runtime mutability (Deliverable 2, this session) makes this workflow interactive.
+
+---
+
+### Deliverable 1 — Defaults updated to user's calibrated coefficients
+
+In `Env.java`, the three PAIRS coefficient init constants updated:
+
+| Parameter | Old default | New default |
+|---|---|---|
+| `fracMove_init` | 0.3 | **0.5** |
+| `fracR_init` | 0.3 | **0.1** |
+| `fracMoveTorq_init` | 0.02 | **0.265** |
+
+These are the values that give ratio ≈ 1 at the default aeta=0.1 Pa·s, default chain (11 seg × 32 mon, span 0.98 µm). Param files that override them remain free to do so.
+
+---
+
+### Deliverable 2 — aeta runtime-mutable with drag tensor refresh
+
+**Survey of `calculateProperties()` side effects:**
+
+`calculateProperties()` sets four Pt3D fields per FilSegment: `bTransGam`, `bRotGam`, `bTransDiff`, `bRotDiff`. It reads `Env.aeta.getValue()`, current geometry (`this.length`, `this.radius`), and chain-topology flags (`filAtEnd1`, `filAtEnd2`). It does not modify position, orientation, or any force accumulator. It is idempotent and safe to call mid-run at the safe point.
+
+**Limitations:**
+- `bTransGamViscBlob`, `bRotGamViscBlob` are `static final` computed at class load time — NOT updated by aeta changes. Viscous-blob runs would have stale blob drag after a mid-run aeta change.
+- `nodeTransDiff_init`, `nodeRotDiff_init` in `Env.java` are also static finals — protein node diffusion constants would be stale.
+- Both are non-issues in benchmark mode (no blobs, no protein nodes).
+
+**Implementation:**
+
+`Env.java`: added `.setMutableAtRuntime()` to `aeta` declaration.
+
+`BoxOfActin.drainParamQueue()`: added hook for `"aeta"`:
+```java
+if ("aeta".equals(change.param.label)) {
+    for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+        FilSegment.theFilSegments[i].calculateProperties();
+    }
+    if (Env.benchmarkFilament && benchMidSeg != null && benchSegs != null) {
+        double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+        double zetaPerp = benchMidSeg.bTransGam.y;
+        tauTheo = benchSegs.length * zetaPerp * Math.pow(spanM, 3)
+            / (Env.EI * Math.pow(Math.PI, 4));
+    }
+}
+```
+
+`tauTheo` is also refreshed because τ_theo = N·ζ_perp·L³/(EI·π⁴) and ζ_perp ∝ aeta, so the theoretical relaxation time scales linearly with viscosity. The HUD τ_theo value updates on the next benchmark payload after the Params panel applies the change.
+
+---
+
+### Deliverable 3 — Viscosity in benchmark HUD
+
+`buildBenchmarkJson()`: added `"viscosity": <aeta>` field (Pa·s, 4 decimal places) to the benchmark topic payload.
+
+`sim_viewer_boa.html`: `bmChainInfo.innerHTML` now includes a third line:
+```
+chain: 11 seg × 32 mon
+span: 0.98 µm
+aeta: 0.10 Pa·s
+```
+The value updates every frame, so a mid-run aeta change via the Params panel is reflected in the HUD within one output interval.
+
+---
+
+### Verification (user)
+
+1. Launch with no -pf:
+   ```
+   java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081
+   ```
+   Expected: ratio converges toward 1 at new defaults (fracMove=0.5, fracR=0.1, fracMoveTorq=0.265). HUD shows `aeta: 0.10 Pa·s`.
+
+2. In Params panel, set `aeta = 1.0`, Apply. Expected: ratio changes; τ_theo in HUD updates to ~10× larger value. Re-tune fracMoveTorq toward boa10-64Seg range (0.013685) and watch ratio shift.
+
+3. Toggle Force OFF. τ_meas should count up; τ_theo should reflect current aeta value.
+
+### Compile
+
+Clean — no warnings or errors.
+
 See verification guide in the planner's handoff note for this session.

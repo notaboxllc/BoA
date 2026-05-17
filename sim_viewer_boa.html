@@ -1391,7 +1391,8 @@ if (LIVE_MODE) {
       bmChainInfo.className = 'bm-chain';
       bmChainInfo.innerHTML =
         `chain: ${bm.chainSegments} seg × ${bm.monomersPerSegment} mon<br>` +
-        `span: ${bm.chainSpanMicrons !== undefined ? bm.chainSpanMicrons.toFixed(2) : '—'} µm`;
+        `span: ${bm.chainSpanMicrons !== undefined ? bm.chainSpanMicrons.toFixed(2) : '—'} µm<br>` +
+        `aeta: ${bm.viscosity !== undefined ? bm.viscosity.toFixed(2) : '—'} Pa·s`;
     }
 
     // Main rows: deflection in nm (protocol carries µm)
