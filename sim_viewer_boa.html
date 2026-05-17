@@ -248,7 +248,7 @@
     /* ── param panel (C4) ─────────────────────────────────────────────────── */
     #paramPanel {
       position: absolute;
-      top: 44px;
+      top: 66px;
       left: 280px;
       background: rgba(0,0,0,0.87);
       border: 1px solid #444;
@@ -360,7 +360,7 @@
     /* ── benchmark HUD (Increment 1) ──────────────────────────────────────── */
     #benchmarkHud {
       position: absolute;
-      top: 44px;
+      top: 66px;
       right: 280px;
       background: rgba(0,0,0,0.70);
       border: 1px solid #555;
@@ -583,59 +583,94 @@ const _coneGeo = new THREE.ConeGeometry(0.18, 0.38, 16);
 const _coneMat = new THREE.MeshPhongMaterial({ color: 0x7799bb });
 let benchSupportMeshes = []; // up to 2 THREE.Mesh objects, created lazily
 
-// ForceArrow: a white THREE.ArrowHelper + F label sprite.
-// update() is called every frame; setToggleVisible() is called from the Display checkbox.
+// ForceArrow: push-convention arrow (cylinder shaft + cone head, both Mesh so shaft has real thickness).
+// "Push" means the cone apex (tip) is at the force application point; the shaft trails
+// back in −dir. The pN label sits beyond the tail end.
+// update() called each benchmark frame; setToggleVisible() called by the Display checkbox.
 class ForceArrow {
   constructor(scene) {
     this._scene = scene;
-    this._helper = null;
-    this._sprite = null;
+    const mat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+    this._shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12, 1), mat);
+    this._head  = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 12, 1), mat);
+    this._shaft.frustumCulled = false;
+    this._head.frustumCulled  = false;
+    this._scene.add(this._shaft);
+    this._scene.add(this._head);
+    this._sprite    = null;
+    this._lastLabel = null;
     this._toggleVisible = true;
     this._dataVisible   = false;
+    // Proportions (µm): shaft + head = totalLen; head is ~21% of total.
+    this._totalLen = 0.70;
+    this._headH    = 0.15;
+    this._headR    = 0.060;
+    this._shaftR   = 0.024;
   }
   _makeLabel(text) {
     const cv = document.createElement('canvas');
-    cv.width = 64; cv.height = 64;
+    cv.width = 128; cv.height = 48;
     const ctx = cv.getContext('2d');
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 44px monospace';
+    ctx.font = 'bold 30px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 32, 32);
+    ctx.fillText(text, 64, 24);
     return new THREE.CanvasTexture(cv);
   }
   update(point, direction, magnitudeN, label, dataVisible) {
     this._dataVisible = dataVisible;
-    const origin = new THREE.Vector3(point.x, point.y, point.z);
+    const shouldShow = this._toggleVisible && this._dataVisible;
+
+    const appPt = new THREE.Vector3(point.x, point.y, point.z);
     const dir = new THREE.Vector3(direction.x, direction.y, direction.z);
     if (dir.lengthSq() > 1e-20) dir.normalize();
-    const visLen = 0.60, headLen = 0.18, headWidth = 0.12;
-    const shouldShow = this._toggleVisible && this._dataVisible;
-    if (!this._helper) {
-      this._helper = new THREE.ArrowHelper(dir, origin, visLen, 0xffffff, headLen, headWidth);
-      this._helper.frustumCulled = false;
-      this._scene.add(this._helper);
-    } else {
-      this._helper.position.copy(origin);
-      this._helper.setDirection(dir);
-      this._helper.setLength(visLen, headLen, headWidth);
-    }
-    this._helper.visible = shouldShow;
+
+    // Push convention: tip (cone apex) at appPt; shaft trails back in −dir.
+    const shaftLen = this._totalLen - this._headH;
+    const tailPt   = appPt.clone().addScaledVector(dir, -this._totalLen);
+    // Quaternion aligning the default +Y axis → dir (used by both shaft and head).
+    const quat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), dir);
+
+    // Shaft: center at midpoint between tail and cone base.
+    this._shaft.position.copy(tailPt).addScaledVector(dir, shaftLen * 0.5);
+    this._shaft.quaternion.copy(quat);
+    this._shaft.scale.set(this._shaftR, shaftLen, this._shaftR);
+    this._shaft.visible = shouldShow;
+
+    // Head: ConeGeometry apex at +Y → after rotation apex points in dir at appPt.
+    // Center is at appPt − dir*(headH/2).
+    this._head.position.copy(appPt).addScaledVector(dir, -this._headH * 0.5);
+    this._head.quaternion.copy(quat);
+    this._head.scale.set(this._headR, this._headH, this._headR);
+    this._head.visible = shouldShow;
+
+    // Label: force in pN, placed just beyond the tail in −dir.
+    const labelText = magnitudeN > 0
+      ? (magnitudeN * 1e12).toFixed(2) + ' pN'
+      : (label || 'F');
     if (!this._sprite) {
-      const mat = new THREE.SpriteMaterial({ map: this._makeLabel(label || 'F'), depthTest: false, transparent: true });
-      this._sprite = new THREE.Sprite(mat);
-      this._sprite.scale.set(0.30, 0.30, 1);
+      const smat = new THREE.SpriteMaterial({ map: this._makeLabel(labelText), depthTest: false, transparent: true });
+      this._sprite = new THREE.Sprite(smat);
+      this._sprite.scale.set(0.60, 0.22, 1);
       this._sprite.frustumCulled = false;
       this._scene.add(this._sprite);
+      this._lastLabel = labelText;
+    } else if (labelText !== this._lastLabel) {
+      this._sprite.material.map.dispose();
+      this._sprite.material.map = this._makeLabel(labelText);
+      this._sprite.material.needsUpdate = true;
+      this._lastLabel = labelText;
     }
-    const tip = origin.clone().addScaledVector(dir, visLen + 0.14);
-    this._sprite.position.copy(tip);
+    this._sprite.position.copy(tailPt).addScaledVector(dir, -0.14);
     this._sprite.visible = shouldShow;
   }
   setToggleVisible(v) {
     this._toggleVisible = v;
     const shouldShow = v && this._dataVisible;
-    if (this._helper) this._helper.visible = shouldShow;
+    this._shaft.visible = shouldShow;
+    this._head.visible  = shouldShow;
     if (this._sprite) this._sprite.visible = shouldShow;
   }
 }
@@ -1385,9 +1420,12 @@ if (LIVE_MODE) {
   btnParams.addEventListener('click', () => {
     const open = paramPanel.classList.toggle('open');
     btnParams.textContent = open ? 'Params ▼' : 'Params ▶';
-    // refresh on open
-    if (open && ws && ws.readyState === WebSocket.OPEN)
-      ws.send(JSON.stringify({ action: 'queryParams' }));
+    if (open) {
+      // Align panel left edge with button left edge.
+      paramPanel.style.left = btnParams.getBoundingClientRect().left + 'px';
+      if (ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ action: 'queryParams' }));
+    }
   });
 
   // Periodic refresh of param values (~5s) while panel is open

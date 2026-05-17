@@ -4,6 +4,70 @@ Last updated: 2026-05-17
 
 ---
 
+## 2026-05-17 — Viewer UI polish round 2
+
+### 1. Panel vertical position
+
+Both `#paramPanel` (`top: 44px`) and `#benchmarkHud` (`top: 44px`) were clipping the orbit-controls help line (`#navHint`, also at `top: 44px`, 11px monospace). Lowered both to `top: 66px`, giving ~7 px clearance below the navHint's text baseline.
+
+### 2. Mutable Parameters panel alignment with button
+
+The Params panel left edge now dynamically aligns with the left edge of the `Params ▶` button that opens it. Added one line to the `btnParams` click handler:
+
+```javascript
+paramPanel.style.left = btnParams.getBoundingClientRect().left + 'px';
+```
+
+The CSS fallback (`left: 280px`) stays for any edge case where the panel opens before JS sets the inline style, but in practice the click always fires first. The exact button position varies with screen width and status-text length, so JS is the right tool here rather than a hardcoded pixel value.
+
+### 3. Force arrow: push convention + pN label
+
+`ForceArrow` rewritten. Two changes to the rendering model:
+
+**Push convention** (tip at application point, shaft trailing upward):
+- `THREE.ArrowHelper` replaced with a cylinder (`_shaft`) + cone (`_head`) pair, both `THREE.Mesh` with white `MeshPhongMaterial`.
+- The cone apex (head tip) is positioned at the force application point (midspan centroid). The shaft trails back along `−dir` (upward for a downward force).
+- `THREE.ConeGeometry` apex is at `+Y`; the quaternion `setFromUnitVectors(Y, dir)` aligns it correctly so the apex lands exactly at the application point.
+
+**Label**: bare `F` replaced by force magnitude in piconewtons. The JSON `magnitude` field carries the value in SI Newtons (from `benchTransForce` magnitude in the sim); the viewer converts: `(magnitudeN * 1e12).toFixed(2) + ' pN'`. Conversion done viewer-side so the JSON schema stays in SI units. Label is placed 0.14 µm beyond the tail end (away from the beam). Label texture is a 128×48 canvas; label updates when the text changes (old texture disposed, new CanvasTexture assigned).
+
+**Units discovery:** `benchTransForce` components are in Newtons (computed as `48 × EI × frac / span²`, where EI ≈ 6.2×10⁻²⁶ N·m², frac ≈ 0.01, span ≈ 1.93×10⁻⁶ m → F ≈ 8×10⁻¹⁴ N ≈ 0.08 pN). Conversion factor ×10¹² (N → pN) is correct.
+
+### 4. Arrow proportions
+
+Replacing `ArrowHelper` with `Mesh` objects also fixed the proportion issue (WebGL 1.0 `lineWidth` is always 1 px regardless of the requested value, so `ArrowHelper`'s shaft was always one-pixel thin regardless of settings). New proportions:
+
+| Part | Property | Value (µm) |
+|------|----------|------------|
+| Total length | shaft + head | 0.70 |
+| Shaft radius | cylinder | 0.024 |
+| Head height | cone | 0.15 |
+| Head base radius | cone | 0.060 |
+
+Head-to-shaft ratio: 2.5× (industry standard for well-proportioned arrows). Head is ~21% of total length.
+
+### Files changed
+
+- `sim_viewer_boa.html` only — no Java changes this round.
+
+### Compile
+
+No Java changes; existing clean compile unchanged.
+
+### Verification (user)
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg
+```
+
+Expected:
+- Orbit-controls help line ("Drag: rotate | Shift+drag: pan…") fully visible above both panels.
+- Clicking `Params ▶` opens the panel with its left edge aligned under the button.
+- Force arrow: thick white shaft trails upward from midspan; cone tip touches midspan; label above the tail reads e.g. `0.08 pN` (or current value).
+- Arrow proportions look like a proper mechanical arrow, not a thin line with a large triangle.
+
+---
+
 ## 2026-05-17 — Viewer UI refinements: precision, layout, force-arrow utility
 
 ### Summary
