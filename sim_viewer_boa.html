@@ -249,7 +249,7 @@
     #paramPanel {
       position: absolute;
       top: 44px;
-      left: 12px;
+      left: 280px;
       background: rgba(0,0,0,0.87);
       border: 1px solid #444;
       border-radius: 4px;
@@ -360,8 +360,8 @@
     /* ── benchmark HUD (Increment 1) ──────────────────────────────────────── */
     #benchmarkHud {
       position: absolute;
-      top: 78px;
-      right: 12px;
+      top: 44px;
+      right: 280px;
       background: rgba(0,0,0,0.70);
       border: 1px solid #555;
       border-radius: 4px;
@@ -448,7 +448,9 @@
   <label><span class="pLabel">Motor head</span>      <input id="sMotor"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMotor">1.00</span></label>
   <label><span class="pLabel">Lever arm</span>       <input id="sLever"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vLever">1.00</span></label>
   <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
-  <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"   type="checkbox"></label>
+  <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"     type="checkbox"></label>
+  <label><span class="pLabel">Supports</span>        <input id="chkSupports" type="checkbox" checked></label>
+  <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
 </div>
 
 <div id="inspectPanel">
@@ -571,6 +573,73 @@ const axisLineMats = [
 ];
 let axisLines = [null, null, null]; // THREE.LineSegments, one per axis color
 let showAxes = false;               // toggled by #chkAxes; enabled on first benchmark frame
+
+// ── benchmark scene overlays ──────────────────────────────────────────────────
+let showSupports  = true;  // toggled by #chkSupports
+let showForceArrow = true; // toggled by #chkArrow
+
+// Conical supports at pinned endpoints: apex-up triangles (mechanics-textbook style).
+const _coneGeo = new THREE.ConeGeometry(0.18, 0.38, 16);
+const _coneMat = new THREE.MeshPhongMaterial({ color: 0x7799bb });
+let benchSupportMeshes = []; // up to 2 THREE.Mesh objects, created lazily
+
+// ForceArrow: a white THREE.ArrowHelper + F label sprite.
+// update() is called every frame; setToggleVisible() is called from the Display checkbox.
+class ForceArrow {
+  constructor(scene) {
+    this._scene = scene;
+    this._helper = null;
+    this._sprite = null;
+    this._toggleVisible = true;
+    this._dataVisible   = false;
+  }
+  _makeLabel(text) {
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 44px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 32, 32);
+    return new THREE.CanvasTexture(cv);
+  }
+  update(point, direction, magnitudeN, label, dataVisible) {
+    this._dataVisible = dataVisible;
+    const origin = new THREE.Vector3(point.x, point.y, point.z);
+    const dir = new THREE.Vector3(direction.x, direction.y, direction.z);
+    if (dir.lengthSq() > 1e-20) dir.normalize();
+    const visLen = 0.60, headLen = 0.18, headWidth = 0.12;
+    const shouldShow = this._toggleVisible && this._dataVisible;
+    if (!this._helper) {
+      this._helper = new THREE.ArrowHelper(dir, origin, visLen, 0xffffff, headLen, headWidth);
+      this._helper.frustumCulled = false;
+      this._scene.add(this._helper);
+    } else {
+      this._helper.position.copy(origin);
+      this._helper.setDirection(dir);
+      this._helper.setLength(visLen, headLen, headWidth);
+    }
+    this._helper.visible = shouldShow;
+    if (!this._sprite) {
+      const mat = new THREE.SpriteMaterial({ map: this._makeLabel(label || 'F'), depthTest: false, transparent: true });
+      this._sprite = new THREE.Sprite(mat);
+      this._sprite.scale.set(0.30, 0.30, 1);
+      this._sprite.frustumCulled = false;
+      this._scene.add(this._sprite);
+    }
+    const tip = origin.clone().addScaledVector(dir, visLen + 0.14);
+    this._sprite.position.copy(tip);
+    this._sprite.visible = shouldShow;
+  }
+  setToggleVisible(v) {
+    this._toggleVisible = v;
+    const shouldShow = v && this._dataVisible;
+    if (this._helper) this._helper.visible = shouldShow;
+    if (this._sprite) this._sprite.visible = shouldShow;
+  }
+}
+let benchForceArrow = null; // ForceArrow instance, created lazily on first benchmark frame
 
 // ── identity maps — rebuilt each frame from JSON "id" fields ──────────────────
 // Forward (id → slot): lets future code find the render slot for a given stable ID.
@@ -773,6 +842,7 @@ function applyFrameData(data) {
 
   updateMyosinData(data.myosins, data.minifilaments);
   updateAxisLines(data.segments);
+  updateBenchmarkScene(data);
 
   hud.innerHTML =
     `frame ${data.frame}<br>` +
@@ -820,6 +890,41 @@ function updateAxisLines(segments) {
       axisLines[a].frustumCulled = false;
       scene.add(axisLines[a]);
     }
+  }
+}
+
+function updateBenchmarkScene(data) {
+  // Conical supports at pinned endpoints.
+  if (data.pinnedEndpoints) {
+    while (benchSupportMeshes.length < data.pinnedEndpoints.length) {
+      const cone = new THREE.Mesh(_coneGeo, _coneMat);
+      cone.frustumCulled = false;
+      scene.add(cone);
+      benchSupportMeshes.push(cone);
+    }
+    for (let i = 0; i < data.pinnedEndpoints.length; i++) {
+      const pt = data.pinnedEndpoints[i];
+      // ConeGeometry: apex at +Y/2, base at -Y/2 (height 0.38).
+      // Shift centroid down 0.19 so apex touches the pinned endpoint.
+      benchSupportMeshes[i].position.set(pt.x, pt.y - 0.19, pt.z);
+      benchSupportMeshes[i].visible = showSupports;
+    }
+    for (let i = data.pinnedEndpoints.length; i < benchSupportMeshes.length; i++) {
+      benchSupportMeshes[i].visible = false;
+    }
+  } else {
+    benchSupportMeshes.forEach(c => { c.visible = false; });
+  }
+  // Force arrows.
+  if (data.forceArrows && data.forceArrows.length > 0) {
+    if (!benchForceArrow) {
+      benchForceArrow = new ForceArrow(scene);
+      benchForceArrow.setToggleVisible(showForceArrow);
+    }
+    const fa = data.forceArrows[0];
+    benchForceArrow.update(fa.point, fa.direction, fa.magnitude, fa.label, fa.visible);
+  } else if (benchForceArrow) {
+    benchForceArrow.update({x:0,y:0,z:0}, {x:0,y:-1,z:0}, 0, 'F', false);
   }
 }
 
@@ -1073,6 +1178,15 @@ bindScaleSlider('sMotor',   'vMotor',   v => { motorScale   = v; });
 bindScaleSlider('sLever',   'vLever',   v => { leverScale   = v; });
 bindScaleSlider('sRod',     'vRod',     v => { rodScale     = v; });
 
+document.getElementById('chkSupports').addEventListener('change', e => {
+  showSupports = e.target.checked;
+  benchSupportMeshes.forEach(c => { c.visible = showSupports; });
+});
+document.getElementById('chkArrow').addEventListener('change', e => {
+  showForceArrow = e.target.checked;
+  if (benchForceArrow) benchForceArrow.setToggleVisible(showForceArrow);
+});
+
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { inspectPanel.classList.remove('open'); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
@@ -1290,7 +1404,8 @@ if (LIVE_MODE) {
     });
 
     paramRows.innerHTML = '';
-    const mutableParams = params.filter(p => p.mutable);
+    // Filter out benchmarkForceOn — its UI control is the Force: ON/OFF button in the benchmark HUD.
+    const mutableParams = params.filter(p => p.mutable && p.name !== 'benchmarkForceOn');
     if (mutableParams.length === 0) {
       paramRows.innerHTML = '<div style="color:#555;padding:4px 0">No mutable parameters</div>';
       return;
@@ -1395,10 +1510,10 @@ if (LIVE_MODE) {
         `aeta: ${bm.viscosity !== undefined ? bm.viscosity.toFixed(2) : '—'} Pa·s`;
     }
 
-    // Main rows: deflection in nm (protocol carries µm)
+    // Main rows: deflection in nm (protocol carries µm); obs/exp to 0.01 nm resolution
     bmHudRows.innerHTML =
-      `obs: ${(bm.observedDeflection * 1000).toFixed(1)} nm<br>` +
-      `exp: ${(bm.expectedDeflection * 1000).toFixed(1)} nm<br>` +
+      `obs: ${(bm.observedDeflection * 1000).toFixed(3)} nm<br>` +
+      `exp: ${(bm.expectedDeflection * 1000).toFixed(3)} nm<br>` +
       `ratio: ${bm.ratio.toFixed(3)}<br>` +
       `step: ${bm.stepCount}`;
 

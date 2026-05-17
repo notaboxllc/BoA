@@ -255,13 +255,15 @@ public class Env {
 	// F1 static-deflection benchmark — gated by Env.benchmarkFilament (set by -bm flag)
 	static boolean benchmarkFilament = false;
 	static int benchmarkNSegs = 11;       // odd → midpoint segment is exactly at midspan
-	static double benchmarkForceFrac = 0.01; // target deflection as fraction of span
+	static final Parameter benchmarkForceFrac = new Parameter("benchmarkForceFrac",
+			" Benchmark force fraction of span", 0.01, "").setMutableAtRuntime();
 	static int benchmarkSettleSteps = 5000;  // steps before first measurement
 	static int benchmarkMonomerCt = 0;       // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
 	static boolean benchmarkDiag = false;    // -bmDiag: fixed-param equilibrium diagnostic, no search
 	static boolean benchmarkManual = false;  // -bmManual: no search loop; user tunes live from viewer
 
-	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work
+	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work.
+	// Not shown in the Params panel UI (filtered client-side); the HUD Force button is the only control.
 	static final Parameter benchmarkForceOn = new Parameter("benchmarkForceOn",
 			" Benchmark: apply midpoint force", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
 	

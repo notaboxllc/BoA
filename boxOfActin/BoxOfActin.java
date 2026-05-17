@@ -823,6 +823,15 @@ public class BoxOfActin {
 						/ (Env.EI * Math.pow(Math.PI, 4));
 				}
 			}
+			// Force-frac refresh: recompute transverse force and analytic deflection immediately.
+			if ("benchmarkForceFrac".equals(change.param.label) && Env.benchmarkFilament && benchFirstSeg != null) {
+				double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+				if (spanM > 1e-15) {
+					double newForceN = 48.0 * Env.EI * change.newValue / (spanM * spanM);
+					benchTransForce.setVals(0, -newForceN, 0);
+					benchAnalyticDefl = change.newValue * spanM * 1e6;
+				}
+			}
 			LiveFrameServer.dispatchParamAck(change.param.label, oldValue, change.newValue);
 		}
 	}
@@ -966,14 +975,14 @@ public class BoxOfActin {
 			benchAnchor1.setVals(segs[0].end1.x, segs[0].end1.y, segs[0].end1.z);
 			benchAnchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
 			double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
-			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac / (spanM * spanM);
-			benchTransForce.setVals(0, forceN, 0); // Y: in-plane, visible from default camera (was Z)
-			benchAnalyticDefl = Env.benchmarkForceFrac * spanM * 1e6; // µm
+			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac.getValue() / (spanM * spanM);
+			benchTransForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
+			benchAnalyticDefl = Env.benchmarkForceFrac.getValue() * spanM * 1e6; // µm
 			System.out.printf("[BENCH] %d-seg × %d-mon/seg chain, span=%.4f µm, F=%.3e N, analytic δ=%.4f µm%n",
 				n, benchMonCt, spanM * 1e6, forceN, benchAnalyticDefl);
 			System.err.printf("[BENCH:FORCE] benchTransForce=(%.4e, %.4e, %.4e) N  EI=%.4e  frac=%.4f  spanM=%.4e%n",
 				benchTransForce.x, benchTransForce.y, benchTransForce.z,
-				Env.EI, Env.benchmarkForceFrac, spanM);
+				Env.EI, Env.benchmarkForceFrac.getValue(), spanM);
 			// Step 2: store segments and initial straight-line positions for per-evaluation reset
 			benchSegs = segs;
 			benchInitCoords = new Pt3D[n];

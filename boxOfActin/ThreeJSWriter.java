@@ -120,7 +120,39 @@ public class ThreeJSWriter {
                     MyoMiniFilament.radius));
             firstMiniFil = false;
         }
-        sb.append("]}");
+        sb.append("]");
+
+        // Benchmark overlay: pinned endpoint anchors and force arrows (absent in non-benchmark frames).
+        if (Env.benchmarkFilament) {
+            sb.append(",\"pinnedEndpoints\":");
+            if (BoxOfActin.benchFirstSeg != null && BoxOfActin.benchLastSeg != null) {
+                sb.append(String.format("[{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}]",
+                    BoxOfActin.benchAnchor1.x, BoxOfActin.benchAnchor1.y, BoxOfActin.benchAnchor1.z,
+                    BoxOfActin.benchAnchor2.x, BoxOfActin.benchAnchor2.y, BoxOfActin.benchAnchor2.z));
+            } else {
+                sb.append("null");
+            }
+            sb.append(",\"forceArrows\":[");
+            if (BoxOfActin.benchMidSeg != null) {
+                boolean forceOn = Env.benchmarkForceOn.getValue() != 0;
+                double ax = BoxOfActin.benchMidSeg.coord.x;
+                double ay = BoxOfActin.benchMidSeg.coord.y;
+                double az = BoxOfActin.benchMidSeg.coord.z;
+                double fx = BoxOfActin.benchTransForce.x;
+                double fy = BoxOfActin.benchTransForce.y;
+                double fz = BoxOfActin.benchTransForce.z;
+                double fmag = Math.sqrt(fx*fx + fy*fy + fz*fz);
+                double dnx = fmag > 1e-30 ? fx/fmag : 0.0;
+                double dny = fmag > 1e-30 ? fy/fmag : -1.0;
+                double dnz = fmag > 1e-30 ? fz/fmag : 0.0;
+                sb.append(String.format(
+                    "{\"point\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},\"direction\":{\"x\":%.4g,\"y\":%.4g,\"z\":%.4g},\"magnitude\":%.5g,\"label\":\"F\",\"visible\":%b}",
+                    ax, ay, az, dnx, dny, dnz, fmag, forceOn));
+            }
+            sb.append("]");
+        }
+
+        sb.append("}");
         return sb.toString();
     }
 

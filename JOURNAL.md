@@ -4,6 +4,108 @@ Last updated: 2026-05-17
 
 ---
 
+## 2026-05-17 — Viewer UI refinements: precision, layout, force-arrow utility
+
+### Summary
+
+Five viewer + sim changes for cleaner feedback during manual benchmark tuning.
+
+### 1. Deflection readout precision (viewer)
+
+`obs` and `exp` in the benchmark HUD now display to 3 decimal places in nm (was 1), giving 0.001 nm resolution. `ratio` stays at 3 decimal places. Change in `updateBenchmarkHud()`: `.toFixed(1)` → `.toFixed(3)`.
+
+### 2. Panel layout (viewer CSS)
+
+Removed panel overlap with corner UI elements:
+- `#paramPanel`: `left: 12px` → `left: 280px`. Was directly overlapping the top-left runtime stats HUD (`frame:`, `t =`, `segments:`).
+- `#benchmarkHud`: `top: 78px, right: 12px` → `top: 44px, right: 280px`. Now aligned with paramPanel vertically (same `top: 44px`). The 280 px right-inset clears the `Display ▶` button (at `right: 12px`) and its dropdown panel (`min-width: 250px`).
+
+Both panels are now simultaneously readable alongside the corner stats. Layout is optimized for jba's ~2300 px wide window; degrades to overlap below ~900 px.
+
+### 3. Force direction flip (sim + viewer)
+
+Reversed the benchmark transverse force from `+Y` to `−Y` so filaments deflect downward in the default camera view (`camera.position.set(0, 0, 15)`). Change in `BoxOfActin.makeInitialThings()`:
+```java
+benchTransForce.setVals(0, -forceN, 0);  // was +forceN
+```
+Same sign flip applied in `drainParamQueue()` when `benchmarkForceFrac` changes at runtime. `benchAnalyticDefl` (the expected deflection magnitude) stays positive; `computeBenchmarkSnapshot()` computes `obs` as a Euclidean distance, so both remain comparable positive magnitudes.
+
+### 4. Force-magnitude mutable parameter (sim + viewer)
+
+**Discovery:** `benchmarkForceFrac` was a bare `static double` in `Env.java`, not a `Parameter`. Promoted it to:
+```java
+static final Parameter benchmarkForceFrac = new Parameter("benchmarkForceFrac",
+    " Benchmark force fraction of span", 0.01, "").setMutableAtRuntime();
+```
+All three call sites in `BoxOfActin.java` updated to `.getValue()`.
+
+In `drainParamQueue()`, a new case for `"benchmarkForceFrac"` recomputes `benchTransForce` and `benchAnalyticDefl` immediately at the safe point (same pattern as the `"aeta"` case). After Apply, the `exp` value in the HUD updates on the next benchmark topic dispatch.
+
+In the viewer, `buildParamPanel()` now filters out `benchmarkForceOn`:
+```javascript
+const mutableParams = params.filter(p => p.mutable && p.name !== 'benchmarkForceOn');
+```
+The Force: ON/OFF HUD button remains the only on/off control. `benchmarkForceFrac` appears in the Params panel and is editable.
+
+### 5. Decorative scene elements (viewer + sim)
+
+#### (a) Conical supports at pinned endpoints
+
+`ThreeJSWriter.buildFrameJson()` now emits `pinnedEndpoints` in the frame JSON when `Env.benchmarkFilament` is true and both `benchFirstSeg` and `benchLastSeg` are non-null:
+```json
+"pinnedEndpoints": [{"x":..., "y":..., "z":...}, {"x":..., "y":..., "z":...}]
+```
+`null` when endpoints are not pinned (future free-chain benchmark mode). The field is absent in non-benchmark frames.
+
+Viewer `updateBenchmarkScene(data)` (new function called from `applyFrameData`) creates up to 2 `THREE.ConeGeometry(0.18, 0.38, 16)` meshes positioned apex-up at each endpoint. ConeGeometry apex is at +Y/2, so centroid is shifted 0.19 µm below the endpoint. Blue-grey color (`0x7799bb`). Toggle via `Supports` checkbox in Display panel (default ON).
+
+#### (b) Force arrow utility
+
+New `ThreeJSWriter` addition — `forceArrows` array in frame JSON:
+```json
+"forceArrows": [{
+  "point":     {"x": ..., "y": ..., "z": ...},
+  "direction": {"x": 0, "y": -1, "z": 0},
+  "magnitude": <N>,
+  "label":     "F",
+  "visible":   true|false
+}]
+```
+Always an array (schema supports multiple arrows for future use). `visible` tracks `benchmarkForceOn`; direction is normalized `benchTransForce`. Application point is the centroid of the midpoint segment.
+
+Viewer: new `ForceArrow` class using `THREE.ArrowHelper` (white, shaft 0.60 µm, head 0.18/0.12 µm) plus a `THREE.Sprite` label (`F`) positioned 0.14 µm beyond the arrowhead. Two-layer visibility: `_toggleVisible` (Display checkbox) × `_dataVisible` (server force state). Arrow is hidden when force is off; checkbox hides it entirely regardless of force state. Toggle via `Force arrow` checkbox in Display panel (default ON).
+
+`benchForceArrow` instance created lazily on first benchmark frame. `setToggleVisible()` allows instant checkbox response without waiting for next frame.
+
+### Files changed
+
+- `boxOfActin/Env.java` — `benchmarkForceFrac` raw double → `Parameter` with `setMutableAtRuntime()`
+- `boxOfActin/BoxOfActin.java` — 3 `getValue()` call sites, force sign flip, `drainParamQueue` new case
+- `boxOfActin/ThreeJSWriter.java` — `buildFrameJson()` emits `pinnedEndpoints` + `forceArrows`
+- `sim_viewer_boa.html` — panel CSS, precision, benchmarkForceOn filter, ForceArrow class, `updateBenchmarkScene`, Display checkboxes
+
+### Compile
+
+Clean — no warnings or errors.
+
+### Verification (user)
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg
+```
+
+Expected:
+- Filament bends **downward** when Force: ON.
+- White arrow with `F` label appears at midspan, pointing down. Disappears when Force: OFF.
+- Blue-grey triangular cones at both pinned endpoints.
+- `obs` and `exp` show 3 decimal places (e.g. `9.807 nm`).
+- Params panel does not show `benchmarkForceOn`; shows `benchmarkForceFrac` instead.
+- Changing `benchmarkForceFrac` → Apply updates `exp` in the HUD.
+- `Supports` and `Force arrow` checkboxes in Display panel toggle the new scene elements.
+- Stats HUD (top-left) and Display button (top-right) remain fully visible.
+
+---
+
 ## 2026-05-17 — Manual benchmarking round 7: viscous-blob mechanism removed (was the 50-mon discontinuity)
 
 ### The bug
@@ -2599,10 +2701,16 @@ plugin).
 
 ### Validation
 
-50-mon chain at known-good coefficients (fracMove=0.4, fracR=0.6,
-fracMoveTorq=0.158, aeta=0.1):
-- Force ON: ratio = 0.995 against expected deflection of 15.1 nm
-- Force OFF: τ_meas = 0.27 s, τ_theo = 0.29 s — 7% agreement
+Validation across monomerCt range (all at aeta=0.1, force in-plane Y,
+all converging to ratio≈1 with reasonable coefficient values):
+- 32 mon: fracMove=0.5, fracR=0.1, fracMoveTorq=0.265
+- 40 mon: fracMove=0.5, fracR=0.47, fracMoveTorq=0.4
+- 49 mon: fracMove=0.5, fracR=0.5, fracMoveTorq=0.1
+- 50 mon: ratio=0.995, τ_meas=0.27s vs τ_theo=0.29s (7% agreement)
+- 64 mon: ratio=1.001, τ_meas=0.66s vs τ_theo=0.71s (7% agreement)
+
+Tuning surface is smooth across the range; no discontinuities; static
+and dynamic both match analytic predictions.
 
 Independent calibration of static (equilibrium deflection) and dynamic
 (relaxation time) behavior both match analytic predictions at the same
