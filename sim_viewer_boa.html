@@ -623,7 +623,7 @@ class ForceArrow {
   _computeLabel(magnitudeN) {
     if (!this._showLabel) return null;
     if (this._labelOverride !== null) return this._labelOverride;
-    return magnitudeN > 0 ? (magnitudeN * 1e12).toFixed(2) + ' pN' : 'F';
+    return magnitudeN > 0 ? (magnitudeN * 1e12).toExponential(2) + ' pN' : 'F';
   }
   _makeLabel(text) {
     const cv = document.createElement('canvas');
@@ -1442,10 +1442,16 @@ if (LIVE_MODE) {
     const open = paramPanel.classList.toggle('open');
     btnParams.textContent = open ? 'Params ▼' : 'Params ▶';
     if (open) {
-      // Align panel right edge with button right edge.
+      // Align panel right edge with button right edge, but push left enough
+      // to clear the benchmark HUD when it is visible.
       const rect = btnParams.getBoundingClientRect();
-      paramPanel.style.left  = 'auto';
-      paramPanel.style.right = (window.innerWidth - rect.right) + 'px';
+      paramPanel.style.left = 'auto';
+      let rightOffset = window.innerWidth - rect.right;
+      if (benchmarkHud.classList.contains('active')) {
+        const hudClearance = window.innerWidth - benchmarkHud.getBoundingClientRect().left + 12;
+        rightOffset = Math.max(rightOffset, hudClearance);
+      }
+      paramPanel.style.right = rightOffset + 'px';
       if (ws && ws.readyState === WebSocket.OPEN)
         ws.send(JSON.stringify({ action: 'queryParams' }));
     }
@@ -1458,6 +1464,8 @@ if (LIVE_MODE) {
   }, 5000);
 
   function buildParamPanel(params) {
+    // Don't rebuild while a field is focused — the user is mid-edit.
+    if (paramRows.contains(document.activeElement)) return;
     // Keep input values that the user has typed (don't clobber pending edits)
     const pending = new Map();
     paramRows.querySelectorAll('.pp-input').forEach(inp => {

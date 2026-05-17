@@ -2869,3 +2869,22 @@ making the chamber genuinely inert (lame-duck) for benchmark mode, so
 free filaments can translate and rotate without box constraints. The
 chamber-lame-duck prompt was drafted in chat earlier; it's the natural
 Round 8.
+### Viewer polish r4: input focus guard, panel overlap, force label format (2026-05-17)
+
+**Input focus guard.** `buildParamPanel` now returns immediately if any child of
+`#paramRows` currently has focus (`paramRows.contains(document.activeElement)`).
+The panel is never rebuilt mid-edit; values displayed in the inputs are stable
+across frames while the user is typing.
+
+**Param / Benchmark overlap nudge.** The `btnParams` click handler previously
+aligned the param panel's right edge with the button's right edge regardless of
+other panels. Now, when the benchmark HUD is active, the handler also checks the
+HUD's left-edge position (`getBoundingClientRect().left`) and clamps the panel's
+`right` offset to keep its right edge at least 12 px to the left of the HUD. At
+~1500 px window width this gives a clear visible gap between the two panels while
+still aligning with the button when no benchmark is running.
+
+**Force label: scientific notation.** `ForceArrow._computeLabel` now formats the
+magnitude as `(magnitudeN * 1e12).toExponential(2) + ' pN'`, e.g. `8.23e-3 pN`
+instead of `0.01 pN`. JavaScript's `toExponential(2)` produces the canonical
+`±d.dde±d` form. The class contract and update path are unchanged.
