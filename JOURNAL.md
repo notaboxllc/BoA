@@ -2411,3 +2411,71 @@ The value updates every frame, so a mid-run aeta change via the Params panel is 
 Clean — no warnings or errors.
 
 See verification guide in the planner's handoff note for this session.
+
+---
+
+## 2026-05-16 — Manual benchmarking round 6: respect param-file segment count
+
+### Change
+
+Removed the `stdSegLength` override from `begin()` that forced 32 monomers/segment in all benchmark modes when `-bmMonomer` was not explicitly given:
+
+```java
+// REMOVED:
+// Revert to calibrated baseline: 32 monomers/segment, ignoring param-file filSegLength.
+// -bmMonomer flag (benchmarkMonomerCt > 0) still overrides when explicitly given.
+if (Env.benchmarkMonomerCt <= 0) {
+    Env.stdSegLength.setValue(32);
+}
+```
+
+The `-bmMonomer <N>` CLI flag is unaffected — it still writes `Env.benchmarkMonomerCt > 0`, which takes priority in `makeInitialThings()` via:
+```java
+benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+```
+
+### Why the override existed
+
+Round 4 introduced it as a debugging crutch. During the investigation of apparent zero deflection (later diagnosed in Round 5 as PAIRS viscosity-dependence, not a code regression), the 32-monomer chain was the only configuration with a confirmed working calibration. Forcing it in all benchmark launches was a shortcut to eliminate chain-construction differences as a variable.
+
+### Why removing it is correct
+
+The override silently contradicts the benchmark's purpose: measuring the chain defined by the user's parameter file. A user who sets `filSegLength:true:64.0` in their param file should get a 64-monomer benchmark chain, not a silent 32-monomer substitute. The override was a temporary diagnostic tool that outlived its usefulness the moment Round 5 identified the actual cause.
+
+### Other "force a known good" overrides in the benchmark block — listed only, not removed
+
+The following overrides remain in the `begin()` benchmark block. All are intentional and correct:
+
+| Override | Location | Justification |
+|---|---|---|
+| `Env.brownianFilMotionOff = true` | Line 118 | Deterministic test requires no stochastic forcing |
+| `Env.remote = true` | Line 119 | Headless; no GUI needed |
+| `Env.paused = false` | Line 120 | Benchmark runs without a WebSocket client to send Resume |
+| `Env.simOutsideBug.setActive(false)` | Line 121 | Suppresses Listeria bug and ActA protein creation |
+| `Env.fracMove.setValue(0.5)` (non-manual only) | Line 123 | `-bm` bisection holds fracMove fixed so only fracR/fracMoveTorq are searched; not applied in `-bmManual` |
+| `Env.runTime.setValue(600)` (manual/diag) | Lines 127, 130 | Sets a long simulation ceiling; -bmManual is actually terminated by Kill button, so this is a safety backstop only |
+| `Env.numChamberFixedMyos.setValue(0)` | Line 146 | Suppresses chamber-constructor myosin creation |
+| `Env.numChamberFixedMyoDimers.setValue(0)` | Line 147 | Same |
+| `Env.initialMyoMiniFils.setValue(0)` | Line 148 | Suppresses doLoop minifilament equilibration |
+| `Env.equilNodes.setValue(0)` | Line 149 | Suppresses doLoop node equilibration |
+| `Env.kRdmNuc.setActive(false)` | Line 150 | Suppresses random filament nucleation |
+| `Env.kNodeNuc.setActive(false)` | Line 151 | Suppresses node-driven nucleation |
+
+The `runTime` override for `-bmManual` is the most borderline — it overrides whatever the param file specified. The user could argue the param file's runTime should be respected. Leaving it for a future decision.
+
+### Verification (user)
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg
+```
+
+Expected:
+- HUD chain config: `chain: 11 seg × 64 mon`
+- `span: 1.93 µm` (not 0.98 µm)
+- `exp` updates to the analytic δ for the 64-monomer chain at the param file's viscosity
+
+Note: Round 5 defaults (fracMove=0.5, fracR=0.1, fracMoveTorq=0.265) were calibrated for 32 mon/seg at aeta=0.1. A 64-monomer chain at aeta=1.0 will require retuning via the Params panel.
+
+### Compile
+
+Clean — no warnings or errors.

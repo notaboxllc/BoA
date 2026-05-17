@@ -149,11 +149,6 @@ public class BoxOfActin {
 			Env.equilNodes.setValue(0);                // equilibrateNodeNumber
 			Env.kRdmNuc.setActive(false);              // spawnRdmFilaments
 			Env.kNodeNuc.setActive(false);             // spawnNodeFilaments
-			// Revert to calibrated baseline: 32 monomers/segment, ignoring param-file filSegLength.
-			// -bmMonomer flag (benchmarkMonomerCt > 0) still overrides when explicitly given.
-			if (Env.benchmarkMonomerCt <= 0) {
-				Env.stdSegLength.setValue(32);
-			}
 		}
 
 		// reset dependent parameters, etc
