@@ -463,6 +463,18 @@ public class BoxOfActin {
 					System.err.printf("[BENCH:POST] step=%d coord.y=%.6e veloc.y=%.4e%n",
 						benchStepCount, benchMidSeg.coord.y, benchMidSeg.veloc.y);
 				}
+				// 50-mon discontinuity diagnostic: one-shot at step 1000
+				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount == 1000) {
+					System.err.printf("[BENCH:DIAG1000] torqueSum=(%.4e,%.4e,%.4e) bAngVeloc=(%.4e,%.4e,%.4e)%n",
+						benchMidSeg.torqueSum.x, benchMidSeg.torqueSum.y, benchMidSeg.torqueSum.z,
+						benchMidSeg.bAngVeloc.x, benchMidSeg.bAngVeloc.y, benchMidSeg.bAngVeloc.z);
+					System.err.printf("[BENCH:DIAG1000] uVec=(%.6f,%.6f,%.6f) yVec=(%.6f,%.6f,%.6f) zVec=(%.6f,%.6f,%.6f)%n",
+						benchMidSeg.uVec.x, benchMidSeg.uVec.y, benchMidSeg.uVec.z,
+						benchMidSeg.yVec.x, benchMidSeg.yVec.y, benchMidSeg.yVec.z,
+						benchMidSeg.zVec.x, benchMidSeg.zVec.y, benchMidSeg.zVec.z);
+					System.err.printf("[BENCH:DIAG1000] bRotGam.y=%.4e monomerCt=%d length=%.4f%n",
+						benchMidSeg.bRotGam.y, benchMidSeg.monomerCt, benchMidSeg.length);
+				}
 
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
