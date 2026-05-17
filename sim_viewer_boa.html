@@ -627,14 +627,18 @@ class ForceArrow {
   }
   _makeLabel(text) {
     const cv = document.createElement('canvas');
-    cv.width = 128; cv.height = 48;
+    cv.height = 48;
     const ctx = cv.getContext('2d');
-    ctx.fillStyle = '#ffffff';
+    // Measure before committing canvas width (font must be set for measureText).
     ctx.font = 'bold 30px monospace';
+    cv.width = Math.ceil(ctx.measureText(text).width) + 24; // 12 px padding each side
+    // Canvas resize resets context state — re-apply font before drawing.
+    ctx.font = 'bold 30px monospace';
+    ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 64, 24);
-    return new THREE.CanvasTexture(cv);
+    ctx.fillText(text, cv.width / 2, 24);
+    return { texture: new THREE.CanvasTexture(cv), aspect: cv.width / cv.height };
   }
   update(point, direction, magnitudeN, dataVisible) {
     this._dataVisible = dataVisible;
@@ -670,16 +674,19 @@ class ForceArrow {
       if (this._sprite) this._sprite.visible = false;
     } else {
       if (!this._sprite) {
-        const smat = new THREE.SpriteMaterial({ map: this._makeLabel(labelText), depthTest: false, transparent: true });
+        const { texture, aspect } = this._makeLabel(labelText);
+        const smat = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
         this._sprite = new THREE.Sprite(smat);
-        this._sprite.scale.set(0.60, 0.22, 1);
+        this._sprite.scale.set(0.22 * aspect, 0.22, 1);
         this._sprite.frustumCulled = false;
         this._scene.add(this._sprite);
         this._lastLabel = labelText;
       } else if (labelText !== this._lastLabel) {
         this._sprite.material.map.dispose();
-        this._sprite.material.map = this._makeLabel(labelText);
+        const { texture, aspect } = this._makeLabel(labelText);
+        this._sprite.material.map = texture;
         this._sprite.material.needsUpdate = true;
+        this._sprite.scale.set(0.22 * aspect, 0.22, 1);
         this._lastLabel = labelText;
       }
       this._sprite.position.copy(tailPt).addScaledVector(dir, -0.14);

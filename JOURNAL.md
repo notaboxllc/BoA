@@ -2888,3 +2888,10 @@ still aligning with the button when no benchmark is running.
 magnitude as `(magnitudeN * 1e12).toExponential(2) + ' pN'`, e.g. `8.23e-3 pN`
 instead of `0.01 pN`. JavaScript's `toExponential(2)` produces the canonical
 `±d.dde±d` form. The class contract and update path are unchanged.
+
+**Force label sprite clipping fix (2026-05-17).** The `_makeLabel` canvas was
+fixed at 128 px wide and the sprite at `scale(0.60, 0.22, 1)`, which clipped
+longer sci-notation strings. `_makeLabel` now measures `ctx.measureText(text).width`
+before committing `cv.width` (= measured width + 24 px padding), and returns
+`{ texture, aspect }`. Both call sites in `update` use `scale(0.22 * aspect, 0.22, 1)` —
+height stays constant so on-screen size is unchanged; width scales with text length.
