@@ -1,0 +1,25 @@
+<BOA> bisect2: bisect1 + filament construction + spring/link params + box dims
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
+runTime:true:100.0;                     // Run Time
+fracMove:true:0.4;                      // Coeff. for PALM movement
+fracR:true:0.134;                       // Coeff. torque arm for PALM movement
+fracMoveTorq:true:0.013685;             // Coeff. for PALM torque movement
+aeta:true:1.0;                          // Viscosity in Bug
+boxXDim:true:10.0;                      // Box X-dimension
+boxYDim:true:10.0;                      // Box Y-dimension
+boxZDim:true:0.5;                       // Box Z-dimension
+filSegLength:true:64.0;                 // Std. segment length
+filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
+BTransCoeff:true:1.0;                   // Brownian Translational Coefficient
+BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient
+maxSegAngle:false:22.5;                 // Max. Angle Between Segments
+maxSegDist:false:0.0108;                // Max. Dist. Between Segment EndPts
+filLinkSpring:true:1.0E-9;              // Link Spring Between Filaments
+filLinkTorqSpring:true:1.0E-19;         // Torque Spring Between Filaments
+xLinkTransAttn:true:1.0;                // Trans. Attn. Factor per link for Cross-linked Segments
+xLinkRotAttn:true:1.0;                  // Rot. Attn. Factor per link for Cross-linked Segments
+maxFilLinkDist:true:0.02;               // Max. Stretch Distance for Filament Links
+linkDissolveRate:true:1.0;              // Spontaneous Link Dissolution Rate

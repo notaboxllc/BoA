@@ -1,4 +1,4 @@
-<BOA> A 10x10 micron field, no monomers simulated, 64-monomer length rigid filament segments
+<BOA> bisect4: full file equivalent — bisect3 + biochem rates + myosin + display flags
 deltaT:true:1.0E-4;                     // Time Step
 biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
 collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
@@ -7,26 +7,31 @@ runTime:true:100.0;                     // Run Time
 fracMove:true:0.4;                      // Coeff. for PALM movement
 fracR:true:0.134;                       // Coeff. torque arm for PALM movement
 fracMoveTorq:true:0.013685;             // Coeff. for PALM torque movement
-drawInterval:true:100.0;                // Drawing Interval
-toFileInterval:true:100.0;              // JPEG Interval
-toQKFileInterval:true:100.0;            // QK Interval
-jpegQuality:true:1.0;                   // JPEG Quality
-remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
-frameWidth:true:800.0;                  // Frame Width
-frameHeight:true:800.0;                 // Frame Height
-bugOff:true:1.0;                       // Bug Off
-simOutsideBug:false:0.0;         	// Sim Outside Bug
-initialFilaments:true:100.0;           // Initial Actin Filaments
+aeta:true:1.0;                          // Viscosity in Bug
+boxXDim:true:10.0;                      // Box X-dimension
+boxYDim:true:10.0;                      // Box Y-dimension
+boxZDim:true:0.5;                       // Box Z-dimension
+filSegLength:true:64.0;                 // Std. segment length
+filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
+BTransCoeff:true:1.0;                   // Brownian Translational Coefficient
+BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient
+maxSegAngle:false:22.5;                 // Max. Angle Between Segments
+maxSegDist:false:0.0108;                // Max. Dist. Between Segment EndPts
+filLinkSpring:true:1.0E-9;              // Link Spring Between Filaments
+filLinkTorqSpring:true:1.0E-19;         // Torque Spring Between Filaments
+xLinkTransAttn:true:1.0;                // Trans. Attn. Factor per link for Cross-linked Segments
+xLinkRotAttn:true:1.0;                  // Rot. Attn. Factor per link for Cross-linked Segments
+maxFilLinkDist:true:0.02;               // Max. Stretch Distance for Filament Links
+linkDissolveRate:true:1.0;              // Spontaneous Link Dissolution Rate
+bugOff:true:1.0;                        // Bug Off
+simOutsideBug:false:0.0;                // Sim Outside Bug
+initialFilaments:true:100.0;            // Initial Actin Filaments
 initialMyoMiniFils:true:100.0;          // Initial Myosin Minifilaments
 minFilLength:true:0.2;                  // Min. Filament Length
 maxFilLength:true:1.5;                  // Max. Filament Length
 stdDevActinDist:true:0.5;               // Std Dev Actin Distribution
-boxXDim:true:10.0;                      // Box X-dimension
-boxYDim:true:10.0;                      // Box Y-dimension
-boxZDim:true:0.5;                       // Box Z-dimension
 actinConc:false:30.0;                   // Actin Concentration
 actinConcNonHydro:true:15.0;            // Non-hydrolyzable Actin Concentration
-aeta:true:1.0;                          // Viscosity in Bug
 capConc:true:2.0;                       // Cap Concentration
 nodeZone:true:0.9;                      // Node Dist. Zone
 nodeRadius:true:0.025;                  // Node Radius
@@ -36,12 +41,6 @@ nodeTransDiff:false:1.0E-16;            // Protein Node Translation Diffusivity
 nodeRotDiff:false:0.0010;               // Protein Node Rotational Diffusivity
 actinSeed:true:3.0;                     // Monomers to seed filament
 actinOnCortex:true:0.0;                 // Actin constrained to cortex
-filSegLength:true:64.0;                 // Std. segment length
-filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
-BTransCoeff:true:1.0;                   // Brownian Translational Coefficient
-BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient
-maxSegAngle:false:22.5;                 // Max. Angle Between Segments
-maxSegDist:false:0.0108;                // Max. Dist. Between Segment EndPts
 nodeTorqSpring:true:1.0E-20;            // Node-Filament Torsional Spring
 maxNodeTetherStrainDist:false:0.0108;   // Max. Strain Distance in Node Tether
 nodeTetherDetachRate:false:0.0010;      // Node Tether Detachment Rate
@@ -56,12 +55,6 @@ sideBonds:true:0.0;                     // Side bonds?
 sideBondsRelax:false:0.0;               // Do side bonds relax, allowing translation of bound fils?
 sideBondsStabilize:false:1.0;           // Do side bonds stabilize depolymerization like nodes
 bundleStableFactor:false:2.0;           // Bundled filament resist cofilin binding (x each bound fil)
-filLinkSpring:true:1.0E-9;              // Link Spring Between Filaments
-filLinkTorqSpring:true:1.0E-19;         // Torque Spring Between Filaments
-xLinkTransAttn:true:1.0;                // Trans. Attn. Factor per link for Cross-linked Segments
-xLinkRotAttn:true:1.0;                  // Rot. Attn. Factor per link for Cross-linked Segments
-maxFilLinkDist:true:0.02;               // Max. Stretch Distance for Filament Links
-linkDissolveRate:true:1.0;              // Spontaneous Link Dissolution Rate
 kATPOn1:true:0.0;                       // ATP Actin On Rate
 kATPOff1:true:0.0;                      // ATP Actin Off Rate
 kADPOff1:true:0.0;                      // ADP Actin Off Rate
@@ -96,6 +89,13 @@ kRdmNuc:false:0.0;                      // Random Actin Nucleation Rate
 kNodeNuc:true:10.0;                     // On Node Actin Nucleation By Formin
 kHydrolysis:true:1.0;                   // Monomer Hydrolysis Rate
 kDissociation:true:1.0;                 // Monomer Dissociation Rate
+drawInterval:true:100.0;                // Drawing Interval
+toFileInterval:true:100.0;              // JPEG Interval
+toQKFileInterval:true:100.0;            // QK Interval
+jpegQuality:true:1.0;                   // JPEG Quality
+remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
+frameWidth:true:800.0;                  // Frame Width
+frameHeight:true:800.0;                 // Frame Height
 showTime:true:0.0;                      // Show Time
 showConc:true:0.0;                      // Show Actin Conc
 showNonHydroConc:false:0.0;             // Show Non-Hydro Actin Conc
