@@ -2545,3 +2545,110 @@ Note: Round 5 defaults (fracMove=0.5, fracR=0.1, fracMoveTorq=0.265) were calibr
 ### Compile
 
 Clean — no warnings or errors.
+
+---
+
+## 2026-05-17 — Session summary: manual benchmarking apparatus complete, two long-standing bugs found
+
+**Session arc:** Goal at start was to build a manual benchmarking apparatus
+to regain gestalt about PAIRS coefficient tuning before continuing automated
+benchmarking. By end of session, the apparatus is complete and two
+long-standing bugs in the chain physics were diagnosed and fixed in passing.
+
+### What landed
+
+**Rounds 1-2: Manual benchmarking apparatus.** Deflection HUD streamed via
+WebSocket, bending coefficients runtime-mutable via Params panel, force
+toggle, relaxation timer measuring τ against analytic τ_theo. Force vector
+moved to in-plane Y so deflection is visible without rotating the camera.
+Deflections displayed in nm.
+
+**Round 3: Clean benchmark environment.** Initial population (myosins,
+minifilaments, ActA, etc.) suppressed in benchmark mode. Chamber wireframe
+hidden in viewer. Wall-collision path confirmed inactive for the benchmark
+chain.
+
+**Round 4: Chain config HUD + per-segment axes.** Chain segment count,
+monomers per segment, span, and viscosity displayed in HUD. Each segment
+renders its local coordinate frame (RGB axes) — proved essential for
+diagnosing the Round 7 bug.
+
+**Round 5: aeta viscosity-dependence diagnosis.** A multi-round
+investigation chased a phantom "regression" in chain deflection. Bisection
+on the param file isolated `aeta = 1.0 Pa·s` (vs default 0.1) as the cause.
+The "bug" was correct PAIRS physics: equilibrium deflection scales as
+1/aeta at fixed coefficients. Earlier algebraic claim that "aeta cancels"
+was wrong. aeta made runtime-mutable with drag-tensor recomputation.
+PAIRS coefficient defaults updated to known-good values (fracMove=0.5,
+fracR=0.1, fracMoveTorq=0.265) calibrated at default aeta=0.1.
+
+**Round 6: Respect param-file segment count.** Removed an override that
+forced stdSegLength=32 in `-bmManual` mode — leftover debugging crutch
+from the Round 5 investigation. Benchmark now uses whatever segment
+count the param file specifies.
+
+**Round 7: Viscous-blob mechanism removed.** A sharp discontinuity at
+monomerCt=50 was diagnosed: filaments above `vBlobMinMons` (default 50)
+accumulated "viscous blobs" representing implicit crosslinking from old
+Listeria motility work. Each blob added ~1e-19 N·s·m rotational drag
+(sphere of 1 µm diameter). At 50 mon, bRotGam.y jumped 560× and segments
+effectively stopped rotating, producing a stepped chain shape instead of
+smooth bending. The mechanism was an experiment-specific hack and has
+been commented out (not deleted — left as breadcrumb for possible v2
+plugin).
+
+### Validation
+
+50-mon chain at known-good coefficients (fracMove=0.4, fracR=0.6,
+fracMoveTorq=0.158, aeta=0.1):
+- Force ON: ratio = 0.995 against expected deflection of 15.1 nm
+- Force OFF: τ_meas = 0.27 s, τ_theo = 0.29 s — 7% agreement
+
+Independent calibration of static (equilibrium deflection) and dynamic
+(relaxation time) behavior both match analytic predictions at the same
+coefficient values. This is a stronger validation than either alone:
+it confirms the chain has the right ratio of bending stiffness to drag,
+not just the right stiffness at one chosen drag.
+
+### Lessons / observations
+
+1. **The "phantom regression" pattern is real.** Multiple rounds of
+   investigation were spent on a bug that wasn't introduced by recent
+   code changes — it was a pre-existing aeta-dependence we'd just never
+   exercised before. A rollback to known-good code didn't recover
+   "working" behavior because the test conditions had also changed
+   silently. Lesson: when investigating a regression, change *one*
+   thing at a time, and don't trust "this worked before" memories
+   without checking what conditions "before" actually used.
+
+2. **The viscous-blob discovery was only possible because of the
+   per-segment axis rendering.** The visual signal "segments stay
+   axis-aligned instead of rotating to follow the curve" pinpointed the
+   bug to rotational drag immediately. Without that rendering, we'd
+   have been looking at the wrong code paths much longer. Per-segment
+   visual state has high diagnostic value.
+
+3. **Old hacks bite when you come back.** The viscous-blob code was
+   written for a specific Listeria experiment, lived in the main
+   codebase for years, and was forgotten. When the benchmark hit its
+   trigger threshold, the behavior was inexplicable from a fresh look
+   at the code because no one was thinking "Listeria." Lesson: hacks
+   for specific experiments should be experiments-specific code paths,
+   not main-codebase features with quiet defaults.
+
+### State at end of session
+
+The manual benchmarking apparatus is complete and validated. Bending
+coefficients can be tuned interactively from the Params panel; aeta
+can be swept at runtime with automatic drag-tensor recomputation;
+both static deflection and dynamic relaxation time agree with analytic
+predictions across the tested monomer-count range (32 through 50
+verified; broader sweep across 64, 96, 128 still TODO for completeness).
+
+The persistence-length benchmark (Round 4-as-drafted in chat) is the
+natural next step: free-floating filament under thermal forces, measuring
+Lp from tangent-vector correlations along the contour. This will require
+making the chamber genuinely inert (lame-duck) for benchmark mode, so
+free filaments can translate and rotate without box constraints. The
+chamber-lame-duck prompt was drafted in chat earlier; it's the natural
+Round 8.
