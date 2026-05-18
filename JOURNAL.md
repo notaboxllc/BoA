@@ -3457,3 +3457,64 @@ Next session: promote both to `setMutableAtRuntime` so they appear in the panel 
 ### 2026-05-17 — BTransCoeff and BRotCoeff promoted to mutable runtime parameters
 
 Added `.setMutableAtRuntime()` to both `Env.BTransCoeff` and `Env.BRotCoeff` in `Env.java` (lines 527, 530). No other changes. Both parameters now appear in the viewer's Mutable Parameters panel with their existing defaults (BTransCoeff=1.0, BRotCoeff=0.5). Editing either value and clicking Apply takes effect at the next safe point; `FilSegment.moveThing()` already reads both via `getValue()` on every step so no further wiring was needed. Compiled clean.
+
+## 2026-05-17 — Tuning underdetermination: a one-parameter family of solutions
+
+While tuning the deflection benchmark, jba observed that two different (fracMove, fracR, fracMoveTorq) triples — (0.5, 0.1, 0.265) and (0.4, 0.1, 0.291) — both produce the correct static deflection and the same relaxation time. The deflection-and-τ tuning is therefore *underdetermined*: three knobs, two targets, one free direction.
+
+In the paper's notation (Alberts 2009), these are Cδ, CR, Cθ. The paper sets Cδ = 0.4 as an "arbitrary value close to but less than 0.5" and tunes only CR and Cθ to satisfy δ and τ. That arbitrariness is exactly the direction we're sliding along when varying fracMove.
+
+### Why this matters
+
+The deflection target constrains the *static* response; the relaxation-time target constrains the *slowest mode dynamics*. Neither directly constrains how thermal fluctuations partition into the spectrum of bending modes — but that partitioning is what determines Lp. Two (Cδ, CR, Cθ) triples that produce the same δ and τ₁ can produce different Lp because the constraint network distributes compliance differently among the modes.
+
+Specifically:
+- Cδ enforces inextensibility per step. Larger Cδ → stiffer endpoint constraint → more of the Brownian translational forcing channels into bending modes rather than axial fluctuations.
+- CR sets the lever arm for endpoint forces, affecting how endpoint corrections translate into segment rotation.
+- Cθ scales the angular-alignment torque directly.
+
+Different triples → different mode partitioning → different Lp at the same BT/Bθ.
+
+### Implications
+
+1. **The BT/Bθ tuning is specific to the chosen (Cδ, CR, Cθ) triple.** The BTransCoeff = 1.4 / BRotCoeff = 0.5 values that bring Lp_meas to ~15 µm are for jba's current operating point. Different deflection-satisfying triples would need different BT/Bθ to satisfy Lp.
+
+2. **Reporting tuning values requires the full triple.** "BTransCoeff = 1.4" isn't reproducible without specifying which (Cδ, CR, Cθ) it pairs with.
+
+3. **The family creates apparent compensation.** BT/Bθ ends up correcting for both genuine discretization artifacts *and* an arbitrary choice within the (Cδ, CR, Cθ) family. This works but is philosophically untidy.
+
+### Possible future revisions
+
+Two ways to remove the underdetermination, neither necessary now but worth recording:
+
+**A. Fix Cδ at a specified value.** The paper's choice of Cδ = 0.4 with stability rationale (Cδ < 0.5 ensures over-damped response when adjacent-segment PAIRS forces align) is defensible. Pin it; tune only CR and Cθ. Drops one knob, removes the family.
+
+**B. Add a third target.** Use second-mode relaxation time τ₂ (or first-mode cantilever τ, also from the paper Fig. 4) as a third constraint. Three targets, three knobs, fully determined. The paper already validates that tuning to (δ, τ₁) reproduces τ₂ — but uses τ₂ as a check, not a constraint. Promoting it to a constraint would pin Cδ via a different physical argument than (A).
+
+### Operating point of record
+
+For posterity, the tuning point that produced Lp_meas converging toward 15 µm (with noise from slowest-mode undersampling):
+- chain: 11 seg × 32 mon, span 0.98 µm (deflection); 90 seg × 32 mon, span 8.019 µm (LP)
+- aeta = 0.1 Pa·s, deltaT = 1e-4 s
+- fracMove = 0.4, fracR = 0.1, fracMoveTorq = 0.291
+- benchmarkForceFrac = 0.01
+- BTransCoeff = 1.4, BRotCoeff = 0.5 (end segments only; internal segments get zero rotational Brownian)
+- Result: obs ≈ exp (0.000 nm at force off; ratio 1.0 with force on), τ_meas ≈ τ_theo (0.0586 vs 0.0570 s), Lp_meas drifting in 7–30 µm range around Lp_theo = 15.0 µm.
+
+The Lp ±50% drift is dominated by slowest-mode undersampling (τ₁_slowest ≈ EWMA window), not by tuning quality. The visual C(s) curve overlays the theoretical exp(−s/15) line through its center, which is the truer indicator of correct tuning.
+---
+
+## 2026-05-17 — CLAUDE.md slimmed down (552 → 287 lines)
+
+Removed sections that were stale, historical, or belonged in JOURNAL.md rather than session-startup orientation:
+
+- **GPU Acceleration Strategy** (~106 lines) → replaced with a 2-sentence stub + pointer to `GPU_STRATEGY.md`. Phase 5 (Java 21) hasn't happened; GPU work hasn't started.
+- **F1 Benchmark Journal** (~154 lines, Rounds 2–4) → replaced with a compact `## Benchmark Modes` reference block. Content was superseded by JOURNAL.md entries and contained stale calibration values (fracMoveTorq=1.010 from the bisection, overridden by the Round 5 manual calibration at fracMoveTorq=0.265).
+- **C3/C4 WebSocket subsections** (~175 words) → removed. Stable implemented features; covered in JOURNAL.md.
+- **Mid-run mutable parameter tables** → removed the whitelist table, "Confirmed immutable" block, and "Unclear" block. All three were stale (aeta was listed as immutable; fracMove/fracR/fracMoveTorq were listed as "unclear"; BTransCoeff/BRotCoeff/lpEwmaAlpha/lpActive not listed at all). Replaced with a grep pointer to `Env.java` as authoritative source, plus the promotion criteria which are forward-guidance.
+- **Architecture Phase-X historical annotations** → trimmed ("After Phase 3, this file no longer contains...", "After Phase 1, this class has no Java3D fields", etc.).
+- **Output section dead entries** → removed "QK files — REMOVED" and "Image capture — REMOVED".
+
+Kept: all build/run commands, CLI option table, WebSocket message shapes, safe-point pattern, C2 inspect payload shapes (lean-keep), promotion criteria, full Architecture section, biological context, parameter file format.
+
+Also updated the message shapes table to include `benchmark` and `lpBenchmark` topics added since Session 12.
