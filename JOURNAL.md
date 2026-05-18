@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-17
+Last updated: 2026-05-18
 
 ---
 
@@ -3565,4 +3565,425 @@ This is conceptually the "look-up tables or functions fit to the tuning coeffici
 
 Current tuning (fracMove = 0.4, fracR = 0.1, fracMoveTorq = 0.291, BT = 1.4, Bθ = 0.5) gives Lp_meas centered on Lp_theo = 15 µm with the expected slow-mode noise. The science can proceed. The empirical family-mapping is a methodological refinement that would put the tuning on more principled footing and produce a reusable result — but it's not blocking the simulation's use.
 
-Status: deferred. To be picked up when there's slack, or if a future configuration change reveals the current tuning is fragile to family-position.
+---
+
+## 2026-05-18 — Automated Deflection Tuning Controller: Design Survey
+
+### Controller behavior (restatement for future readers)
+
+The user currently tunes three PAIRS coefficients — `fracMove`, `fracR`, `fracMoveTorq` — by hand in the `-bmManual` GUI until the deflection chain's measured midpoint deflection matches the analytic Euler-Bernoulli prediction. Brownian forcing is off on the deflection chain; numerical jitter is ~0.01 nm. The proposed controller automates this two-phase search.
+
+**Coarse phase.** Step `fracR` and `fracMoveTorq` together in opposite directions (±0.1 / ∓0.1). After each step, wait for a smoothed deflection value to stabilize (running mean over N samples). Compare to theoretical. If the smoothed deflection crossed theoretical (sign of error flipped), freeze `fracR` and enter fine phase. Limits: fracMove ∈ [0.1, 0.5], fracR ∈ [0.1, 1.5], fracMoveTorq ∈ [0.01, 0.5]. If fracR = 0.1 and fracMoveTorq = 0.5 and chain is still too stiff, lower `fracMove` by 0.05 and restart coarse.
+
+**Fine phase.** Bisect on `fracMoveTorq` alone with `fracR` frozen. Initial step 0.05, halved on each sign reversal. Terminate when smoothed deflection stays within ±0.005 nm of theoretical for K consecutive averaging windows.
+
+**Output.** Final (fracMove, fracR, fracMoveTorq) triple plus converged/failed status. Internal tracking only.
+
+**Two wirings, same controller:**
+- *GUI:* "Auto" button starts the controller; Java-side deflection samples feed it; parameter updates applied to live sim via existing `Env.xxx.setValue()` mechanism.
+- *Headless:* `-bm` flag triggers it; final triple reported to stdout.
+
+---
+
+### Survey findings
+
+#### 1. Deflection measurement: site, cadence, existing smoothing
+
+**Primary measurement site:** `BoxOfActin.computeBenchmarkSnapshot()` (`BoxOfActin.java:694–711`). Computes perpendicular distance from the center of `deflFil.midSeg` to the anchor-to-anchor axis. Returns a `BenchmarkSnapshot(observed, expected, ratio)` with all values in µm. One call per output frame.
+
+**Call chain:** `buildBenchmarkJson()` (`BoxOfActin.java:732`) calls `computeBenchmarkSnapshot()`, then serializes the result as JSON. `buildBenchmarkJson()` is called from both `logAndDraw()` (`BoxOfActin.java:983–993`) and `remoteLog()` (`BoxOfActin.java:1059–1068`) when `threeJSCounter >= Env.toFileInterval.getIntValue()`.
+
+**Output cadence:** Every `toFileInterval` simulation steps (default 100). At `deltaT = 1e-4 s` that is one sample per 0.01 s of simulated time. Both `logAndDraw()` and `remoteLog()` are called from inside `synchronized(Env.safeO)` at the safe point — so these calls are on the single `TimeLoop` thread with all physics completed.
+
+**Secondary measurement site (existing bisection only):** `computeDeflectionRatio()` (`BoxOfActin.java:714`), called every `BENCH_SETTLE_CHECK_INTERVAL = 1000` steps from the bisection block at the safe point (`BoxOfActin.java:542`). Not used for display.
+
+**Existing smoothing:** None on the Java side. `buildBenchmarkJson()` sends the raw snapshot value each output frame. The viewer (`updateBenchmarkHud` in `sim_viewer_boa.html:1618`) displays raw values — no JS-side averaging either. All smoothing must live in the new controller.
+
+**Force gate:** The transverse force is applied only when `Env.benchmarkForceOn.getValue() != 0` (`BoxOfActin.java:452`). The controller should only accumulate samples when the force is on, since force-off samples are the chain relaxing toward zero.
+
+#### 2. Theoretical deflection: computation site and display path
+
+**Computation:** Computed once at chain setup in `makeInitialThings()` (`BoxOfActin.java:1087`):
+```
+deflFil.analyticDefl = Env.benchmarkForceFrac.getValue() * spanM * 1e6   // result in µm
+```
+This is the analytic midpoint deflection for a pinned-pinned beam under midpoint force (δ = benchmarkForceFrac × span, dimensionally): `FL³/48EI = (F/F_unit) × L` where `benchmarkForceFrac` encodes the ratio. The force magnitude itself is set from `benchmarkForceFrac` at line 1085. Expected deflection does not change during a run unless `benchmarkForceFrac` is mutated via setParam (it is mutableAtRuntime).
+
+**τ_theo is recomputed** in `drainParamQueue()` (`BoxOfActin.java:905–918`) if `aeta` changes, since τ_theo depends on the drag tensor `bTransGam.y` of the midpoint segment.
+
+**Display path:** `buildBenchmarkJson()` emits `expectedDeflection` (µm) as a raw double. The viewer multiplies by 1000 and calls `.toFixed(3)` to display in nm (`sim_viewer_boa.html:1643`).
+
+**Controller relevance:** The controller's `expected` value should be set once at `start()` from `deflFil.analyticDefl` (accessible as a field on the static `deflFil` object). It does not need to call `computeBenchmarkSnapshot()` — the caller passes the observed value.
+
+#### 3. fracMove, fracR, fracMoveTorq: location, runtime safety, caching
+
+**Location:** All three are `static final Parameter` objects in `Env.java` (lines 130–135):
+```java
+static final Parameter fracMove    = new Parameter("fracMove",    ..., 0.5, "").setMutableAtRuntime();
+static final Parameter fracR       = new Parameter("fracR",       ..., 0.1, "").setMutableAtRuntime();
+static final Parameter fracMoveTorq= new Parameter("fracMoveTorq",..., 0.265,"").setMutableAtRuntime();
+```
+
+**Runtime safety:** All three are already `setMutableAtRuntime()`. The existing WebSocket `setParam` mechanism can change them mid-run; they are validated and queued in `Env.paramQueue`, then applied at the safe point in `drainParamQueue()`. For the controller (running at the safe point on the TimeLoop thread), direct `Env.xxx.setValue()` calls are equally safe — no queue needed.
+
+**Caching:** None. Every usage in `FilSegment.java` calls `.getValue()` at the moment the force or torque is computed (lines 1356, 1364, 1418, 1426, 1494, 1558, 1641, 1644, 1698). Changes take effect on the next simulation step. No recomputation hook is needed (contrast with `aeta`, which requires a drag-tensor refresh in `drainParamQueue()`).
+
+**`Parameter.setValue()` implementation:** Simple field assignment (`curValue = newValue`, `Parameter.java:99–105`). Thread-safe when called from the single TimeLoop thread at the safe point.
+
+**Effect directions (from code + physical intuition):**
+- Larger `fracMove` → stronger PAIRS translational restoring force per step → stiffer overall
+- Larger `fracR` → longer torque arm for PAIRS angular correction → stronger bending restoring → stiffer
+- Larger `fracMoveTorq` → stronger torsional spring → stiffer in torsion
+
+The spec's coarse-phase description (increasing fracR, decreasing fracMoveTorq together stiffens the chain) appears physically plausible but is empirically unverified for this joint motion (see ambiguities §3 below).
+
+#### 4. How `-bm` currently works
+
+**Flag parsing:** `BoxOfActin.java:285–296`. `-bm` sets `Env.benchmarkFilament = true` and the standard bisection runs. `-bmManual` additionally sets `Env.benchmarkManual = true`; `-bmDiag` sets `Env.benchmarkDiag = true`.
+
+**Setup:** `begin()` at `BoxOfActin.java:127–160` zeroes population parameters, sets `Env.remote = true`, and forces `Env.fracMove.setValue(0.5)` (holds fracMove fixed throughout the search). `makeInitialThings()` then constructs the 11-segment deflection chain and 90-segment LP chain, and initializes the bisection state variables.
+
+**Search algorithm (existing):** Joint bisection on `c` where `fracR = fracMoveTorq = c` (`BoxOfActin.java:534–620`). At each safe point:
+- Increments `benchStepCount`
+- Every `BENCH_SETTLE_CHECK_INTERVAL = 1000` steps after `benchMinSettleSteps` minimum, checks convergence of consecutive ratio measurements (`BENCH_SETTLE_CONV_TOL = 0.5%` relative change)
+- Hard cap at `BENCH_SEARCH_MAX_SETTLE = 500000` steps per evaluation
+- On evaluation: if `|ratio − 1| ≤ BENCH_SEARCH_TOL = 0.01`, prints converged result and calls `System.exit(0)`; otherwise updates bisection brackets, sets `Env.fracR.setValue(next)` and `Env.fracMoveTorq.setValue(next)` jointly, calls `resetBenchmarkChain()`, resets step counter
+
+**`resetBenchmarkChain()`** (`BoxOfActin.java:864–875`): restores all deflection-chain segments to their initial straight-line coordinates (stored in `deflFil.initCoords`), zeroes forces/torques, calls `initialize()`. Currently `private static`.
+
+**Output convention:** Prints `[BENCH] CONVERGED  c=<val>  (fracR=fracMoveTorq=c)  ratio=<val>  iters=<N>  fracMove=<val>` to stdout, then `System.exit(0)`.
+
+**Key difference from proposed controller:** The existing bisection constrains `fracR = fracMoveTorq = c` and moves them jointly in the same direction. The proposed controller moves them in opposite directions (±0.1 / ∓0.1), then in the fine phase bisects on `fracMoveTorq` alone with `fracR` frozen. These are fundamentally different search strategies.
+
+#### 5. GUI button infrastructure
+
+**Benchmark HUD location:** `#benchmarkHud` div in `sim_viewer_boa.html:453–461`. Currently contains chain info, HUD rows, two hidden τ rows, and one button (`btnBenchForce`).
+
+**Existing button pattern:**
+```html
+<button id="btnBenchForce" class="liveBtn">Deflection: ON</button>
+```
+```js
+btnBenchForce.addEventListener('click', () => {
+    ws.send(JSON.stringify({ action: 'setParam', name: 'benchmarkForceOn', value: ... }));
+});
+```
+The click handler sends a WebSocket `setParam` action. On the Java side, `LiveFrameServer.handleSetParam()` validates and queues it. `drainParamQueue()` applies it at the safe point and dispatches a `paramAck` back. The viewer listens for `paramAck` in `handleParamAck()` to update UI state.
+
+**Second button pattern (btnPersist):** Identical: click → `setParam lpActive` → ack → `syncLpActiveUI()`.
+
+**Where a new "Auto" button hooks in:** Inside `#benchmarkHud`, alongside or below `btnBenchForce`. However, starting the controller is not a `setParam` action — it activates a mode. A new WebSocket action (`"startAutoTune"`) is needed. `LiveFrameServer.onMessage()` (`LiveFrameServer.java:122–186`) has a simple `message.contains(...)` dispatch chain; adding a new case is straightforward. The controller reports convergence back to the server log; optionally a new `tunerStatus` topic can carry state to the viewer (not needed for v1 per spec).
+
+---
+
+### Proposed class/file structure
+
+**New file:** `boxOfActin/DeflectionTuner.java`
+
+This class is a pure state machine. It holds internal state and a running mean buffer. It knows nothing about Swing, WebSocket, `FilSegment`, or the safe-point mechanism. All unit-testable with a standalone main.
+
+```
+class DeflectionTuner (package boxOfActin)
+
+  // Lifecycle phases
+  enum Phase { COARSE, FINE, CONVERGED, FAILED }
+
+  // Immutable parameter triple returned when a change is needed
+  static class ParamTriple {
+    final double fracMove, fracR, fracMoveTorq
+    final boolean resetChain   // caller should invoke resetBenchmarkChain()
+  }
+
+  // Constants (propose these values; all tunable)
+  WINDOW_N       = 30          // averaging window depth (output frames)
+  SETTLE_SKIP    = 20          // frames discarded after each param change
+  COARSE_STEP    = 0.1         // |Δfrac R| = |Δfrac MoveTorq| per coarse step
+  FINE_STEP_INIT = 0.05        // initial fracMoveTorq bisection step
+  CONV_TOL_UM    = 5e-6        // ±0.005 nm in µm
+  CONV_WINDOWS   = 3           // consecutive windows within tolerance → CONVERGED
+  FRAC_MOVE_MIN/MAX = 0.1/0.5
+  FRAC_R_MIN/MAX    = 0.1/1.5
+  FRAC_MT_MIN/MAX   = 0.01/0.5
+
+  // Internal state
+  phase:          Phase
+  fracMove:       double       // current live values tracked internally
+  fracR:          double
+  fracMoveTorq:   double
+  expected:       double       // µm — set at start(), does not change
+  fineStep:       double       // current fine bisection step size
+  frozenFracR:    double       // fracR frozen at end of coarse phase
+  prevSmoothed:   double       // smoothed value from previous window (NaN initially)
+  sampleBuf:      double[]     // ring buffer, length WINDOW_N
+  sampleHead:     int
+  sampleCount:    int          // valid samples in ring (0..WINDOW_N)
+  skipRemaining:  int          // frames to discard (set to SETTLE_SKIP on param change)
+  convCount:      int          // consecutive converging windows (fine phase only)
+
+  // Public API
+
+  void start(double fracMove, double fracR, double fracMoveTorq, double expectedMicrons)
+    // Arms the controller. Resets all state. Enters COARSE phase.
+
+  ParamTriple feed(double observedMicrons)
+    // Feed one output-frame deflection sample.
+    // Returns null while accumulating (skipRemaining > 0, or window not yet full).
+    // Returns non-null ParamTriple when the window is full and a parameter change is decided.
+    // After CONVERGED/FAILED, returns null (caller checks isDone()).
+
+  Phase    getPhase()
+  boolean  isDone()            // phase == CONVERGED || phase == FAILED
+  double   getFracMove()
+  double   getFracR()
+  double   getFracMoveTorq()
+  String   resultSummary()     // "[AUTOTUNE] CONVERGED/FAILED fracMove=... fracR=... fracMoveTorq=..."
+```
+
+**Control loop pseudocode (feed method):**
+
+```
+feed(observed):
+  if isDone(): return null
+
+  // Settle skip: discard initial post-change samples
+  if skipRemaining > 0:
+    skipRemaining--
+    return null
+
+  // Accumulate into ring buffer
+  sampleBuf[sampleHead % WINDOW_N] = observed
+  sampleHead++
+  sampleCount = min(sampleCount + 1, WINDOW_N)
+
+  if sampleCount < WINDOW_N: return null   // window not yet full
+
+  // Window full: compute smoothed value
+  smoothed = mean(sampleBuf)
+
+  if phase == COARSE:
+    return doCoarseStep(smoothed)
+  else if phase == FINE:
+    return doFineStep(smoothed)
+  return null
+
+doCoarseStep(smoothed):
+  error = smoothed - expected        // positive → too much deflection (too soft)
+  
+  // Check for limit-hit failure case
+  if fracR <= FRAC_R_MIN and fracMoveTorq >= FRAC_MT_MAX:
+    if error > 0:                    // still too soft at full-soft limit
+      if fracMove <= FRAC_MOVE_MIN:
+        phase = FAILED
+        return null
+      fracMove -= 0.05
+      // reset to full-soft coarse corner; restart coarse
+      fracR = FRAC_R_MIN
+      fracMoveTorq = FRAC_MT_MAX
+      return resetAndReturn()
+
+  // Check overshoot (sign flip since last evaluation)
+  if prevSmoothed is not NaN:
+    prevError = prevSmoothed - expected
+    if prevError * error < 0:         // sign flipped → we bracketed
+      phase = FINE
+      frozenFracR = fracR
+      fineStep = FINE_STEP_INIT
+      // do NOT change fracR in fine phase — only fracMoveTorq moves
+      return null
+
+  prevSmoothed = smoothed
+
+  // Step in direction that reduces error
+  if error > 0:                       // too soft → stiffen
+    newFracR       = clamp(fracR + COARSE_STEP, FRAC_R_MIN, FRAC_R_MAX)
+    newFracMoveTorq= clamp(fracMoveTorq - COARSE_STEP, FRAC_MT_MIN, FRAC_MT_MAX)
+  else:                               // too stiff → soften
+    newFracR       = clamp(fracR - COARSE_STEP, FRAC_R_MIN, FRAC_R_MAX)
+    newFracMoveTorq= clamp(fracMoveTorq + COARSE_STEP, FRAC_MT_MIN, FRAC_MT_MAX)
+  fracR = newFracR
+  fracMoveTorq = newFracMoveTorq
+  return resetAndReturn()
+
+doFineStep(smoothed):
+  error = smoothed - expected
+  if abs(error) <= CONV_TOL_UM:
+    convCount++
+    if convCount >= CONV_WINDOWS:
+      phase = CONVERGED
+      return null
+  else:
+    convCount = 0
+
+  if prevSmoothed is not NaN:
+    prevError = prevSmoothed - expected
+    if prevError * error < 0:         // crossed → halve step and reverse
+      fineStep /= 2.0
+
+  prevSmoothed = smoothed
+  // Adjust fracMoveTorq in direction that reduces error
+  // error > 0 (too soft) → increase fracMoveTorq (stiffen in torsion)
+  // error < 0 (too stiff) → decrease fracMoveTorq
+  if error > 0:
+    newFracMoveTorq = clamp(fracMoveTorq + fineStep, FRAC_MT_MIN, FRAC_MT_MAX)
+  else:
+    newFracMoveTorq = clamp(fracMoveTorq - fineStep, FRAC_MT_MIN, FRAC_MT_MAX)
+  fracMoveTorq = newFracMoveTorq
+  return resetAndReturn()
+
+resetAndReturn():
+  sampleCount = 0
+  sampleHead = 0
+  skipRemaining = SETTLE_SKIP
+  prevSmoothed = NaN   // reset overshoot detection
+  return new ParamTriple(fracMove, fracR, fracMoveTorq, resetChain=true)
+```
+
+**Integration point in `BoxOfActin.java`:**
+
+New static field: `static DeflectionTuner deflTuner = null;`
+
+At the safe point, after `drainParamQueue()` and before `logAndDraw()`/`remoteLog()`, add a tuner-drain block:
+
+```java
+// Autotune: feed controller at output-frame cadence
+if (deflTuner != null && Env.benchmarkFilament && deflFil.midSeg != null
+        && threeJSCounter + 1 >= Env.toFileInterval.getIntValue()
+        && Env.benchmarkForceOn.getValue() != 0) {
+    BenchmarkSnapshot snap = computeBenchmarkSnapshot();
+    if (snap != null) {
+        DeflectionTuner.ParamTriple update = deflTuner.feed(snap.observed);
+        if (update != null) {
+            Env.fracMove.setValue(update.fracMove);
+            Env.fracR.setValue(update.fracR);
+            Env.fracMoveTorq.setValue(update.fracMoveTorq);
+            if (update.resetChain) resetBenchmarkChain();
+            // optionally dispatch paramAck-style messages for each changed param
+        }
+        if (deflTuner.isDone()) {
+            System.out.println(deflTuner.resultSummary());
+            deflTuner = null;
+            // headless wiring: System.exit(0) here
+        }
+    }
+}
+```
+
+Note: `threeJSCounter + 1 >= toFileInterval` gates the tuner to fire on the same step as the output frame, without duplicating `computeBenchmarkSnapshot()` unnecessarily. An alternative is to decouple entirely and use a separate counter — see ambiguity §4 below.
+
+**GUI wiring (future session):**
+- New WebSocket action `{"action": "startAutoTune"}` in `LiveFrameServer.onMessage()`
+- Sets `Env.autoTuneRequested = true` (a new `static volatile boolean` in `Env`)
+- At safe point (before the tuner-drain block above): if `autoTuneRequested`, instantiate `deflTuner`, clear flag
+- Optionally add `{"action": "stopAutoTune"}` to cancel
+
+**Headless wiring (future session):**
+- `-bmAuto` flag (new) or repurposed `-bm` sets `Env.benchmarkAutoTune = true`
+- In `begin()`, when this flag is set: arm `deflTuner` directly (no WebSocket trigger needed)
+- The same per-step tuner-drain block fires; on `isDone()` prints result and `System.exit(0)` or 1
+
+---
+
+### Specification ambiguities and code-reality mismatches
+
+**1. Settle-vs-window (spec gap)**
+The spec says "wait for an averaging window of N samples to fill." It does not mention a settling phase. After a coarse step of ±0.1, the chain is starting from the wrong position; the averaging window will include transient deflections during the chain's relaxation to the new equilibrium. The existing `-bm` bisection has a minimum settle of `benchDynamicSettle(fracMoveTorq) = 500/fracMoveTorq` steps (at fracMoveTorq=0.265, ~1887 steps = ~19 output frames) before evaluating. A 30-sample window starting immediately after the change would thus average roughly equal parts transient and steady-state. Recommendation: add `SETTLE_SKIP = 20` output frames as a discard period after each parameter change, before the window starts accumulating. This makes the effective wait ≈ (20 + 30) frames = 50 frames per evaluation, similar to the existing settle logic. The proposed design includes this as `skipRemaining`.
+
+**2. Chain reset after each step (spec gap)**
+The spec does not mention calling `resetBenchmarkChain()` after each controller step. The existing bisection always calls it (`BoxOfActin.java:615`). Without reset, the chain starts each new evaluation from the previously deflected configuration, introducing transients. With reset to the straight-line initial config, each evaluation starts from zero deflection and the transient is predictable (chain bends downward toward equilibrium — always in the same direction). Recommendation: always reset. The `ParamTriple.resetChain` flag in the design makes this explicit and keeps the controller class ignorant of the reset mechanism.
+
+**3. Coarse-phase step direction (empirically unverified)**
+The spec states "increasing fracR and decreasing fracMoveTorq stiffens the filament." From individual parameter physics (larger fracR → stronger bending correction; larger fracMoveTorq → stronger torsional restoring force), this is physically plausible. However, the JOURNAL's iso-(δ, τ) family analysis describes "softer" operating points as having *lower* fracR and *higher* fracMoveTorq — consistent with the spec's direction when inverted, but derived from keeping δ and τ *constant* along the family. The spec's claim is about moving *across* the family (changing deflection). These are logically consistent but the net joint effect of the ±0.1/∓0.1 step on the measured midpoint deflection has not been tested with Brownian off. The first thing the implementation session should do — before writing the full controller — is run a manual 2-point test: from the current operating point, increase fracR by 0.1 and decrease fracMoveTorq by 0.1, then observe the ratio. If ratio goes down (less deflection = stiffer), the spec's direction is correct. If it goes up, invert the coarse step logic.
+
+**4. Headless cadence (code-reality mismatch)**
+The proposed design gates the tuner feed on the output frame dispatch check (`threeJSOutputDir != null || LiveFrameServer.isRunning()`). In headless mode without `-3js` and without `-3jsLive`, this block never fires (both conditions are false), so the tuner would never be fed. The existing `-bm` bisection avoids this by running directly at the per-step safe-point, with its own internal counter. The controller must have a fallback cadence for headless mode. Options:
+- **A (recommended):** Add a separate `tunerStepCounter` in BoxOfActin that fires every `toFileInterval` steps regardless of output frame dispatch. Slightly more code but decouples the tuner from the rendering pipeline entirely.
+- **B:** Force a virtual output frame even when no sink is connected (add `|| Env.benchmarkAutoTune` to the output frame condition). Simpler but conflates two concerns.
+The design document assumes option A, with the gate pseudocode shown above rewritten to use a dedicated counter.
+
+**5. Relationship to existing `-bm` (spec gap)**
+The spec says "headless wiring: triggered by `-bm` flag." The existing `-bm` runs the joint bisection (`fracR = fracMoveTorq = c`). Replacing `-bm` behavior with the new controller is a breaking change. Alternatives:
+- **A (recommended):** Add `-bmAuto` for the new controller; keep `-bm` for the old joint bisection until the new controller is validated. Rename or deprecate the old one in a later session.
+- **B:** Replace `-bm` immediately; document the change.
+Recommendation A requires no decision now but must be resolved before the headless wiring session.
+
+**6. Force state during tuning (implicit assumption)**
+The controller accumulates samples only when `benchmarkForceOn.getValue() != 0`. If the user turns the force off while the controller is running (via `btnBenchForce`), the controller would effectively stall (no samples accumulate). The spec doesn't address this. v1 can treat this as a user error — the force should be on during automated tuning. The implementation should document this precondition.
+
+**7. `resetBenchmarkChain()` accessibility**
+The method is currently `private static` in `BoxOfActin.java:864`. The controller class itself should never call it directly (it's a pure logic component). The caller (the BoxOfActin tuner-drain block) invokes it when `update.resetChain == true`. No change to `resetBenchmarkChain` visibility is needed.
+
+**8. Proposed SETTLE_SKIP and WINDOW_N values**
+With τ_theo ≈ 0.06 s = 600 steps and toFileInterval = 100, the chain reaches 5τ in ~30 output frames. With noise σ ≈ 0.01 nm and CONV_TOL = 0.005 nm, averaging N = 30 samples gives σ/√30 ≈ 0.0018 nm, sufficient to distinguish within/outside tolerance with high confidence. The proposed SETTLE_SKIP = 20 frames means the controller waits ~30 frames total before the first evaluation window, at the expense of a longer initial coarse phase. These numbers should be confirmed against τ_theo for the specific parameter-file segmentation in use.
+
+---
+
+## 2026-05-18 — Chain-aware settle wait for DeflectionTuner
+
+### Problem
+
+`DeflectionTuner` used a fixed `SETTLE_SKIP = 20` output frames after each parameter change. This was calibrated for 32-monomer chains. For 64-monomer chains the torsional relaxation time τ_slow = 100/fracMoveTorq steps is 8× longer (L_seg³ scaling), so 20 frames was far too short: observed deflection ≈ 0.001 µm vs target 0.019 µm on the first coarse evaluation, causing wrong direction inference.
+
+### Fix
+
+Replaced the constant `SETTLE_SKIP` with a chain-length– and fracMoveTorq–aware instance field in `DeflectionTuner`, updated by `BoxOfActin` at each parameter change.
+
+**Formula (revived from old bisection controller, commit 95af4f2):**
+
+```
+settleSteps = max(500 / fracMoveTorq,  5000 × (monomerCt / 32)³)   [capped at 333333]
+settleFrames = max(0,  ceil(settleSteps / toFileInterval) − WINDOW_N)
+```
+
+Constants: `BENCH_SETTLE_BASE = 5000`, `BENCH_SETTLE_REF_MONOMER_CT = 32`, `BENCH_SETTLE_MAX_STEPS = 500000`. The `500/fracMoveTorq` term gives 5 τ_slow at any fracMoveTorq; the `5000*(M/32)³` term is the chain-length floor validated by the old L³ commit.
+
+Subtracting `WINDOW_N = 30` makes total wait (settle + window) equal to the old formula's step count converted to frames.
+
+Results by chain length at default `toFileInterval = 100`:
+| monomerCt | fracMoveTorq | settleSteps | settleFrames |
+|---|---|---|---|
+| 32 | 0.265 | 5 000 | **20** (matches old constant) |
+| 64 | 0.0137 | 40 000 | **370** |
+
+### Interface change
+
+`DeflectionTuner.start()` gains a fifth parameter `int initialSettleFrames`. New method `setSettleSkip(int frames)` updates both the stored `settleSkip` and the current `skipRemaining` — called by `BoxOfActin` immediately after applying each `ParamTriple`.
+
+`BoxOfActin.benchDynamicSettleFrames(double fracMoveTorq)` computes the frame count from `benchMonCt` and `Env.toFileInterval`.
+
+### COARSE_FINE_FRAC note (design decision from previous session, not recorded there)
+
+The coarse phase transitions to fine when `|error| / expected ≤ COARSE_FINE_FRAC = 0.20`. This means the coarse phase exits as soon as the smoothed deflection is within ±20% of target, even before a sign reversal. At the default 32-mon starting point (fracR=0.1, fracMoveTorq=0.265), the initial deflection is already within 20% of target, so the controller enters fine immediately.
+
+### Test results
+
+**32-monomer (regression):** `CONVERGED  fracMove=0.5000  fracR=0.1000  fracMoveTorq=0.2621`. settleFrames=20 confirmed identical to old constant. Controller entered FINE immediately (initial params within 20% of target) and bisected to convergence in ~8 simulated seconds.
+
+**64-monomer:** settleFrames=370 confirmed in startup log. Full convergence run not completed by Claude Code (each evaluation requires ~32 min wall clock at 64-mon complexity). Handed off to user for verification.
+
+---
+
+### Next session plan
+
+**Session N: Implement `DeflectionTuner.java` + headless wiring**
+
+Prerequisites: resolve ambiguity §3 empirically (2-point manual test of coarse step direction) before writing the coarse-phase logic.
+
+Steps:
+1. Write `boxOfActin/DeflectionTuner.java` as a standalone class with no simulation dependencies.
+2. Verify with a short standalone test: simulate a stream of deflection samples that converges, confirm COARSE → FINE → CONVERGED transition.
+3. Add tuner-drain block to `doLoop()` in `BoxOfActin.java`.
+4. Add `-bmAuto` flag parsing in `parseArgs()`. In `begin()`, when `-bmAuto`: arm `deflTuner` directly; set `Env.fracMove.setValue(0.5)` (start from same initial condition as old `-bm`).
+5. On `isDone()` in the drain block: print `resultSummary()` and `System.exit(0 or 1)`.
+
+Pass condition: `java -Xmx800M -cp ".:libs/*" BoxOfActin -bmAuto -pf ParameterFiles/boa10-64Seg -r 2>&1 | tail -5` prints `[AUTOTUNE] CONVERGED fracMove=... fracR=... fracMoveTorq=...` within a reasonable wall-clock time.
+
+**Session N+1: GUI wiring**
+
+Steps:
+1. Add `{"action": "startAutoTune"}` (and optionally `"stopAutoTune"`) to `LiveFrameServer.onMessage()`.
+2. Add `Env.autoTuneRequested` as a `static volatile boolean`.
+3. At the safe point, before the tuner-drain block: check and drain `autoTuneRequested`, instantiate tuner.
+4. Add `btnAutoTune` button inside `#benchmarkHud` in `sim_viewer_boa.html`.
+5. Wire button click to send `startAutoTune` action; disable button while running; re-enable on convergence (optionally via a new `tunerStatus` topic or inferred from param changes).
+
+Pass condition: start with `-bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg`, click "Auto" in the viewer, watch the ratio in the Deflection/Relaxation HUD converge toward 1.000, confirm final params printed to stdout.
