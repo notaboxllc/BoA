@@ -3415,3 +3415,45 @@ Rationale for choosing A over B (end-only estimator) and C (half-range): B disca
 **Note on release detection:** `releaseTime` is still set at output-frame resolution (when the force toggle first appears in the output-frame check). The error this introduces is at most `toFileInterval × deltaT = 0.01 s` in the τ_meas start time, but the crossing is detected at step resolution, so the final frozen τ_meas is accurate to one step.
 
 **Files changed:** `boxOfActin/BoxOfActin.java` only.
+
+## 2026-05-17 — On the physical justification of BT/Bθ Brownian tuning (in light of the 2× Lp result)
+
+Context: With the persistence-length benchmark now functional, an 8 µm chain at default parameters yields Lp_meas ≈ 27 µm against Lp_theo = 15 µm — a factor of ~2 discrepancy. The question: accept it, or tune BT/Bθ to fix it? And how to justify a second round of tuning at all?
+
+### The original framing (2009 paper, jba)
+
+The BT/Bθ coefficients were introduced as empirical knobs to scale the magnitudes of translational and rotational Brownian forces applied to each rigid filament segment. The justification given in the 2009 PLoS ONE paper was essentially practical: with a small number of rigid segments representing a continuous filament, the simple "iid Brownian force per segment" scheme doesn't reproduce expected angular correlations, so introduce two coefficients to make it. The defaults that work in practice are BT ≈ 1.0, Bθ ≈ 0.5, with internal-segment Bθ effectively 0. The paper notes this technique works well only for filaments of ≲20 segments and flags correlated inter-segment Brownian forcing as the proper fix that wasn't done. Engineering framing: "the representation is already coarse; tweaking how segments move to hit biophysical targets is allowable."
+
+This framing is honest but understates the principled basis. Worth recording the deeper interpretation.
+
+### The deeper interpretation
+
+The deflection tuning (CR, Cθ) and the Brownian tuning (BT, Bθ) are the same kind of object — empirical calibration constants that map a discrete representation onto continuum behavior. Refusing the latter while accepting the former would be epistemologically inconsistent. Specifically:
+
+1. **The chain has more degrees of freedom than the continuum at short wavelengths.** Per-segment Brownian forces inject energy that, after constraint-enforcement by the connection topology, partitions into modes that exist in the continuum and modes that don't (or are differently weighted). The mapping between injected energy and realized thermal fluctuation amplitude is not 1:1 and depends on segmentation. BT/Bθ correct for this.
+
+2. **Fluctuation–dissipation interpretation.** The per-segment drag coefficients (γ‖, γ⊥, γθ) are computed as if each segment were an isolated body. The effective drag of a segment constrained by neighbors is different — particularly in rotation, where adjacent-segment torque sharing reduces the effective rotational independence. Bθ < 1 (and Bθ ≈ 0 for internal segments) keeps the FDT balance between injected Brownian forcing and the *effective* (not isolated) dissipation. The fact that Bθ ≈ 0.5 / 0 works empirically is consistent with this picture — internal segments share rotational dissipation with both neighbors, end segments with only one.
+
+3. **System count.** Five tuning coefficients (Cδ, CR, Cθ, BT, Bθ), three physical targets (deflection, relaxation time, persistence length). Cδ held fixed at 0.4 for stability; CR, Cθ fix deflection and τ; BT, Bθ fix Lp. The system is well-determined. Not over-fitting.
+
+4. **Segmentation-specific.** Like CR/Cθ, the BT/Bθ tuning lives in the same dependency class — it depends on segment size, time-step, viscosity, and chain length. The 90-segment Lp chain in BoA is well outside the ≲20-segment regime the paper validated. The tuning is for *this* segmentation and would need re-checking at others.
+
+### Practical implication: tune them
+
+A factor of 2 in Lp is biophysically meaningful — at lengths near Lp the filament transitions from rod-like to flexible behavior, and that boundary moves. For BoA's downstream use (alignment energetics in contractile rings, plasmid segregation, etc.) Lp matters. The benchmarking tool is now positioned for a four-parameter tuning loop:
+
+- Adjust CR/Cθ on the deflection chain until obs ≈ exp and τ_meas ≈ τ_theo.
+- Adjust BT/Bθ on the LP chain until the measured C(s) curve overlays the theoretical exp(−s/Lp) line.
+- Verify CR/Cθ haven't drifted (they shouldn't — BT/Bθ only affect stochastic forcing).
+
+This requires that BT/Bθ be live-editable in the viewer.
+
+### Current code state
+
+`Env.BTransCoeff` (default 1.0) and `Env.BRotCoeff` (default 0.5) already exist as `Parameter` objects in `Env.java` lines 514–518. They are read by `FilSegment.moveThing()` at lines 468, 477 to scale `transScale` and `rotScale`. Currently they are startup-only — configurable via parameter file but not in the GUI Mutable Parameters panel.
+
+Next session: promote both to `setMutableAtRuntime` so they appear in the panel and can be tuned against the live persistence-length readout.
+
+### 2026-05-17 — BTransCoeff and BRotCoeff promoted to mutable runtime parameters
+
+Added `.setMutableAtRuntime()` to both `Env.BTransCoeff` and `Env.BRotCoeff` in `Env.java` (lines 527, 530). No other changes. Both parameters now appear in the viewer's Mutable Parameters panel with their existing defaults (BTransCoeff=1.0, BRotCoeff=0.5). Editing either value and clicking Apply takes effect at the next safe point; `FilSegment.moveThing()` already reads both via `getValue()` on every step so no further wiring was needed. Compiled clean.

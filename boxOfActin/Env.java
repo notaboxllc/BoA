@@ -524,10 +524,10 @@ public class Env {
 	static final Parameter filTorqSpring = new Parameter("filTorqSpring"," Filament Torsional Spring", filTorqSpring_init, " N/radian",Parameter.DOUBLE, false);
 
 	static private double BTransCoeff_init = 1; // range from zero (no brownian motion) to infinity
-	static final Parameter BTransCoeff = new Parameter("BTransCoeff"," Brownian Translational Coefficient", BTransCoeff_init, "");
+	static final Parameter BTransCoeff = new Parameter("BTransCoeff"," Brownian Translational Coefficient", BTransCoeff_init, "").setMutableAtRuntime();
 
 	static private double BRotCoeff_init = 0.5; // range from zero (no brownian motion) to infinity
-	static final Parameter BRotCoeff = new Parameter("BRotCoeff"," Brownian Rotational Coefficient", BRotCoeff_init, "");
+	static final Parameter BRotCoeff = new Parameter("BRotCoeff"," Brownian Rotational Coefficient", BRotCoeff_init, "").setMutableAtRuntime();
 
 	static private final double maxSegAngle_init = 22.5; // degrees
 	static final Parameter maxSegAngle = new Parameter("maxSegAngle"," Max. Angle Between Segments", maxSegAngle_init, " degrees",Parameter.DOUBLE, false);
