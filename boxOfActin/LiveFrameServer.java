@@ -252,6 +252,16 @@ public class LiveFrameServer extends WebSocketServer {
     }
 
     /**
+     * Dispatches an lpBenchmark-topic message to all clients. Called from BoxOfActin
+     * at the same cadence as dispatchBenchmark() when benchmark mode is active.
+     */
+    public static void dispatchLpBenchmark(String lpJson) {
+        if (instance == null || !running || instance.clients.isEmpty()) return;
+        String msg = "{\"topic\":\"lpBenchmark\",\"payload\":" + lpJson + "}";
+        enqueueAll(msg);
+    }
+
+    /**
      * Wraps frameJson in the protocol envelope and enqueues it for every
      * connected client. Non-blocking: if a client's queue is full the oldest
      * frame is dropped to make room. Returns immediately regardless of network.

@@ -3257,3 +3257,70 @@ Viewer: only draw axis lines for segments with `chainType === "defl"` (or where 
 12. Rename Force button text and CSS to Deflection.
 
 Steps 1–3 are prerequisite; steps 4–10 can be done in order; step 11 is independent.
+
+---
+
+## 2026-05-17 — Persistence length benchmark: Phase 2 implementation
+
+Implemented the LP benchmark as designed in Phase 1, with the EWMA adjustment. All 12 steps completed. Compile clean.
+
+### EWMA α and parameter name
+
+`lpEwmaAlpha` declared in `Env.java` with default 0.01 (effective window ~100 output frames). Mutable at runtime via `setMutableAtRuntime()` — appears in the Params panel and can be adjusted mid-run. Range (0,1]; no clamping enforced in the accumulator (user responsibility to keep α sensible).
+
+### Step-by-step discoveries
+
+**Step 1 (`brownianOff`):** Straightforward. Added `boolean brownianOff = false` and `boolean isLpSeg = false` as instance fields in `FilSegment.java` near the other boolean flags. The single-line condition change in `moveThing()` (`if (!Env.brownianFilMotionOff && !brownianOff)`) was correct and compiled without issue.
+
+**Step 2 (remove global flag from begin):** Removed `Env.brownianFilMotionOff = true` from the `if (Env.benchmarkFilament)` block in `begin()`. Verified by grep that no other path depends on the benchmark mode setting this flag automatically. The global `Env.brownianFilMotionOff` flag is unchanged and fully functional for non-benchmark use cases (e.g. biochem-only mode, any future debugging use).
+
+**Step 3 (`isLpSeg` + `chainType` in JSON):** Added `isLpSeg` to `FilSegment`. In `ThreeJSWriter.buildFrameJson()`, the axis overlay is now gated on `!fs.isLpSeg`: deflection-chain segments get `"chainType":"defl"` + `axisX/Y/Z`; LP-chain segments get only `"chainType":"lp"` (no axis arrays, no visual clutter from 90 × 3 = 270 axis lines).
+
+**Step 4 (bench* → deflFil.*):** The mechanical rename covered ~15 fields in `BoxOfActin.java` and 6 references in `ThreeJSWriter.java`. One missed instance was found during compile: `benchAnalyticDefl` in the `-bmDiag` reporting block (line ~515 of `doLoop()`). Fixed in the same edit pass. No other surprises; compile was clean on first attempt after the fix.
+
+**Steps 5–6 (LP chain factories + makeInitialThings):** `makeLpChain(n, yOff, zOff)` added to `FilSegment.java`, identical to `makeBenchmarkChain` except (a) centroid placed at `(cx, yOff, zOff)` and (b) `isLpSeg = true` set on each segment. In `makeInitialThings()`, `n` computed as `Math.round(8.0 / segLenLp)` at runtime (correct for both monCt=32 → n=90 and monCt=64 → n=46). The deflection chain segments are tagged `brownianOff = true` immediately after creation (replacing the removed global flag).
+
+**Step 7 (box sizing):** Updated to `Math.max(deflFil.chainSpanMicrons, lpFil.contourLength)` before multiplying by 3. With LP chain at 8.019 µm, the box auto-sizes to ~24 µm — large enough for both chains and the LP chain's center-of-mass diffusion during a typical run.
+
+**Step 8 (EWMA accumulator + LP JSON):** `accumulateLpData()` uses a single `cMean[k]` array; first frame seeds directly (no decay), subsequent frames apply `α × cNew + (1-α) × cMean`. The log-linear Lp fit in `buildLpJson()` excludes k=0 (hardcoded C(0)=1.0 in the `cc` JSON array) and excludes any k where `cMean[k] ≤ 0.01`. The JSON includes `EI` directly from `Env.EI` (N·m²), `lpTheo` from `Env.persistenceLength` (µm), and `lpMeas` only when the fit yields a positive slope.
+
+**Step 9 (`dispatchLpBenchmark`):** 3-line clone of `dispatchBenchmark` in `LiveFrameServer.java`. Uses `"lpBenchmark"` as the topic string.
+
+**Steps 10–12:** `doLoop()` `deflFil.midSeg`, `logAndDraw()`/`remoteLog()` LP dispatch calls, and viewer Force→Deflection rename all mechanical.
+
+### Viewer LP panel
+
+`#lpPanel` positioned `bottom: 80px; right: 12px` (lower right). `<canvas id="lpCanvas" width="220" height="130">` with Canvas2D. Plot:
+- Y axis: C(s) from −0.15 to 1.05; gridline (dashed) at C=0.
+- X axis: s from 0 to contourLength µm; labels every 2 µm.
+- Measured C(s): solid `#4af` (cyan-blue) polyline; gaps where cc[k] < −0.15 (far-noise exclusion for rendering only — the fit exclusion is `> 0.01`).
+- Theoretical exp(−s/Lp_theo): dashed white/grey line.
+
+Panel hidden until first `lpBenchmark` message (`lpPanel.dataset.hasData` flag). `Persist: ON/OFF` button toggles `lpVisible`; when OFF, the panel hides but LP data keeps accumulating in Java.
+
+### Global brownianFilMotionOff confirmation
+
+`Env.brownianFilMotionOff` remains a static boolean field in `Env.java` (line 232). It is no longer set automatically in `begin()` for benchmark mode; instead, per-segment `brownianOff = true` suppresses Brownian on deflection-chain segments. The global flag can still be set externally (e.g. via a parameter file or debug code) and will suppress Brownian on all filaments that don't have `brownianOff = true` — correct AND-semantics as specified.
+
+### Verification launch command
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg
+```
+
+Expected:
+- Deflection chain at Y=0 with cones, force arrow (labeled in sci-notation pN), downward bend when Deflection: ON.
+- LP chain 8 µm long at Y=−1.5, Z=−0.5 µm, visibly jiggling under Brownian motion.
+- Lower-right LP panel with decay-curve canvas (blue line approaching white dashed theoretical), EI, Lp_theo (15.0 µm), Lp_meas (converging toward 15 µm over thousands of frames), sample count.
+- `lpEwmaAlpha` appears in Mutable Parameters panel.
+- Deflection: ON/OFF button correctly updates HUD and stops/starts force arrow.
+- Persist: ON/OFF hides/shows LP panel.
+
+### Files changed
+
+- `boxOfActin/FilSegment.java` — `brownianOff`, `isLpSeg` fields; `moveThing()` condition; `makeLpChain()`
+- `boxOfActin/Env.java` — `lpEwmaAlpha` parameter
+- `boxOfActin/BoxOfActin.java` — `DeflFil`/`LpFil` inner classes; all `bench*` → `deflFil.*`; `accumulateLpData()`; `buildLpJson()`; LP chain creation; box sizing; logAndDraw/remoteLog dispatch
+- `boxOfActin/ThreeJSWriter.java` — `deflFil.*` references; `chainType` field; axis gating on `!isLpSeg`
+- `boxOfActin/LiveFrameServer.java` — `dispatchLpBenchmark()`
+- `sim_viewer_boa.html` — LP panel CSS/HTML/JS; `updateLpPanel()`; Force→Deflection rename; `defl-off` CSS class

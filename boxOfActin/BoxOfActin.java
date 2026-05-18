@@ -56,33 +56,45 @@ public class BoxOfActin {
 	static double curLogAndDrawTime = 0;
 	static double lastRunDetsTime = 0;
 
-	// F1 benchmark state — populated by makeInitialThings() when Env.benchmarkFilament is set
-	static FilSegment benchFirstSeg = null;
-	static FilSegment benchLastSeg = null;
-	static FilSegment benchMidSeg = null;
-	static Pt3D benchAnchor1 = new Pt3D();
-	static Pt3D benchAnchor2 = new Pt3D();
-	static Pt3D benchTransForce = new Pt3D();
-	static int benchStepCount = 0;
-	static double benchAnalyticDefl = 0;
-	static double benchChainSpanMicrons = 0;  // total span L in µm; set in makeInitialThings, sent in benchmark topic
+	// Deflection benchmark state (pinned ends, applied force, static-deflection measurement)
+	static class DeflFil {
+		FilSegment firstSeg, lastSeg, midSeg;
+		FilSegment[] segs;
+		Pt3D anchor1 = new Pt3D(), anchor2 = new Pt3D();
+		Pt3D transForce = new Pt3D();
+		Pt3D[] initCoords;
+		double analyticDefl, chainSpanMicrons;
+		double tauTheo = Double.NaN, tauMeas = Double.NaN;
+		boolean tauMeasFrozen = false;
+		long releaseStep = -1;
+		double releaseDefl = Double.NaN;
+		boolean prevForceOn = true;
+	}
+	static final DeflFil deflFil = new DeflFil();
 
-	// Increment 1: snapshot struct returned by computeBenchmarkSnapshot()
+	// LP benchmark state (free BCs, Brownian forces, tangent-correlation measurement)
+	static class LpFil {
+		FilSegment[] segs;
+		int nSegs;
+		double segLen, contourLength;  // µm
+		double[] cMean;                // EWMA of C(s); index 0..nSegs-1; k=0 always 1.0
+		boolean cMeanInitialized = false;
+		int sampleCount;
+	}
+	static LpFil lpFil = null;  // null until makeInitialThings() creates it
+
+	// Shared snapshot struct returned by computeBenchmarkSnapshot()
 	static class BenchmarkSnapshot {
 		final double observed, expected, ratio;
 		BenchmarkSnapshot(double obs, double exp, double r) { observed=obs; expected=exp; ratio=r; }
 	}
 
-	// Increment 4: relaxation timer state
-	static boolean benchPrevForceOn = true;
-	static long benchReleaseStep = -1;
-	static double benchReleaseDeflection = Double.NaN;
-
-	// Round 2: τ_meas / τ_theo relaxation timing
-	static double tauTheo = Double.NaN;        // theoretical first-mode relaxation time (s)
-	static double tauMeas = Double.NaN;        // measured 1/e relaxation time (s)
-	static boolean tauMeasFrozen = false;      // true once 1/e crossing is detected
+	// Relaxation-time constants
 	static final double RELAX_INV_E = 1.0 / Math.E;
+
+	// F1 benchmark per-eval counters (search-loop state, not filament state)
+	static int    benchStepCount   = 0;
+	static int    benchMonCt       = 32;   // stored for dynamic settle updates
 
 	// F1 Step 2: search-loop constants
 	static final double BENCH_SEARCH_TOL            = 0.01;   // ±1% deflection ratio tolerance
@@ -96,15 +108,12 @@ public class BoxOfActin {
 	static final double BENCH_SEARCH_INIT_CAND      = 0.1;    // starting c (fracR = fracMoveTorq = c)
 
 	// F1 Step 2: search-loop state — all set by makeInitialThings() before first step
-	static FilSegment[] benchSegs           = null;        // full segment array for per-evaluation reset
-	static Pt3D[]       benchInitCoords     = null;        // stored straight-line center positions
 	static int          benchSearchIter     = 0;
 	static double       benchSearchLo       = 0.0;         // c giving ratio > 1+tol (too soft)
 	static double       benchSearchHi       = -1.0;        // c giving ratio < 1-tol; -1 = not yet found
 	static double       benchSearchCand     = 0.0;         // joint coeff c currently under evaluation
 	static int          benchMinSettleSteps = BENCH_SETTLE_BASE; // updated dynamically: max(5τ_slow, base)
 	static double       benchPrevCheckRatio = Double.NaN;  // ratio at previous settle check
-	static int          benchMonCt          = BENCH_SETTLE_REF_MONOMER_CT; // stored for dynamic settle updates
 
 	public BoxOfActin (String[] args) {
 		
@@ -115,7 +124,6 @@ public class BoxOfActin {
 	public static void begin (String[] args) {
 		parseArgs(args);
 		if (Env.benchmarkFilament) {
-			Env.brownianFilMotionOff = true;
 			Env.remote = true;
 			Env.paused = false; // benchmark runs headless; no WebSocket client to send resume
 			Env.simOutsideBug.setActive(false); // suppress Listeria bug + ActA creation
@@ -440,15 +448,15 @@ public class BoxOfActin {
 				stepTimer.stopInc();
 
 				// F1 benchmark: apply transverse force to midpoint segment before integration
-				if (Env.benchmarkFilament && benchMidSeg != null && Env.benchmarkForceOn.getValue() != 0) {
-					benchMidSeg.incForceSum(benchTransForce);
+				if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
+					deflFil.midSeg.incForceSum(deflFil.transForce);
 				}
 				// Round 3 diagnostic: trace force application path
-				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
+				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
 					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f) veloc.y=%.4e%n",
-						benchStepCount, benchMidSeg.forceSum.x, benchMidSeg.forceSum.y, benchMidSeg.forceSum.z,
-						benchMidSeg.coord.x, benchMidSeg.coord.y, benchMidSeg.coord.z,
-						benchMidSeg.veloc.y);
+						benchStepCount, deflFil.midSeg.forceSum.x, deflFil.midSeg.forceSum.y, deflFil.midSeg.forceSum.z,
+						deflFil.midSeg.coord.x, deflFil.midSeg.coord.y, deflFil.midSeg.coord.z,
+						deflFil.midSeg.veloc.y);
 				}
 
 				moveTimer.start();
@@ -459,9 +467,9 @@ public class BoxOfActin {
 				// F1 benchmark: restore pinned endpoints after integration
 				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
 				// Round 3 diagnostic: midpoint coord after integration + pin correction
-				if (Env.benchmarkFilament && benchMidSeg != null && benchStepCount < 10) {
+				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
 					System.err.printf("[BENCH:POST] step=%d coord.y=%.6e veloc.y=%.4e%n",
-						benchStepCount, benchMidSeg.coord.y, benchMidSeg.veloc.y);
+						benchStepCount, deflFil.midSeg.coord.y, deflFil.midSeg.veloc.y);
 				}
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
@@ -504,7 +512,7 @@ public class BoxOfActin {
 					benchStepCount++;
 					if (benchStepCount % 5000 == 0) {
 						double ratio = computeDeflectionRatio();
-						double defl = benchAnalyticDefl * ratio;
+						double defl = deflFil.analyticDefl * ratio;
 						double dRatio = Double.isNaN(benchPrevCheckRatio) ? Double.NaN : ratio - benchPrevCheckRatio;
 						System.out.printf("[BMDIAG] step=%8d  simT=%8.2fs  ratio=%.6f  defl=%.6fµm  dRatio=%s%n",
 							benchStepCount, Env.simulationTime, ratio, defl,
@@ -657,32 +665,32 @@ public class BoxOfActin {
 	// centroid translation and rotation (rotation pivots about centroid, not pin, so the
 	// endpoint drifts; the correction below restores it exactly regardless of the source).
 	private static void applyBenchmarkPins() {
-		if (benchFirstSeg == null || benchLastSeg == null) return;
-		benchFirstSeg.coord.x += benchAnchor1.x - benchFirstSeg.end1.x;
-		benchFirstSeg.coord.y += benchAnchor1.y - benchFirstSeg.end1.y;
-		benchFirstSeg.coord.z += benchAnchor1.z - benchFirstSeg.end1.z;
-		benchFirstSeg.initialize();
-		benchLastSeg.coord.x += benchAnchor2.x - benchLastSeg.end2.x;
-		benchLastSeg.coord.y += benchAnchor2.y - benchLastSeg.end2.y;
-		benchLastSeg.coord.z += benchAnchor2.z - benchLastSeg.end2.z;
-		benchLastSeg.initialize();
+		if (deflFil.firstSeg == null || deflFil.lastSeg == null) return;
+		deflFil.firstSeg.coord.x += deflFil.anchor1.x - deflFil.firstSeg.end1.x;
+		deflFil.firstSeg.coord.y += deflFil.anchor1.y - deflFil.firstSeg.end1.y;
+		deflFil.firstSeg.coord.z += deflFil.anchor1.z - deflFil.firstSeg.end1.z;
+		deflFil.firstSeg.initialize();
+		deflFil.lastSeg.coord.x += deflFil.anchor2.x - deflFil.lastSeg.end2.x;
+		deflFil.lastSeg.coord.y += deflFil.anchor2.y - deflFil.lastSeg.end2.y;
+		deflFil.lastSeg.coord.z += deflFil.anchor2.z - deflFil.lastSeg.end2.z;
+		deflFil.lastSeg.initialize();
 	}
 
 	// F1 benchmark: compute midpoint perpendicular deflection as a full snapshot.
 	private static BenchmarkSnapshot computeBenchmarkSnapshot() {
-		if (benchMidSeg == null) return null;
-		double ax = benchAnchor2.x - benchAnchor1.x;
-		double ay = benchAnchor2.y - benchAnchor1.y;
-		double az = benchAnchor2.z - benchAnchor1.z;
+		if (deflFil.midSeg == null) return null;
+		double ax = deflFil.anchor2.x - deflFil.anchor1.x;
+		double ay = deflFil.anchor2.y - deflFil.anchor1.y;
+		double az = deflFil.anchor2.z - deflFil.anchor1.z;
 		double aLen = Math.sqrt(ax*ax + ay*ay + az*az);
 		ax /= aLen; ay /= aLen; az /= aLen;
-		double px = benchMidSeg.coord.x - benchAnchor1.x;
-		double py = benchMidSeg.coord.y - benchAnchor1.y;
-		double pz = benchMidSeg.coord.z - benchAnchor1.z;
+		double px = deflFil.midSeg.coord.x - deflFil.anchor1.x;
+		double py = deflFil.midSeg.coord.y - deflFil.anchor1.y;
+		double pz = deflFil.midSeg.coord.z - deflFil.anchor1.z;
 		double proj = px*ax + py*ay + pz*az;
 		double perpX = px - proj*ax, perpY = py - proj*ay, perpZ = pz - proj*az;
 		double obs = Math.sqrt(perpX*perpX + perpY*perpY + perpZ*perpZ);
-		double exp = benchAnalyticDefl;
+		double exp = deflFil.analyticDefl;
 		double ratio = exp > 0 ? obs / exp : Double.NaN;
 		return new BenchmarkSnapshot(obs, exp, ratio);
 	}
@@ -695,7 +703,7 @@ public class BoxOfActin {
 
 	// F1 benchmark: print midpoint perpendicular deflection vs analytic FL³/(48EI).
 	private static void reportBenchmarkDeflection(String label) {
-		if (benchMidSeg == null) return;
+		if (deflFil.midSeg == null) return;
 		BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 		if (snap == null) return;
 		System.out.println("[BENCH:" + label + "] step=" + benchStepCount
@@ -704,55 +712,125 @@ public class BoxOfActin {
 			+ "  ratio=" + String.format("%.4f", snap.ratio));
 	}
 
-	// Build the benchmark WebSocket topic payload JSON.
+	// Build the deflection benchmark WebSocket topic payload JSON.
 	// Handles force-toggle state transitions and 1/e relaxation-time detection.
 	private static String buildBenchmarkJson() {
 		BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 		if (snap == null) return null;
 		boolean forceOn = Env.benchmarkForceOn.getValue() != 0;
-		if (forceOn != benchPrevForceOn) {
+		if (forceOn != deflFil.prevForceOn) {
 			if (!forceOn) {
-				benchReleaseStep = benchStepCount;
-				benchReleaseDeflection = snap.observed;
-				tauMeas = Double.NaN;
-				tauMeasFrozen = false;
+				deflFil.releaseStep = benchStepCount;
+				deflFil.releaseDefl = snap.observed;
+				deflFil.tauMeas = Double.NaN;
+				deflFil.tauMeasFrozen = false;
 			} else {
-				benchReleaseStep = -1;
-				benchReleaseDeflection = Double.NaN;
-				tauMeas = Double.NaN;
-				tauMeasFrozen = false;
+				deflFil.releaseStep = -1;
+				deflFil.releaseDefl = Double.NaN;
+				deflFil.tauMeas = Double.NaN;
+				deflFil.tauMeasFrozen = false;
 			}
-			benchPrevForceOn = forceOn;
+			deflFil.prevForceOn = forceOn;
 		}
 		// Detect 1/e crossing (tauMeas freeze)
-		if (!forceOn && benchReleaseStep >= 0 && !tauMeasFrozen
-				&& !Double.isNaN(benchReleaseDeflection) && benchReleaseDeflection > 0) {
-			double fraction = snap.observed / benchReleaseDeflection;
+		if (!forceOn && deflFil.releaseStep >= 0 && !deflFil.tauMeasFrozen
+				&& !Double.isNaN(deflFil.releaseDefl) && deflFil.releaseDefl > 0) {
+			double fraction = snap.observed / deflFil.releaseDefl;
 			if (fraction <= RELAX_INV_E) {
-				long elapsed = (long) benchStepCount - benchReleaseStep;
-				tauMeas = elapsed * Env.deltaT.getValue();
-				tauMeasFrozen = true;
+				long elapsed = (long) benchStepCount - deflFil.releaseStep;
+				deflFil.tauMeas = elapsed * Env.deltaT.getValue();
+				deflFil.tauMeasFrozen = true;
 			}
 		}
 		StringBuilder sb = new StringBuilder(256);
 		sb.append(String.format(
 			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f,\"viscosity\":%.4f",
-			Env.benchmarkNSegs, benchMonCt, benchChainSpanMicrons, Env.aeta.getValue()));
+			Env.benchmarkNSegs, benchMonCt, deflFil.chainSpanMicrons, Env.aeta.getValue()));
 		sb.append(String.format(
 			",\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
 			snap.observed, snap.expected, snap.ratio, forceOn, (long) benchStepCount));
-		if (!Double.isNaN(tauTheo)) {
-			sb.append(String.format(",\"tauTheo\":%.4f", tauTheo));
+		if (!Double.isNaN(deflFil.tauTheo)) {
+			sb.append(String.format(",\"tauTheo\":%.4f", deflFil.tauTheo));
 		}
-		if (!forceOn && benchReleaseStep >= 0) {
-			if (tauMeasFrozen) {
-				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":true", tauMeas));
+		if (!forceOn && deflFil.releaseStep >= 0) {
+			if (deflFil.tauMeasFrozen) {
+				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":true", deflFil.tauMeas));
 			} else {
-				long elapsed = (long) benchStepCount - benchReleaseStep;
+				long elapsed = (long) benchStepCount - deflFil.releaseStep;
 				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":false", elapsed * Env.deltaT.getValue()));
 			}
 		}
 		sb.append("}");
+		return sb.toString();
+	}
+
+	// LP benchmark: accumulate EWMA of tangent-tangent correlation C(s) for this output frame.
+	// Called once per output frame inside synchronized(Env.safeO). Reads segment uVec — read-only, safe.
+	private static void accumulateLpData() {
+		if (lpFil == null) return;
+		int nLp = lpFil.nSegs;
+		FilSegment[] lpSegs = lpFil.segs;
+		double alpha = Env.lpEwmaAlpha.getValue();
+		// Compute per-frame mean C(s) for each separation k=1..nLp-1
+		for (int k = 1; k < nLp; k++) {
+			int pairs = 0;
+			double sum = 0.0;
+			for (int i = 0; i + k < nLp; i++) {
+				sum += Pt3D.Dot(lpSegs[i].uVec, lpSegs[i + k].uVec);
+				pairs++;
+			}
+			double cNew = (pairs > 0) ? sum / pairs : 1.0;
+			if (!lpFil.cMeanInitialized) {
+				lpFil.cMean[k] = cNew;
+			} else {
+				lpFil.cMean[k] = alpha * cNew + (1.0 - alpha) * lpFil.cMean[k];
+			}
+		}
+		if (!lpFil.cMeanInitialized) lpFil.cMeanInitialized = true;
+		lpFil.sampleCount++;
+	}
+
+	// LP benchmark: build the lpBenchmark WebSocket topic payload JSON.
+	// Performs log-linear Lp fit on the current cMean array.
+	private static String buildLpJson() {
+		if (lpFil == null || !lpFil.cMeanInitialized) return null;
+		int nLp = lpFil.nSegs;
+		double segLen = lpFil.segLen;
+		// Log-linear regression: log(C(s)) = a + b*s, Lp = -1/b
+		double sumS = 0, sumLogC = 0, sumS2 = 0, sumSlogC = 0;
+		int nFit = 0;
+		for (int k = 1; k < nLp; k++) {
+			double ck = lpFil.cMean[k];
+			if (ck > 0.01) {
+				double sk = k * segLen;
+				double logC = Math.log(ck);
+				sumS += sk; sumLogC += logC;
+				sumS2 += sk * sk; sumSlogC += sk * logC;
+				nFit++;
+			}
+		}
+		double lpMeas = Double.NaN;
+		if (nFit >= 2) {
+			double meanS = sumS / nFit, meanLogC = sumLogC / nFit;
+			double denom = sumS2 - nFit * meanS * meanS;
+			if (Math.abs(denom) > 1e-30) {
+				double b = (sumSlogC - nFit * meanS * meanLogC) / denom;
+				if (b < 0) lpMeas = -1.0 / b;
+			}
+		}
+		// Build JSON
+		StringBuilder sb = new StringBuilder(nLp * 10 + 128);
+		sb.append(String.format(
+			"{\"nSegs\":%d,\"segLen\":%.5g,\"contourLength\":%.4f,\"EI\":%.4e,\"lpTheo\":%.4f,\"samples\":%d",
+			nLp, segLen, lpFil.contourLength, Env.EI, Env.persistenceLength, lpFil.sampleCount));
+		if (!Double.isNaN(lpMeas)) {
+			sb.append(String.format(",\"lpMeas\":%.4f", lpMeas));
+		}
+		sb.append(",\"cc\":[1.0");
+		for (int k = 1; k < nLp; k++) {
+			sb.append(String.format(",%.5g", lpFil.cMean[k]));
+		}
+		sb.append("]}");
 		return sb.toString();
 	}
 
@@ -769,10 +847,10 @@ public class BoxOfActin {
 	// F1 Step 2: restore all benchmark segments to their initial straight-line configuration.
 	// Called at the safe point before each new search evaluation.
 	private static void resetBenchmarkChain() {
-		if (benchSegs == null || benchInitCoords == null) return;
-		for (int i = 0; i < benchSegs.length; i++) {
-			FilSegment s = benchSegs[i];
-			s.coord.setVals(benchInitCoords[i].x, benchInitCoords[i].y, benchInitCoords[i].z);
+		if (deflFil.segs == null || deflFil.initCoords == null) return;
+		for (int i = 0; i < deflFil.segs.length; i++) {
+			FilSegment s = deflFil.segs[i];
+			s.coord.setVals(deflFil.initCoords[i].x, deflFil.initCoords[i].y, deflFil.initCoords[i].z);
 			s.uVec.setVals(1, 0, 0);
 			s.yVec.setVals(0, 1, 0);
 			s.initialize();
@@ -816,20 +894,20 @@ public class BoxOfActin {
 				for (int i = 0; i < FilSegment.filSegmentCt; i++) {
 					FilSegment.theFilSegments[i].calculateProperties();
 				}
-				if (Env.benchmarkFilament && benchMidSeg != null && benchSegs != null) {
-					double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
-					double zetaPerp = benchMidSeg.bTransGam.y;
-					tauTheo = benchSegs.length * zetaPerp * Math.pow(spanM, 3)
+				if (Env.benchmarkFilament && deflFil.midSeg != null && deflFil.segs != null) {
+					double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
+					double zetaPerp = deflFil.midSeg.bTransGam.y;
+					deflFil.tauTheo = deflFil.segs.length * zetaPerp * Math.pow(spanM, 3)
 						/ (Env.EI * Math.pow(Math.PI, 4));
 				}
 			}
 			// Force-frac refresh: recompute transverse force and analytic deflection immediately.
-			if ("benchmarkForceFrac".equals(change.param.label) && Env.benchmarkFilament && benchFirstSeg != null) {
-				double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+			if ("benchmarkForceFrac".equals(change.param.label) && Env.benchmarkFilament && deflFil.firstSeg != null) {
+				double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 				if (spanM > 1e-15) {
 					double newForceN = 48.0 * Env.EI * change.newValue / (spanM * spanM);
-					benchTransForce.setVals(0, -newForceN, 0);
-					benchAnalyticDefl = change.newValue * spanM * 1e6;
+					deflFil.transForce.setVals(0, -newForceN, 0);
+					deflFil.analyticDefl = change.newValue * spanM * 1e6;
 				}
 			}
 			LiveFrameServer.dispatchParamAck(change.param.label, oldValue, change.newValue);
@@ -886,13 +964,16 @@ public class BoxOfActin {
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
+				accumulateLpData();
+				String lpJson = buildLpJson();
+				if (lpJson != null) LiveFrameServer.dispatchLpBenchmark(lpJson);
 			}
 			threeJSCounter = 0;
 		}
 
 		if (remoteOutCounter >= Env.remoteReportInterval.getValue()) {
 			if (Env.logFiles) { FileOps.writeToOutFile(); }
-			
+
 			if (Env.glidingAssay.isActive()) {
 				MyosinFixed.glidingAssayDataSetRun ();
 				//FileOps.writeToGAssayFile();
@@ -959,6 +1040,9 @@ public class BoxOfActin {
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
+				accumulateLpData();
+				String lpJson = buildLpJson();
+				if (lpJson != null) LiveFrameServer.dispatchLpBenchmark(lpJson);
 			}
 			threeJSCounter = 0;
 		}
@@ -967,36 +1051,76 @@ public class BoxOfActin {
 	public static void makeInitialThings() {
 		if (Env.benchmarkFilament) {
 			Env.noMonomersSimd.setActive(true);
+
+			// --- Deflection benchmark chain ---
 			FilSegment[] segs = FilSegment.makeBenchmarkChain(Env.benchmarkNSegs);
 			int n = segs.length;
-			benchFirstSeg = segs[0];
-			benchLastSeg  = segs[n - 1];
-			benchMidSeg   = segs[n / 2];
-			benchAnchor1.setVals(segs[0].end1.x, segs[0].end1.y, segs[0].end1.z);
-			benchAnchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
-			double spanM = Pt3D.ptDist(benchAnchor1, benchAnchor2) * 1e-6;
+			deflFil.firstSeg = segs[0];
+			deflFil.lastSeg  = segs[n - 1];
+			deflFil.midSeg   = segs[n / 2];
+			deflFil.anchor1.setVals(segs[0].end1.x, segs[0].end1.y, segs[0].end1.z);
+			deflFil.anchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
+			double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac.getValue() / (spanM * spanM);
-			benchTransForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
-			benchAnalyticDefl = Env.benchmarkForceFrac.getValue() * spanM * 1e6; // µm
-			System.out.printf("[BENCH] %d-seg × %d-mon/seg chain, span=%.4f µm, F=%.3e N, analytic δ=%.4f µm%n",
-				n, benchMonCt, spanM * 1e6, forceN, benchAnalyticDefl);
-			System.err.printf("[BENCH:FORCE] benchTransForce=(%.4e, %.4e, %.4e) N  EI=%.4e  frac=%.4f  spanM=%.4e%n",
-				benchTransForce.x, benchTransForce.y, benchTransForce.z,
-				Env.EI, Env.benchmarkForceFrac.getValue(), spanM);
-			// Step 2: store segments and initial straight-line positions for per-evaluation reset
-			benchSegs = segs;
-			benchInitCoords = new Pt3D[n];
+			deflFil.transForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
+			deflFil.analyticDefl = Env.benchmarkForceFrac.getValue() * spanM * 1e6; // µm
+			deflFil.segs = segs;
+			deflFil.initCoords = new Pt3D[n];
 			for (int i = 0; i < n; i++) {
-				benchInitCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
+				deflFil.initCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
+			}
+			// Suppress Brownian forces on deflection chain (per-segment, replacing removed global flag)
+			for (FilSegment s : segs) s.brownianOff = true;
+
+			benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+			deflFil.chainSpanMicrons = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2);
+
+			System.out.printf("[BENCH] %d-seg × %d-mon/seg chain, span=%.4f µm, F=%.3e N, analytic δ=%.4f µm%n",
+				n, benchMonCt, spanM * 1e6, forceN, deflFil.analyticDefl);
+			System.err.printf("[BENCH:FORCE] deflFil.transForce=(%.4e, %.4e, %.4e) N  EI=%.4e  frac=%.4f  spanM=%.4e%n",
+				deflFil.transForce.x, deflFil.transForce.y, deflFil.transForce.z,
+				Env.EI, Env.benchmarkForceFrac.getValue(), spanM);
+
+			benchStepCount = 0;
+			deflFil.prevForceOn = true;
+			deflFil.releaseStep = -1;
+			deflFil.releaseDefl = Double.NaN;
+
+			// τ_theo = N × ζ_perp_seg × L³ / (EI × π⁴)  (first bending mode, pinned-pinned)
+			double zetaPerp = deflFil.midSeg.bTransGam.y;
+			deflFil.tauTheo = n * zetaPerp * Math.pow(spanM, 3) / (Env.EI * Math.pow(Math.PI, 4));
+			deflFil.tauMeas = Double.NaN;
+			deflFil.tauMeasFrozen = false;
+			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", deflFil.tauTheo, zetaPerp);
+
+			// Round 3 diagnostic: print each segment's center coord, length, and anchor flag
+			for (int i = 0; i < n; i++) {
+				boolean isAnchor = (segs[i] == deflFil.firstSeg || segs[i] == deflFil.lastSeg);
+				System.err.printf("[BENCH:CHAIN] i=%d coord=(%.4f,%.4f,%.4f) length=%.4f isAnchor=%b%n",
+					i, segs[i].coord.x, segs[i].coord.y, segs[i].coord.z, segs[i].length, isAnchor);
 			}
 
-			// benchMonCt stored for dynamic settle updates in doLoop
-			benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+			// --- LP benchmark chain (free BCs, Brownian forces) ---
+			int monCtLp = benchMonCt;
+			double segLenLp = (monCtLp + 1) * FilSegment.halfmono; // µm
+			int nLp = (int) Math.round(8.0 / segLenLp);
+			double lpYOff = -1.5, lpZOff = -0.5;
+			FilSegment[] lpSegs = FilSegment.makeLpChain(nLp, lpYOff, lpZOff);
+			lpFil = new LpFil();
+			lpFil.segs = lpSegs;
+			lpFil.nSegs = nLp;
+			lpFil.segLen = segLenLp;
+			lpFil.contourLength = nLp * segLenLp;
+			lpFil.cMean = new double[nLp];
+			java.util.Arrays.fill(lpFil.cMean, 1.0); // placeholder; real data accumulates from first frame
+			lpFil.cMeanInitialized = false;
+			lpFil.sampleCount = 0;
+			System.out.printf("[LP] %d-seg × %d-mon/seg LP chain, contour=%.4f µm, offset=(0, %.1f, %.1f) µm%n",
+				nLp, monCtLp, lpFil.contourLength, lpYOff, lpZOff);
 
-			// Fix 2: auto-size box to 3× chain span along X and Y so wall collisions never contaminate
-			double totalSpan = Pt3D.ptDist(benchAnchor1, benchAnchor2); // µm
-			benchChainSpanMicrons = totalSpan;
-			double benchBoxDim = Math.max(totalSpan * 3.0, Env.boxXDim.getValue());
+			// Box sizing: use the larger of deflection span and LP contour length
+			double maxSpan = Math.max(deflFil.chainSpanMicrons, lpFil.contourLength);
+			double benchBoxDim = Math.max(maxSpan * 3.0, Env.boxXDim.getValue());
 			if (Thing.theBox instanceof Chamber) {
 				Chamber.dimX = benchBoxDim;
 				Chamber.dimY = Math.max(benchBoxDim, Env.boxYDim.getValue());
@@ -1008,30 +1132,10 @@ public class BoxOfActin {
 					+ String.format("%.3f", Chamber.dimZ) + " µm");
 			}
 
-			benchStepCount = 0;
-			benchPrevForceOn = true;
-			benchReleaseStep = -1;
-			benchReleaseDeflection = Double.NaN;
-
-			// Round 2: τ_theo = N × ζ_perp_seg × L³ / (EI × π⁴)  (first bending mode, pinned-pinned)
-			// ζ_perp_seg = bTransGam.y (perpendicular drag per segment, N·s/m; set in calculateProperties())
-			double zetaPerp = benchMidSeg.bTransGam.y;
-			tauTheo = n * zetaPerp * Math.pow(spanM, 3) / (Env.EI * Math.pow(Math.PI, 4));
-			tauMeas = Double.NaN;
-			tauMeasFrozen = false;
-			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", tauTheo, zetaPerp);
-
-			// Round 3 diagnostic: print each segment's center coord, length, and anchor flag
-			for (int i = 0; i < n; i++) {
-				boolean isAnchor = (segs[i] == benchFirstSeg || segs[i] == benchLastSeg);
-				System.err.printf("[BENCH:CHAIN] i=%d coord=(%.4f,%.4f,%.4f) length=%.4f isAnchor=%b%n",
-					i, segs[i].coord.x, segs[i].coord.y, segs[i].coord.z, segs[i].length, isAnchor);
-			}
-
 			if (Env.benchmarkManual) {
 				// Manual tuning mode — no search loop; params stay at their current (param-file) values
 				System.out.printf("[BENCH:MANUAL] chain ready: span=%.4f µm  fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f%n",
-					totalSpan, Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue());
+					deflFil.chainSpanMicrons, Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue());
 				return;
 			}
 
@@ -1054,9 +1158,9 @@ public class BoxOfActin {
 
 			if (Env.benchmarkDiag) {
 				System.out.printf("[BMDIAG] fixed-param diagnostic: c=fracR=fracMoveTorq=%.4f  fracMove=%.4f  monomerCt=%d  span=%.4f µm%n",
-					Env.fracMoveTorq.getValue(), Env.fracMove.getValue(), benchMonCt, totalSpan);
+					Env.fracMoveTorq.getValue(), Env.fracMove.getValue(), benchMonCt, deflFil.chainSpanMicrons);
 				System.out.printf("[BMDIAG] analytic δ=%.6f µm  reporting every 5000 steps  cap=5,000,000 steps%n",
-					benchAnalyticDefl);
+					deflFil.analyticDefl);
 			}
 			return;
 		}

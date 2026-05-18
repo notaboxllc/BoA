@@ -77,11 +77,14 @@ public class ThreeJSWriter {
                     fs.end1.x, fs.end1.y, fs.end1.z,
                     fs.end2.x, fs.end2.y, fs.end2.z));
             if (Env.benchmarkFilament) {
-                sb.append(String.format(
-                    ",\"axisX\":[%.4g,%.4g,%.4g],\"axisY\":[%.4g,%.4g,%.4g],\"axisZ\":[%.4g,%.4g,%.4g]",
-                    fs.uVec.x, fs.uVec.y, fs.uVec.z,
-                    fs.yVec.x, fs.yVec.y, fs.yVec.z,
-                    fs.zVec.x, fs.zVec.y, fs.zVec.z));
+                sb.append(fs.isLpSeg ? ",\"chainType\":\"lp\"" : ",\"chainType\":\"defl\"");
+                if (!fs.isLpSeg) {
+                    sb.append(String.format(
+                        ",\"axisX\":[%.4g,%.4g,%.4g],\"axisY\":[%.4g,%.4g,%.4g],\"axisZ\":[%.4g,%.4g,%.4g]",
+                        fs.uVec.x, fs.uVec.y, fs.uVec.z,
+                        fs.yVec.x, fs.yVec.y, fs.yVec.z,
+                        fs.zVec.x, fs.zVec.y, fs.zVec.z));
+                }
             }
             sb.append("}");
             first = false;
@@ -125,22 +128,22 @@ public class ThreeJSWriter {
         // Benchmark overlay: pinned endpoint anchors and force arrows (absent in non-benchmark frames).
         if (Env.benchmarkFilament) {
             sb.append(",\"pinnedEndpoints\":");
-            if (BoxOfActin.benchFirstSeg != null && BoxOfActin.benchLastSeg != null) {
+            if (BoxOfActin.deflFil.firstSeg != null && BoxOfActin.deflFil.lastSeg != null) {
                 sb.append(String.format("[{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}]",
-                    BoxOfActin.benchAnchor1.x, BoxOfActin.benchAnchor1.y, BoxOfActin.benchAnchor1.z,
-                    BoxOfActin.benchAnchor2.x, BoxOfActin.benchAnchor2.y, BoxOfActin.benchAnchor2.z));
+                    BoxOfActin.deflFil.anchor1.x, BoxOfActin.deflFil.anchor1.y, BoxOfActin.deflFil.anchor1.z,
+                    BoxOfActin.deflFil.anchor2.x, BoxOfActin.deflFil.anchor2.y, BoxOfActin.deflFil.anchor2.z));
             } else {
                 sb.append("null");
             }
             sb.append(",\"forceArrows\":[");
-            if (BoxOfActin.benchMidSeg != null) {
+            if (BoxOfActin.deflFil.midSeg != null) {
                 boolean forceOn = Env.benchmarkForceOn.getValue() != 0;
-                double ax = BoxOfActin.benchMidSeg.coord.x;
-                double ay = BoxOfActin.benchMidSeg.coord.y;
-                double az = BoxOfActin.benchMidSeg.coord.z;
-                double fx = BoxOfActin.benchTransForce.x;
-                double fy = BoxOfActin.benchTransForce.y;
-                double fz = BoxOfActin.benchTransForce.z;
+                double ax = BoxOfActin.deflFil.midSeg.coord.x;
+                double ay = BoxOfActin.deflFil.midSeg.coord.y;
+                double az = BoxOfActin.deflFil.midSeg.coord.z;
+                double fx = BoxOfActin.deflFil.transForce.x;
+                double fy = BoxOfActin.deflFil.transForce.y;
+                double fz = BoxOfActin.deflFil.transForce.z;
                 double fmag = Math.sqrt(fx*fx + fy*fy + fz*fz);
                 double dnx = fmag > 1e-30 ? fx/fmag : 0.0;
                 double dny = fmag > 1e-30 ? fy/fmag : -1.0;

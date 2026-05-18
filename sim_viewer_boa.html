@@ -385,8 +385,36 @@
       margin-top: 5px;
       pointer-events: auto;
     }
-    #btnBenchForce.force-off { border-color: #833; color: #f88; }
-    #btnBenchForce.force-off:hover:not(:disabled) { border-color: #f44; color: #faa; }
+    #btnBenchForce.defl-off { border-color: #833; color: #f88; }
+    #btnBenchForce.defl-off:hover:not(:disabled) { border-color: #f44; color: #faa; }
+
+    /* ── LP benchmark panel ──────────────────────────────────────────────────── */
+    #lpPanel {
+      position: absolute;
+      bottom: 80px;
+      right: 12px;
+      background: rgba(0,0,0,0.70);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 10px;
+      z-index: 10;
+      display: none;
+      font: 12px/1.9 monospace;
+      color: #ddd;
+      text-align: right;
+      pointer-events: auto;
+    }
+    #lpPanel.active { display: block; }
+    #lpPanel .lp-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; }
+    #lpCanvas { display: block; margin: 4px 0; background: rgba(0,0,0,0.4); border: 1px solid #444; }
+    #lpReadout { color: #ddd; line-height: 1.8; }
+    #btnPersist {
+      display: block;
+      width: 100%;
+      margin-top: 5px;
+      pointer-events: auto;
+    }
+    #btnPersist.persist-off { border-color: #555; color: #888; }
   </style>
 </head>
 <body>
@@ -426,7 +454,14 @@
   <div id="bmHudRows"></div>
   <div id="bmTauMeasRow" class="bm-relax" style="display:none"></div>
   <div id="bmTauTheoRow" class="bm-relax" style="display:none"></div>
-  <button id="btnBenchForce" class="liveBtn">Force: ON</button>
+  <button id="btnBenchForce" class="liveBtn">Deflection: ON</button>
+</div>
+
+<div id="lpPanel">
+  <div class="lp-title">— Persistence Length —</div>
+  <canvas id="lpCanvas" width="220" height="130"></canvas>
+  <div id="lpReadout">samples: 0</div>
+  <button id="btnPersist" class="liveBtn">Persist: ON</button>
 </div>
 
 <div id="controls">
@@ -1419,6 +1454,8 @@ if (LIVE_MODE) {
         handleParamAck(env.payload);
       } else if (env.topic === 'benchmark') {
         updateBenchmarkHud(env.payload);
+      } else if (env.topic === 'lpBenchmark') {
+        updateLpPanel(env.payload);
       }
     };
     ws.onclose = () => {
@@ -1574,8 +1611,8 @@ if (LIVE_MODE) {
       chkAxes.checked = true;
     }
 
-    btnBenchForce.textContent = bmForceOn ? 'Force: ON' : 'Force: OFF';
-    btnBenchForce.classList.toggle('force-off', !bmForceOn);
+    btnBenchForce.textContent = bmForceOn ? 'Deflection: ON' : 'Deflection: OFF';
+    btnBenchForce.classList.toggle('defl-off', !bmForceOn);
 
     // Chain config block (static during run, but sent every frame for simplicity).
     if (bm.chainSegments !== undefined) {
@@ -1610,6 +1647,124 @@ if (LIVE_MODE) {
       ws.send(JSON.stringify({ action: 'setParam', name: 'benchmarkForceOn', value: bmForceOn ? 'false' : 'true' }));
     }
   });
+
+  // ── LP benchmark panel ────────────────────────────────────────────────────
+  const lpPanel    = document.getElementById('lpPanel');
+  const lpCanvas   = document.getElementById('lpCanvas');
+  const lpReadout  = document.getElementById('lpReadout');
+  const btnPersist = document.getElementById('btnPersist');
+  const lpCtx      = lpCanvas.getContext('2d');
+  let lpVisible    = true;  // true = panel shown when active; toggled by btnPersist
+
+  btnPersist.addEventListener('click', () => {
+    lpVisible = !lpVisible;
+    btnPersist.textContent = lpVisible ? 'Persist: ON' : 'Persist: OFF';
+    btnPersist.classList.toggle('persist-off', !lpVisible);
+    if (!lpVisible) lpPanel.classList.remove('active');
+    else if (lpPanel.dataset.hasData) lpPanel.classList.add('active');
+  });
+
+  function drawLpCurve(lp) {
+    const W = lpCanvas.width, H = lpCanvas.height;
+    const ml = 28, mb = 18, mt = 5, mr = 5;  // margins
+    const pw = W - ml - mr, ph = H - mt - mb; // plot area width/height
+
+    lpCtx.clearRect(0, 0, W, H);
+
+    const nSeg = lp.nSegs;
+    const cLen = lp.contourLength;
+    const cc   = lp.cc;
+
+    // Map s (µm) → canvas x, C(s) → canvas y
+    function sx(s) { return ml + (s / cLen) * pw; }
+    function cy(c) { return mt + (1.0 - Math.max(-0.15, Math.min(1.05, c))) / 1.2 * ph; }
+
+    // Grid: C=0 line
+    lpCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+    lpCtx.lineWidth = 1;
+    lpCtx.setLineDash([3, 4]);
+    lpCtx.beginPath();
+    lpCtx.moveTo(ml, cy(0));
+    lpCtx.lineTo(ml + pw, cy(0));
+    lpCtx.stroke();
+    lpCtx.setLineDash([]);
+
+    // Axes
+    lpCtx.strokeStyle = '#666';
+    lpCtx.lineWidth = 1;
+    lpCtx.beginPath();
+    lpCtx.moveTo(ml, mt); lpCtx.lineTo(ml, mt + ph);  // Y axis
+    lpCtx.moveTo(ml, mt + ph); lpCtx.lineTo(ml + pw, mt + ph);  // X axis
+    lpCtx.stroke();
+
+    // Axis labels
+    lpCtx.fillStyle = '#888';
+    lpCtx.font = '9px monospace';
+    lpCtx.textAlign = 'right';
+    lpCtx.fillText('1', ml - 2, cy(1.0) + 3);
+    lpCtx.fillText('0', ml - 2, cy(0.0) + 3);
+    lpCtx.textAlign = 'center';
+    // X tick every 2 µm
+    for (let s = 0; s <= cLen; s += 2) {
+      const x = sx(s);
+      lpCtx.fillText(s.toFixed(0), x, mt + ph + 12);
+    }
+    lpCtx.fillStyle = '#666';
+    lpCtx.font = '9px monospace';
+    lpCtx.textAlign = 'right';
+    lpCtx.fillText('µm', ml + pw + mr - 2, mt + ph + 12);
+
+    // Theoretical curve: exp(-s / lpTheo)
+    const lpTheo = lp.lpTheo;
+    lpCtx.strokeStyle = 'rgba(255,255,255,0.55)';
+    lpCtx.lineWidth = 1;
+    lpCtx.setLineDash([4, 4]);
+    lpCtx.beginPath();
+    let firstTheo = true;
+    for (let k = 0; k < nSeg; k++) {
+      const s = k * lp.segLen;
+      const cTheo = Math.exp(-s / lpTheo);
+      if (firstTheo) { lpCtx.moveTo(sx(s), cy(cTheo)); firstTheo = false; }
+      else lpCtx.lineTo(sx(s), cy(cTheo));
+    }
+    lpCtx.stroke();
+    lpCtx.setLineDash([]);
+
+    // Measured C(s): cyan/blue line
+    lpCtx.strokeStyle = '#4af';
+    lpCtx.lineWidth = 1.5;
+    lpCtx.beginPath();
+    let firstMeas = true, penDown = false;
+    for (let k = 0; k < nSeg; k++) {
+      const s = k * lp.segLen;
+      const c = cc[k];
+      if (c > -0.15) {
+        if (firstMeas) { lpCtx.moveTo(sx(s), cy(c)); firstMeas = false; penDown = true; }
+        else { lpCtx.lineTo(sx(s), cy(c)); }
+        penDown = true;
+      } else {
+        if (penDown) { lpCtx.stroke(); lpCtx.beginPath(); penDown = false; firstMeas = true; }
+      }
+    }
+    if (penDown) lpCtx.stroke();
+  }
+
+  function updateLpPanel(lp) {
+    lpPanel.dataset.hasData = '1';
+    if (!lpVisible) return;
+    lpPanel.classList.add('active');
+
+    drawLpCurve(lp);
+
+    const eiStr  = lp.EI !== undefined ? lp.EI.toExponential(2) : '—';
+    const lpTStr = lp.lpTheo !== undefined ? lp.lpTheo.toFixed(1) : '—';
+    const lpMStr = lp.lpMeas !== undefined ? lp.lpMeas.toFixed(1) : '—';
+    lpReadout.innerHTML =
+      `EI: ${eiStr} N·m²<br>` +
+      `Lp_theo: ${lpTStr} µm<br>` +
+      `Lp_meas: ${lpMStr} µm<br>` +
+      `samples: ${lp.samples}`;
+  }
 
   setLiveState('reconnecting');
   openSocket();

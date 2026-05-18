@@ -154,6 +154,8 @@ public class FilSegment extends Thing {
 	boolean nodeAtEnd2 = false;
 	boolean globalNodeAtEnd1 = false;
 	boolean globalNodeAtEnd2 = false;
+	boolean brownianOff = false;  // per-segment Brownian suppression (AND with global Env.brownianFilMotionOff)
+	boolean isLpSeg = false;      // true for segments belonging to the LP benchmark chain
 	ProteinNode end1Node,end2Node;
 	Pt3D forminVecInx = new Pt3D(); Pt3D forminVecInX = new Pt3D();
 	Pt3D end1PAttachPt = new Pt3D(); Pt3D end2PAttachPt = new Pt3D();
@@ -461,7 +463,7 @@ public class FilSegment extends Thing {
 		bTorqueSum.XTox(this, torqueSum);
 		
 		// add brownian force and torque... these are zero except at every chosen time-step
-		if (!Env.brownianFilMotionOff) {
+		if (!Env.brownianFilMotionOff && !brownianOff) {
 			double transScale,rotScale;
 			if (motherFil == null) {	
 				// trans
@@ -3705,6 +3707,26 @@ public class FilSegment extends Thing {
 		for (int i = 0; i < n; i++) {
 			double cx = -totalLen / 2.0 + (i + 0.5) * segLen;
 			segs[i] = new FilSegment(new Pt3D(cx, 0, 0), xAxis, 0, monCt, true);
+		}
+		for (int i = 0; i < n - 1; i++) {
+			segs[i].setEnd2Links(segs[i + 1], true);
+			segs[i + 1].setEnd1Links(segs[i], true);
+		}
+		return segs;
+	}
+
+	// LP benchmark: create n segments in a straight chain along +X axis at the given Y/Z offset.
+	// All segments are marked isLpSeg = true. Caller sets Env.noMonomersSimd active.
+	public static FilSegment[] makeLpChain(int n, double yOff, double zOff) {
+		int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+		double segLen = (monCt + 1) * halfmono; // µm
+		double totalLen = n * segLen;
+		Pt3D xAxis = new Pt3D(1, 0, 0);
+		FilSegment[] segs = new FilSegment[n];
+		for (int i = 0; i < n; i++) {
+			double cx = -totalLen / 2.0 + (i + 0.5) * segLen;
+			segs[i] = new FilSegment(new Pt3D(cx, yOff, zOff), xAxis, 0, monCt, true);
+			segs[i].isLpSeg = true;
 		}
 		for (int i = 0; i < n - 1; i++) {
 			segs[i].setEnd2Links(segs[i + 1], true);

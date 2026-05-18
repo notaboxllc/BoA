@@ -266,6 +266,11 @@ public class Env {
 	// Not shown in the Params panel UI (filtered client-side); the HUD Force button is the only control.
 	static final Parameter benchmarkForceOn = new Parameter("benchmarkForceOn",
 			" Benchmark: apply midpoint force", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
+
+	// LP benchmark: EWMA smoothing factor for the tangent-tangent correlation accumulator.
+	// α ∈ (0,1]; effective window ≈ 1/α output frames. Mutable at runtime.
+	static final Parameter lpEwmaAlpha = new Parameter("lpEwmaAlpha",
+			" LP benchmark EWMA alpha", 0.01, "").setMutableAtRuntime();
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;
