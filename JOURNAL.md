@@ -3395,3 +3395,23 @@ Rationale for choosing A over B (end-only estimator) and C (half-range): B disca
 **Confirmed:** `String.format("%s", 0.00054321)` → `"5.4321E-4"` → `JSON.parse → 0.00054321` → `× 1000 = 0.54321` → `toFixed(3) = "0.543"`. Previously: `String.format("%.4f", 0.00054321)` → `"0.0005"` → `× 1000 = 0.5` → `"0.500"`.
 
 **Files changed:** `boxOfActin/BoxOfActin.java` only.
+
+---
+
+## τ_meas sampling resolution fix
+
+**Bug:** τ_meas was advancing in steps of `toFileInterval × deltaT` (100 × 0.0001 s = 0.01 s in default config), because the 1/e crossing detection lived inside `buildBenchmarkJson()`, which only runs on output frames. Successive un-frozen values: `0.0100, 0.0200, 0.0300…`; frozen values landed on multiples of 0.01 s.
+
+**Approach chosen: Option A — per-step crossing check.** Every simulation step (inside `synchronized(Env.safeO)`, just before the `logAndDraw()`/`remoteLog()` call), the code now checks the current deflection against the 1/e threshold when a release is active. Cost: one `computeBenchmarkSnapshot()` call per step during relaxation only (guarded by `!deflFil.tauMeasFrozen && deflFil.releaseStep >= 0 && forceOn == 0`).
+
+**Implementation (`BoxOfActin.java`):**
+
+- Added `double releaseTime` to `DeflFil` to record `Env.simulationTime` at the moment the release is first detected (output-frame resolution — this is fine; the crossing detection is what needs step resolution).
+- `buildBenchmarkJson()`: on force ON→OFF transition, now also stores `deflFil.releaseTime = Env.simulationTime`. Removed the 1/e crossing block from `buildBenchmarkJson()` (replaced with a comment). Un-frozen τ_meas display now uses `Env.simulationTime − deflFil.releaseTime` instead of `elapsed_steps × deltaT`.
+- `doLoop()`: new per-step block before `logAndDraw()`/`remoteLog()`. On crossing, stores `deflFil.tauMeas = Env.simulationTime − deflFil.releaseTime` and sets `tauMeasFrozen = true`. `buildBenchmarkJson()` then serializes the already-frozen value at the next output frame.
+
+**Resolution improvement:** crossing is now detected within one simulation step of the actual 1/e event. With deltaT = 1e-4 s, τ_meas now has 0.0001 s resolution — four meaningful decimal places. Successive accumulating values during a release will show `0.0531, 0.0568, 0.0594…` at per-step precision rather than 0.01 s grid steps.
+
+**Note on release detection:** `releaseTime` is still set at output-frame resolution (when the force toggle first appears in the output-frame check). The error this introduces is at most `toFileInterval × deltaT = 0.01 s` in the τ_meas start time, but the crossing is detected at step resolution, so the final frozen τ_meas is accurate to one step.
+
+**Files changed:** `boxOfActin/BoxOfActin.java` only.

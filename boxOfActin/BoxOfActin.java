@@ -68,6 +68,7 @@ public class BoxOfActin {
 		boolean tauMeasFrozen = false;
 		long releaseStep = -1;
 		double releaseDefl = Double.NaN;
+		double releaseTime = Double.NaN;  // Env.simulationTime when release was detected (output-frame resolution)
 		boolean prevForceOn = true;
 	}
 	static final DeflFil deflFil = new DeflFil();
@@ -618,6 +619,20 @@ public class BoxOfActin {
 					}
 				}
 
+				// Per-step 1/e crossing detection: step-resolution τ_meas (Option A).
+				// Runs every step during relaxation; at most one computeBenchmarkSnapshot() call per step.
+				if (Env.benchmarkFilament && !deflFil.tauMeasFrozen
+						&& deflFil.releaseStep >= 0 && Env.benchmarkForceOn.getValue() == 0
+						&& !Double.isNaN(deflFil.releaseDefl) && deflFil.releaseDefl > 0) {
+					BenchmarkSnapshot stepSnap = computeBenchmarkSnapshot();
+					if (stepSnap != null && stepSnap.observed / deflFil.releaseDefl <= RELAX_INV_E) {
+						deflFil.tauMeas = !Double.isNaN(deflFil.releaseTime)
+							? Env.simulationTime - deflFil.releaseTime
+							: (benchStepCount - deflFil.releaseStep) * Env.deltaT.getValue();
+						deflFil.tauMeasFrozen = true;
+					}
+				}
+
 				// output to screen and/or files
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
 
@@ -722,26 +737,19 @@ public class BoxOfActin {
 			if (!forceOn) {
 				deflFil.releaseStep = benchStepCount;
 				deflFil.releaseDefl = snap.observed;
+				deflFil.releaseTime = Env.simulationTime;  // output-frame resolution; crossing check uses step resolution
 				deflFil.tauMeas = Double.NaN;
 				deflFil.tauMeasFrozen = false;
 			} else {
 				deflFil.releaseStep = -1;
 				deflFil.releaseDefl = Double.NaN;
+				deflFil.releaseTime = Double.NaN;
 				deflFil.tauMeas = Double.NaN;
 				deflFil.tauMeasFrozen = false;
 			}
 			deflFil.prevForceOn = forceOn;
 		}
-		// Detect 1/e crossing (tauMeas freeze)
-		if (!forceOn && deflFil.releaseStep >= 0 && !deflFil.tauMeasFrozen
-				&& !Double.isNaN(deflFil.releaseDefl) && deflFil.releaseDefl > 0) {
-			double fraction = snap.observed / deflFil.releaseDefl;
-			if (fraction <= RELAX_INV_E) {
-				long elapsed = (long) benchStepCount - deflFil.releaseStep;
-				deflFil.tauMeas = elapsed * Env.deltaT.getValue();
-				deflFil.tauMeasFrozen = true;
-			}
-		}
+		// 1/e crossing detection moved to per-step block in doLoop() for step-resolution τ_meas.
 		StringBuilder sb = new StringBuilder(256);
 		sb.append(String.format(
 			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f,\"viscosity\":%.4f",
@@ -758,8 +766,10 @@ public class BoxOfActin {
 			if (deflFil.tauMeasFrozen) {
 				sb.append(",\"tauMeas\":").append(deflFil.tauMeas).append(",\"tauMeasFrozen\":true");
 			} else {
-				long elapsed = (long) benchStepCount - deflFil.releaseStep;
-				sb.append(",\"tauMeas\":").append(elapsed * Env.deltaT.getValue()).append(",\"tauMeasFrozen\":false");
+				double elapsed = !Double.isNaN(deflFil.releaseTime)
+					? Env.simulationTime - deflFil.releaseTime
+					: (long)(benchStepCount - deflFil.releaseStep) * Env.deltaT.getValue();
+				sb.append(",\"tauMeas\":").append(elapsed).append(",\"tauMeasFrozen\":false");
 			}
 		}
 		sb.append("}");
