@@ -1,0 +1,6 @@
+<BOA> A 10x10 micron field, no monomers simulated, bare bones changes to default for testing
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
+runTime:true:100.0;                     // Run Time

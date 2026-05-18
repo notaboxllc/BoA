@@ -3518,3 +3518,51 @@ Removed sections that were stale, historical, or belonged in JOURNAL.md rather t
 Kept: all build/run commands, CLI option table, WebSocket message shapes, safe-point pattern, C2 inspect payload shapes (lean-keep), promotion criteria, full Architecture section, biological context, parameter file format.
 
 Also updated the message shapes table to include `benchmark` and `lpBenchmark` topics added since Session 12.
+
+## 2026-05-17 — The iso-(δ, τ) family: a proposed empirical mapping
+
+Following the discussion of tuning underdetermination, a more specific structure is worth recording. At fixed fracMove (= Cδ), the deflection and relaxation-time targets define not a point but a *curve* in (fracR, fracMoveTorq) space — the iso-(δ, τ) family. fracR softens the system, fracMoveTorq stiffens it; once one tuning is found, others can be reached by moving them together. Slightly lower values along this curve correspond to slightly longer relaxation times (consistent with the paper's step 5: "decrease CR if τ > τ_expected").
+
+The paper validates a single tuning point and uses second-mode τ as a *check*. It does not characterize the family.
+
+### What changes along the family
+
+δ and τ₁ are constant by construction. Everything else can vary:
+- Higher-mode relaxation times (τ₂, τ₃, ...)
+- Mode partitioning of thermal fluctuations
+- Persistence length Lp
+- Sensitivity to applied force magnitude (paper Fig. 5C nonlinearity)
+
+Lp is the operationally important one. The current four-parameter tuning workflow (fracMove + fracR + fracMoveTorq for δ/τ, then BT/Bθ for Lp) is implicitly compensating for an arbitrary choice within the family using BT/Bθ. If Lp varies strongly across the family, BT/Bθ is doing double duty: correcting genuine discretization artifacts *and* correcting the family-choice arbitrariness.
+
+### Proposed minimal experiment
+
+A small, bounded measurement using the live benchmarking tool. The idea is to find out whether the family-choice matters before committing to a more systematic mapping.
+
+**Procedure:**
+1. Fix fracMove = 0.4, monCt = 32, aeta = 0.1 Pa·s, deltaT = 1e-4, the current default chain configurations.
+2. Find three operating points on the iso-(δ, τ) curve:
+   - Current: (fracR, fracMoveTorq) = (0.1, 0.291)
+   - Softer: lower fracR, raise fracMoveTorq to keep τ_meas ≈ τ_theo and ratio ≈ 1
+   - Stiffer: higher fracR, lower fracMoveTorq, same
+3. At each point, with BT/Bθ held at the current tuned values (1.4, 0.5), measure Lp_meas. Beat the slow-mode noise by taking the median of N independent readings (N = 5–10), each from a fresh EWMA accumulator (Persist OFF → ON resets it).
+4. Plot (fracR, Lp_meas) for the three points.
+
+**Outcomes:**
+- **Flat curve:** family is degenerate in Lp. Pick any point; BT/Bθ does the real work.
+- **Steep curve:** family-choice matters. Lp can be set by family-position alone, and BT/Bθ becomes a fine-tuning knob rather than a primary one. The principled tuning becomes: pick the family point where Lp is right, then refine with BT/Bθ if needed.
+- **Moderate slope:** both knobs contribute; current workflow is approximately correct but underdetermined.
+
+Effort: a few hours of interactive work with the tool, no code changes.
+
+### If results warrant a systematic mapping
+
+Configurations BoA actually uses: maybe 3 monomer counts (32, 64, perhaps 100), 1–2 filament lengths, 1 viscosity, 1 time-step. That's a 6–12 point grid. At each, the iso-(δ, τ) curve could be traced with an automated sweep that adjusts one of (fracR, fracMoveTorq) and converges the other to keep δ and τ on target. The output: a tuning recommendation per (monCt, segment length, viscosity, Δt) tuple, with the family-point chosen to satisfy Lp directly.
+
+This is conceptually the "look-up tables or functions fit to the tuning coefficients across the range of variability" idea the paper Discussion gestures at, made concrete.
+
+### Why this is worth recording but not urgent
+
+Current tuning (fracMove = 0.4, fracR = 0.1, fracMoveTorq = 0.291, BT = 1.4, Bθ = 0.5) gives Lp_meas centered on Lp_theo = 15 µm with the expected slow-mode noise. The science can proceed. The empirical family-mapping is a methodological refinement that would put the tuning on more principled footing and produce a reusable result — but it's not blocking the simulation's use.
+
+Status: deferred. To be picked up when there's slack, or if a future configuration change reveals the current tuning is fragile to family-position.
