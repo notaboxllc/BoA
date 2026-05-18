@@ -270,7 +270,12 @@ public class Env {
 	// LP benchmark: EWMA smoothing factor for the tangent-tangent correlation accumulator.
 	// α ∈ (0,1]; effective window ≈ 1/α output frames. Mutable at runtime.
 	static final Parameter lpEwmaAlpha = new Parameter("lpEwmaAlpha",
-			" LP benchmark EWMA alpha", 0.01, "").setMutableAtRuntime();
+			" LP benchmark EWMA alpha", 0.001, "").setMutableAtRuntime();
+
+	// LP benchmark: active flag. When 0, LP segments are skipped in step/move/Brownian and
+	// accumulation halts; when transitioning 0→1, accumulator resets for a clean re-start.
+	static final Parameter lpActive = new Parameter("lpActive",
+			" LP benchmark active", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;

@@ -3324,3 +3324,60 @@ Expected:
 - `boxOfActin/ThreeJSWriter.java` — `deflFil.*` references; `chainType` field; axis gating on `!isLpSeg`
 - `boxOfActin/LiveFrameServer.java` — `dispatchLpBenchmark()`
 - `sim_viewer_boa.html` — LP panel CSS/HTML/JS; `updateLpPanel()`; Force→Deflection rename; `defl-off` CSS class
+
+---
+
+## 2026-05-17 — LP benchmark polish + Persist suspend semantics
+
+Six items implemented. Compile clean.
+
+### 1. Persist: ON/OFF — Java-side suspend/resume
+
+**New `lpActive` parameter** added to `Env.java` (boolean-as-int, default 1 = ON, mutableAtRuntime). Guards added in three `FilSegment` methods:
+- `step()` — skips force accumulation and box-collision check for LP segments when `lpActive == 0`
+- `moveThing()` — skips position/orientation integration for LP segments
+- `calcRandomForces()` — skips Brownian force calculation for LP segments
+
+Together these three guards fully freeze the LP chain in its last-known configuration when suspended; no thermal motion, no position updates.
+
+**`accumulateLpData()`** early-returns when `lpActive == 0`, so frozen-state samples never enter the EWMA.
+
+**Accumulator reset on ON transition:** `drainParamQueue()` detects the `0 → 1` transition and resets `lpFil.cMean` to all 1.0, clears `cMeanInitialized`, and zeroes `sampleCount`. Rationale: the LP chain was frozen during suspension so its static configuration is not a thermal sample; starting clean ensures re-equilibration from scratch.
+
+**Viewer side:** `btnPersist` is now above the collapsible `#lpPanelBody` div (containing the canvas and readout), so it is always visible when the panel exists. Clicking sends `setParam lpActive true/false` via WebSocket. `syncLpActiveUI()` keeps button label and panel-body visibility in sync. `handleParamAck()` and `buildParamPanel()` (paramList handler) both call `syncLpActiveUI()` when the confirmed `lpActive` value arrives, ensuring the button reflects server state. `lpActive` is filtered from the Mutable Parameters panel (same treatment as `benchmarkForceOn`).
+
+### 2. Panel header rename
+
+Top-right benchmark panel header: `— Benchmark —` → `— Deflection/Relaxation —`.
+
+### 3. Chain info in LP panel
+
+`buildLpJson()` now emits `"monomersPerSegment": benchMonCt` alongside the existing `nSegs`, `segLen`, `contourLength` fields. `updateLpPanel()` renders a `#lpChainInfo` div above the canvas:
+```
+chain: 90 seg × 32 mon
+span: 8.019 µm
+```
+Layout mirrors the Deflection/Relaxation chain-info block.
+
+### 4. Relaxation time: 4 decimals
+
+`τ_meas` and `τ_theo` rows in the Deflection/Relaxation HUD changed from `.toFixed(2)` to `.toFixed(4)`. Meaningful for short relaxation times (e.g. `0.0631 s` instead of `0.06 s`).
+
+### 5. lpEwmaAlpha default lowered to 0.001
+
+`Env.lpEwmaAlpha` default changed from `0.01` to `0.001`. Effective averaging window goes from ~100 to ~1000 output frames. The parameter remains mutable at runtime via the Params panel for live adjustment. Expected result: Lp_meas readout visibly steadier during long runs.
+
+### 6. Weighted least-squares Lp fit
+
+**Choice: A — weighted least squares.** Weights `w_k = C_k²` (proportional to `1 / var(log C_k)` for small fluctuations, since `var(log C) ≈ 1/C²`). High-correlation (small-s) points get strong weight; noisy large-s tail points are down-weighted automatically. No information is discarded — the full set of k ∈ [1, nLp-1] where `C_k > 0.01` still enters the fit. The visual plot is unchanged.
+
+Rationale for choosing A over B (end-only estimator) and C (half-range): B discards all intermediate points and the visual is the only remaining output; C uses an arbitrary cut at L/2. A is the most principled approach and keeps the full curve in the fit with natural variance weighting. The instability the user observed (Lp_meas drifting from ~19 µm to ~224 µm) was caused by the flat tail dominating the unweighted slope; weighted regression nearly eliminates that effect.
+
+**Implementation:** Replace `sumS`, `sumLogC`, `sumS2`, `sumSlogC` (unweighted) with `sumW`, `sumWS`, `sumWLogC`, `sumWS2`, `sumWSlogC` (weighted). Denominator guard (`sumW > 1e-30`) added.
+
+### Files changed
+
+- `boxOfActin/Env.java` — `lpEwmaAlpha` default 0.01 → 0.001; new `lpActive` parameter
+- `boxOfActin/FilSegment.java` — guards in `step()`, `moveThing()`, `calcRandomForces()`
+- `boxOfActin/BoxOfActin.java` — `accumulateLpData()` guard; `drainParamQueue()` reset block; `buildLpJson()` weighted regression + `monomersPerSegment` field
+- `sim_viewer_boa.html` — panel header rename; LP panel HTML/CSS restructure; `updateLpPanel()` chain-info; τ 4-decimal; `btnPersist` wired to setParam; `handleParamAck` + `buildParamPanel` sync `lpActiveState`; `lpActive` filtered from Params panel

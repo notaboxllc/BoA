@@ -768,6 +768,7 @@ public class BoxOfActin {
 	// Called once per output frame inside synchronized(Env.safeO). Reads segment uVec — read-only, safe.
 	private static void accumulateLpData() {
 		if (lpFil == null) return;
+		if (Env.lpActive.getValue() == 0) return;
 		int nLp = lpFil.nSegs;
 		FilSegment[] lpSegs = lpFil.segs;
 		double alpha = Env.lpEwmaAlpha.getValue();
@@ -791,38 +792,40 @@ public class BoxOfActin {
 	}
 
 	// LP benchmark: build the lpBenchmark WebSocket topic payload JSON.
-	// Performs log-linear Lp fit on the current cMean array.
+	// Weighted log-linear regression: weight_k = C_k² (proportional to 1/var(log C_k) for
+	// small fluctuations). High-C (small-s) points get strong weight; noisy large-s tails
+	// are down-weighted, making Lp_meas stable even when L ≲ Lp.
 	private static String buildLpJson() {
 		if (lpFil == null || !lpFil.cMeanInitialized) return null;
 		int nLp = lpFil.nSegs;
 		double segLen = lpFil.segLen;
-		// Log-linear regression: log(C(s)) = a + b*s, Lp = -1/b
-		double sumS = 0, sumLogC = 0, sumS2 = 0, sumSlogC = 0;
+		// Weighted regression: Σw, Σw·s, Σw·logC, Σw·s², Σw·s·logC
+		double sumW = 0, sumWS = 0, sumWLogC = 0, sumWS2 = 0, sumWSlogC = 0;
 		int nFit = 0;
 		for (int k = 1; k < nLp; k++) {
 			double ck = lpFil.cMean[k];
 			if (ck > 0.01) {
 				double sk = k * segLen;
 				double logC = Math.log(ck);
-				sumS += sk; sumLogC += logC;
-				sumS2 += sk * sk; sumSlogC += sk * logC;
+				double w = ck * ck;  // weight ∝ 1/var(log C) ≈ C²
+				sumW += w; sumWS += w * sk; sumWLogC += w * logC;
+				sumWS2 += w * sk * sk; sumWSlogC += w * sk * logC;
 				nFit++;
 			}
 		}
 		double lpMeas = Double.NaN;
-		if (nFit >= 2) {
-			double meanS = sumS / nFit, meanLogC = sumLogC / nFit;
-			double denom = sumS2 - nFit * meanS * meanS;
+		if (nFit >= 2 && sumW > 1e-30) {
+			double denom = sumWS2 - sumWS * sumWS / sumW;
 			if (Math.abs(denom) > 1e-30) {
-				double b = (sumSlogC - nFit * meanS * meanLogC) / denom;
+				double b = (sumWSlogC - sumWS * sumWLogC / sumW) / denom;
 				if (b < 0) lpMeas = -1.0 / b;
 			}
 		}
 		// Build JSON
-		StringBuilder sb = new StringBuilder(nLp * 10 + 128);
+		StringBuilder sb = new StringBuilder(nLp * 10 + 160);
 		sb.append(String.format(
-			"{\"nSegs\":%d,\"segLen\":%.5g,\"contourLength\":%.4f,\"EI\":%.4e,\"lpTheo\":%.4f,\"samples\":%d",
-			nLp, segLen, lpFil.contourLength, Env.EI, Env.persistenceLength, lpFil.sampleCount));
+			"{\"nSegs\":%d,\"segLen\":%.5g,\"contourLength\":%.4f,\"monomersPerSegment\":%d,\"EI\":%.4e,\"lpTheo\":%.4f,\"samples\":%d",
+			nLp, segLen, lpFil.contourLength, benchMonCt, Env.EI, Env.persistenceLength, lpFil.sampleCount));
 		if (!Double.isNaN(lpMeas)) {
 			sb.append(String.format(",\"lpMeas\":%.4f", lpMeas));
 		}
@@ -909,6 +912,12 @@ public class BoxOfActin {
 					deflFil.transForce.setVals(0, -newForceN, 0);
 					deflFil.analyticDefl = change.newValue * spanM * 1e6;
 				}
+			}
+			// lpActive 0→1 transition: reset accumulator so stale frozen-state data is discarded.
+			if ("lpActive".equals(change.param.label) && oldValue == 0.0 && change.newValue == 1.0 && lpFil != null) {
+				java.util.Arrays.fill(lpFil.cMean, 1.0);
+				lpFil.cMeanInitialized = false;
+				lpFil.sampleCount = 0;
 			}
 			LiveFrameServer.dispatchParamAck(change.param.label, oldValue, change.newValue);
 		}

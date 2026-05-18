@@ -406,12 +406,15 @@
     }
     #lpPanel.active { display: block; }
     #lpPanel .lp-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; }
+    .lp-chain { color: #aaa; line-height: 1.7; margin-bottom: 4px; }
+    #lpPanelBody { }
     #lpCanvas { display: block; margin: 4px 0; background: rgba(0,0,0,0.4); border: 1px solid #444; }
     #lpReadout { color: #ddd; line-height: 1.8; }
     #btnPersist {
       display: block;
       width: 100%;
       margin-top: 5px;
+      margin-bottom: 5px;
       pointer-events: auto;
     }
     #btnPersist.persist-off { border-color: #555; color: #888; }
@@ -448,7 +451,7 @@
 </div>
 
 <div id="benchmarkHud">
-  <div class="bm-title">— Benchmark —</div>
+  <div class="bm-title">— Deflection/Relaxation —</div>
   <div id="bmChainInfo"></div>
   <div class="bm-divider"></div>
   <div id="bmHudRows"></div>
@@ -459,9 +462,12 @@
 
 <div id="lpPanel">
   <div class="lp-title">— Persistence Length —</div>
-  <canvas id="lpCanvas" width="220" height="130"></canvas>
-  <div id="lpReadout">samples: 0</div>
   <button id="btnPersist" class="liveBtn">Persist: ON</button>
+  <div id="lpPanelBody">
+    <div id="lpChainInfo" class="lp-chain"></div>
+    <canvas id="lpCanvas" width="220" height="130"></canvas>
+    <div id="lpReadout">samples: 0</div>
+  </div>
 </div>
 
 <div id="controls">
@@ -1517,8 +1523,11 @@ if (LIVE_MODE) {
     });
 
     paramRows.innerHTML = '';
-    // Filter out benchmarkForceOn — its UI control is the Force: ON/OFF button in the benchmark HUD.
-    const mutableParams = params.filter(p => p.mutable && p.name !== 'benchmarkForceOn');
+    // Filter out params with dedicated UI buttons in other panels.
+    const mutableParams = params.filter(p => p.mutable && p.name !== 'benchmarkForceOn' && p.name !== 'lpActive');
+    // Sync lpActiveState from server's current value
+    const lpParam = params.find(p => p.name === 'lpActive');
+    if (lpParam !== undefined) { lpActiveState = lpParam.value !== 0; syncLpActiveUI(); }
     if (mutableParams.length === 0) {
       paramRows.innerHTML = '<div style="color:#555;padding:4px 0">No mutable parameters</div>';
       return;
@@ -1567,6 +1576,11 @@ if (LIVE_MODE) {
   }
 
   function handleParamAck(ack) {
+    // Sync lpActiveState from confirmed server value
+    if (ack.success && ack.name === 'lpActive') {
+      lpActiveState = ack.newValue !== 0;
+      syncLpActiveUI();
+    }
     const msgEl = document.getElementById('pp-msg-' + ack.name);
     if (ack.success) {
       // Update the input to reflect confirmed new value
@@ -1636,9 +1650,9 @@ if (LIVE_MODE) {
     bmTauTheoRow.style.display = showRelax ? '' : 'none';
     if (showRelax) {
       bmTauMeasRow.textContent = bm.tauMeasFrozen
-        ? `τ_meas: ${bm.tauMeas.toFixed(2)} s (crossed)`
-        : `τ_meas: ${bm.tauMeas.toFixed(2)} s…`;
-      bmTauTheoRow.textContent = `τ_theo: ${bm.tauTheo !== undefined ? bm.tauTheo.toFixed(2) : '—'} s`;
+        ? `τ_meas: ${bm.tauMeas.toFixed(4)} s (crossed)`
+        : `τ_meas: ${bm.tauMeas.toFixed(4)} s…`;
+      bmTauTheoRow.textContent = `τ_theo: ${bm.tauTheo !== undefined ? bm.tauTheo.toFixed(4) : '—'} s`;
     }
   }
 
@@ -1649,19 +1663,25 @@ if (LIVE_MODE) {
   });
 
   // ── LP benchmark panel ────────────────────────────────────────────────────
-  const lpPanel    = document.getElementById('lpPanel');
-  const lpCanvas   = document.getElementById('lpCanvas');
-  const lpReadout  = document.getElementById('lpReadout');
-  const btnPersist = document.getElementById('btnPersist');
-  const lpCtx      = lpCanvas.getContext('2d');
-  let lpVisible    = true;  // true = panel shown when active; toggled by btnPersist
+  const lpPanel      = document.getElementById('lpPanel');
+  const lpPanelBody  = document.getElementById('lpPanelBody');
+  const lpChainInfo  = document.getElementById('lpChainInfo');
+  const lpCanvas     = document.getElementById('lpCanvas');
+  const lpReadout    = document.getElementById('lpReadout');
+  const btnPersist   = document.getElementById('btnPersist');
+  const lpCtx        = lpCanvas.getContext('2d');
+  let lpActiveState  = true;  // mirrors server-side lpActive (1=ON, 0=OFF)
+
+  function syncLpActiveUI() {
+    btnPersist.textContent = lpActiveState ? 'Persist: ON' : 'Persist: OFF';
+    btnPersist.classList.toggle('persist-off', !lpActiveState);
+    lpPanelBody.style.display = lpActiveState ? '' : 'none';
+  }
 
   btnPersist.addEventListener('click', () => {
-    lpVisible = !lpVisible;
-    btnPersist.textContent = lpVisible ? 'Persist: ON' : 'Persist: OFF';
-    btnPersist.classList.toggle('persist-off', !lpVisible);
-    if (!lpVisible) lpPanel.classList.remove('active');
-    else if (lpPanel.dataset.hasData) lpPanel.classList.add('active');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'setParam', name: 'lpActive', value: lpActiveState ? 'false' : 'true' }));
+    }
   });
 
   function drawLpCurve(lp) {
@@ -1751,8 +1771,16 @@ if (LIVE_MODE) {
 
   function updateLpPanel(lp) {
     lpPanel.dataset.hasData = '1';
-    if (!lpVisible) return;
     lpPanel.classList.add('active');
+
+    if (!lpActiveState) return;
+
+    // Chain info (static during run)
+    if (lp.nSegs !== undefined) {
+      lpChainInfo.innerHTML =
+        `chain: ${lp.nSegs} seg × ${lp.monomersPerSegment !== undefined ? lp.monomersPerSegment : '—'} mon<br>` +
+        `span: ${lp.contourLength !== undefined ? lp.contourLength.toFixed(3) : '—'} µm`;
+    }
 
     drawLpCurve(lp);
 

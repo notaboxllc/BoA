@@ -397,6 +397,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public void step () {
+		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		// increment counters that control how often different bits are run
 		collCheckCt++;
 		
@@ -456,8 +457,9 @@ public class FilSegment extends Thing {
 	}
 	
 	public void moveThing () {
+		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
-		
+
 		// Work in coordinates aligned with the rod... transform forces and torques into body-fixed axis....
 		bForceSum.XTox(this, forceSum);
 		bTorqueSum.XTox(this, torqueSum);
@@ -532,6 +534,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public void calcRandomForces () {  // override Thing.calRandomForces to account for sync'd brownian motion and to avoid wasting calculation of independent values
+		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		if (motherFil == null) {
 			super.calcRandomForces();
 			if (arpChildCt > 0) {	// if this filSegment has branches that will ~share brownian motion then store this once
