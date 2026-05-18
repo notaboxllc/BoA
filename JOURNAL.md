@@ -3381,3 +3381,17 @@ Rationale for choosing A over B (end-only estimator) and C (half-range): B disca
 - `boxOfActin/FilSegment.java` — guards in `step()`, `moveThing()`, `calcRandomForces()`
 - `boxOfActin/BoxOfActin.java` — `accumulateLpData()` guard; `drainParamQueue()` reset block; `buildLpJson()` weighted regression + `monomersPerSegment` field
 - `sim_viewer_boa.html` — panel header rename; LP panel HTML/CSS restructure; `updateLpPanel()` chain-info; τ 4-decimal; `btnPersist` wired to setParam; `handleParamAck` + `buildParamPanel` sync `lpActiveState`; `lpActive` filtered from Params panel
+
+---
+
+## Precision truncation fix in benchmark readouts
+
+**Root cause:** `buildBenchmarkJson()` serialized `observedDeflection` and `expectedDeflection` with `String.format("%.4f", ...)` — 4 decimal places in µm = 0.0001 µm = 0.1 nm resolution. The viewer multiplies by 1000 to convert to nm and displays `toFixed(3)` (0.001 nm resolution), so the 2nd and 3rd decimal places were always 0. E.g. a true obs of 0.00054 µm (0.54 nm) serialized as "0.0005", which the viewer decoded as 0.5 nm → "0.500".
+
+`tauTheo` and `tauMeas` used `%.4f` as well. For τ in seconds, 4 decimal places = 0.1 ms granularity. Since the minimum τ step is one simulation step = Env.deltaT ≈ 0.0001 s, `%.4f` was just barely at the native resolution — no sub-step information is possible — so those were functionally correct but were also changed to full-precision emission for consistency.
+
+**Fix (`boxOfActin/BoxOfActin.java`):** Changed to raw-double emission using `%s` (which calls `Double.toString()`) in String.format for `observedDeflection`/`expectedDeflection`, and `StringBuilder.append(double)` (same underlying call) for `tauTheo`/`tauMeas`. Java's `Double.toString()` uses scientific notation for small magnitudes (e.g. `5.4321E-4`), which is valid JSON and parsed correctly by `JSON.parse` in all browsers. The viewer's multiplication and `toFixed` then operate on the full-precision value.
+
+**Confirmed:** `String.format("%s", 0.00054321)` → `"5.4321E-4"` → `JSON.parse → 0.00054321` → `× 1000 = 0.54321` → `toFixed(3) = "0.543"`. Previously: `String.format("%.4f", 0.00054321)` → `"0.0005"` → `× 1000 = 0.5` → `"0.500"`.
+
+**Files changed:** `boxOfActin/BoxOfActin.java` only.

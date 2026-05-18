@@ -746,18 +746,20 @@ public class BoxOfActin {
 		sb.append(String.format(
 			"{\"chainSegments\":%d,\"monomersPerSegment\":%d,\"chainSpanMicrons\":%.4f,\"viscosity\":%.4f",
 			Env.benchmarkNSegs, benchMonCt, deflFil.chainSpanMicrons, Env.aeta.getValue()));
+		// observedDeflection and expectedDeflection are in µm; viewer multiplies by 1000 for nm
+		// and shows toFixed(3) — needs 0.001 nm = 1e-6 µm precision, so emit full double.
 		sb.append(String.format(
-			",\"observedDeflection\":%.4f,\"expectedDeflection\":%.4f,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
+			",\"observedDeflection\":%s,\"expectedDeflection\":%s,\"ratio\":%.3f,\"forceOn\":%b,\"stepCount\":%d",
 			snap.observed, snap.expected, snap.ratio, forceOn, (long) benchStepCount));
 		if (!Double.isNaN(deflFil.tauTheo)) {
-			sb.append(String.format(",\"tauTheo\":%.4f", deflFil.tauTheo));
+			sb.append(",\"tauTheo\":").append(deflFil.tauTheo);
 		}
 		if (!forceOn && deflFil.releaseStep >= 0) {
 			if (deflFil.tauMeasFrozen) {
-				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":true", deflFil.tauMeas));
+				sb.append(",\"tauMeas\":").append(deflFil.tauMeas).append(",\"tauMeasFrozen\":true");
 			} else {
 				long elapsed = (long) benchStepCount - deflFil.releaseStep;
-				sb.append(String.format(",\"tauMeas\":%.4f,\"tauMeasFrozen\":false", elapsed * Env.deltaT.getValue()));
+				sb.append(",\"tauMeas\":").append(elapsed * Env.deltaT.getValue()).append(",\"tauMeasFrozen\":false");
 			}
 		}
 		sb.append("}");
