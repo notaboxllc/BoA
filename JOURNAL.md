@@ -4128,3 +4128,111 @@ Steps:
 5. Wire button click to send `startAutoTune` action; disable button while running; re-enable on convergence (optionally via a new `tunerStatus` topic or inferred from param changes).
 
 Pass condition: start with `-bmManual -3jsLive 8081 -pf ParameterFiles/boa10-64Seg`, click "Auto" in the viewer, watch the ratio in the Deflection/Relaxation HUD converge toward 1.000, confirm final params printed to stdout.
+
+## 2026-05-19 — Predictive Controller Design: Sessions and Status
+
+### Session arc
+
+This day's work was a chain of attempts to get DeflectionTuner converging
+correctly on long chains. Four design iterations, each replacing the
+prior. Status at end of day: design for iteration #4 is settled and
+prompted; implementation pending due to repeated Claude Code 32K-output-
+token failures during survey-then-write sessions.
+
+### Design progression
+
+1. **Windowed settle-then-evaluate.** Original implementation. Functionally
+   similar to the old `-bm` joint-bisection controller. Worked on 32-mon
+   but took hours on 64-mon. Replaced.
+
+2. **Crossing-event-driven bisection.** Reacted to sign changes in
+   (smoothed - theoretical), halving step size at each crossing. Failed
+   in a specific way: a single under-corrected stiffening step left the
+   deflection far past target with no subsequent crossing to trigger
+   further action. Controller appeared to stop. Replaced.
+
+3. **Predictive controller with joint scalar s.** Online sensitivity
+   estimation, COARSE phase moves fracR and fracMoveTorq along a
+   parameterized ray (s ∈ [0,1]). Fatal bug: initial (fracR,
+   fracMoveTorq) generally doesn't lie on the s-ray, so step 0
+   teleports fracR from the parameter-file value (e.g., 0.1) to the
+   on-ray value (e.g., 0.84), throwing the controller into a region
+   where its sensitivity estimates are invalid. Replaced.
+
+4. **Independent per-parameter predictive controllers** (in progress).
+   Drop the joint scalar. Each of fracR and fracMoveTorq gets its own
+   sensitivity estimate, brackets, and predictive step computation.
+   COARSE phase moves both simultaneously; FINE freezes fracR. Designed,
+   prompted to Claude Code, not yet implemented.
+
+### Empirical findings from manual tests during the day
+
+User-confirmed monotonicity in the relevant operating regions:
+
+  - fracMoveTorq: monotonic stiffening across [0.01, 0.5] at
+    fracR=0.189. Tested values 0.5 → 0.01.
+  - fracR: monotonic softening across [0.1, 1.2] at fracMoveTorq=0.5.
+    Data:
+       fracR    deflection (nm)
+       0.1       6.32
+       0.2      10.18
+       0.3      13.22
+       0.4      15.67
+       0.5      17.68
+       0.6      19.36
+       0.7      20.76
+       0.8      21.97
+       0.9      23.02
+       1.0      23.92
+       1.1      24.72
+       1.2      25.43
+    Curve flattens at the high end (diminishing softening with each
+    increment of fracR). Consistent with a numerical-gain explanation
+    where bigger fracR converts more inter-segment link force into
+    angular kicks per step, dynamically inefficient at large values.
+
+User-validated tuned triple for 32-mon, 11-seg×32-mon/seg chain,
+span=0.9801 µm, target=9.801 nm:
+  fracMove=0.5, fracR=0.189, fracMoveTorq=0.5 → obs ≈ 9.801 nm.
+
+### Other work completed this day
+
+  - Live viewer parameter panel now updates during autotune runs
+    (LiveFrameServer.dispatchParamAck broadcast added in design #3
+    session; carried forward).
+  - GUI "Auto" button — still on the to-do list. Design preference:
+    Option A (one-shot, click engages controller, on convergence
+    controller deactivates and sim continues). Not yet implemented.
+
+### Forward items (in dependency order)
+
+1. Implement and verify design #4 (independent predictive controllers).
+   This is the immediate next session.
+2. Parameter-tuple caching: persistent mapping of (deltaT, aeta,
+   monomerCt, filSegLength) → tuned triple. Format and location TBD.
+   Save on convergence, look up at startup.
+3. Startup-time prompt with timeout: if a parameter file's tuple is
+   not in the cache, ask user (with timeout to default) whether to
+   benchmark first. Headless mode needs flag-driven equivalent.
+4. GUI "Auto" button. Click engages autotune; on convergence the
+   controller deactivates and the simulation continues running.
+
+### Session-management note
+
+The two attempts at design #3 → #4 implementation both hit Claude Code's
+32K output-token limit during the survey-then-write phase. The bloated
+survey context appears to leave insufficient budget for the write phase
+in the same session. Fix: restart Claude Code with a fresh session for
+each implementation pass, and keep the prompt scoped tightly so the
+survey is minimal. The "restart at task boundaries" guidance in the
+project doc applies more strictly than I'd been treating it.
+
+### Codebase merge note
+
+The user is operating on a branched-for-Listeria-motility version of BoA.
+The parameter file's "No match found for parameter label X" warnings
+(11 of them: toQKFileInterval, bugOff, myosPerNode, noMonomers,
+maxFilLinkDist, linkDissolveRate, myosSteppingSwitch, myosinStepRate,
+myosinReleaseRate, myoFBRBase, myoFBRExp) point to features present in
+the other branch but stripped here. A future session will diff the two
+codebases and selectively restore features. Not urgent.
