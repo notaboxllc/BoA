@@ -1,6 +1,87 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
+
+---
+
+## 2026-05-19 — DeflectionTuner v6: early-trigger gate for cold-start first probe
+
+### Symptom
+
+In the v6 32-monomer run, PROBE_FMT step #1 fired at `obs = 0.025814 µm` — the chain had
+already deflected to 2.6× the target (`expected ≈ 0.009801 µm`) before any action was taken.
+The cause: the EMA initializes from zero while the chain bends rapidly under load, filling the
+slope ring buffer with large negative slopes. The settling detector requires those slopes to
+fall below `SETTLE_TOL_FRAC × |smoothed|`, which didn't happen until the chain had nearly
+reached its (overshooting) initial equilibrium — well past the target.
+
+### Gate condition
+
+In `feed()`, just before the switch dispatch, an early-trigger boolean is evaluated:
+
+```java
+boolean earlyTrigger = !firstProbeFired && phase == Phase.PROBE_FMT && smoothed > expected;
+if (!isSettled() && !force && !earlyTrigger) return null;
+```
+
+If the smoothed deflection exceeds `expected` and no probe step has yet been taken, the
+settling detector is bypassed and the first probe fires immediately. A new field
+`firstProbeFired` (initialized to `false` in `start()`, set to `true` when the first
+PROBE_FMT probe step is applied) gates the condition.
+
+### Scoping rationale
+
+The gate applies only to the cold-start case — it is permanently disabled once
+`firstProbeFired = true`:
+
+- **Retries (bad-sign):** `probeStepped` is reset to `false` after a bad-sign, but
+  `firstProbeFired` is already `true`, so the gate is off. Retries go through the normal
+  settling detector.
+- **PROBE_FR probes:** different phase; `phase == Phase.PROBE_FMT` is false.
+- **Post-rescue re-entry:** `stiffEndRescue()` re-enters PROBE_FMT but does NOT reset
+  `firstProbeFired`. At that point the chain is already deflected from a mid-run state;
+  the settling detector is appropriate.
+
+`firstProbeFired` is never reset, including across stiff-end rescues. Its sole purpose
+is the cold-start case.
+
+---
+
+## 2026-05-19 — DeflectionTuner v5: stiff-end rescue false-trigger fix
+
+### Symptom
+
+In the v5 32-monomer run the stiff-end rescue fired twice when the chain
+was already at target. At step 9 (COARSE→FINE, err=+0.000292 µm ≈ 30 pm,
+well inside the 5 nm convergence tolerance) the controller had reached
+`fracMoveTorq = FRAC_MT_MAX = 0.5`, which satisfied the rescue condition
+`error > 0 && fmt >= FRAC_MT_MAX`. The rescue reduced `fracMove` 0.5→0.45
+and reset all state to PROBE_FMT, discarding the calibration. Step 17
+repeated the same failure.
+
+### Root cause
+
+The rescue condition checked only the sign of error, not its magnitude.
+Any positive error — even 30 picometers — at a parameter boundary
+triggered a full reset.
+
+### Fix
+
+Added `RESCUE_ERR_FRAC = 0.05`. The rescue condition in both `handleCoarse`
+and `handleFine` now requires `error > RESCUE_ERR_FRAC * expected` (i.e.
+error must exceed 5% of the target deflection) before firing. For the
+32-monomer benchmark (expected ≈ 0.0098 µm) this gates rescue at
+error > 0.49 nm — about 100× the convergence tolerance — giving the
+controller ample room to settle without triggering rescue. Nothing else
+changed: decrement size, reset semantics, and phase transition are all
+unchanged.
+
+### Constant choice
+
+`RESCUE_ERR_FRAC = 0.05` puts the gate at ~100× `CONV_TOL_UM` for the
+32-monomer case. The rescue is still useful for genuine saturation (where
+the chain is far from target and every parameter knob is against its
+limit); it just no longer fires when the chain is essentially converged.
 
 ---
 
@@ -4365,5 +4446,111 @@ No changes needed. API surface preserved exactly:
    too tight. Could raise to 0.1 (half of MAX_STEP). Also consider
    widening fmtHiBound to FRAC_MT_MAX when re-entering FINE after a
    rescue (to give more room to explore).
+3. Parameter-tuple caching: persistent map of (deltaT, aeta, monomerCt,
+   filSegLength) → converged triple, saved on CONVERGED, loaded at startup.
+
+---
+
+## 2026-05-19 (session 3) — DeflectionTuner v5: settling-based windows + trust-region step sizing
+
+### Summary
+
+`boxOfActin/DeflectionTuner.java` rewritten as v5. Compiles clean.
+`BoxOfActin.java` unchanged — API surface identical to v4.
+
+### Motivation (three structural problems diagnosed in v4)
+
+**1. Fixed OBS_WINDOW = 20 is not a settling condition.** The very first
+probe in the v4 run failed sign-check because the chain hadn't reached
+initial-deflection equilibrium yet. No EMA alpha value can fix that —
+it's a sampling-before-settling problem.
+
+**2. MAX_STEP = 0.2 produced bang-bang control.** Every COARSE step in the
+v4 run hit the clamp. FINE steps oscillated (obs bounced 0.009→0.011→
+0.012→0.011→0.010 over steps 13–21) without converging. The clamp was
+doing binary switching, not predictive control.
+
+**3. BRACKET_SKIP_THRESH was a workaround for (1) and (2), not a fix.**
+Brackets were only updated after small steps — precisely when least
+informative. The root cause was reading EMA before it settled.
+
+### Algorithm changes
+
+**Settling detector (replaces fixed OBS_WINDOW):**
+A ring buffer of the last SLOPE_WIN=10 EMA samples. The controller
+considers the chain settled when the oldest→newest change in the buffer
+is less than SETTLE_TOL_FRAC=0.01 × max(|smoothed|, expected). This
+catches both the initial deflection transient and post-step transients.
+
+Additional guards: MIN_FRAMES_PER_STEP=5 (minimum between steps, prevents
+instant re-trigger); MAX_FRAMES_PER_STEP=200 (force a step with a warning
+if settling never arrives — log but don't declare FAILED on this alone).
+
+After each step: reset slope buffer, set framesSinceStep=0.
+
+**Trust-region step sizing (replaces global MAX_STEP clamp):**
+Each parameter has its own trust radius (trustFr, trustFmt), initialized
+at INIT_TRUST=0.1, range [MIN_TRUST=0.005, MAX_TRUST=0.3].
+
+After each step evaluation (at settling):
+- Sign flip (error crossed zero): halve trust (TRUST_SHRINK=0.5) — overshot.
+- actual/predicted ≥ PREDICTED_FRACTION=0.5 AND no sign flip: grow by
+  TRUST_GROW=1.5 (capped at MAX_TRUST) — model was accurate.
+- actual/predicted < 0.25: halve trust — sensitivity too optimistic.
+- Otherwise (0.25 ≤ ratio < 0.5): leave trust unchanged.
+
+In COARSE, actual deflection change is attributed to each parameter
+proportionally via |Δparam × sens_prior|. In FINE, full actual change
+is attributed to fmt (fr is frozen).
+
+Trust is NOT reset at COARSE→FINE. It IS reset on stiff-end rescue.
+
+**Execution order within each settled evaluation:** trust update runs
+BEFORE sensitivity update so the trust judgment uses the same sensitivity
+value that drove the step (not the freshly revised estimate).
+
+### Removals
+
+- `PROBE_EMA_ALPHA` / dual-alpha logic — settling detector makes the
+  cold-start hack unnecessary.
+- `BRACKET_SKIP_THRESH` / bracket-skip conditionals — brackets update
+  unconditionally at every settled evaluation. Settling guarantees EMA
+  has converged to the post-step equilibrium.
+- `OBS_WINDOW` as a fixed frame count — replaced by slope ring buffer.
+- `MAX_STEP` global clamp — replaced by per-parameter trust radii.
+- `lastFrActualStep` / `lastFmtActualStep` fields — delta is computed
+  from saved baselines (fracR − frAtStep, fracMoveTorq − fmtAtStep).
+
+### Preserved
+
+Phase machine (PROBE_FMT → PROBE_FR → COARSE → FINE → CONVERGED/FAILED),
+monotonicity, attribution-based sensitivity update (updateCoarseSensitivities),
+stiff-end rescue, probe retry logic (halve step on bad sign, MAX_PROBE_RETRIES=3).
+EMA_ALPHA=0.05 unchanged. All parameter limits unchanged.
+
+### Constants
+
+  EMA_ALPHA=0.05, SLOPE_WIN=10, SETTLE_TOL_FRAC=0.01,
+  MIN_FRAMES_PER_STEP=5, MAX_FRAMES_PER_STEP=200,
+  INIT_PROBE_STEP=0.05, INIT_TRUST=0.1, MIN_TRUST=0.005, MAX_TRUST=0.3,
+  TRUST_GROW=1.5, TRUST_SHRINK=0.5, PREDICTED_FRACTION=0.5,
+  PRED_STEP_TOL=0.001, CONV_TOL_UM=5e-6, CONV_FRAMES=50,
+  FR_FINE_THRESH=0.02, ALPHA_DIST=0.5, FRAC_MOVE_STEP=0.05,
+  MAX_PROBE_RETRIES=3.
+
+### Survey findings / no scope expansion
+
+BoxOfActin.java wiring was not touched. The feed()→ParamTriple→
+dispatchParamAck path, isDone(), getPhase(), resultSummary(), and the
+start() 4-arg signature are all preserved exactly.
+
+### Forward items
+
+1. Runtime verification: run with 32-monomer params, confirm settling
+   latency is visible in frame counts, confirm trust grows/shrinks as
+   expected, confirm CONVERGED before 64-monomer test.
+2. If probes still show bad-sign on cold start: SETTLE_TOL_FRAC=0.01
+   may be too loose — tighten to 0.005 or add an absolute minimum frame
+   count (currently MIN_FRAMES_PER_STEP=5, could raise to 20).
 3. Parameter-tuple caching: persistent map of (deltaT, aeta, monomerCt,
    filSegLength) → converged triple, saved on CONVERGED, loaded at startup.

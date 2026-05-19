@@ -1,21 +1,17 @@
 package boxOfActin;
 
 /**
- * Automated deflection tuning — v4: independent per-parameter predictive controllers.
+ * Automated deflection tuning — v6: early-trigger gate for cold-start first probe.
  *
- * Two separate online predictive controllers, one for fracR and one for fracMoveTorq.
- * Each maintains its own sensitivity estimate, brackets, and step history.
- * No joint scalar; parameters start wherever the user left them.
- *
- * Direction convention (confirmed empirically):
- *   Larger fracR        → softer (more deflection); sens_fr > 0
- *   Larger fracMoveTorq → stiffer (less deflection); sens_fmt < 0
+ * Replaces fixed OBS_WINDOW with a slope ring buffer settling detector and replaces
+ * global MAX_STEP with per-parameter trust regions that adapt based on prediction quality.
+ * Removes PROBE_EMA_ALPHA dual-alpha hack and BRACKET_SKIP_THRESH workaround.
  *
  * Phase order: PROBE_FMT → PROBE_FR → COARSE → FINE → CONVERGED (or FAILED anywhere)
  *
- * Pure logic: no Env, no FilSegment, no I/O beyond System.out.
- * Feed one output-frame deflection sample via feed(). Returns a non-null
- * ParamTriple when a parameter change should be applied.
+ * Direction convention (empirically confirmed):
+ *   Larger fracR        → softer (more deflection); frSens > 0
+ *   Larger fracMoveTorq → stiffer (less deflection); fmtSens < 0
  */
 class DeflectionTuner {
 
@@ -28,28 +24,36 @@ class DeflectionTuner {
         }
     }
 
-    // ── constants ─────────────────────────────────────────────────────────────
-    static final double EMA_ALPHA          = 0.05;  // COARSE/FINE: slow, stable
-    static final double PROBE_EMA_ALPHA    = 0.2;   // PROBE phases: fast convergence (98.8% in 20 frames)
-    static final int    OBS_WINDOW         = 20;
-    static final double INIT_PROBE_STEP    = 0.05;
-    static final double MAX_STEP           = 0.2;
-    static final double PRED_STEP_TOL      = 0.001;
-    static final double CONV_TOL_UM        = 5e-6;
-    static final int    CONV_FRAMES        = 50;
-    static final double FR_FINE_THRESH     = 0.02;
-    static final double ALPHA_DIST         = 0.5;   // fracR share of gap-closure
+    // ── constants ──────────────────────────────────────────────────────────────
+    static final double EMA_ALPHA           = 0.05;
+    static final int    SLOPE_WIN           = 10;
+    static final double SETTLE_TOL_FRAC     = 0.01;
+    static final int    MIN_FRAMES_PER_STEP = 5;
+    static final int    MAX_FRAMES_PER_STEP = 200;
+    static final double INIT_PROBE_STEP     = 0.05;
+    static final double INIT_TRUST          = 0.1;
+    static final double MIN_TRUST           = 0.005;
+    static final double MAX_TRUST           = 0.3;
+    static final double TRUST_GROW          = 1.5;
+    static final double TRUST_SHRINK        = 0.5;
+    static final double PREDICTED_FRACTION  = 0.5;
+    static final double PRED_STEP_TOL       = 0.001;
+    static final double CONV_TOL_UM         = 5e-6;
+    static final int    CONV_FRAMES         = 50;
+    static final double FR_FINE_THRESH      = 0.02;
+    static final double ALPHA_DIST          = 0.5;
     static final double FRAC_MOVE_STEP      = 0.05;
     static final int    MAX_PROBE_RETRIES   = 3;
-    // Skip bracket update after a large step; EMA hasn't converged to new equilibrium yet
-    static final double BRACKET_SKIP_THRESH = 0.05;
 
     // parameter limits
     static final double FRAC_MOVE_MIN = 0.1,  FRAC_MOVE_MAX = 0.5;
     static final double FRAC_R_MIN    = 0.1,  FRAC_R_MAX    = 1.5;
     static final double FRAC_MT_MIN   = 0.01, FRAC_MT_MAX   = 0.5;
 
-    // ── current parameter values ──────────────────────────────────────────────
+    // rescue guard: stiff-end rescue fires only when error exceeds this fraction of expected
+    static final double RESCUE_ERR_FRAC = 0.05;
+
+    // ── current parameter values ───────────────────────────────────────────────
     private double fracMove, fracR, fracMoveTorq;
     private double expected;
 
@@ -57,27 +61,39 @@ class DeflectionTuner {
     private double  smoothed;
     private boolean smoothedInit;
 
-    // ── observation window ────────────────────────────────────────────────────
-    private int    obsFrames;
-    private double smoothedAtWindowOpen;
-    private double frAtWindowOpen;
-    private double fmtAtWindowOpen;
+    // ── slope ring buffer ──────────────────────────────────────────────────────
+    private final double[] slopeBuf = new double[SLOPE_WIN];
+    private int slopeHead;   // next write position; when full, also points to oldest
+    private int slopeCount;  // 0..SLOPE_WIN
+
+    // ── step timing ───────────────────────────────────────────────────────────
+    private int framesSinceStep;
+
+    // ── baselines (recorded when step is taken) ────────────────────────────────
+    private double smoothedAtStep;
+    private double frAtStep;
+    private double fmtAtStep;
+    private double errorAtStep;
+
+    // ── trust regions ─────────────────────────────────────────────────────────
+    private double trustFr;
+    private double trustFmt;
 
     // ── fracR controller ──────────────────────────────────────────────────────
-    private double  frSens;        // dDefl/dFracR; expected > 0
+    private double  frSens;
     private boolean frHasSens;
-    private double  frLoBound;     // largest "too-stiff" fracR seen (target above this)
+    private double  frLoBound;
     private boolean frHasLo;
-    private double  frHiBound;     // smallest "too-soft" fracR seen (target below this)
+    private double  frHiBound;
     private boolean frHasHi;
-    private double  frPredStep;    // |predicted step| at last evaluation (for FINE transition)
+    private double  frPredStep;  // |rawFrPred| at last COARSE step; drives COARSE→FINE
 
     // ── fracMoveTorq controller ───────────────────────────────────────────────
-    private double  fmtSens;       // dDefl/dFracMoveTorq; expected < 0
+    private double  fmtSens;
     private boolean fmtHasSens;
-    private double  fmtLoBound;    // largest "too-soft" fmt seen (target above this)
+    private double  fmtLoBound;
     private boolean fmtHasLo;
-    private double  fmtHiBound;    // smallest "too-stiff" fmt seen (target below this)
+    private double  fmtHiBound;
     private boolean fmtHasHi;
 
     // ── phase ─────────────────────────────────────────────────────────────────
@@ -85,19 +101,19 @@ class DeflectionTuner {
 
     // ── convergence ───────────────────────────────────────────────────────────
     private int    convCount;
-    private double lastPredStepMag;  // max(|frPredStep|, |fmtPredStep|) at last step
+    private double lastPredStepMag;
 
     // ── COARSE→FINE detection ─────────────────────────────────────────────────
-    private int fineReadyCount;      // consecutive steps with |frPredStep| < FR_FINE_THRESH
+    private int fineReadyCount;
 
-    // ── last actual step sizes (for bracket-skip logic) ───────────────────────
-    private double lastFrActualStep;  // actual Δfr applied in last step
-    private double lastFmtActualStep; // actual Δfmt applied in last step
+    // ── first-step flag: skip sensitivity/trust update on first step of phase ──
+    private boolean firstStepInPhase;
 
     // ── PROBE sub-state ───────────────────────────────────────────────────────
     private boolean probeStepped;    // false=waiting to take step; true=waiting to evaluate
-    private double  probeStep;       // current probe step magnitude
+    private double  probeStep;
     private int     probeRetryCount;
+    private boolean firstProbeFired; // true after first PROBE_FMT step taken; gates cold-start early trigger
 
     // ── logging ───────────────────────────────────────────────────────────────
     private int stepCount;
@@ -114,25 +130,27 @@ class DeflectionTuner {
         smoothed     = 0.0;
         smoothedInit = false;
 
+        slopeHead = 0; slopeCount = 0;
+        framesSinceStep = 0;
+
+        trustFr  = INIT_TRUST;
+        trustFmt = INIT_TRUST;
+
         frSens  = 0; frHasSens = false; frHasLo = false; frHasHi = false;
         fmtSens = 0; fmtHasSens = false; fmtHasLo = false; fmtHasHi = false;
         frPredStep = Double.NaN;
 
-        obsFrames            = 0;
-        smoothedAtWindowOpen = 0.0;
-        frAtWindowOpen       = fr;
-        fmtAtWindowOpen      = fmt;
+        smoothedAtStep = 0; frAtStep = fr; fmtAtStep = fmt; errorAtStep = 0;
 
-        convCount      = 0;
-        lastPredStepMag = Double.NaN;
-        fineReadyCount = 0;
-
-        lastFrActualStep  = 0.0;
-        lastFmtActualStep = 0.0;
+        convCount        = 0;
+        lastPredStepMag  = Double.NaN;
+        fineReadyCount   = 0;
+        firstStepInPhase = true;
 
         probeStepped    = false;
         probeStep       = INIT_PROBE_STEP;
         probeRetryCount = 0;
+        firstProbeFired = false;
         stepCount       = 0;
     }
 
@@ -144,20 +162,28 @@ class DeflectionTuner {
     ParamTriple feed(double observedMicrons) {
         if (isDone()) return null;
 
-        double alpha = (phase == Phase.PROBE_FMT || phase == Phase.PROBE_FR)
-            ? PROBE_EMA_ALPHA : EMA_ALPHA;
         smoothed = smoothedInit
-            ? alpha * observedMicrons + (1.0 - alpha) * smoothed
+            ? EMA_ALPHA * observedMicrons + (1.0 - EMA_ALPHA) * smoothed
             : observedMicrons;
         smoothedInit = true;
+
+        pushSlope(smoothed);
+        framesSinceStep++;
 
         double error = smoothed - expected;
         checkConvergence(error);
         if (isDone()) return null;
 
-        obsFrames++;
-        if (obsFrames < OBS_WINDOW) return null;
-        obsFrames = 0;
+        boolean force = framesSinceStep >= MAX_FRAMES_PER_STEP;
+        if (force) {
+            System.out.printf("[AUTOTUNE:WARN] %s unsettled after %d frames — forcing step%n",
+                phase, MAX_FRAMES_PER_STEP);
+        }
+        // Early trigger: if this is the very first probe and deflection already exceeds
+        // expected, skip the settling detector — the chain is too soft right now and
+        // waiting for settling wastes time without providing any useful information.
+        boolean earlyTrigger = !firstProbeFired && phase == Phase.PROBE_FMT && smoothed > expected;
+        if (!isSettled() && !force && !earlyTrigger) return null;
 
         switch (phase) {
             case PROBE_FMT: return handleProbeFmt(error);
@@ -180,56 +206,83 @@ class DeflectionTuner {
             phase, fracMove, fracR, fracMoveTorq);
     }
 
-    // ── probe phase: fracMoveTorq ─────────────────────────────────────────────
+    // ── slope ring buffer ──────────────────────────────────────────────────────
+
+    private void resetSlopeBuffer() {
+        slopeHead = 0;
+        slopeCount = 0;
+    }
+
+    private void pushSlope(double val) {
+        slopeBuf[slopeHead] = val;
+        slopeHead = (slopeHead + 1) % SLOPE_WIN;
+        if (slopeCount < SLOPE_WIN) slopeCount++;
+    }
+
+    private boolean isSettled() {
+        if (framesSinceStep < MIN_FRAMES_PER_STEP) return false;
+        if (slopeCount < SLOPE_WIN) return false;
+        // When full: oldest is at slopeHead; newest is at (slopeHead-1+SLOPE_WIN)%SLOPE_WIN
+        double oldest = slopeBuf[slopeHead];
+        double newest = slopeBuf[(slopeHead - 1 + SLOPE_WIN) % SLOPE_WIN];
+        double scale  = Math.max(Math.abs(smoothed), Math.abs(expected));
+        if (scale < 1e-12) scale = 1e-12;
+        return Math.abs(newest - oldest) < SETTLE_TOL_FRAC * scale;
+    }
+
+    // ── probe phase: fracMoveTorq ──────────────────────────────────────────────
 
     private ParamTriple handleProbeFmt(double error) {
         if (!probeStepped) {
+            // Stage 1: take probe step
             updateFmtBrackets(error);
-            // too soft (error>0) → stiffen → increase fmt; too stiff → soften → decrease fmt
-            double dir = (error >= 0) ? +1.0 : -1.0;
-            double step = dir * probeStep;
-            double newFmt = clamp(fracMoveTorq + step, FRAC_MT_MIN, FRAC_MT_MAX);
-            double actualStep = newFmt - fracMoveTorq;
+            double dir    = (error >= 0) ? +1.0 : -1.0;
+            double newFmt = clamp(fracMoveTorq + dir * probeStep, FRAC_MT_MIN, FRAC_MT_MAX);
+            double step   = newFmt - fracMoveTorq;
 
-            smoothedAtWindowOpen = smoothed;
-            fmtAtWindowOpen      = fracMoveTorq;
-            fracMoveTorq         = newFmt;
-            probeStepped         = true;
+            smoothedAtStep  = smoothed;
+            fmtAtStep       = fracMoveTorq;
+            errorAtStep     = error;
+            fracMoveTorq    = newFmt;
+            probeStepped    = true;
+            firstProbeFired = true;
             stepCount++;
+            framesSinceStep = 0;
+            resetSlopeBuffer();
 
             System.out.printf(
-                "[AUTOTUNE:STEP#%d] PROBE_FMT take  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
-                + "  fracMoveTorq: %.4f→%.4f (step=%+.4f)  probeRetry=%d%n",
-                stepCount, smoothed, expected, error,
-                fmtAtWindowOpen, fracMoveTorq, actualStep, probeRetryCount);
+                "[AUTOTUNE:STEP#%d] PROBE_FMT take  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+                + "  fmt: %.4f→%.4f (step=%+.4f)  retry=%d%n",
+                stepCount, framesSinceStep, smoothed, expected, error,
+                fmtAtStep, fracMoveTorq, step, probeRetryCount);
             return new ParamTriple(fracMove, fracR, fracMoveTorq);
 
         } else {
-            // evaluate the window just completed
-            double trend      = smoothed - smoothedAtWindowOpen;
-            double actualStep = fracMoveTorq - fmtAtWindowOpen;
-            double rawSens    = (Math.abs(actualStep) > 1e-12) ? trend / actualStep : 0.0;
-            boolean signOk    = rawSens < 0; // expected: larger fmt → less deflection
+            // Stage 2: evaluate sensitivity
+            double trend   = smoothed - smoothedAtStep;
+            double step    = fracMoveTorq - fmtAtStep;
+            double rawSens = Math.abs(step) > 1e-12 ? trend / step : 0.0;
+            boolean signOk = rawSens < 0;
 
-            if (Math.abs(actualStep) < 1e-12) {
-                System.out.printf("[AUTOTUNE] PROBE_FMT: probe step clamped to zero — advancing%n");
-                signOk = true; // treat as degenerate; keep existing fmtSens if any
+            if (Math.abs(step) < 1e-12) {
+                System.out.printf("[AUTOTUNE] PROBE_FMT step clamped to zero — advancing%n");
+                signOk = true;
             } else if (!signOk) {
                 System.out.printf(
                     "[AUTOTUNE] PROBE_FMT bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d%n",
-                    rawSens, trend, actualStep, probeRetryCount);
+                    rawSens, trend, step, probeRetryCount);
                 if (probeRetryCount >= MAX_PROBE_RETRIES) {
                     phase = Phase.FAILED;
                     System.out.println("[AUTOTUNE] FAILED: PROBE_FMT exhausted retries");
                     return null;
                 }
                 probeRetryCount++;
-                probeStep /= 2.0;
+                probeStep   /= 2.0;
                 probeStepped = false;
-                return handleProbeFmt(error); // retry immediately
+                return handleProbeFmt(error);
             }
 
-            if (signOk && Math.abs(actualStep) > 1e-12) {
+            if (signOk && Math.abs(step) > 1e-12) {
                 fmtSens    = rawSens;
                 fmtHasSens = true;
             }
@@ -237,67 +290,68 @@ class DeflectionTuner {
 
             System.out.printf(
                 "[AUTOTUNE] PROBE_FMT eval: trend=%+.6f  step=%+.4f  fmtSens=%.4f  → PROBE_FR%n",
-                trend, actualStep, fmtSens);
+                trend, step, fmtSens);
 
-            // transition to PROBE_FR
             phase           = Phase.PROBE_FR;
             probeStepped    = false;
             probeStep       = INIT_PROBE_STEP;
             probeRetryCount = 0;
-            return handleProbeFr(error); // take FR probe step immediately
+            return handleProbeFr(error);
         }
     }
 
-    // ── probe phase: fracR ────────────────────────────────────────────────────
+    // ── probe phase: fracR ─────────────────────────────────────────────────────
 
     private ParamTriple handleProbeFr(double error) {
         if (!probeStepped) {
+            // Stage 1: take probe step
             updateFrBrackets(error);
-            // too soft (error>0) → stiffen → decrease fracR; too stiff → soften → increase fracR
-            double dir = (error >= 0) ? -1.0 : +1.0;
-            double step = dir * probeStep;
-            double newFr = clamp(fracR + step, FRAC_R_MIN, FRAC_R_MAX);
-            double actualStep = newFr - fracR;
+            double dir   = (error >= 0) ? -1.0 : +1.0;
+            double newFr = clamp(fracR + dir * probeStep, FRAC_R_MIN, FRAC_R_MAX);
+            double step  = newFr - fracR;
 
-            smoothedAtWindowOpen = smoothed;
-            frAtWindowOpen       = fracR;
-            fmtAtWindowOpen      = fracMoveTorq;
-            fracR                = newFr;
-            probeStepped         = true;
+            smoothedAtStep = smoothed;
+            frAtStep       = fracR;
+            errorAtStep    = error;
+            fracR          = newFr;
+            probeStepped   = true;
             stepCount++;
+            framesSinceStep = 0;
+            resetSlopeBuffer();
 
             System.out.printf(
-                "[AUTOTUNE:STEP#%d] PROBE_FR take  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
-                + "  fracR: %.4f→%.4f (step=%+.4f)  probeRetry=%d%n",
-                stepCount, smoothed, expected, error,
-                frAtWindowOpen, fracR, actualStep, probeRetryCount);
+                "[AUTOTUNE:STEP#%d] PROBE_FR take  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+                + "  fr: %.4f→%.4f (step=%+.4f)  retry=%d%n",
+                stepCount, framesSinceStep, smoothed, expected, error,
+                frAtStep, fracR, step, probeRetryCount);
             return new ParamTriple(fracMove, fracR, fracMoveTorq);
 
         } else {
-            double trend      = smoothed - smoothedAtWindowOpen;
-            double actualStep = fracR - frAtWindowOpen;
-            double rawSens    = (Math.abs(actualStep) > 1e-12) ? trend / actualStep : 0.0;
-            boolean signOk    = rawSens > 0; // expected: larger fracR → more deflection
+            // Stage 2: evaluate sensitivity
+            double trend   = smoothed - smoothedAtStep;
+            double step    = fracR - frAtStep;
+            double rawSens = Math.abs(step) > 1e-12 ? trend / step : 0.0;
+            boolean signOk = rawSens > 0;
 
-            if (Math.abs(actualStep) < 1e-12) {
-                System.out.printf("[AUTOTUNE] PROBE_FR: probe step clamped to zero — advancing%n");
+            if (Math.abs(step) < 1e-12) {
+                System.out.printf("[AUTOTUNE] PROBE_FR step clamped to zero — advancing%n");
                 signOk = true;
             } else if (!signOk) {
                 System.out.printf(
                     "[AUTOTUNE] PROBE_FR bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d%n",
-                    rawSens, trend, actualStep, probeRetryCount);
+                    rawSens, trend, step, probeRetryCount);
                 if (probeRetryCount >= MAX_PROBE_RETRIES) {
                     phase = Phase.FAILED;
                     System.out.println("[AUTOTUNE] FAILED: PROBE_FR exhausted retries");
                     return null;
                 }
                 probeRetryCount++;
-                probeStep /= 2.0;
+                probeStep   /= 2.0;
                 probeStepped = false;
-                return handleProbeFr(error); // retry immediately
+                return handleProbeFr(error);
             }
 
-            if (signOk && Math.abs(actualStep) > 1e-12) {
+            if (signOk && Math.abs(step) > 1e-12) {
                 frSens    = rawSens;
                 frHasSens = true;
             }
@@ -305,95 +359,77 @@ class DeflectionTuner {
 
             System.out.printf(
                 "[AUTOTUNE] PROBE_FR eval: trend=%+.6f  step=%+.4f  frSens=%.4f  → COARSE%n",
-                trend, actualStep, frSens);
+                trend, step, frSens);
 
-            // transition to COARSE; record baselines so first COARSE call can compute Δ
-            phase          = Phase.COARSE;
-            fineReadyCount = 0;
-            smoothedAtWindowOpen = smoothed;
-            frAtWindowOpen       = fracR;
-            fmtAtWindowOpen      = fracMoveTorq;
-            return null; // wait OBS_WINDOW frames before first COARSE step
+            phase            = Phase.COARSE;
+            firstStepInPhase = true;
+            fineReadyCount   = 0;
+            return null;
         }
     }
 
     // ── COARSE phase ──────────────────────────────────────────────────────────
 
     private ParamTriple handleCoarse(double error) {
-        // Stiff-end saturation: at stiff limits, still too soft → rescue via fracMove
-        if (error > 0 && fracR <= FRAC_R_MIN + 1e-9 && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
+        if (error > RESCUE_ERR_FRAC * expected && fracR <= FRAC_R_MIN + 1e-9 && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
             return stiffEndRescue();
         }
 
-        // Update sensitivity estimates from the window just completed
-        double defl  = smoothed - smoothedAtWindowOpen;
-        double deltaFr  = fracR        - frAtWindowOpen;
-        double deltaFmt = fracMoveTorq - fmtAtWindowOpen;
-        updateCoarseSensitivities(defl, deltaFr, deltaFmt);
+        if (!firstStepInPhase) {
+            double defl    = smoothed     - smoothedAtStep;
+            double deltaFr  = fracR        - frAtStep;
+            double deltaFmt = fracMoveTorq - fmtAtStep;
+            // Trust update before sensitivity so it uses the sensitivity that drove the step
+            updateCoarseTrust(defl, deltaFr, deltaFmt, error);
+            updateCoarseSensitivities(defl, deltaFr, deltaFmt);
+        }
 
-        if (Math.abs(lastFrActualStep)  <= BRACKET_SKIP_THRESH) updateFrBrackets(error);
-        if (Math.abs(lastFmtActualStep) <= BRACKET_SKIP_THRESH) updateFmtBrackets(error);
+        updateFrBrackets(error);
+        updateFmtBrackets(error);
 
-        // Predictive steps
-        double rawFrPred  = frHasSens
-            ? ALPHA_DIST * (expected - smoothed) / frSens
-            : 0.0; // shouldn't happen in COARSE, but safe fallback
-        double rawFmtPred = fmtHasSens
-            ? (1.0 - ALPHA_DIST) * (expected - smoothed) / fmtSens
-            : 0.0;
+        double rawFrPred  = frHasSens  ? ALPHA_DIST         * (expected - smoothed) / frSens  : 0.0;
+        double rawFmtPred = fmtHasSens ? (1.0 - ALPHA_DIST) * (expected - smoothed) / fmtSens : 0.0;
 
-        frPredStep = Math.abs(rawFrPred);
+        frPredStep      = Math.abs(rawFrPred);
         lastPredStepMag = Math.max(frPredStep, Math.abs(rawFmtPred));
 
-        // Clamp and apply fracR step
-        double frStep  = clamp(rawFrPred,  -MAX_STEP, MAX_STEP);
-        double newFr   = clamp(fracR   + frStep,  FRAC_R_MIN,  FRAC_R_MAX);
+        double frStep = clamp(rawFrPred,  -trustFr,  trustFr);
+        double newFr  = clamp(fracR   + frStep,  FRAC_R_MIN, FRAC_R_MAX);
         newFr  = clampToBrackets(newFr,  frHasLo,  frLoBound,  frHasHi,  frHiBound);
-        double actFrStep = newFr - fracR;
+        double aFr = newFr - fracR;
 
-        // Clamp and apply fracMoveTorq step
-        double fmtStep = clamp(rawFmtPred, -MAX_STEP, MAX_STEP);
+        double fmtStep = clamp(rawFmtPred, -trustFmt, trustFmt);
         double newFmt  = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
         newFmt = clampToBrackets(newFmt, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
-        double actFmtStep = newFmt - fracMoveTorq;
+        double aFmt = newFmt - fracMoveTorq;
 
         System.out.printf(
-            "[AUTOTUNE:STEP#%d] COARSE"
-            + "  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
-            + "  fr=%.4f(%s pred=%+.4f act=%+.4f)"
-            + "  fmt=%.4f(%s pred=%+.4f act=%+.4f)%n",
-            stepCount + 1, smoothed, expected, error,
-            fracR,        frHasSens  ? String.format("%.3f", frSens)  : "---", rawFrPred,  actFrStep,
-            fracMoveTorq, fmtHasSens ? String.format("%.3f", fmtSens) : "---", rawFmtPred, actFmtStep);
+            "[AUTOTUNE:STEP#%d] COARSE  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+            + "  fr=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)"
+            + "  fmt=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)%n",
+            stepCount + 1, framesSinceStep, smoothed, expected, error,
+            fracR,        frHasSens  ? String.format("%.4f", frSens)  : "---", rawFrPred,  aFr,  trustFr,
+            fracMoveTorq, fmtHasSens ? String.format("%.4f", fmtSens) : "---", rawFmtPred, aFmt, trustFmt);
 
-        // Record baselines before applying step
-        smoothedAtWindowOpen = smoothed;
-        frAtWindowOpen       = fracR;
-        fmtAtWindowOpen      = fracMoveTorq;
-
-        fracR        = newFr;
-        fracMoveTorq = newFmt;
-        lastFrActualStep  = actFrStep;
-        lastFmtActualStep = actFmtStep;
+        smoothedAtStep   = smoothed;
+        frAtStep         = fracR;
+        fmtAtStep        = fracMoveTorq;
+        errorAtStep      = error;
+        fracR            = newFr;
+        fracMoveTorq     = newFmt;
         stepCount++;
+        firstStepInPhase = false;
+        framesSinceStep  = 0;
+        resetSlopeBuffer();
 
-        // Check COARSE→FINE: two consecutive steps with small |frPredStep|
         if (frPredStep < FR_FINE_THRESH) {
             if (++fineReadyCount >= 2) {
-                double frozenFr = fracR;
-                phase          = Phase.FINE;
-                fineReadyCount = 0;
-                // Reset fmt controller state for fresh FINE estimation
-                fmtHasSens        = false;
-                fmtHasLo          = false;
-                fmtHasHi          = false;
-                lastFmtActualStep = 0.0; // allow first FINE bracket update
-                smoothedAtWindowOpen = smoothed;
-                frAtWindowOpen       = fracR;
-                fmtAtWindowOpen      = fracMoveTorq;
-                System.out.printf(
-                    "[AUTOTUNE] COARSE→FINE: fracR=%.4f frozen  fracMoveTorq=%.4f%n",
-                    frozenFr, fracMoveTorq);
+                phase            = Phase.FINE;
+                firstStepInPhase = true;
+                fineReadyCount   = 0;
+                fmtHasSens = false; fmtHasLo = false; fmtHasHi = false;
+                System.out.printf("[AUTOTUNE] COARSE→FINE: fracR=%.4f frozen  fracMoveTorq=%.4f%n",
+                    fracR, fracMoveTorq);
             }
         } else {
             fineReadyCount = 0;
@@ -405,41 +441,46 @@ class DeflectionTuner {
     // ── FINE phase ────────────────────────────────────────────────────────────
 
     private ParamTriple handleFine(double error) {
-        // Stiff-end saturation: fracMoveTorq at stiff limit, still too soft
-        if (error > 0 && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
+        if (error > RESCUE_ERR_FRAC * expected && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
             return stiffEndRescue();
         }
 
-        double defl     = smoothed - smoothedAtWindowOpen;
-        double deltaFmt = fracMoveTorq - fmtAtWindowOpen;
-        updateFineSensitivity(defl, deltaFmt);
+        if (!firstStepInPhase) {
+            double defl    = smoothed     - smoothedAtStep;
+            double deltaFmt = fracMoveTorq - fmtAtStep;
+            // Trust update before sensitivity so it uses the sensitivity that drove the step
+            updateFineTrust(defl, deltaFmt, error);
+            updateFineSensitivity(defl, deltaFmt);
+        }
 
-        if (Math.abs(lastFmtActualStep) <= BRACKET_SKIP_THRESH) updateFmtBrackets(error);
+        updateFmtBrackets(error);
 
         double rawFmtPred = fmtHasSens
             ? (expected - smoothed) / fmtSens
-            : ((error > 0) ? INIT_PROBE_STEP : -INIT_PROBE_STEP); // initial FINE probe
+            : ((error > 0) ? INIT_PROBE_STEP : -INIT_PROBE_STEP);
         lastPredStepMag = Math.abs(rawFmtPred);
 
-        double fmtStep    = clamp(rawFmtPred, -MAX_STEP, MAX_STEP);
-        double newFmt     = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
+        double fmtStep = clamp(rawFmtPred, -trustFmt, trustFmt);
+        double newFmt  = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
         newFmt = clampToBrackets(newFmt, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
-        double actFmtStep = newFmt - fracMoveTorq;
+        double aFmt = newFmt - fracMoveTorq;
 
         System.out.printf(
-            "[AUTOTUNE:STEP#%d] FINE"
-            + "  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+            "[AUTOTUNE:STEP#%d] FINE  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
             + "  fr=%.4f(frozen)"
-            + "  fmt=%.4f(%s pred=%+.4f act=%+.4f)%n",
-            stepCount + 1, smoothed, expected, error,
+            + "  fmt=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)%n",
+            stepCount + 1, framesSinceStep, smoothed, expected, error,
             fracR,
-            fracMoveTorq, fmtHasSens ? String.format("%.3f", fmtSens) : "---", rawFmtPred, actFmtStep);
+            fracMoveTorq, fmtHasSens ? String.format("%.4f", fmtSens) : "---", rawFmtPred, aFmt, trustFmt);
 
-        smoothedAtWindowOpen  = smoothed;
-        fmtAtWindowOpen       = fracMoveTorq;
-        fracMoveTorq          = newFmt;
-        lastFmtActualStep     = actFmtStep;
+        smoothedAtStep   = smoothed;
+        fmtAtStep        = fracMoveTorq;
+        errorAtStep      = error;
+        fracMoveTorq     = newFmt;
         stepCount++;
+        firstStepInPhase = false;
+        framesSinceStep  = 0;
+        resetSlopeBuffer();
 
         return new ParamTriple(fracMove, fracR, fracMoveTorq);
     }
@@ -447,58 +488,100 @@ class DeflectionTuner {
     // ── sensitivity updates ───────────────────────────────────────────────────
 
     private void updateCoarseSensitivities(double defl, double deltaFr, double deltaFmt) {
-        if (!frHasSens || !fmtHasSens) return; // need prior estimates for attribution
+        if (!frHasSens || !fmtHasSens) return;
         double expFr  = Math.abs(deltaFr  * frSens);
         double expFmt = Math.abs(deltaFmt * fmtSens);
         double total  = expFr + expFmt;
         if (total < 1e-12) return;
 
         if (Math.abs(deltaFr) > 1e-12) {
-            double rawFrSens = defl * (expFr / total) / deltaFr;
-            if (rawFrSens > 0) {
-                frSens = rawFrSens;
-            } else {
-                System.out.printf("[AUTOTUNE] bad-sign frSens=%.4f (defl=%+.6f Δfr=%+.4f) — keeping prior%n",
-                    rawFrSens, defl, deltaFr);
-            }
+            double raw = defl * (expFr / total) / deltaFr;
+            if (raw > 0) { frSens = raw; }
+            else System.out.printf(
+                "[AUTOTUNE] bad-sign frSens=%.4f (defl=%+.6f Δfr=%+.4f) — keeping prior%n",
+                raw, defl, deltaFr);
         }
-
         if (Math.abs(deltaFmt) > 1e-12) {
-            double rawFmtSens = defl * (expFmt / total) / deltaFmt;
-            if (rawFmtSens < 0) {
-                fmtSens = rawFmtSens;
-            } else {
-                System.out.printf("[AUTOTUNE] bad-sign fmtSens=%.4f (defl=%+.6f Δfmt=%+.4f) — keeping prior%n",
-                    rawFmtSens, defl, deltaFmt);
-            }
+            double raw = defl * (expFmt / total) / deltaFmt;
+            if (raw < 0) { fmtSens = raw; }
+            else System.out.printf(
+                "[AUTOTUNE] bad-sign fmtSens=%.4f (defl=%+.6f Δfmt=%+.4f) — keeping prior%n",
+                raw, defl, deltaFmt);
         }
     }
 
     private void updateFineSensitivity(double defl, double deltaFmt) {
         if (Math.abs(deltaFmt) < 1e-12) return;
-        double rawSens = defl / deltaFmt;
-        if (rawSens < 0) {
-            fmtSens    = rawSens;
-            fmtHasSens = true;
-        } else {
-            System.out.printf("[AUTOTUNE] FINE bad-sign fmtSens=%.4f (defl=%+.6f Δfmt=%+.4f) — %s%n",
-                rawSens, defl, deltaFmt, fmtHasSens ? "keeping prior" : "using probe next");
+        double raw = defl / deltaFmt;
+        if (raw < 0) { fmtSens = raw; fmtHasSens = true; }
+        else System.out.printf(
+            "[AUTOTUNE] FINE bad-sign fmtSens=%.4f (defl=%+.6f Δfmt=%+.4f) — %s%n",
+            raw, defl, deltaFmt, fmtHasSens ? "keeping prior" : "using probe next");
+    }
+
+    // ── trust region updates ──────────────────────────────────────────────────
+
+    private void updateCoarseTrust(double defl, double deltaFr, double deltaFmt, double errorAfter) {
+        if (!frHasSens && !fmtHasSens) return;
+        boolean signFlipped = signFlipped(errorAtStep, errorAfter);
+
+        double predFrAbs  = frHasSens  ? Math.abs(deltaFr  * frSens)  : 0.0;
+        double predFmtAbs = fmtHasSens ? Math.abs(deltaFmt * fmtSens) : 0.0;
+        double total      = predFrAbs + predFmtAbs;
+        if (total < 1e-12) return;
+
+        if (frHasSens && Math.abs(deltaFr) > 1e-12) {
+            trustFr = updateTrustRadius(trustFr,
+                defl * (predFrAbs / total), deltaFr * frSens, signFlipped, "fracR");
         }
+        if (fmtHasSens && Math.abs(deltaFmt) > 1e-12) {
+            trustFmt = updateTrustRadius(trustFmt,
+                defl * (predFmtAbs / total), deltaFmt * fmtSens, signFlipped, "fracMoveTorq");
+        }
+    }
+
+    private void updateFineTrust(double defl, double deltaFmt, double errorAfter) {
+        if (!fmtHasSens || Math.abs(deltaFmt) < 1e-12) return;
+        trustFmt = updateTrustRadius(trustFmt,
+            defl, deltaFmt * fmtSens, signFlipped(errorAtStep, errorAfter), "fracMoveTorq");
+    }
+
+    private static boolean signFlipped(double eBefore, double eAfter) {
+        return Math.abs(eBefore) > 1e-12 && Math.abs(eAfter) > 1e-12
+            && (eBefore > 0) != (eAfter > 0);
+    }
+
+    private double updateTrustRadius(double trust, double actual, double predicted,
+                                     boolean signFlipped, String name) {
+        if (signFlipped) {
+            double nt = Math.max(trust * TRUST_SHRINK, MIN_TRUST);
+            System.out.printf("[AUTOTUNE] trust %s sign-flip  %.4f→%.4f%n", name, trust, nt);
+            return nt;
+        }
+        double ratio = Math.abs(predicted) > 1e-12 ? actual / predicted : 0.0;
+        if (ratio >= PREDICTED_FRACTION) {
+            double nt = Math.min(trust * TRUST_GROW, MAX_TRUST);
+            if (nt > trust + 1e-9)
+                System.out.printf("[AUTOTUNE] trust %s grow  %.4f→%.4f%n", name, trust, nt);
+            return nt;
+        }
+        if (ratio < 0.25) {
+            double nt = Math.max(trust * TRUST_SHRINK, MIN_TRUST);
+            System.out.printf("[AUTOTUNE] trust %s weak  %.4f→%.4f%n", name, trust, nt);
+            return nt;
+        }
+        return trust;
     }
 
     // ── bracket updates ───────────────────────────────────────────────────────
 
-    // fracR: larger = softer.
-    //   too soft (error>0): fracR too large → upper bound
-    //   too stiff (error<0): fracR too small → lower bound
+    // fracR: larger = softer; too soft (err>0) → upper bound; too stiff → lower bound
     private void updateFrBrackets(double error) {
         if (error > 0 && (!frHasHi || fracR < frHiBound)) { frHiBound = fracR; frHasHi = true; }
         if (error < 0 && (!frHasLo || fracR > frLoBound)) { frLoBound = fracR; frHasLo = true; }
     }
 
-    // fracMoveTorq: larger = stiffer.
-    //   too soft (error>0): fmt too small → lower bound (target is above current fmt)
-    //   too stiff (error<0): fmt too large → upper bound
+    // fracMoveTorq: larger = stiffer; too soft (err>0) → lower bound; too stiff → upper bound
     private void updateFmtBrackets(double error) {
         if (error > 0 && (!fmtHasLo || fracMoveTorq > fmtLoBound)) { fmtLoBound = fracMoveTorq; fmtHasLo = true; }
         if (error < 0 && (!fmtHasHi || fracMoveTorq < fmtHiBound)) { fmtHiBound = fracMoveTorq; fmtHasHi = true; }
@@ -517,18 +600,21 @@ class DeflectionTuner {
 
         frHasSens  = false; frHasLo  = false; frHasHi  = false;
         fmtHasSens = false; fmtHasLo = false; fmtHasHi = false;
-        fineReadyCount = 0;
+        fineReadyCount   = 0;
+        firstStepInPhase = true;
+        trustFr  = INIT_TRUST;
+        trustFmt = INIT_TRUST;
+        framesSinceStep  = 0;
+        resetSlopeBuffer();
 
         phase           = Phase.PROBE_FMT;
         probeStepped    = false;
         probeStep       = INIT_PROBE_STEP;
         probeRetryCount = 0;
-        smoothedAtWindowOpen = smoothed;
-        frAtWindowOpen       = fracR;
-        fmtAtWindowOpen      = fracMoveTorq;
 
         System.out.printf(
-            "[AUTOTUNE] stiff-end rescue: fracMove %.4f→%.4f  reset→PROBE_FMT%n", oldFm, fracMove);
+            "[AUTOTUNE] stiff-end rescue: fracMove %.4f→%.4f  trust reset  → PROBE_FMT%n",
+            oldFm, fracMove);
         return new ParamTriple(fracMove, fracR, fracMoveTorq);
     }
 
@@ -557,7 +643,7 @@ class DeflectionTuner {
             boolean hasLo, double lo, boolean hasHi, double hi) {
         if (hasLo && v < lo) v = lo;
         if (hasHi && v > hi) v = hi;
-        if (hasLo && hasHi && lo > hi) v = (lo + hi) / 2.0; // degenerate → midpoint
+        if (hasLo && hasHi && lo > hi) v = (lo + hi) / 2.0;
         return v;
     }
 
