@@ -4236,3 +4236,134 @@ maxFilLinkDist, linkDissolveRate, myosSteppingSwitch, myosinStepRate,
 myosinReleaseRate, myoFBRBase, myoFBRExp) point to features present in
 the other branch but stripped here. A future session will diff the two
 codebases and selectively restore features. Not urgent.
+
+---
+
+## 2026-05-19 (session 2) — DeflectionTuner v4: independent per-parameter predictive controllers
+
+### Summary
+
+`boxOfActin/DeflectionTuner.java` rewritten from scratch (v3 joint-scalar
+design replaced in full). `BoxOfActin.java` wiring unchanged. Compiles
+clean. Runtime verification incomplete — two bugs found and fixed during
+the session; a third bug (bracket collapse) was diagnosed and fixed but
+not yet verified at runtime.
+
+### Algorithm
+
+Two fully independent online predictive controllers, one for fracR and
+one for fracMoveTorq. Each maintains its own sensitivity estimate
+(dDefl/dParam), bracket bounds, and last-step size. No joint scalar.
+Parameters start wherever the parameter file leaves them.
+
+**Phase order:** PROBE_FMT → PROBE_FR → COARSE → FINE → CONVERGED (or
+FAILED at any point).
+
+**PROBE_FMT / PROBE_FR:** Take a single probe step in the error-closing
+direction (obs>exp → stiffen; obs<exp → soften). Wait OBS_WINDOW frames.
+Compute sensitivity from EMA trend/step ratio. If sign is wrong, retry
+with halved step (up to MAX_PROBE_RETRIES=3 retries). Transitions are
+immediate (no extra wait between phases).
+
+**COARSE:** Both fracR and fracMoveTorq step simultaneously, each
+contributing ALPHA_DIST=0.5 of the predicted gap closure. Sensitivity
+re-estimated each window via weighted attribution:
+  sens_fr_new  = Δdefl × |Δfr  × sens_fr_prev|  / (Δfr  × total)
+  sens_fmt_new = Δdefl × |Δfmt × sens_fmt_prev| / (Δfmt × total)
+where total = |Δfr × sens_fr| + |Δfmt × sens_fmt|.
+
+Transitions to FINE when |predicted fracR step| < FR_FINE_THRESH=0.02
+on two consecutive steps.
+
+**FINE:** fracR frozen. Only fracMoveTorq moves. Simple single-parameter
+predictive step. Sensitivity re-estimated each window from Δdefl/Δfmt.
+
+**CONVERGED:** |smoothed − expected| ≤ CONV_TOL_UM=5e-6 µm for
+CONV_FRAMES=50 consecutive frames AND |last predicted step| < PRED_STEP_TOL=0.001.
+
+**Stiff-end rescue:** fracR at FRAC_R_MIN AND fracMoveTorq at FRAC_MT_MAX
+AND error>0 (chain too soft to stiffen further) → reduce fracMove by
+FRAC_MOVE_STEP=0.05, reset sensitivity and brackets, return to PROBE_FMT.
+If fracMove already at FRAC_MOVE_MIN: FAILED.
+
+### Constants
+
+  EMA_ALPHA=0.05, PROBE_EMA_ALPHA=0.2, OBS_WINDOW=20, INIT_PROBE_STEP=0.05,
+  MAX_STEP=0.2, PRED_STEP_TOL=0.001, CONV_TOL_UM=5e-6, CONV_FRAMES=50,
+  FR_FINE_THRESH=0.02, ALPHA_DIST=0.5, FRAC_MOVE_STEP=0.05,
+  MAX_PROBE_RETRIES=3, BRACKET_SKIP_THRESH=0.05.
+
+### Bugs found and fixed during the session
+
+**Bug 1: EMA cold-start causes wrong probe sign.**
+With EMA_ALPHA=0.05 and OBS_WINDOW=20, the EMA is only 63% converged
+when the first probe fires (starting from 0 at t=0). For a parameter
+that starts far from target, the EMA lag (still rising toward old
+equilibrium) dominates the small sensitivity signal from the probe step.
+Result: sign consistently wrong → all retries fail → FAILED.
+
+Fix: use PROBE_EMA_ALPHA=0.2 during PROBE_FMT and PROBE_FR phases. At
+alpha=0.2, EMA reaches 98.8% convergence in 20 frames. Alpha reverts
+to 0.05 on entering COARSE (for noise averaging in convergence criterion).
+
+The dual-alpha switch is one line in feed(): alpha is selected based on
+current phase before each EMA update. The EMA value itself is never
+reset — just the update rate changes.
+
+**Bug 2: Bracket collapse after large FINE step.**
+In the test run, a large fmt step (0.4500→0.2500) was applied at FINE
+step 12. After 20 frames with EMA_ALPHA=0.05, the EMA was at 63%
+convergence to the new equilibrium. It read obs=0.009775 µm (barely
+below target), triggering fmtHiBound=0.2500. The next window at
+fmt=0.2500 (with 20 more frames) showed obs=0.011 µm>target, setting
+fmtLoBound=0.2475. Bracket collapsed to [0.2475, 0.2500]. Every
+subsequent step was clamped to that range, controller stuck indefinitely.
+
+Fix: BRACKET_SKIP_THRESH=0.05. updateFrBrackets / updateFmtBrackets are
+skipped when |last actual step for that parameter| > 0.05. The bracket
+is only updated after small steps, when the EMA has had sufficient time
+(at OBS_WINDOW=20 frames, a step of ≤0.05 leaves EMA near equilibrium
+in the subsequent window). `lastFmtActualStep` is reset to 0.0 at the
+COARSE→FINE transition so the first FINE bracket update is always allowed.
+
+### Test run observed (32-monomer, fracR=0.807 start)
+
+Run with `ParameterFiles/boaDebugParams` (fracR=0.807, fracMoveTorq=0.303,
+filSegLength=32, target=9.801 nm):
+
+  PROBE_FMT: retried twice (bad sign), succeeded on retry #2.
+    fmtSens = -0.005 (correct sign, small magnitude from tiny probe).
+  PROBE_FR: succeeded first try. frSens = 0.0085.
+  COARSE: 6 steps. fracR driven from 0.757 → 0.126 (stiff direction,
+    3 consecutive MAX_STEP cuts). fracMoveTorq clamped at 0.5000 throughout.
+    Error went positive → negative between steps 8 and 9.
+  COARSE→FINE: triggered at step 10 (fineReadyCount=2).
+    fracR=0.1263 frozen. fracMoveTorq=0.5000.
+  FINE (before bracket fix): stalled at fmt=0.2500 from step 15 onward.
+    obs converged to 0.011868 µm, predicted step +0.0038, actual 0.0000.
+    (bracket trap as described above)
+
+After bug 2 fix was applied: runtime verification not completed this
+session (user elected to stop at diagnosis + fix stage).
+
+### BoxOfActin.java wiring
+
+No changes needed. API surface preserved exactly:
+  - start(fm, fr, fmt, expectedMicrons) — 4-arg, same signature
+  - feed(observedMicrons) → ParamTriple | null
+  - isDone(), getPhase() (Phase.CONVERGED / Phase.FAILED still present)
+  - resultSummary()
+  - dispatchParamAck broadcasts already in place from previous sessions
+  - resetBenchmarkChain() not called in autotune path (confirmed)
+  - SETTLE_SKIP / settleSkip / benchDynamicSettleFrames: not present
+
+### Forward items
+
+1. Runtime verification: 32-monomer should converge in seconds, 64-monomer
+   in well under a minute after the bracket-skip fix.
+2. If FINE stalls again: consider whether BRACKET_SKIP_THRESH=0.05 is
+   too tight. Could raise to 0.1 (half of MAX_STEP). Also consider
+   widening fmtHiBound to FRAC_MT_MAX when re-entering FINE after a
+   rescue (to give more room to explore).
+3. Parameter-tuple caching: persistent map of (deltaT, aeta, monomerCt,
+   filSegLength) → converged triple, saved on CONVERGED, loaded at startup.
