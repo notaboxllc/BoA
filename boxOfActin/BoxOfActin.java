@@ -97,11 +97,7 @@ public class BoxOfActin {
 	static int    benchStepCount   = 0;
 	static int    benchMonCt       = 32;   // stored for LP chain and HUD
 
-	// Settle-window formula constants (revived from the old bisection controller, commit 95af4f2).
-	// τ_slow ∝ L_seg³/fracMoveTorq; both terms must be satisfied for reliable evaluation.
-	static final int    BENCH_SETTLE_BASE           = 5000;    // steps at monomerCt=32 (one settle period)
-	static final int    BENCH_SETTLE_REF_MONOMER_CT = 32;
-	static final int    BENCH_SETTLE_MAX_STEPS       = 500000; // absolute per-evaluation cap in steps
+	// (settle-window formula constants removed — new crossing-event controller needs no settle wait)
 
 	// Automated deflection tuning controller (null when not running)
 	static DeflectionTuner deflTuner = null;
@@ -527,15 +523,18 @@ public class BoxOfActin {
 						if (snap != null) {
 							DeflectionTuner.ParamTriple update = deflTuner.feed(snap.observed);
 							if (update != null) {
+								double oldFm  = Env.fracMove.getValue();
+								double oldFr  = Env.fracR.getValue();
+								double oldFmt = Env.fracMoveTorq.getValue();
 								Env.fracMove.setValue(update.fracMove);
 								Env.fracR.setValue(update.fracR);
 								Env.fracMoveTorq.setValue(update.fracMoveTorq);
-								if (update.resetChain) resetBenchmarkChain();
-								int newSettle = benchDynamicSettleFrames(update.fracMoveTorq);
-								deflTuner.setSettleSkip(newSettle);
-								System.out.printf("[AUTOTUNE:%s] fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  obs=%.4f µm  exp=%.4f µm  settle=%d fr%n",
-									deflTuner.getPhase(), update.fracMove, update.fracR, update.fracMoveTorq,
-									snap.observed, snap.expected, newSettle);
+								// Broadcast param changes so the live viewer's Params panel updates
+								if (LiveFrameServer.isRunning()) {
+									if (update.fracMove    != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+									if (update.fracR       != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+									if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+								}
 							}
 							if (deflTuner.isDone()) {
 								boolean converged = deflTuner.getPhase() == DeflectionTuner.Phase.CONVERGED;
@@ -775,21 +774,6 @@ public class BoxOfActin {
 		}
 		sb.append("]}");
 		return sb.toString();
-	}
-
-	// Restore all benchmark segments to their initial straight-line configuration.
-	// Called at the safe point after each autotune parameter change.
-	// Settle frames = max(500/fracMoveTorq, 5000*(monCt/32)^3) steps → frames, minus WINDOW_N.
-	// Matches the formula from the old bisection controller (commit 95af4f2), now converted to
-	// output-frame units so DeflectionTuner can use it directly.
-	private static int benchDynamicSettleFrames(double fracMoveTorq) {
-		int toFile = Env.toFileInterval.getIntValue();
-		double dynSteps  = Math.min(500.0 / fracMoveTorq, BENCH_SETTLE_MAX_STEPS * 2.0 / 3.0);
-		double baseSteps = Math.min(
-			BENCH_SETTLE_BASE * Math.pow((double)benchMonCt / BENCH_SETTLE_REF_MONOMER_CT, 3.0),
-			BENCH_SETTLE_MAX_STEPS * 2.0 / 3.0);
-		int settleSteps = (int)Math.max(dynSteps, baseSteps);
-		return Math.max(0, (int)Math.ceil(settleSteps / (double)toFile) - DeflectionTuner.WINDOW_N);
 	}
 
 	private static void resetBenchmarkChain() {
@@ -1101,17 +1085,15 @@ public class BoxOfActin {
 
 			// Automated deflection tuning (-bm): arm the DeflectionTuner.
 			deflTuner = new DeflectionTuner();
-			int initialSettleFrames = benchDynamicSettleFrames(Env.fracMoveTorq.getValue());
 			deflTuner.start(
 				Env.fracMove.getValue(),
 				Env.fracR.getValue(),
 				Env.fracMoveTorq.getValue(),
-				deflFil.analyticDefl,
-				initialSettleFrames
+				deflFil.analyticDefl
 			);
 			autoTuneStepCounter = 0;
-			System.out.printf("[AUTOTUNE] armed: fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm  settleFrames=%d%n",
-				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl, initialSettleFrames);
+			System.out.printf("[AUTOTUNE] armed: fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm%n",
+				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}
 		if (Env.twoNodesOneFil) {

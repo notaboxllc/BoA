@@ -4,6 +4,147 @@ Last updated: 2026-05-18
 
 ---
 
+## 2026-05-18 — DeflectionTuner v3: online predictive controller with sensitivity estimation
+
+### Motivation
+
+The crossing-event bisection (v2) got stuck on the 64-monomer chain after the first coarse step. The initial step from default params (`fracR=0.1, fracMoveTorq=0.265`) was large (coarseStep=0.1 applied as a fixed delta), producing a parameter pair far from equilibrium. The EMA smoothed signal never crossed back through the theoretical threshold in a reasonable time — so no second crossing occurred, and the controller stalled with no way to recover.
+
+Root cause: the bisection algorithm only acts at crossings. If the first step over-corrects to a region where the chain asymptotically approaches (but never crosses) the threshold, the controller is silent forever.
+
+The new controller is predictive: it acts on a fixed cadence (every `OBS_WINDOW=20` output frames regardless of sign changes), estimates local sensitivity, and extrapolates the next parameter value directly. No stalling.
+
+### Algorithm
+
+**EMA.** Same as v2: `alpha=0.05`, ~19-frame time constant. Smoothed starts at 0 (chain straight).
+
+**COARSE joint coordinate s.** Rather than stepping fracR and fracMoveTorq independently by fixed deltas, the COARSE phase moves along a ray in (fracR, fracMoveTorq) space parameterised by `s ∈ [0,1]`:
+- `s=0` → `(fracR=0.1, fracMoveTorq=0.5)` — stiffest (max stiffness in both directions)
+- `s=1` → `(fracR=1.5, fracMoveTorq=0.01)` — softest
+- `fracR(s)        = 0.1  + s * 1.4`
+- `fracMoveTorq(s) = 0.5  - s * 0.49`
+- Expected sensitivity: `dDeflection/ds > 0` (larger s → softer → more deflection)
+
+Initial s is derived from the starting `fracMoveTorq` value so the first step keeps `fracMoveTorq` continuous: `s_init = (0.5 - fracMoveTorq) / 0.49`.
+
+**OBS_WINDOW cadence.** After each step (and at startup), the controller waits exactly 20 output frames, then acts. This is not a settle wait — it just gives enough time to observe initial movement. The chain runs continuously throughout.
+
+**Sensitivity estimation.** At the end of each OBS_WINDOW:
+- `trend = smoothed_now - smoothed_at_window_open`
+- `sensitivity = trend / lastStep`
+- Sign check: COARSE expects `sensitivity > 0`; FINE expects `sensitivity < 0` (larger `fracMoveTorq` → less deflection). Wrong-sign estimates are discarded; prior estimate is kept (or probe step used if none).
+
+**Prediction.** `rawPred = (expected - smoothed) / sensitivity`. This extrapolates to the parameter value that should land deflection on theoretical in one ideal step.
+
+**Initial probe.** At startup (or after entering FINE) before any sensitivity estimate exists, a fixed `INIT_PROBE_STEP=0.05` probe is taken in the correct direction (`error < 0` → probe toward softer = increase s).
+
+**Brackets.** Each step observation updates bracket bounds:
+- COARSE: `hiBound` = smallest s seen when `smoothed > expected`; `loBound` = largest s seen when `smoothed < expected`. Target s ∈ [loBound, hiBound].
+- FINE: `loBound` = largest `fracMoveTorq` seen when too soft; `hiBound` = smallest `fracMoveTorq` seen when too stiff.
+Predicted parameter is clamped to the bracket, preventing bad sensitivity estimates from extrapolating past known-good bounds.
+
+**MAX_STEP clamping.** Raw prediction clamped to `±MAX_STEP=0.2` before bracket and limit clamping.
+
+**COARSE→FINE transition.** When `|rawPred| * FRAC_R_RANGE (=1.4) < 0.05`, the predicted fracR movement is small enough that further coarse steps can't improve much. Transition to FINE: freeze `fracR`, reset sensitivity and brackets, continue with `fracMoveTorq` alone.
+
+**Convergence.** Both conditions must hold simultaneously: `|smoothed - expected| ≤ 5e-6 µm` for `CONV_FRAMES=50` consecutive frames, AND `lastRawPredStep < PRED_STEP_TOL=0.001` (predictor says "nearly there"). Checked every frame including between steps.
+
+**Failure.** At COARSE stiff limit (`s < 1e-6` and `error < 0`): lower `fracMove` by 0.05, reset sensitivity and brackets, continue. If `fracMove` already at 0.1, declare FAILED.
+
+### Constants chosen and rationale
+
+| Constant | Value | Why |
+|---|---|---|
+| `EMA_ALPHA` | 0.05 | Same as v2; ~19-frame smoothing |
+| `OBS_WINDOW` | 20 | Long enough to see initial movement from a step; short enough not to waste time |
+| `INIT_PROBE_STEP` | 0.05 | ~5% of the s range; small enough not to overshoot badly, large enough to get a reliable sensitivity signal |
+| `MAX_STEP` | 0.2 | Prevents wild extrapolation from noisy first sensitivity; 0.2 on s = 0.28 µm in fracR |
+| `PRED_STEP_TOL` | 0.001 | Below this, predictor thinks we're essentially at target |
+| `CONV_TOL_UM` | 5e-6 | ±0.005 nm — same as v1 and v2 |
+| `CONV_FRAMES` | 50 | ~2.5 OBS_WINDOWs of sustained convergence |
+| `COARSE_TO_FINE_FRACR` | 0.05 | Matches prior fine-phase granularity |
+| `FRAC_MOVE_STEP` | 0.05 | Same as prior implementations |
+
+### BoxOfActin wiring
+
+No changes needed. The `start(fm, fr, fmt, expected)` signature (4 args) is unchanged from v2. The drain block and `dispatchParamAck` broadcast are unchanged.
+
+### Test results
+
+Not yet run — handed off to user. Expected:
+- **32-monomer:** initial probe + 1-2 coarse steps → FINE → converges in O(seconds).
+- **64-monomer:** initial probe (OBS_WINDOW=20 frames = 2000 steps), 1-2 coarse steps, then fine. Target: under 1 minute wall clock.
+
+If 64-monomer does not converge, user to report: sensitivity values, bracket bounds, smoothed deflection trace, and which step the controller stalled on.
+
+### Compile
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — clean.
+
+---
+
+## 2026-05-18 — DeflectionTuner rewrite: continuous crossing-event bisection
+
+### Motivation
+
+The previous `DeflectionTuner` used the same evaluate-settle-step-reset pattern as the old `-bm` controller. For a 32-monomer chain it converged in seconds; for a 64-monomer chain the chain-length-cubed settle formula produced ~370-frame settle waits + 30-frame windows = 400 frames per evaluation, making each step take ~32 min wall clock.
+
+The new algorithm never resets the chain and needs no settle wait. It runs the chain continuously and only acts at crossing events — when the EMA-smoothed deflection crosses the theoretical target. Between crossings the chain evolves freely under current parameters.
+
+### Algorithm
+
+**EMA smoothing.** `smoothed = EMA_ALPHA * observed + (1 - EMA_ALPHA) * smoothed`. Alpha = 0.05, giving a ~19-frame time constant. Own EMA maintained by `DeflectionTuner` (not the shared `lpEwmaAlpha` signal) because the deflection benchmark and LP chain are separate signals with different noise and settling characteristics. Coupling them would require the caller to track which frame belongs to which benchmark.
+
+**Crossing detection.** Each frame: compute `error = smoothed - expected`; track `prevErrorSign` (last non-zero sign). A crossing fires when both the current and previous non-zero sign differ. On the first crossing the controller takes action; before that it is idle. The chain starts straight (deflection = 0), so `prevErrorSign` is initialized to −1. The first crossing fires when the smoothed deflection first climbs past the theoretical target.
+
+**Coarse phase (COARSE_STEP_INIT = 0.1).** On each crossing: apply `fracR ± s`, `fracMoveTorq ∓ s` (stiffening if error > 0, softening if error < 0), then halve `s`. Transition to FINE when `s < COARSE_TO_FINE_THRESH = 0.05` — this happens on the second crossing (s goes 0.1 → 0.05 → 0.025, and 0.025 < 0.05).
+
+**Fine phase.** `fracR` frozen at value when coarse phase ends. Only `fracMoveTorq` moves. Initial fine step = coarse step at transition (0.025). Halves after each fine crossing.
+
+**Convergence.** Both conditions must hold: `fineStep < CONV_STEP_THRESH = 0.005` AND `|error| ≤ CONV_TOL_UM = 5e-6 µm` for `CONV_N = 50` consecutive non-crossing frames. Convergence can only occur in the fine phase (coarse step never drops below 0.05 before transitioning).
+
+**Failure.** Checked in the coarse phase at a crossing: if `fracR = FRAC_R_MIN` AND `fracMoveTorq = FRAC_MT_MAX` AND `error < 0` (at stiff limit and still below target), lower `fracMove` by 0.05 down to `FRAC_MOVE_MIN = 0.1`. If already at minimum, declare FAILED. The symmetric "too soft" failure is not implemented per user confirmation that it does not arise in practice.
+
+### Deleted machinery
+
+- `SETTLE_SKIP`, `settleSkip`, `setSettleSkip()` from old `DeflectionTuner`
+- `WINDOW_N` ring buffer and windowed-mean logic
+- `benchDynamicSettleFrames()` from `BoxOfActin.java`
+- `BENCH_SETTLE_BASE`, `BENCH_SETTLE_REF_MONOMER_CT`, `BENCH_SETTLE_MAX_STEPS` constants
+- `resetBenchmarkChain()` call from the autotune update path (method definition retained as dead code)
+- `resetChain` field from `ParamTriple` — the chain is never reset; caller no longer needs the flag
+
+### GUI parameter panel fix
+
+The autotune path previously updated `Env.fracMove/fracR/fracMoveTorq` directly without broadcasting, so the live viewer's Mutable Parameters panel only reflected changes after a page refresh. Fixed by calling `LiveFrameServer.dispatchParamAck()` for each changed parameter immediately after each autotune step, reusing the existing `paramAck` topic path. The `!=` comparison before dispatching suppresses no-op broadcasts (e.g. fracMove unchanged during a fracR/fracMoveTorq step).
+
+### Constants and their rationale
+
+| Constant | Value | Why |
+|---|---|---|
+| `EMA_ALPHA` | 0.05 | ~19-frame time constant; fast enough to track parameter-driven changes (< 100 frames settling) while smoothing Brownian noise |
+| `COARSE_STEP_INIT` | 0.1 | Same as old coarse step — brackets the target in 2 crossings from default params |
+| `COARSE_TO_FINE_THRESH` | 0.05 | Transition happens after 2 coarse crossings (step goes 0.1 → 0.05 → 0.025 < 0.05) |
+| `CONV_STEP_THRESH` | 0.005 | Requires 2+ fine halvings (0.025 → 0.0125 → 0.00625 → 0.003125) before convergence can fire |
+| `CONV_TOL_UM` | 5e-6 µm | = ±0.005 nm — same tight tolerance as old algorithm |
+| `CONV_N` | 50 | Sustained for 50 consecutive frames = at least 5 EMA time constants of stable reading |
+
+### Notes on potential noise issues
+
+With EMA alpha=0.05 and Brownian noise, the EMA noise amplitude may exceed `CONV_TOL_UM = 5e-6 µm`. If this causes `convCount` to reset frequently, `CONV_TOL_UM` can be relaxed (e.g. 1e-5 or 2e-5 µm) or `EMA_ALPHA` reduced further. These are isolated constants in `DeflectionTuner.java`.
+
+### Test results
+
+Tests not yet run — handed off to user. Expected behavior:
+- **32-monomer:** 2 coarse crossings → fine phase → convergence in O(seconds) wall clock. Final triple near `fracR=0.10, fracMoveTorq=0.265, fracMove=0.50`.
+- **64-monomer:** 2 coarse crossings each taking ~100-300 output frames (no settle wait), then fine bisection. Target: single-digit minutes. If > 10 min, user to record smoothed deflection, crossing count, and stuck condition before stopping.
+
+### Compile status
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — clean, no warnings.
+
+---
+
 ## 2026-05-17 — ForceArrow label refactor; force value diagnosis
 
 HTML/JS only. No Java changes, compile clean.
