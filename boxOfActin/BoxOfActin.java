@@ -1084,12 +1084,28 @@ public class BoxOfActin {
 			}
 
 			// Automated deflection tuning (-bm): arm the DeflectionTuner.
+			// Soft-start: override to softest legal configuration so the first crossing is
+			// guaranteed and convergence trajectory is independent of parameter-file state.
+			{
+				double oldFm  = Env.fracMove.getValue();
+				double oldFr  = Env.fracR.getValue();
+				double oldFmt = Env.fracMoveTorq.getValue();
+				Env.fracMove.setValue(DeflectionTuner.FRAC_MOVE_MAX);
+				Env.fracR.setValue(DeflectionTuner.FRAC_R_MAX);
+				Env.fracMoveTorq.setValue(DeflectionTuner.FRAC_MT_MIN);
+				if (LiveFrameServer.isRunning()) {
+					if (Env.fracMove.getValue()     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  Env.fracMove.getValue());
+					if (Env.fracR.getValue()        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  Env.fracR.getValue());
+					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
+				}
+			}
 			deflTuner = new DeflectionTuner();
 			deflTuner.start(
 				Env.fracMove.getValue(),
 				Env.fracR.getValue(),
 				Env.fracMoveTorq.getValue(),
-				deflFil.analyticDefl
+				deflFil.analyticDefl,
+				deflFil.tauTheo
 			);
 			autoTuneStepCounter = 0;
 			System.out.printf("[AUTOTUNE] armed: fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm%n",

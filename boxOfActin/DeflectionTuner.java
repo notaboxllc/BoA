@@ -1,11 +1,21 @@
 package boxOfActin;
 
 /**
- * Automated deflection tuning — v6: early-trigger gate for cold-start first probe.
+ * Automated deflection tuning — v11: physics-scaled settling detector.
  *
- * Replaces fixed OBS_WINDOW with a slope ring buffer settling detector and replaces
- * global MAX_STEP with per-parameter trust regions that adapt based on prediction quality.
- * Removes PROBE_EMA_ALPHA dual-alpha hack and BRACKET_SKIP_THRESH workaround.
+ * v8: actual-step convergence, fmt-saturated fracR rescue, crossing-triggered stepping, CONV_FRAMES=10.
+ * v9: clear fmt brackets in fr-rescue branch (stale bounds after fracR shift).
+ * v10: in normal FINE branch, detect when a fmt bracket has eaten >98% of the desired trust-region
+ *      step and sensitivity confirms the direction; clear the obstructing bound and retry once.
+ * v11: SLOPE_WIN, MIN_FRAMES_PER_STEP, MAX_FRAMES_PER_STEP are now instance fields computed from
+ *      τ_theo at start() so the settling detector covers ~2τ of physical time. Fixes limit-cycle
+ *      oscillation on slow chains (48-monomer) where the static window covered only 0.4τ.
+ * v12: symmetric saturation rescue — the soft-end case (params at softest extremes, chain still
+ *      too stiff) now fires saturationRescue() in both COARSE and FINE, mirroring the existing
+ *      stiff-end rescue. stiffEndRescue() renamed saturationRescue().
+ * v13: saturation rescue check added to PROBE_FMT "not yet stepped" branch. Previously, a
+ *      fully-saturated-soft configuration produced a zero probe step, which silently advanced
+ *      through PROBE_FMT → PROBE_FR → COARSE before the rescue fired. Now fires immediately.
  *
  * Phase order: PROBE_FMT → PROBE_FR → COARSE → FINE → CONVERGED (or FAILED anywhere)
  *
@@ -25,11 +35,11 @@ class DeflectionTuner {
     }
 
     // ── constants ──────────────────────────────────────────────────────────────
-    static final double EMA_ALPHA           = 0.05;
-    static final int    SLOPE_WIN           = 10;
-    static final double SETTLE_TOL_FRAC     = 0.01;
-    static final int    MIN_FRAMES_PER_STEP = 5;
-    static final int    MAX_FRAMES_PER_STEP = 200;
+    static final double EMA_ALPHA         = 0.05;
+    static final double SETTLE_TOL_FRAC   = 0.01;
+    static final double SLOPE_TAU_FRAC    = 2.0;   // observation window covers ~2τ of physical time
+    static final double SECONDS_PER_FRAME = 0.01;  // drawInterval × deltaT
+    static final int    MIN_SLOPE_WIN     = 10;    // floor: never narrower than v10's SLOPE_WIN
     static final double INIT_PROBE_STEP     = 0.05;
     static final double INIT_TRUST          = 0.1;
     static final double MIN_TRUST           = 0.005;
@@ -39,7 +49,7 @@ class DeflectionTuner {
     static final double PREDICTED_FRACTION  = 0.5;
     static final double PRED_STEP_TOL       = 0.001;
     static final double CONV_TOL_UM         = 5e-6;
-    static final int    CONV_FRAMES         = 50;
+    static final int    CONV_FRAMES         = 10;   // was 50; 10 suffices with settling/crossing triggers
     static final double FR_FINE_THRESH      = 0.02;
     static final double ALPHA_DIST          = 0.5;
     static final double FRAC_MOVE_STEP      = 0.05;
@@ -53,6 +63,9 @@ class DeflectionTuner {
     // rescue guard: stiff-end rescue fires only when error exceeds this fraction of expected
     static final double RESCUE_ERR_FRAC = 0.05;
 
+    // bracket obstruction: clear an fmt bracket if it ate >98% of the desired trust-region step
+    static final double OBSTRUCTION_FRAC = 0.02;
+
     // ── current parameter values ───────────────────────────────────────────────
     private double fracMove, fracR, fracMoveTorq;
     private double expected;
@@ -62,9 +75,15 @@ class DeflectionTuner {
     private boolean smoothedInit;
 
     // ── slope ring buffer ──────────────────────────────────────────────────────
-    private final double[] slopeBuf = new double[SLOPE_WIN];
-    private int slopeHead;   // next write position; when full, also points to oldest
-    private int slopeCount;  // 0..SLOPE_WIN
+    // slopeWin and slopeBuf are sized in start() based on τ_theo (physics-scaled).
+    private int    slopeWin;           // physics-scaled equivalent of v10's SLOPE_WIN = 10
+    private double[] slopeBuf;         // allocated in start()
+    private int slopeHead;             // next write position; when full, also points to oldest
+    private int slopeCount;            // 0..slopeWin
+
+    // ── step-timing bounds (physics-scaled) ────────────────────────────────────
+    private int minFramesPerStep;      // physics-scaled equivalent of v10's MIN_FRAMES_PER_STEP = 5
+    private int maxFramesPerStep;      // physics-scaled equivalent of v10's MAX_FRAMES_PER_STEP = 200
 
     // ── step timing ───────────────────────────────────────────────────────────
     private int framesSinceStep;
@@ -101,7 +120,7 @@ class DeflectionTuner {
 
     // ── convergence ───────────────────────────────────────────────────────────
     private int    convCount;
-    private double lastPredStepMag;
+    private double lastActStepMag;  // max |actual step| in most recent step; NaN until first step
 
     // ── COARSE→FINE detection ─────────────────────────────────────────────────
     private int fineReadyCount;
@@ -115,16 +134,36 @@ class DeflectionTuner {
     private int     probeRetryCount;
     private boolean firstProbeFired; // true after first PROBE_FMT step taken; gates cold-start early trigger
 
+    // ── crossing detection ────────────────────────────────────────────────────
+    private boolean lastErrorSign;      // sign of (error > 0) at the time of the last step
+    private boolean lastErrorSignValid; // false until at least one step has been taken
+
     // ── logging ───────────────────────────────────────────────────────────────
     private int stepCount;
 
     // ── public API ────────────────────────────────────────────────────────────
 
-    void start(double fm, double fr, double fmt, double expectedMicrons) {
+    void start(double fm, double fr, double fmt, double expectedMicrons, double tauSeconds) {
         fracMove     = fm;
         fracR        = fr;
         fracMoveTorq = fmt;
         expected     = expectedMicrons;
+
+        // Physics-scaled settling detector: window covers ~2τ of simulated time.
+        // Falls back to v10 static values when τ is unavailable (zero or NaN).
+        if (tauSeconds > 0 && !Double.isNaN(tauSeconds)) {
+            slopeWin          = (int) Math.max(MIN_SLOPE_WIN,
+                                    Math.round(SLOPE_TAU_FRAC * tauSeconds / SECONDS_PER_FRAME));
+            minFramesPerStep  = (int) Math.max(5,
+                                    Math.round(0.5 * tauSeconds / SECONDS_PER_FRAME));
+            maxFramesPerStep  = (int) Math.max(200,
+                                    Math.round(20.0 * tauSeconds / SECONDS_PER_FRAME));
+        } else {
+            slopeWin         = MIN_SLOPE_WIN;
+            minFramesPerStep = 5;
+            maxFramesPerStep = 200;
+        }
+        slopeBuf = new double[slopeWin];
 
         phase        = Phase.PROBE_FMT;
         smoothed     = 0.0;
@@ -142,16 +181,23 @@ class DeflectionTuner {
 
         smoothedAtStep = 0; frAtStep = fr; fmtAtStep = fmt; errorAtStep = 0;
 
-        convCount        = 0;
-        lastPredStepMag  = Double.NaN;
-        fineReadyCount   = 0;
+        convCount      = 0;
+        lastActStepMag = Double.NaN;
+        fineReadyCount = 0;
         firstStepInPhase = true;
 
         probeStepped    = false;
         probeStep       = INIT_PROBE_STEP;
         probeRetryCount = 0;
         firstProbeFired = false;
-        stepCount       = 0;
+
+        lastErrorSign      = false;
+        lastErrorSignValid = false;
+
+        stepCount = 0;
+
+        System.out.printf("[AUTOTUNE] armed: τ=%.3fs  slope_win=%d  min_step=%d  max_step=%d%n",
+            tauSeconds, slopeWin, minFramesPerStep, maxFramesPerStep);
     }
 
     /**
@@ -174,22 +220,30 @@ class DeflectionTuner {
         checkConvergence(error);
         if (isDone()) return null;
 
-        boolean force = framesSinceStep >= MAX_FRAMES_PER_STEP;
+        boolean force = framesSinceStep >= maxFramesPerStep;
         if (force) {
             System.out.printf("[AUTOTUNE:WARN] %s unsettled after %d frames — forcing step%n",
-                phase, MAX_FRAMES_PER_STEP);
+                phase, maxFramesPerStep);
         }
         // Early trigger: if this is the very first probe and deflection already exceeds
         // expected, skip the settling detector — the chain is too soft right now and
         // waiting for settling wastes time without providing any useful information.
         boolean earlyTrigger = !firstProbeFired && phase == Phase.PROBE_FMT && smoothed > expected;
-        if (!isSettled() && !force && !earlyTrigger) return null;
+
+        // Crossing trigger: fires when the error sign has flipped since the last step,
+        // at least MIN_FRAMES_PER_STEP after the last step. Applies in all phases
+        // once at least one step has been taken (lastErrorSignValid guards the cold start).
+        boolean crossingFired = lastErrorSignValid
+            && framesSinceStep >= minFramesPerStep
+            && ((error > 0) != lastErrorSign);
+
+        if (!isSettled() && !force && !earlyTrigger && !crossingFired) return null;
 
         switch (phase) {
             case PROBE_FMT: return handleProbeFmt(error);
             case PROBE_FR:  return handleProbeFr(error);
-            case COARSE:    return handleCoarse(error);
-            case FINE:      return handleFine(error);
+            case COARSE:    return handleCoarse(error, crossingFired);
+            case FINE:      return handleFine(error, crossingFired);
             default:        return null;
         }
     }
@@ -215,16 +269,16 @@ class DeflectionTuner {
 
     private void pushSlope(double val) {
         slopeBuf[slopeHead] = val;
-        slopeHead = (slopeHead + 1) % SLOPE_WIN;
-        if (slopeCount < SLOPE_WIN) slopeCount++;
+        slopeHead = (slopeHead + 1) % slopeWin;
+        if (slopeCount < slopeWin) slopeCount++;
     }
 
     private boolean isSettled() {
-        if (framesSinceStep < MIN_FRAMES_PER_STEP) return false;
-        if (slopeCount < SLOPE_WIN) return false;
-        // When full: oldest is at slopeHead; newest is at (slopeHead-1+SLOPE_WIN)%SLOPE_WIN
+        if (framesSinceStep < minFramesPerStep) return false;
+        if (slopeCount < slopeWin) return false;
+        // When full: oldest is at slopeHead; newest is at (slopeHead-1+slopeWin)%slopeWin
         double oldest = slopeBuf[slopeHead];
-        double newest = slopeBuf[(slopeHead - 1 + SLOPE_WIN) % SLOPE_WIN];
+        double newest = slopeBuf[(slopeHead - 1 + slopeWin) % slopeWin];
         double scale  = Math.max(Math.abs(smoothed), Math.abs(expected));
         if (scale < 1e-12) scale = 1e-12;
         return Math.abs(newest - oldest) < SETTLE_TOL_FRAC * scale;
@@ -234,6 +288,16 @@ class DeflectionTuner {
 
     private ParamTriple handleProbeFmt(double error) {
         if (!probeStepped) {
+            if (error < -RESCUE_ERR_FRAC * expected
+                    && fracR >= FRAC_R_MAX - 1e-9
+                    && fracMoveTorq <= FRAC_MT_MIN + 1e-9) {
+                return saturationRescue();
+            }
+            if (error > RESCUE_ERR_FRAC * expected
+                    && fracR <= FRAC_R_MIN + 1e-9
+                    && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
+                return saturationRescue();
+            }
             // Stage 1: take probe step
             updateFmtBrackets(error);
             double dir    = (error >= 0) ? +1.0 : -1.0;
@@ -248,6 +312,9 @@ class DeflectionTuner {
             firstProbeFired = true;
             stepCount++;
             framesSinceStep = 0;
+            lastActStepMag     = Math.abs(step);
+            lastErrorSign      = (error > 0);
+            lastErrorSignValid = true;
             resetSlopeBuffer();
 
             System.out.printf(
@@ -317,6 +384,9 @@ class DeflectionTuner {
             probeStepped   = true;
             stepCount++;
             framesSinceStep = 0;
+            lastActStepMag     = Math.abs(step);
+            lastErrorSign      = (error > 0);
+            lastErrorSignValid = true;
             resetSlopeBuffer();
 
             System.out.printf(
@@ -370,9 +440,14 @@ class DeflectionTuner {
 
     // ── COARSE phase ──────────────────────────────────────────────────────────
 
-    private ParamTriple handleCoarse(double error) {
+    private ParamTriple handleCoarse(double error, boolean crossing) {
+        // Stiff-end: params at stiffest extremes, chain still too soft.
         if (error > RESCUE_ERR_FRAC * expected && fracR <= FRAC_R_MIN + 1e-9 && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
-            return stiffEndRescue();
+            return saturationRescue();
+        }
+        // Soft-end: params at softest extremes, chain still too stiff.
+        if (error < -RESCUE_ERR_FRAC * expected && fracR >= FRAC_R_MAX - 1e-9 && fracMoveTorq <= FRAC_MT_MIN + 1e-9) {
+            return saturationRescue();
         }
 
         if (!firstStepInPhase) {
@@ -390,8 +465,7 @@ class DeflectionTuner {
         double rawFrPred  = frHasSens  ? ALPHA_DIST         * (expected - smoothed) / frSens  : 0.0;
         double rawFmtPred = fmtHasSens ? (1.0 - ALPHA_DIST) * (expected - smoothed) / fmtSens : 0.0;
 
-        frPredStep      = Math.abs(rawFrPred);
-        lastPredStepMag = Math.max(frPredStep, Math.abs(rawFmtPred));
+        frPredStep = Math.abs(rawFrPred);
 
         double frStep = clamp(rawFrPred,  -trustFr,  trustFr);
         double newFr  = clamp(fracR   + frStep,  FRAC_R_MIN, FRAC_R_MAX);
@@ -404,22 +478,26 @@ class DeflectionTuner {
         double aFmt = newFmt - fracMoveTorq;
 
         System.out.printf(
-            "[AUTOTUNE:STEP#%d] COARSE  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+            "[AUTOTUNE:STEP#%d] COARSE [%s]  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
             + "  fr=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)"
             + "  fmt=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)%n",
-            stepCount + 1, framesSinceStep, smoothed, expected, error,
+            stepCount + 1, crossing ? "crossing" : "settled",
+            framesSinceStep, smoothed, expected, error,
             fracR,        frHasSens  ? String.format("%.4f", frSens)  : "---", rawFrPred,  aFr,  trustFr,
             fracMoveTorq, fmtHasSens ? String.format("%.4f", fmtSens) : "---", rawFmtPred, aFmt, trustFmt);
 
-        smoothedAtStep   = smoothed;
-        frAtStep         = fracR;
-        fmtAtStep        = fracMoveTorq;
-        errorAtStep      = error;
-        fracR            = newFr;
-        fracMoveTorq     = newFmt;
+        smoothedAtStep     = smoothed;
+        frAtStep           = fracR;
+        fmtAtStep          = fracMoveTorq;
+        errorAtStep        = error;
+        fracR              = newFr;
+        fracMoveTorq       = newFmt;
         stepCount++;
-        firstStepInPhase = false;
-        framesSinceStep  = 0;
+        firstStepInPhase   = false;
+        framesSinceStep    = 0;
+        lastActStepMag     = Math.max(Math.abs(aFr), Math.abs(aFmt));
+        lastErrorSign      = (error > 0);
+        lastErrorSignValid = true;
         resetSlopeBuffer();
 
         if (frPredStep < FR_FINE_THRESH) {
@@ -440,9 +518,14 @@ class DeflectionTuner {
 
     // ── FINE phase ────────────────────────────────────────────────────────────
 
-    private ParamTriple handleFine(double error) {
+    private ParamTriple handleFine(double error, boolean crossing) {
+        // Stiff-end: fmt at stiffest extreme, chain still too soft.
         if (error > RESCUE_ERR_FRAC * expected && fracMoveTorq >= FRAC_MT_MAX - 1e-9) {
-            return stiffEndRescue();
+            return saturationRescue();
+        }
+        // Soft-end: fmt at softest extreme, chain still too stiff.
+        if (error < -RESCUE_ERR_FRAC * expected && fracMoveTorq <= FRAC_MT_MIN + 1e-9) {
+            return saturationRescue();
         }
 
         if (!firstStepInPhase) {
@@ -458,28 +541,99 @@ class DeflectionTuner {
         double rawFmtPred = fmtHasSens
             ? (expected - smoothed) / fmtSens
             : ((error > 0) ? INIT_PROBE_STEP : -INIT_PROBE_STEP);
-        lastPredStepMag = Math.abs(rawFmtPred);
 
-        double fmtStep = clamp(rawFmtPred, -trustFmt, trustFmt);
-        double newFmt  = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
-        newFmt = clampToBrackets(newFmt, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
+        // fr-rescue: fmt is saturated against a limit in the desired direction AND the
+        // error is large enough that we're not already converged — use fracR instead.
+        boolean fmtSaturatedAtLimit =
+            (rawFmtPred > 0 && fracMoveTorq >= FRAC_MT_MAX - 1e-9) ||
+            (rawFmtPred < 0 && fracMoveTorq <= FRAC_MT_MIN + 1e-9);
+
+        if (fmtSaturatedAtLimit && Math.abs(error) > CONV_TOL_UM) {
+            double rawFrPred    = frHasSens ? (expected - smoothed) / frSens : 0.0;
+            double frRescueStep = clamp(rawFrPred, -trustFr, trustFr);
+            double newFr        = clamp(fracR + frRescueStep, FRAC_R_MIN, FRAC_R_MAX);
+            newFr = clampToBrackets(newFr, frHasLo, frLoBound, frHasHi, frHiBound);
+            double aFr = newFr - fracR;
+
+            System.out.printf(
+                "[AUTOTUNE:STEP#%d] FINE [fr-rescue]  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+                + "  fr=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)"
+                + "  fmt=%.4f(saturated)%n",
+                stepCount + 1, framesSinceStep, smoothed, expected, error,
+                fracR, frHasSens ? String.format("%.4f", frSens) : "---", rawFrPred, aFr, trustFr,
+                fracMoveTorq);
+
+            smoothedAtStep     = smoothed;
+            frAtStep           = fracR;
+            fmtAtStep          = fracMoveTorq;
+            errorAtStep        = error;
+            fracR              = newFr;
+            // Changing fracR shifts the deflection landscape; any fmt bracket recorded
+            // under the old fracR is no longer a valid bound. Clear so the next FINE
+            // step accumulates fresh brackets under the new fracR.
+            fmtHasLo = false;
+            fmtHasHi = false;
+            stepCount++;
+            firstStepInPhase   = false;
+            framesSinceStep    = 0;
+            lastActStepMag     = Math.abs(aFr);
+            lastErrorSign      = (error > 0);
+            lastErrorSignValid = true;
+            resetSlopeBuffer();
+
+            return new ParamTriple(fracMove, fracR, fracMoveTorq);
+        }
+
+        // Normal FINE step: move fracMoveTorq only.
+        double fmtStep         = clamp(rawFmtPred, -trustFmt, trustFmt);
+        double candidateLimits = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
+        double newFmt          = clampToBrackets(candidateLimits, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
+
+        // If sensitivity confirms direction and brackets ate >98% of the desired step,
+        // the obstructing bracket is stale (recorded under a different fracR). Clear once and retry.
+        if (fmtHasSens && Math.abs(fmtStep) > 1e-12) {
+            double preClearAct = newFmt - fracMoveTorq;
+            if (Math.abs(preClearAct) < OBSTRUCTION_FRAC * Math.abs(fmtStep)
+                    && Math.abs(candidateLimits - newFmt) > 1e-9) {
+                if (fmtStep < 0) {
+                    System.out.printf(
+                        "[AUTOTUNE] FINE bracket-clear: fmtLoBound (%.4f) discarded as obstruction."
+                        + " prev_step would have been act=%+.6f; recomputed newFmt=",
+                        fmtLoBound, preClearAct);
+                    fmtHasLo = false;
+                } else {
+                    System.out.printf(
+                        "[AUTOTUNE] FINE bracket-clear: fmtHiBound (%.4f) discarded as obstruction."
+                        + " prev_step would have been act=%+.6f; recomputed newFmt=",
+                        fmtHiBound, preClearAct);
+                    fmtHasHi = false;
+                }
+                newFmt = clampToBrackets(candidateLimits, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
+                System.out.printf("%.4f%n", newFmt);
+            }
+        }
+
         double aFmt = newFmt - fracMoveTorq;
 
         System.out.printf(
-            "[AUTOTUNE:STEP#%d] FINE  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
+            "[AUTOTUNE:STEP#%d] FINE [%s]  frames=%d  obs=%.6fµm  exp=%.6fµm  err=%+.6f"
             + "  fr=%.4f(frozen)"
             + "  fmt=%.4f(s=%s pred=%+.4f act=%+.4f tru=%.4f)%n",
-            stepCount + 1, framesSinceStep, smoothed, expected, error,
+            stepCount + 1, crossing ? "crossing" : "settled",
+            framesSinceStep, smoothed, expected, error,
             fracR,
             fracMoveTorq, fmtHasSens ? String.format("%.4f", fmtSens) : "---", rawFmtPred, aFmt, trustFmt);
 
-        smoothedAtStep   = smoothed;
-        fmtAtStep        = fracMoveTorq;
-        errorAtStep      = error;
-        fracMoveTorq     = newFmt;
+        smoothedAtStep     = smoothed;
+        fmtAtStep          = fracMoveTorq;
+        errorAtStep        = error;
+        fracMoveTorq       = newFmt;
         stepCount++;
-        firstStepInPhase = false;
-        framesSinceStep  = 0;
+        firstStepInPhase   = false;
+        framesSinceStep    = 0;
+        lastActStepMag     = Math.abs(aFmt);
+        lastErrorSign      = (error > 0);
+        lastErrorSignValid = true;
         resetSlopeBuffer();
 
         return new ParamTriple(fracMove, fracR, fracMoveTorq);
@@ -587,12 +741,12 @@ class DeflectionTuner {
         if (error < 0 && (!fmtHasHi || fracMoveTorq < fmtHiBound)) { fmtHiBound = fracMoveTorq; fmtHasHi = true; }
     }
 
-    // ── stiff-end saturation rescue ───────────────────────────────────────────
+    // ── saturation rescue (stiff-end or soft-end) ────────────────────────────
 
-    private ParamTriple stiffEndRescue() {
+    private ParamTriple saturationRescue() {
         if (fracMove <= FRAC_MOVE_MIN + 1e-9) {
             phase = Phase.FAILED;
-            System.out.println("[AUTOTUNE] FAILED: stiff-end saturation and fracMove at minimum");
+            System.out.println("[AUTOTUNE] FAILED: parameter saturation and fracMove at minimum");
             return null;
         }
         double oldFm = fracMove;
@@ -613,7 +767,7 @@ class DeflectionTuner {
         probeRetryCount = 0;
 
         System.out.printf(
-            "[AUTOTUNE] stiff-end rescue: fracMove %.4f→%.4f  trust reset  → PROBE_FMT%n",
+            "[AUTOTUNE] saturation rescue: fracMove %.4f→%.4f  trust reset  → PROBE_FMT%n",
             oldFm, fracMove);
         return new ParamTriple(fracMove, fracR, fracMoveTorq);
     }
@@ -622,7 +776,9 @@ class DeflectionTuner {
 
     private void checkConvergence(double error) {
         if (phase == Phase.PROBE_FMT || phase == Phase.PROBE_FR) return;
-        if (Double.isNaN(lastPredStepMag) || lastPredStepMag >= PRED_STEP_TOL) {
+        // Converge on actual step magnitude: when the last actual parameter change was
+        // smaller than PRED_STEP_TOL, the controller has effectively stopped moving.
+        if (Double.isNaN(lastActStepMag) || lastActStepMag >= PRED_STEP_TOL) {
             convCount = 0;
             return;
         }

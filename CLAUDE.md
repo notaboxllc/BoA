@@ -6,6 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BoxOfActin** — a Java biophysics simulation of actin filament network dynamics in cells. Simulates filaments, myosin motors, crosslinkers, Arp2/3-branched networks, membrane nodes, and Listeria motility using overdamped Langevin dynamics with Brownian motion. Visualization is handled out-of-process by a Three.js browser viewer fed by per-frame JSON files written from the simulation (`ThreeJSWriter`).
 
+## Documentation Layout
+
+| File | Contents |
+|---|---|
+| `CLAUDE.md` | This file — build/run commands, architecture, conventions for Claude Code sessions |
+| `JOURNAL.md` | Active journal — most recent 10–20 substantive entries; open questions; current known issues |
+| `JOURNAL_ARCHIVE.md` | Older entries verbatim (oldest at top); safe to read for history but not loaded by default |
+| `RUN_LOGS/` | Bulky pasted simulation output; plain `.txt` files named `YYYY-MM-DD_short-topic.txt` |
+
+When restructuring documentation: entries move to `JOURNAL_ARCHIVE.md` verbatim (no summarizing); log blocks > ~20 lines go to `RUN_LOGS/`. Do not delete content.
+
+## Documentation Conventions
+
+When adding to JOURNAL.md, keep entries terse. An entry should describe what was done, what was learned, and what's open. Avoid restating context that's clear from the surrounding entries.
+
+Do not paste simulation output more than ~20 lines long inline. Write the output to `RUN_LOGS/YYYY-MM-DD_short-topic.txt` and reference it by filename from the journal entry. Short snippets (a few lines highlighting a specific value or message) are fine inline.
+
+Do not move entries to `JOURNAL_ARCHIVE.md` on your own. Archival happens via explicit cleanup prompts from the planner. If JOURNAL.md feels too long, flag it for the planner rather than reorganizing autonomously.
+
 ## Build and Run
 
 ### Build (current, post-Phase 4)
