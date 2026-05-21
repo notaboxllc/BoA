@@ -1,0 +1,190 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /Users/jba/Dropbox/CodeSync/boxOfActinMTRedux01/ParameterFiles/boa10-64Seg...
+     Parameter assigned: deltaT set to 1.0E-4
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 100.0
+     Parameter assigned: fracMove set to 0.4
+     Parameter assigned: fracR set to 0.134
+     Parameter assigned: fracMoveTorq set to 0.013685
+     Parameter assigned: drawInterval set to 100
+     Parameter assigned: toFileInterval set to 100
+     No match found for parameter label toQKFileInterval ... you best check that out!
+     Parameter assigned: jpegQuality set to 1.0
+     Parameter assigned: remoteWriteInterval set to 100000
+     Parameter assigned: frameWidth set to 800
+     Parameter assigned: frameHeight set to 800
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 100
+     Parameter assigned: initialMyoMiniFils set to 100
+     Parameter assigned: minFilLength set to 0.2
+     Parameter assigned: maxFilLength set to 1.5
+     Parameter assigned: stdDevActinDist set to 0.5
+     Parameter assigned: boxXDim set to 10.0
+     Parameter assigned: boxYDim set to 10.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: actinConc set to 30.0
+     Parameter assigned: actinConcNonHydro set to 15.0
+     Parameter assigned: aeta set to 1.0
+     Parameter assigned: capConc set to 2.0
+     Parameter assigned: nodeZone set to 0.9
+     Parameter assigned: nodeRadius set to 0.025
+     Parameter assigned: forminsPerNode set to 0
+     No match found for parameter label myosPerNode ... you best check that out!
+     Parameter assigned: nodeTransDiff set to 1.0E-16
+     Parameter assigned: nodeRotDiff set to 0.001
+     Parameter assigned: actinSeed set to 3
+     Parameter assigned: actinOnCortex set to true
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: filTorqSpring set to 1.0E-20
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.5
+     Parameter assigned: maxSegAngle set to 22.5
+     Parameter assigned: maxSegDist set to 0.0108
+     Parameter assigned: nodeTorqSpring set to 1.0E-20
+     Parameter assigned: maxNodeTetherStrainDist set to 0.0108
+     Parameter assigned: nodeTetherDetachRate set to 0.001
+     Parameter assigned: forminMoves set to false
+     Parameter assigned: forminRelease set to 1.0
+     No match found for parameter label noMonomers ... you best check that out!
+     Parameter assigned: filamentsAnneal set to false
+     Parameter assigned: annealDist set to 0.054
+     Parameter assigned: annealAngleCosine set to 0.9
+     Parameter assigned: maxLinksOnSeg set to 10.0
+     Parameter assigned: sideBonds set to 0
+     Parameter assigned: sideBondsRelax set to false
+     Parameter assigned: sideBondsStabilize set to 1.0
+     Parameter assigned: bundleStableFactor set to 2.0
+     Parameter assigned: filLinkSpring set to 1.0E-9
+     Parameter assigned: filLinkTorqSpring set to 1.0E-19
+     Parameter assigned: xLinkTransAttn set to 1.0
+     Parameter assigned: xLinkRotAttn set to 1.0
+     No match found for parameter label maxFilLinkDist ... you best check that out!
+     No match found for parameter label linkDissolveRate ... you best check that out!
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn1NonHydro set to 0.0
+     Parameter assigned: kATPOff1NonHydro set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: kATPOn2WithFormin set to 0.0
+     Parameter assigned: kATPOff2WithFormin set to 0.0
+     Parameter assigned: kADPOff2WithFormin set to 0.0
+     Parameter assigned: kATPOn2NonHydro set to 0.0
+     Parameter assigned: kATPOff2NonHydro set to 0.0
+     Parameter assigned: kATPOn2NonHydroWithFormin set to 0.0
+     Parameter assigned: kATPOff2NonHydroWithFormin set to 0.0
+     Parameter assigned: capRate set to 3.0
+     Parameter assigned: cofilinRate set to 0.4
+     Parameter assigned: cofilinConc set to 3.0
+     Parameter assigned: cofilinRatio set to 1.1
+     No match found for parameter label myosSteppingSwitch ... you best check that out!
+     No match found for parameter label myosinStepRate ... you best check that out!
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     Parameter assigned: capNumEnd1 set to 3
+     Parameter assigned: capNumEnd2 set to 3
+     Parameter assigned: capNumEnd1WithNode set to 3
+     Parameter assigned: capNumEnd2WithNode set to 3
+     Parameter assigned: polyCompressionCutoff set to 0.0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 10.0
+     Parameter assigned: kHydrolysis set to 1.0
+     Parameter assigned: kDissociation set to 1.0
+     Parameter assigned: showTime set to true
+     Parameter assigned: showConc set to true
+     Parameter assigned: showNonHydroConc set to false
+     Parameter assigned: showFilCt set to true
+     Parameter assigned: showFilLinkCt set to true
+     Parameter assigned: showFilSegCt set to false
+     Parameter assigned: showMonCt set to true
+     Parameter assigned: fixedHistScale set to 100.0
+     Parameter assigned: showHistBox set to true
+     Parameter assigned: showYHistTics set to true
+     Parameter assigned: flatTops set to true
+Done... there were 11 misunderstandings.
+[BENCH] 11-seg × 64-mon/seg chain, span=1.9305 µm, F=7.953e-15 N, analytic δ=0.0193 µm
+[BENCH:FORCE] deflFil.transForce=(0.0000e+00, -7.9527e-15, 0.0000e+00) N  EI=6.1747e-26  frac=0.0100  spanM=1.9305e-06
+[BENCH] τ_theo=7.144 s  ζ_perp_seg=5.430e-07 N·s/m
+[BENCH:CHAIN] i=0 coord=(-0.8775,0.0000,0.0000) length=0.1755 isAnchor=true
+[BENCH:CHAIN] i=1 coord=(-0.7020,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=2 coord=(-0.5265,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=3 coord=(-0.3510,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=4 coord=(-0.1755,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=5 coord=(0.0000,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=6 coord=(0.1755,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=7 coord=(0.3510,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=8 coord=(0.5265,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=9 coord=(0.7020,0.0000,0.0000) length=0.1755 isAnchor=false
+[BENCH:CHAIN] i=10 coord=(0.8775,0.0000,0.0000) length=0.1755 isAnchor=true
+[LP] 46-seg × 64-mon/seg LP chain, contour=8.0730 µm, offset=(0, -1.5, -0.5) µm
+[BENCH] box auto-sized to 24.22 × 24.22 × 0.500 µm
+[V15] armed: τ=7.144s  dtFrame=0.0100s  vNoise=8.000e-05  aNoise=1.300e-03  wTimeout=2858  W_A=12  slope_win=1429
+[AUTOTUNE] armed: tuner=v15  fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=0.019305 µm
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 51; xBinWidth = 0.2 µm
+nYBins = 51; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+[BENCH:STEP] step=0 forceSum=(1.0097e-25,-7.9527e-15,0.0000e+00) coord=(0.0000,0.0000,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=0 coord.y=-1.464667e-06 veloc.y=-1.4647e-02
+[BENCH:STEP] step=1 forceSum=(2.5445e-26,-5.2803e-15,-1.5826e-31) coord=(0.0000,-0.0000,0.0000) veloc.y=-1.4647e-02
+[BENCH:POST] step=1 coord.y=-2.437143e-06 veloc.y=-9.7248e-03
+[BENCH:STEP] step=2 forceSum=(2.5445e-26,-5.1891e-15,-2.0804e-31) coord=(0.0000,-0.0000,0.0000) veloc.y=-9.7248e-03
+[BENCH:POST] step=2 coord.y=-3.392836e-06 veloc.y=-9.5569e-03
+[BENCH:STEP] step=3 forceSum=(8.4745e-21,-4.9010e-15,-1.9161e-31) coord=(0.0000,-0.0000,0.0000) veloc.y=-9.5569e-03
+[BENCH:POST] step=3 coord.y=-4.295468e-06 veloc.y=-9.0263e-03
+[BENCH:STEP] step=4 forceSum=(5.3067e-20,-4.9755e-15,2.8985e-32) coord=(0.0000,-0.0000,0.0000) veloc.y=-9.0263e-03
+[BENCH:POST] step=4 coord.y=-5.211817e-06 veloc.y=-9.1635e-03
+[BENCH:STEP] step=5 forceSum=(-1.3231e-19,-4.7745e-15,-3.3663e-31) coord=(0.0000,-0.0000,0.0000) veloc.y=-9.1635e-03
+[BENCH:POST] step=5 coord.y=-6.091151e-06 veloc.y=-8.7933e-03
+[BENCH:STEP] step=6 forceSum=(2.1697e-19,-4.9084e-15,-1.6727e-31) coord=(-0.0000,-0.0000,0.0000) veloc.y=-8.7933e-03
+[BENCH:POST] step=6 coord.y=-6.995139e-06 veloc.y=-9.0399e-03
+[BENCH:STEP] step=7 forceSum=(-1.9289e-19,-4.7715e-15,-8.4496e-32) coord=(0.0000,-0.0000,0.0000) veloc.y=-9.0399e-03
+[BENCH:POST] step=7 coord.y=-7.873915e-06 veloc.y=-8.7878e-03
+[BENCH:STEP] step=8 forceSum=(1.0285e-20,-4.6617e-15,9.8092e-32) coord=(-0.0000,-0.0000,0.0000) veloc.y=-8.7878e-03
+[BENCH:POST] step=8 coord.y=-8.732473e-06 veloc.y=-8.5856e-03
+[BENCH:STEP] step=9 forceSum=(4.6412e-20,-4.6918e-15,-2.9069e-31) coord=(-0.0000,-0.0000,0.0000) veloc.y=-8.5856e-03
+[BENCH:POST] step=9 coord.y=-9.596569e-06 veloc.y=-8.6410e-03
+Sim. time=10.00....~02.13 minutes computation to simulate 1 sec, run finished in ~03.19 hours
+[V15] saturation rescue: fracMove 0.5000→0.4500  → PROBE_FMT
+Sim. time=20.00....~01.22 minutes computation to simulate 1 sec, run finished in ~01.63 hours
+[V15] saturation rescue: fracMove 0.4500→0.4000  → PROBE_FMT
+Sim. time=30.00....~00.94 minutes computation to simulate 1 sec, run finished in ~01.09 hours
+Sim. time=40.00....~00.92 minutes computation to simulate 1 sec, run finished in ~00.92 hours
+[V15] saturation rescue: fracMove 0.4000→0.3500  → PROBE_FMT
+Sim. time=50.00....~00.91 minutes computation to simulate 1 sec, run finished in ~00.76 hours
+[V15] saturation rescue: fracMove 0.3500→0.3000  → PROBE_FMT
+Sim. time=60.00....~00.82 minutes computation to simulate 1 sec, run finished in ~00.55 hours
+Sim. time=70.00....~00.79 minutes computation to simulate 1 sec, run finished in ~00.40 hours
+[V15] saturation rescue: fracMove 0.3000→0.2500  → PROBE_FMT
+Sim. time=80.00....~00.79 minutes computation to simulate 1 sec, run finished in ~00.26 hours
+[V15] saturation rescue: fracMove 0.2500→0.2000  → PROBE_FMT
+Sim. time=90.00....~00.79 minutes computation to simulate 1 sec, run finished in ~00.13 hours
+Sim. time=100.00....~00.79 minutes computation to simulate 1 sec, run finished in ~-00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+ThingStep Threads took 1146.757000 seconds.
+ThingBrownian Threads took 314.492000 seconds.
+Myosin Threads took 468.844000 seconds.
+MyoDimer Threads took 464.668000 seconds.
+Protein Node Threads took 886.313000 seconds.
+MyoMiniFil Threads took 869.837000 seconds.
+Chamber Myo Threads took 877.267000 seconds.
+Chamber MyoDimer Threads took 876.011000 seconds.
+Mesh Threads took 728.742000 seconds.
+Ck Mesh Threads took 305.117000 seconds.
+Ck Mots Threads took 303.157000 seconds.
+XLink Threads took 373.102000 seconds.
+Arp23 Threads took 363.573000 seconds.
+NodeLink Threads took 533.424000 seconds.
+Membrane Node Threads took 301.483000 seconds.
+ActA Threads took 568.688000 seconds.
+Finished closing JSON plots!

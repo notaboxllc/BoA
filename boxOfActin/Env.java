@@ -261,6 +261,8 @@ public class Env {
 	static int benchmarkMonomerCt = 0;       // 0 = use stdSegLength; nonzero overrides for -bm runs (-bmMonomer flag)
 	static boolean benchmarkDiag = false;    // -bmDiag: fixed-param equilibrium diagnostic, no search
 	static boolean benchmarkManual = false;  // -bmManual: no search loop; user tunes live from viewer
+	static boolean benchmarkTunerV15 = false; // -bmTunerV15: use DeflectionTunerV15 instead of v14
+	static boolean benchmarkNoiseProbe = false; // -bmNoiseProbe: post-convergence tail capture for V_NOISE/A_NOISE calibration
 
 	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work.
 	// Not shown in the Params panel UI (filtered client-side); the HUD Force button is the only control.

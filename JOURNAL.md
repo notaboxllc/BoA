@@ -1,9 +1,567 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-20 — DeflectionTuner v15.1: three parameter-handling fixes
+
+### Motivation
+
+A 32-monomer run with v15 stalled in FINE: `obs = 0.01001 µm` vs target `0.0098 µm`
+(err = +200 nm, 200× CONV_TOL_UM). `fracMoveTorq` was pinned at FRAC_MT_MAX = 0.5 from an
+early COARSE step and the controller could not step it back down despite the predictor giving
+`rawFmtPred = -0.05` every frame. Three independent bugs conspired to cause and worsen the stall.
+
+### Fix 1: FINE limit-retreat (Issue 1)
+
+**Symptom:** fmt at FRAC_MT_MAX, predictor says decrease (rawFmtPred < 0). The fr-rescue gate
+(`fmtSaturatedAtLimit`) correctly does NOT fire — rawFmtPred < 0 and fmt is at MAX not MIN.
+The normal FINE step path runs, but `clampToBrackets` clamps the step to zero because
+`fmtLoBound = FRAC_MT_MAX` (recorded when error > 0 was observed at fmt = 0.5) blocks any
+decrease below 0.5.
+
+**Root cause:** the lower bracket bound (`fmtHasLo`) is set when the chain is too soft at some
+fmt value. When fmt is at FRAC_MT_MAX and error > 0 fires, `fmtLoBound = FRAC_MT_MAX`. Any
+subsequent attempt to retreat (decrease fmt) is blocked because `candidateLimits < fmtLoBound`.
+
+**Fix:** in `handleFineStep` / `handleFine`, immediately before `clampToBrackets`, check if
+fmt is at a hardware limit and the step retreats from it. If so, clear the stale bracket that
+would block the retreat:
+- `fracMoveTorq >= FRAC_MT_MAX - 1e-9 && fmtStep < 0` → clear `fmtHasLo`
+- `fracMoveTorq <= FRAC_MT_MIN + 1e-9 && fmtStep > 0` → clear `fmtHasHi`
+
+Log line: `[V15] FINE limit-retreat: clearing fmtLoBound/fmtHiBound (value)`.
+
+**Small in-scope discovery:** the task spec said "clear fmtHasHi when retreating from MAX" but
+the correct variable is `fmtHasLo` (the lower bound that prevents going below MAX). The task
+description had the variable names swapped; the intent was correct and is implemented correctly here.
+
+### Fix 2: bad-sign probe retries reverse direction (Issue 2)
+
+**Symptom:** PROBE_FMT launched the chain from obs ≈ 9.9 nm to 35 nm in three steps by taking
+6× multiplicative jumps in the wrong direction. Each bad-sign retry halved the step magnitude
+but stepped in the SAME direction, digging further in the wrong direction.
+
+**Root cause:** on bad-sign, the retry set `probeStepped = false` and recursed into
+`handleProbeFmt`. The direction `dir` was recomputed from the CURRENT error sign — but the
+current error sign at retry time reflects the (wrong-direction) probe step already taken, not
+the desired correction direction.
+
+**Fix:** add `probeStepDir` field (double, 0 = not yet set). When taking the initial probe step,
+compute direction from error and store it in `probeStepDir`. On bad-sign retry:
+`probeStepDir = -probeStepDir` (reverse) then halve `probeStep` as before. The next step uses
+`probeStepDir` directly rather than recomputing from error.
+
+Also reset `probeStepDir = 0` at: `start()`, PROBE_FMT→PROBE_FR transition, `saturationRescue()`.
+
+Log line updated to say `→ reversing direction` on bad-sign.
+
+Applied symmetrically to `handleProbeFmt` and `handleProbeFr` in both files.
+
+### Fix 3: probe step capped relative to current parameter magnitude (Issue 3)
+
+**Symptom:** `INIT_PROBE_STEP = 0.05` is additive. When applied to `fracMoveTorq` starting
+at 0.01, the first probe step is 5× the current value — launching the chain dramatically
+far from the initial state before any sensitivity is known.
+
+**Fix:** add two new constants:
+```
+MAX_PROBE_REL      = 0.5    // probe step ≤ 50% of current param value
+MIN_PROBE_STEP_ABS = 1e-3   // absolute floor
+```
+Compute `probeMag = min(probeStep, max(MIN_PROBE_STEP_ABS, MAX_PROBE_REL × |param|))` and
+use `probeMag` for the actual step; `probeStep` continues to track the halving schedule.
+
+Effect: fmt=0.01 → probeMag_cap = 0.005 (first probe at most 0.015). fracR=1.5 → cap = 0.75,
+above INIT_PROBE_STEP → unchanged. PROBE_FR on typical fracR values is unaffected.
+
+Applied to both `handleProbeFmt` and `handleProbeFr` in both files.
+
+### Files changed
+
+- `boxOfActin/DeflectionTunerV15.java` — all three fixes; new constants MAX_PROBE_REL /
+  MIN_PROBE_STEP_ABS; new field probeStepDir; limit-retreat check in handleFineStep.
+- `boxOfActin/DeflectionTuner.java` — identical three fixes applied to v14 code paths.
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings.
+
+### Runtime flags (unchanged)
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV15 -bmMonomer 32 -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV15 -pf ParameterFiles/boa10-64Seg -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV15 -bmMonomer 32 -bmNoiseProbe
+```
+
+Next session: run 32-monomer first to verify (a) PROBE_FMT no longer overshoots target,
+(b) bad-sign retry reverses and eventually brackets correctly, (c) FINE can step fmt back
+down from FRAC_MT_MAX when the predictor calls for it. Then 64-monomer for full-run trace.
+
+---
+
+## 2026-05-20 — DeflectionTuner v15: CONV_TOL_UM fix and noise-floor calibration
+
+### CONV_TOL_UM resolution (case c — neither a nor b)
+
+The code had `CONV_TOL_UM = 5e-6` (µm) with comment `// 5 pm`. The unit conversion is correct:
+`5e-6 µm = 5 pm` (since 1 µm = 10⁶ pm). The "46×" arithmetic in the v14 64-monomer entry is
+consistent: 226 pm / 5 pm = 45.2 ≈ 46. The v15 implementation note stating "5e-6 µm = 5 nm"
+was a unit conversion error in the journal, not a code error.
+
+Fix: changed `CONV_TOL_UM = 5e-6` → `1e-5` in both `DeflectionTuner.java` (v14) and
+`DeflectionTunerV15.java` (v15). This is a 2× loosening (5 pm → 10 pm = 0.01 nm), matching
+the empirical steady-state flutter floor reported by the user. The v14 dead-zone journal entry
+arithmetic still holds qualitatively: 226 pm / 10 pm = 22.6× (v14 was still well outside
+tolerance even after the fix).
+
+### 32-monomer noise probe: V_NOISE and A_NOISE calibration
+
+**First attempt (old placeholder values):** Run stuck in a dead loop. The placeholder formula
+`vNoise = 1e-5/dtFrame = 1e-3 µm/s` and `aNoise = vNoise/τ_theo = 1.754e-2 µm/s²` were 13×
+and 14× too large respectively. Actual `|a|` during relaxation was 1–4e-3 µm/s², always below
+`aNoise`. τ_est was never valid; τ_stable never fired; T1 and T2 never fired. Controller
+degraded entirely to T4 timeout mode. Stuck at 57 pm from target (below new CONV_TOL_UM=10 pm;
+above old 5 pm) with fmt saturated and no rescue or convergence path.
+
+**Calibration from stuck-run tail:** Extracted 200 frames of near-equilibrium FINE output from
+the stuck run (s=0.009857 µm, error=57 pm). Statistics:
+- v: mean≈0, std=2.55e-5 µm/s → 3σ = 7.65e-5 µm/s
+- a: mean≈0, std=4.15e-4 µm/s² → 3σ = 1.25e-3 µm/s²
+
+Updated `start()` in v15: `vNoise = 8e-5` µm/s; `aNoise = 1.3e-3` µm/s² (both rounded up
+conservatively from 3σ). Also added T4 near-target NOISE_PROBE activation path: if
+noiseProbePending AND T4 fires AND |error| < 10×CONV_TOL_UM (100 pm), enter NOISE_PROBE
+instead of stepping. This handles the case where τ_stable never fires.
+
+**Second attempt (calibrated values):** T2 fired throughout COARSE phase — τ_est was now valid
+during the deceleration phase (|a| reaching 2–87e-3 µm/s², above new aNoise=1.3e-3). τ_est
+values ranged 0.19–0.44 s (all much larger than τ_theo=0.057 s; multi-mode chain behavior).
+τ_stable fired despite high τ_est variance, enabling T2 steps. 19 steps total to convergence.
+T3 (crossing) fired at step 20. T4 near-target → NOISE_PROBE activated. 1000-frame CSV written
+to `/tmp/v15_noise_probe.csv`.
+
+**Formal 1000-frame CSV statistics:**
+- v: mean=1.6e-7 µm/s, std=2.12e-5 → 3σ = 6.37e-5 µm/s (code has 8e-5 — slightly conservative ✓)
+- a: mean=5.6e-7 µm/s², std=3.42e-4 → 3σ = 1.03e-3 µm/s² (code has 1.3e-3 ✓)
+
+Committed values (8e-5, 1.3e-3) are within ~25% of 3σ calibrated values. No further update needed.
+
+### 64-monomer benchmark trace
+
+Full log: `RUN_LOGS/v15_64mer_first_calibrated.log`. Run converged (exit code 0).
+
+Key findings:
+- **τ_theo = 7.144 s**, not 0.714 s as the prior journal entry stated. The prior entry was a
+  10× error. Correct derivation: ζ_perp(64-mon)/ζ_perp(32-mon) ≈ 16.4; L(64-mon)/L(32-mon) ≈
+  1.97, L³ ratio ≈ 7.65; τ ∝ ζ_perp × L³ → 16.4 × 7.65 × 0.057 s ≈ 7.1 s. Matches 7.144 ✓.
+- **slope_win = 1429 frames = 14.29 sim-sec; wTimeout = 2858 frames = 28.58 sim-sec**.
+- **6 saturation rescues**: fracMove 0.5→0.45→0.40→0.35→0.30→0.25→0.20. Each rescue fired
+  after ~10 sim-sec of settling (the slope buffer needing 1429 frames should take 14.29 sim-sec,
+  but rescues fire earlier — possibly the early trigger (smoothed > expected) fires first when
+  the chain transiently overshoots target during approach).
+- **Convergence** happened after the 6th rescue (fracMove=0.20), between sim=80 and sim=100.
+  Final params not captured (see below).
+- **Wall-clock**: ~79 minutes (100 sim-sec at ~0.79 min/sim-sec). This is dominated by
+  the 6 × 14 sim-sec probe windows, not COARSE/FINE control.
+
+**stdout buffer loss bug:** All COARSE/FINE/convergence output was lost due to block-buffered
+`System.out` not flushing before `System.exit(0)`. Fixed this session: added
+`System.out.flush()` before both v14 and v15 `System.exit()` calls in `BoxOfActin.java`. The
+flush fix was not compiled before the first 64-monomer run, so the convergence trace is missing.
+Final params (fracR, fracMoveTorq at convergence) are unknown.
+
+### Open issues flagged for planner
+
+1. **τ_theo = 7.144 s for 64-monomer** means each probe settling window is 14 sim-sec ≈ 12
+   minutes wall-clock. With 6 rescues needed, the total time is dominated by probe overhead, not
+   by COARSE/FINE tuning. The v15 T2 fast-exit from probe phases (firing on τ_stable rather than
+   waiting for full settle) does not help during the saturation-rescue loop because τ_stable can't
+   fire in PROBE_FMT phase. If there's a way to detect "chain at soft-start is already
+   too stiff, skip probes and immediately rescue", the probe overhead would be eliminated.
+
+2. **Calibration noise floors are chain-specific.** V_NOISE and A_NOISE were calibrated from
+   the 32-monomer chain. The 64-monomer run may have different equilibrium fluctuations due to
+   longer segments. The 64-monomer run converged, suggesting the 32-monomer calibration is
+   adequate, but a separate 64-monomer noise probe would be the correct procedure.
+
+3. **T2 firing on 32-monomer confirmed.** The multi-mode τ_est values (0.19–0.44 s vs τ_theo=
+   0.057 s) are ~4–8× larger than theoretical. TAU_STABLE_FRAC=0.15 appears permissive enough
+   that τ_stable fires despite this mismatch. The planner should decide whether this is correct
+   behavior or a sign that TAU_STABLE_FRAC needs tightening.
+
+4. **64-monomer convergence trace missing** (stdout flush bug). Re-run with the flush fix to
+   get the full COARSE/FINE trace and final converged params.
+
+### Compile verification
+
+All changes compile clean: `javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java`
+
+### Files changed this session
+
+- `boxOfActin/DeflectionTuner.java` — CONV_TOL_UM 5e-6 → 1e-5
+- `boxOfActin/DeflectionTunerV15.java` — CONV_TOL_UM 5e-6 → 1e-5; Phase.NOISE_PROBE added;
+  noise probe fields + enableNoiseProbe(); T1 → NOISE_PROBE branch; T4 near-target → NOISE_PROBE
+  branch; vNoise/aNoise changed from placeholder formulas to calibrated constants (8e-5, 1.3e-3)
+- `boxOfActin/Env.java` — `benchmarkNoiseProbe` flag added
+- `boxOfActin/BoxOfActin.java` — `-bmNoiseProbe` arg; `enableNoiseProbe()` call; `System.out.flush()`
+  before both v14 and v15 `System.exit()` calls
+- `RUN_LOGS/v15_64mer_first_calibrated.log` — 64-monomer trace (probe/rescue phases only;
+  COARSE/FINE output lost to buffer flush bug)
+
+---
+
+## 2026-05-20 — DeflectionTuner v15: implementation
+
+### File structure
+
+- **`boxOfActin/DeflectionTunerV15.java`** — new file, ~650 lines, `package boxOfActin`. Self-contained; shares no state with `DeflectionTuner.java` (v14). Both files compile and link independently.
+- **`boxOfActin/DeflectionTuner.java`** — v14, untouched.
+- **`boxOfActin/Env.java`** — one line added: `static boolean benchmarkTunerV15 = false;`
+- **`boxOfActin/BoxOfActin.java`** — three edits: (1) `static DeflectionTunerV15 deflTunerV15 = null;` declaration alongside `deflTuner`; (2) `-bmTunerV15` arg parsed in `parseArgs()`, sets `Env.benchmarkTunerV15` and `Env.benchmarkFilament`; (3) feed loop refactored to route to whichever controller is non-null (v15 branch, else v14 branch). Soft-start initialization block is shared by both paths.
+
+### Implementation choices
+
+**`_stagedDInf` pattern.** The `feed()` method computes `dInf` as a local variable, but the step handlers (`handleCoarseStep`, `handleFineStep`) need to record it as `dInfAtStep` for the next sensitivity attribution. Rather than add `dInf` as a parameter threading through three dispatch levels, a single package-private field `_stagedDInf` is written by `stageDInf(dInf)` immediately before each `dispatchStep()` call. The three call sites (T2, T3, T4) each call `stageDInf(dInf)` first. This is the only non-obvious structural choice; everything else follows directly from the design doc.
+
+**τ_est buffer cleared on each parameter step.** The τ_est stability ring buffer (`tauEstBuf`) is wiped via `clearTauEstBuf()` whenever a COARSE or FINE step is taken, and also at PROBE_FMT/PROBE_FR step time. This forces a fresh W_TAU-frame accumulation after every parameter change, ensuring τ_stable cannot fire on τ_est values measured under different physics. The va regression buffer is NOT cleared — it has W_A=12 frames of memory and the W_post=4 gate suppresses triggers during the immediate post-step transient.
+
+**Cold-start path.** PROBE_FMT and PROBE_FR use the v14 settling + early-trigger gate unchanged. The first PROBE_FMT early trigger fires as soon as `smoothed > expected` (which happens immediately with soft-start at softest params). The 4-trigger state machine only activates after `phase == Phase.COARSE` or `phase == Phase.FINE`.
+
+**Sensitivity attribution at first τ_stable frame.** `sensitivityAttribDone` is reset on every step (in both probe and COARSE/FINE handlers). `attributeSensitivity(dInfNow)` computes `Δd_∞ / Δparam` using the Δd_∞ between now and `dInfAtStep`. If `dInfAtStep` was NaN at step time (probe phases, or T3/T4 with d_∞ unavailable), it falls back to smoothed-based attribution. T4 timeout also calls `attributeSensitivitySmoothed()` directly if τ_stable never fired during the watch period.
+
+**CONV_TOL_UM constant note.** The design doc specifies "5 pm" but 5e-6 µm = 5 nm, not 5 pm (5e-9 µm). This is unchanged from v14 — both use `5e-6`. The design doc label "5 pm" appears to be a notation inconsistency inherited from prior versions; the actual value matches v14.
+
+### Runtime flag
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV15 -pf ParameterFiles/boa10-64Seg -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV15 -bmMonomer 32
+```
+
+Absent `-bmTunerV15`, `-bm` behavior is unchanged (v14 arms, same log lines as before).
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings beyond baseline.
+
+### Controller dispatch confirmed
+
+- `-bm` (no v15 flag): prints `[AUTOTUNE] armed: tuner=v14 ...` — v14 controller active, behavior identical to prior sessions.
+- `-bmTunerV15`: prints `[V15] armed: τ=... vNoise=... aNoise=... wTimeout=...` followed by `[AUTOTUNE] armed: tuner=v15 ...` — v15 controller active. PROBE_FMT early trigger fires on first output frame, emits `[V15:STEP#1] PROBE_FMT take ...`.
+
+### Constants to calibrate (all PLACEHOLDER in source)
+
+`W_A=12`, `W_TAU=6`, `W_POST=4`, `TAU_STABLE_FRAC=0.15`, `A_SETTLED_FRAC=0.5`, `CONV_FRAMES_V15=2`, `RESCUE_ERR_FRAC=0.05`. V_NOISE and A_NOISE computed from τ_theo in `start()`: `vNoise = 1e-5 / dtFrame`, `aNoise = vNoise / tauTheo`. W_timeout computed as `round(4·τ_theo / dtFrame)`. All need calibration against a 64-monomer trace before trusting convergence timing.
+
+---
+
+## 2026-05-20 — DeflectionTuner v15: unified (v, a)-aware controller design
+
+### Motivation
+
+v14+ as drafted uses velocity-extrapolation (`d_∞ ≈ d + v·τ_theo`) to predict equilibrium without waiting for the chain to settle. The 64-monomer v14 trace then showed a dead-zone failure: rescue gate too strict, convergence tol too tight, the chain stranded ~200 pm off target with no controller path to close it.
+
+The unified design adds the **second derivative of the smoothed deflection trajectory** as a third signal alongside d and v. Acceleration plays three coupled roles:
+
+1. **τ estimation on the fly.** For a single-exponential relaxation, `τ_est = −v/a`. When this is stable across frames, we are in the slowest-mode-dominated regime and the predicted d_∞ can be trusted.
+2. **Settling/convergence confirmation.** `|a| → 0` confirms the chain has actually reached equilibrium, not just passed through.
+3. **Transient discrimination.** High |a| (relative to its noise floor) means we are early in a step's response; sensitivity attribution and prediction-trust should be suppressed until |a| drops.
+
+The acceleration signal does not replace velocity-extrapolation — it qualifies it.
+
+### Physics recap
+
+For a pinned, overdamped chain under constant load, deflection relaxes as a sum of normal-mode exponentials. After a short transient, the slowest mode dominates:
+
+    d(t) ≈ d_∞ + A · exp(−t/τ)
+
+From this:
+
+    v   = d'(t)  = −(d − d_∞) / τ
+    a   = d''(t) = (d − d_∞) / τ²  = −v/τ
+
+So once we are slow-mode-dominated:
+
+    τ_est = −v / a
+    d_∞   = d − v² / a       (equivalently d + v·τ_est)
+
+Early in a response, multiple modes are active and `−v/a ≠ τ_slow`. The unified controller detects this by watching τ_est's stability frame-to-frame.
+
+### Signal definitions
+
+Let `s_n` = current smoothed deflection (the existing EMA, unchanged).
+Let `Δt_frame` = `drawInterval · deltaT` (frame period, seconds).
+
+**Velocity.** Computed as a regression slope, not a two-point difference, to suppress noise:
+
+    v_n = slope of linear regression on the last W_v values of (frame_time, s)
+
+with `W_v = 8` (placeholder; SLOPE_WIN-ish, calibrate against chain τ).
+
+**Acceleration.** Computed as the *curvature* (quadratic coefficient × 2) of a quadratic regression on the same window, OR as the slope of a regression on the last W_a velocity values. Both work; the quadratic-regression form is preferred because it uses the raw smoothed values once and yields v and a from the same fit, ensuring consistency.
+
+    Quadratic fit on W_a = 12 frames of (frame_time, s):
+        s(t) ≈ s_0 + v_n · (t − t_n) + ½ · a_n · (t − t_n)²
+    returns v_n and a_n.
+
+Calibration note: W_v and W_a must be tuned per chain. A reasonable starting heuristic is `W_a · Δt_frame ≈ 0.2 · τ_theo` (window covers ~20% of a time-constant — long enough to suppress noise, short enough to track changes mid-relaxation).
+
+**τ_est.** Computed each frame when the signals are healthy:
+
+    τ_est_n = −v_n / a_n      iff (|v_n| > V_NOISE) AND (|a_n| > A_NOISE) AND (sign(v_n) ≠ sign(a_n))
+
+The sign-opposition check is physics: in single-exponential decay toward equilibrium, v and a always have opposite signs. Same-sign means we are in a regime where the model doesn't apply (e.g., chain just got a kick from a parameter change and is accelerating, not decelerating).
+
+When the conditions fail, τ_est is undefined for that frame; the controller falls back to `τ_theo`.
+
+**Predicted d_∞.** Computed each frame:
+
+    τ_use = τ_est_n   if τ_est is stable (see below) else τ_theo
+    d_∞_n = s_n + v_n · τ_use
+
+**τ_est stability.** A scalar flag, updated each frame:
+
+    τ_stable = true   iff the relative std-dev of τ_est over the last W_τ frames < TAU_STABLE_FRAC
+
+with `W_τ = 6` frames and `TAU_STABLE_FRAC = 0.15` (placeholders). When fewer than W_τ valid τ_est values are available, τ_stable = false.
+
+### Noise floor constants (placeholders, need empirical calibration)
+
+    V_NOISE         — velocity below which v is dominated by EMA noise.
+                      Starting point: 1e-5 µm / Δt_frame, calibrated from the
+                      tail of a converged chain run.
+    A_NOISE         — acceleration noise floor. Starting point: V_NOISE / τ_theo.
+    TAU_STABLE_FRAC — relative std-dev threshold for declaring τ_est stable. 0.15.
+    A_SETTLED_FRAC  — fraction of A_NOISE below which |a| confirms equilibrium.
+                      0.5 (placeholder).
+
+All four should be inspected against an actual 64-monomer trace before being trusted; A_NOISE in particular depends on the EMA configuration and chain length.
+
+### Step triggers, in priority order
+
+After each parameter change, the controller waits in a "watch" state. Triggers below fire in priority order (first match wins). All triggers require the controller to be past the "post-step settle delay" (a small fixed number of frames W_post = 4, to let the immediate kick from a parameter change wash out before computing v/a).
+
+1. **Convergence (predicted-d_∞ based).**
+   - τ_stable AND |d_∞_n − target| < CONV_TOL_UM AND |a_n| < A_SETTLED_FRAC · A_NOISE
+   - → declare CONVERGED. The chain is heading to within tolerance and is no longer accelerating. Do not require smoothed to be there yet — this closes the v14 dead zone directly.
+
+2. **Confirmed prediction, off-target.**
+   - τ_stable AND |d_∞_n − target| > CONV_TOL_UM
+   - → step now. Use d_∞_n (not s_n) as the basis for the error in the sensitivity formula. Direction is sign(target − d_∞_n).
+   - This replaces v14+'s "predicted d_∞ would significantly undershoot" trigger 3, and absorbs trigger 1 (on-target) into trigger 1 above.
+
+3. **Smoothed crossed target.**
+   - Sign of (s_n − target) flipped vs sign of (s_{n−1} − target)
+   - → step now. Preserved from v14+ as a safety net; if the predictor fails (τ_est never stabilizes), the crossing event still triggers a step.
+
+4. **Hard timeout.**
+   - More than W_timeout frames have elapsed in the watch state since the last parameter change
+   - → step now, basing error on s_n (predictor unreliable). W_timeout placeholder: 4 · τ_theo / Δt_frame.
+
+5. **Otherwise:** keep watching.
+
+The v14 dead zone is closed by trigger 1: when the chain is mid-relaxation toward an on-target equilibrium, τ_stable will eventually become true, |a| will drop, and convergence will fire even though s_n is still 200 pm off.
+
+### Convergence condition
+
+As above, in trigger 1. Replaces the current N-consecutive-frames criterion with a single instantaneous predicate that has physical meaning. (We may keep an N=2-frame requirement to suppress single-frame noise — i.e., trigger 1 must hold for 2 consecutive frames before declaring CONVERGED. Cheap insurance.)
+
+### Sensitivity attribution
+
+Currently: sensitivity = Δ(smoothed deflection) / Δ(parameter), measured over a settling window after each step.
+
+New: sensitivity = Δ(predicted d_∞) / Δ(parameter), measured at the frame when τ_stable first becomes true after the step (or at the W_timeout deadline if τ_stable doesn't fire).
+
+This is more responsive (no full settling wait) and uses the same physics-grounded predictor the trigger logic uses. Fallback to current-style settled sensitivity is retained for the timeout branch.
+
+### Interaction with rescue and brackets
+
+The v14 rescue's RESCUE_ERR_FRAC gate (and the v10 bracket-obstruction logic) should now read **predicted d_∞** as their error signal, not smoothed deflection. Specifically:
+
+- Rescue fires when `|d_∞ − target| > RESCUE_ERR_FRAC · expected` AND further parameter steps would clamp to zero. This removes the v14 64-monomer rescue-gate trap: in that trace, smoothed err = 226 pm < RESCUE_ERR_FRAC · expected, so rescue didn't fire — but predicted d_∞ may have been further from target than smoothed (the chain was still moving), in which case rescue would have fired correctly.
+- Bracket-obstruction detection is unchanged structurally; just feed it d_∞-based error.
+
+Trust-region behavior is unchanged.
+
+### Fallback paths when (v, a) is unreliable
+
+Cases where the design must degrade gracefully:
+
+- **Cold start (first probe).** No history; W_v / W_a windows not yet filled. Use the v6 cold-start gate as currently designed — first probe fires when s crosses expected, without waiting for τ_stable.
+- **τ_est never stabilizes.** Trigger 4 (hard timeout) fires; controller falls back to current-style smoothed-deflection-based stepping with τ_theo extrapolation. Should be rare; if it happens often on a chain type, it means the chain is genuinely multi-mode and the slow-mode assumption is wrong (worth investigating, but not a blocker for the controller).
+- **|a| in the noise floor right after a parameter step.** Expected — the chain hasn't responded yet. The W_post = 4 frame post-step delay handles this; if it persists past W_post, trigger 4 takes over.
+- **Same-sign v and a.** Indicates the chain is still being kicked by the most recent step (or by a non-equilibrium force). τ_est invalid for that frame; falls through to τ_theo extrapolation, which is conservative.
+
+### Constants summary (placeholder values, all need calibration)
+
+    W_v             = 8       (regression window for v)
+    W_a             = 12      (regression window for a, must be ≥ W_v)
+    W_τ             = 6       (stability window for τ_est)
+    W_post          = 4       (post-step settle delay, frames)
+    W_timeout       = 4·τ_theo / Δt_frame  (hard timeout, frames)
+    V_NOISE         = 1e-5 µm / Δt_frame  (velocity noise floor)
+    A_NOISE         = V_NOISE / τ_theo     (acceleration noise floor)
+    TAU_STABLE_FRAC = 0.15    (relative std-dev threshold)
+    A_SETTLED_FRAC  = 0.5     (fraction of A_NOISE for settled detection)
+    CONV_FRAMES     = 2       (consecutive-frame requirement for trigger 1)
+    CONV_TOL_UM     = 5 pm    (unchanged)
+    RESCUE_ERR_FRAC = 0.05    (unchanged, but applied to d_∞-based error)
+
+### Logging requirements
+
+For each frame in watch state, the log line should include `s, v_n, a_n, τ_est_n, τ_stable, d_∞_n, predicted_err`. This is essential for diagnosing whether v15 actually fires on the right physics or just inherits the v14 stalls under new names. Add a one-line summary at every trigger fire: which trigger, which signals were in/out of bounds.
+
+### What this gets us
+
+- **64-monomer dead zone closed by design.** Trigger 1 fires when predicted d_∞ is on target, regardless of smoothed deflection's current position. No more "too small to rescue, too large to converge."
+- **Faster convergence on slow chains.** Trigger 2 acts on confirmed prediction without waiting for settling, removing the per-step ~2τ wait.
+- **Diagnostic richness.** τ_est should track τ_theo when the chain is healthy; deviations are useful debugging info (sign of multi-mode behavior, sign of EMA mis-tuning, sign of parameter regime errors).
+- **Backward compatible at the edges.** Trigger 3 (smoothed crossing) and trigger 4 (timeout) preserve the current behavior as fallbacks, so a chain that defeats the predictor still converges via the old path.
+
+### Open questions for the implementation session
+
+1. Should we EMA-smooth τ_est as well, or only check its relative std-dev? The latter is cleaner; the former might be necessary if τ_est is noisy enough to fail the stability check despite being "correct on average."
+2. Should sensitivity attribution use the *first* τ_stable frame after a step, or wait for an EMA of d_∞ to settle? Probably first τ_stable, but worth a comparison on the 48-monomer trace.
+3. The current EMA-smoothed `s` is itself a low-pass filter — the regression-based v and a will inherit any lag from it. Is the existing EMA tuned for that, or should v15 compute v and a from a less-smoothed signal? Probably worth measuring before tuning.
+
+These are the kind of questions worth resolving on the *first run* of v15 against the 64-monomer trace, not in advance. The design is structured to make them visible in the log output.
+
+---
+
+## 2026-05-20 — DeflectionTuner v15: unified (v, a)-aware controller design
+Motivation
+v14+ as drafted uses velocity-extrapolation (d_∞ ≈ d + v·τ_theo) to predict equilibrium without waiting for the chain to settle. The 64-monomer v14 trace then showed a dead-zone failure: rescue gate too strict, convergence tol too tight, the chain stranded ~200 pm off target with no controller path to close it.
+The unified design adds the second derivative of the smoothed deflection trajectory as a third signal alongside d and v. Acceleration plays three coupled roles:
+
+τ estimation on the fly. For a single-exponential relaxation, τ_est = −v/a. When this is stable across frames, we are in the slowest-mode-dominated regime and the predicted d_∞ can be trusted.
+Settling/convergence confirmation. |a| → 0 confirms the chain has actually reached equilibrium, not just passed through.
+Transient discrimination. High |a| (relative to its noise floor) means we are early in a step's response; sensitivity attribution and prediction-trust should be suppressed until |a| drops.
+
+The acceleration signal does not replace velocity-extrapolation — it qualifies it.
+Physics recap
+For a pinned, overdamped chain under constant load, deflection relaxes as a sum of normal-mode exponentials. After a short transient, the slowest mode dominates:
+d(t) ≈ d_∞ + A · exp(−t/τ)
+From this:
+v   = d'(t)  = −(d − d_∞) / τ
+a   = d''(t) = (d − d_∞) / τ²  = −v/τ
+So once we are slow-mode-dominated:
+τ_est = −v / a
+d_∞   = d − v² / a       (equivalently d + v·τ_est)
+Early in a response, multiple modes are active and −v/a ≠ τ_slow. The unified controller detects this by watching τ_est's stability frame-to-frame.
+Signal definitions
+Let s_n = current smoothed deflection (the existing EMA, unchanged).
+Let Δt_frame = drawInterval · deltaT (frame period, seconds).
+Velocity. Computed as a regression slope, not a two-point difference, to suppress noise:
+v_n = slope of linear regression on the last W_v values of (frame_time, s)
+with W_v = 8 (placeholder; SLOPE_WIN-ish, calibrate against chain τ).
+Acceleration. Computed as the curvature (quadratic coefficient × 2) of a quadratic regression on the same window, OR as the slope of a regression on the last W_a velocity values. Both work; the quadratic-regression form is preferred because it uses the raw smoothed values once and yields v and a from the same fit, ensuring consistency.
+Quadratic fit on W_a = 12 frames of (frame_time, s):
+    s(t) ≈ s_0 + v_n · (t − t_n) + ½ · a_n · (t − t_n)²
+returns v_n and a_n.
+Calibration note: W_v and W_a must be tuned per chain. A reasonable starting heuristic is W_a · Δt_frame ≈ 0.2 · τ_theo (window covers ~20% of a time-constant — long enough to suppress noise, short enough to track changes mid-relaxation).
+τ_est. Computed each frame when the signals are healthy:
+τ_est_n = −v_n / a_n      iff (|v_n| > V_NOISE) AND (|a_n| > A_NOISE) AND (sign(v_n) ≠ sign(a_n))
+The sign-opposition check is physics: in single-exponential decay toward equilibrium, v and a always have opposite signs. Same-sign means we are in a regime where the model doesn't apply (e.g., chain just got a kick from a parameter change and is accelerating, not decelerating).
+When the conditions fail, τ_est is undefined for that frame; the controller falls back to τ_theo.
+Predicted d_∞. Computed each frame:
+τ_use = τ_est_n   if τ_est is stable (see below) else τ_theo
+d_∞_n = s_n + v_n · τ_use
+τ_est stability. A scalar flag, updated each frame:
+τ_stable = true   iff the relative std-dev of τ_est over the last W_τ frames < TAU_STABLE_FRAC
+with W_τ = 6 frames and TAU_STABLE_FRAC = 0.15 (placeholders). When fewer than W_τ valid τ_est values are available, τ_stable = false.
+Noise floor constants (placeholders, need empirical calibration)
+V_NOISE         — velocity below which v is dominated by EMA noise.
+                  Starting point: 1e-5 µm / Δt_frame, calibrated from the
+                  tail of a converged chain run.
+A_NOISE         — acceleration noise floor. Starting point: V_NOISE / τ_theo.
+TAU_STABLE_FRAC — relative std-dev threshold for declaring τ_est stable. 0.15.
+A_SETTLED_FRAC  — fraction of A_NOISE below which |a| confirms equilibrium.
+                  0.5 (placeholder).
+All four should be inspected against an actual 64-monomer trace before being trusted; A_NOISE in particular depends on the EMA configuration and chain length.
+Step triggers, in priority order
+After each parameter change, the controller waits in a "watch" state. Triggers below fire in priority order (first match wins). All triggers require the controller to be past the "post-step settle delay" (a small fixed number of frames W_post = 4, to let the immediate kick from a parameter change wash out before computing v/a).
+
+Convergence (predicted-d_∞ based).
+
+τ_stable AND |d_∞_n − target| < CONV_TOL_UM AND |a_n| < A_SETTLED_FRAC · A_NOISE
+→ declare CONVERGED. The chain is heading to within tolerance and is no longer accelerating. Do not require smoothed to be there yet — this closes the v14 dead zone directly.
+
+
+Confirmed prediction, off-target.
+
+τ_stable AND |d_∞_n − target| > CONV_TOL_UM
+→ step now. Use d_∞n (not s_n) as the basis for the error in the sensitivity formula. Direction is sign(target − d∞_n).
+This replaces v14+'s "predicted d_∞ would significantly undershoot" trigger 3, and absorbs trigger 1 (on-target) into trigger 1 above.
+
+
+Smoothed crossed target.
+
+Sign of (s_n − target) flipped vs sign of (s_{n−1} − target)
+→ step now. Preserved from v14+ as a safety net; if the predictor fails (τ_est never stabilizes), the crossing event still triggers a step.
+
+
+Hard timeout.
+
+More than W_timeout frames have elapsed in the watch state since the last parameter change
+→ step now, basing error on s_n (predictor unreliable). W_timeout placeholder: 4 · τ_theo / Δt_frame.
+
+
+Otherwise: keep watching.
+
+The v14 dead zone is closed by trigger 1: when the chain is mid-relaxation toward an on-target equilibrium, τ_stable will eventually become true, |a| will drop, and convergence will fire even though s_n is still 200 pm off.
+Convergence condition
+As above, in trigger 1. Replaces the current N-consecutive-frames criterion with a single instantaneous predicate that has physical meaning. (We may keep an N=2-frame requirement to suppress single-frame noise — i.e., trigger 1 must hold for 2 consecutive frames before declaring CONVERGED. Cheap insurance.)
+Sensitivity attribution
+Currently: sensitivity = Δ(smoothed deflection) / Δ(parameter), measured over a settling window after each step.
+New: sensitivity = Δ(predicted d_∞) / Δ(parameter), measured at the frame when τ_stable first becomes true after the step (or at the W_timeout deadline if τ_stable doesn't fire).
+This is more responsive (no full settling wait) and uses the same physics-grounded predictor the trigger logic uses. Fallback to current-style settled sensitivity is retained for the timeout branch.
+Interaction with rescue and brackets
+The v14 rescue's RESCUE_ERR_FRAC gate (and the v10 bracket-obstruction logic) should now read predicted d_∞ as their error signal, not smoothed deflection. Specifically:
+
+Rescue fires when |d_∞ − target| > RESCUE_ERR_FRAC · expected AND further parameter steps would clamp to zero. This removes the v14 64-monomer rescue-gate trap: in that trace, smoothed err = 226 pm < RESCUE_ERR_FRAC · expected, so rescue didn't fire — but predicted d_∞ may have been further from target than smoothed (the chain was still moving), in which case rescue would have fired correctly.
+Bracket-obstruction detection is unchanged structurally; just feed it d_∞-based error.
+
+Trust-region behavior is unchanged.
+Fallback paths when (v, a) is unreliable
+Cases where the design must degrade gracefully:
+
+Cold start (first probe). No history; W_v / W_a windows not yet filled. Use the v6 cold-start gate as currently designed — first probe fires when s crosses expected, without waiting for τ_stable.
+τ_est never stabilizes. Trigger 4 (hard timeout) fires; controller falls back to current-style smoothed-deflection-based stepping with τ_theo extrapolation. Should be rare; if it happens often on a chain type, it means the chain is genuinely multi-mode and the slow-mode assumption is wrong (worth investigating, but not a blocker for the controller).
+|a| in the noise floor right after a parameter step. Expected — the chain hasn't responded yet. The W_post = 4 frame post-step delay handles this; if it persists past W_post, trigger 4 takes over.
+Same-sign v and a. Indicates the chain is still being kicked by the most recent step (or by a non-equilibrium force). τ_est invalid for that frame; falls through to τ_theo extrapolation, which is conservative.
+
+Constants summary (placeholder values, all need calibration)
+W_v             = 8       (regression window for v)
+W_a             = 12      (regression window for a, must be ≥ W_v)
+W_τ             = 6       (stability window for τ_est)
+W_post          = 4       (post-step settle delay, frames)
+W_timeout       = 4·τ_theo / Δt_frame  (hard timeout, frames)
+V_NOISE         = 1e-5 µm / Δt_frame  (velocity noise floor)
+A_NOISE         = V_NOISE / τ_theo     (acceleration noise floor)
+TAU_STABLE_FRAC = 0.15    (relative std-dev threshold)
+A_SETTLED_FRAC  = 0.5     (fraction of A_NOISE for settled detection)
+CONV_FRAMES     = 2       (consecutive-frame requirement for trigger 1)
+CONV_TOL_UM     = 5 pm    (unchanged)
+RESCUE_ERR_FRAC = 0.05    (unchanged, but applied to d_∞-based error)
+Logging requirements
+For each frame in watch state, the log line should include s, v_n, a_n, τ_est_n, τ_stable, d_∞_n, predicted_err. This is essential for diagnosing whether v15 actually fires on the right physics or just inherits the v14 stalls under new names. Add a one-line summary at every trigger fire: which trigger, which signals were in/out of bounds.
+What this gets us
+
+64-monomer dead zone closed by design. Trigger 1 fires when predicted d_∞ is on target, regardless of smoothed deflection's current position. No more "too small to rescue, too large to converge."
+Faster convergence on slow chains. Trigger 2 acts on confirmed prediction without waiting for settling, removing the per-step ~2τ wait.
+Diagnostic richness. τ_est should track τ_theo when the chain is healthy; deviations are useful debugging info (sign of multi-mode behavior, sign of EMA mis-tuning, sign of parameter regime errors).
+Backward compatible at the edges. Trigger 3 (smoothed crossing) and trigger 4 (timeout) preserve the current behavior as fallbacks, so a chain that defeats the predictor still converges via the old path.
+
+Open questions for the implementation session
+
+Should we EMA-smooth τ_est as well, or only check its relative std-dev? The latter is cleaner; the former might be necessary if τ_est is noisy enough to fail the stability check despite being "correct on average."
+Should sensitivity attribution use the first τ_stable frame after a step, or wait for an EMA of d_∞ to settle? Probably first τ_stable, but worth a comparison on the 48-monomer trace.
+The current EMA-smoothed s is itself a low-pass filter — the regression-based v and a will inherit any lag from it. Is the existing EMA tuned for that, or should v15 compute v and a from a less-smoothed signal? Probably worth measuring before tuning.
+
+These are the kind of questions worth resolving on the first run of v15 against the 64-monomer trace, not in advance. The design is structured to make them visible in the log output.
 ---
 ## 2026-05-20 — Planned: velocity-extrapolation control (v14+)
 

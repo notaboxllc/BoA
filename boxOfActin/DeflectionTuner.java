@@ -41,6 +41,8 @@ class DeflectionTuner {
     static final double SECONDS_PER_FRAME = 0.01;  // drawInterval × deltaT
     static final int    MIN_SLOPE_WIN     = 10;    // floor: never narrower than v10's SLOPE_WIN
     static final double INIT_PROBE_STEP     = 0.05;
+    static final double MAX_PROBE_REL       = 0.5;    // probe step ≤ 50% of current param value
+    static final double MIN_PROBE_STEP_ABS  = 1e-3;   // probe step absolute floor
     static final double INIT_TRUST          = 0.1;
     static final double MIN_TRUST           = 0.005;
     static final double MAX_TRUST           = 0.3;
@@ -48,7 +50,7 @@ class DeflectionTuner {
     static final double TRUST_SHRINK        = 0.5;
     static final double PREDICTED_FRACTION  = 0.5;
     static final double PRED_STEP_TOL       = 0.001;
-    static final double CONV_TOL_UM         = 5e-6;
+    static final double CONV_TOL_UM         = 1e-5;   // 0.01 nm = 10 pm (empirical noise floor)
     static final int    CONV_FRAMES         = 10;   // was 50; 10 suffices with settling/crossing triggers
     static final double FR_FINE_THRESH      = 0.02;
     static final double ALPHA_DIST          = 0.5;
@@ -131,6 +133,7 @@ class DeflectionTuner {
     // ── PROBE sub-state ───────────────────────────────────────────────────────
     private boolean probeStepped;    // false=waiting to take step; true=waiting to evaluate
     private double  probeStep;
+    private double  probeStepDir;   // direction sign (+1/-1) of current probe; 0 = not yet set
     private int     probeRetryCount;
     private boolean firstProbeFired; // true after first PROBE_FMT step taken; gates cold-start early trigger
 
@@ -188,6 +191,7 @@ class DeflectionTuner {
 
         probeStepped    = false;
         probeStep       = INIT_PROBE_STEP;
+        probeStepDir    = 0;
         probeRetryCount = 0;
         firstProbeFired = false;
 
@@ -300,8 +304,10 @@ class DeflectionTuner {
             }
             // Stage 1: take probe step
             updateFmtBrackets(error);
-            double dir    = (error >= 0) ? +1.0 : -1.0;
-            double newFmt = clamp(fracMoveTorq + dir * probeStep, FRAC_MT_MIN, FRAC_MT_MAX);
+            if (probeStepDir == 0) probeStepDir = (error >= 0) ? +1.0 : -1.0;
+            double probeMag = Math.min(probeStep,
+                                  Math.max(MIN_PROBE_STEP_ABS, MAX_PROBE_REL * Math.abs(fracMoveTorq)));
+            double newFmt = clamp(fracMoveTorq + probeStepDir * probeMag, FRAC_MT_MIN, FRAC_MT_MAX);
             double step   = newFmt - fracMoveTorq;
 
             smoothedAtStep  = smoothed;
@@ -336,7 +342,7 @@ class DeflectionTuner {
                 signOk = true;
             } else if (!signOk) {
                 System.out.printf(
-                    "[AUTOTUNE] PROBE_FMT bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d%n",
+                    "[AUTOTUNE] PROBE_FMT bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d → reversing direction%n",
                     rawSens, trend, step, probeRetryCount);
                 if (probeRetryCount >= MAX_PROBE_RETRIES) {
                     phase = Phase.FAILED;
@@ -344,6 +350,7 @@ class DeflectionTuner {
                     return null;
                 }
                 probeRetryCount++;
+                probeStepDir = -probeStepDir;
                 probeStep   /= 2.0;
                 probeStepped = false;
                 return handleProbeFmt(error);
@@ -362,6 +369,7 @@ class DeflectionTuner {
             phase           = Phase.PROBE_FR;
             probeStepped    = false;
             probeStep       = INIT_PROBE_STEP;
+            probeStepDir    = 0;
             probeRetryCount = 0;
             return handleProbeFr(error);
         }
@@ -373,8 +381,10 @@ class DeflectionTuner {
         if (!probeStepped) {
             // Stage 1: take probe step
             updateFrBrackets(error);
-            double dir   = (error >= 0) ? -1.0 : +1.0;
-            double newFr = clamp(fracR + dir * probeStep, FRAC_R_MIN, FRAC_R_MAX);
+            if (probeStepDir == 0) probeStepDir = (error >= 0) ? -1.0 : +1.0;
+            double probeMag = Math.min(probeStep,
+                                  Math.max(MIN_PROBE_STEP_ABS, MAX_PROBE_REL * Math.abs(fracR)));
+            double newFr = clamp(fracR + probeStepDir * probeMag, FRAC_R_MIN, FRAC_R_MAX);
             double step  = newFr - fracR;
 
             smoothedAtStep = smoothed;
@@ -408,7 +418,7 @@ class DeflectionTuner {
                 signOk = true;
             } else if (!signOk) {
                 System.out.printf(
-                    "[AUTOTUNE] PROBE_FR bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d%n",
+                    "[AUTOTUNE] PROBE_FR bad-sign: rawSens=%.4f (trend=%+.6f step=%+.4f) retry=%d → reversing direction%n",
                     rawSens, trend, step, probeRetryCount);
                 if (probeRetryCount >= MAX_PROBE_RETRIES) {
                     phase = Phase.FAILED;
@@ -416,6 +426,7 @@ class DeflectionTuner {
                     return null;
                 }
                 probeRetryCount++;
+                probeStepDir = -probeStepDir;
                 probeStep   /= 2.0;
                 probeStepped = false;
                 return handleProbeFr(error);
@@ -587,6 +598,19 @@ class DeflectionTuner {
         // Normal FINE step: move fracMoveTorq only.
         double fmtStep         = clamp(rawFmtPred, -trustFmt, trustFmt);
         double candidateLimits = clamp(fracMoveTorq + fmtStep, FRAC_MT_MIN, FRAC_MT_MAX);
+
+        // Limit-retreat: when fmt sits at a hardware limit and the predictor calls for
+        // a step AWAY from it, the Lo/Hi bracket recorded at that limit is stale and
+        // would otherwise clamp the step back to zero.  Clear it before clamping.
+        if (fracMoveTorq >= FRAC_MT_MAX - 1e-9 && fmtStep < 0 && fmtHasLo) {
+            System.out.printf("[AUTOTUNE] FINE limit-retreat: clearing fmtLoBound (%.4f)%n", fmtLoBound);
+            fmtHasLo = false;
+        }
+        if (fracMoveTorq <= FRAC_MT_MIN + 1e-9 && fmtStep > 0 && fmtHasHi) {
+            System.out.printf("[AUTOTUNE] FINE limit-retreat: clearing fmtHiBound (%.4f)%n", fmtHiBound);
+            fmtHasHi = false;
+        }
+
         double newFmt          = clampToBrackets(candidateLimits, fmtHasLo, fmtLoBound, fmtHasHi, fmtHiBound);
 
         // If sensitivity confirms direction and brackets ate >98% of the desired step,
@@ -764,6 +788,7 @@ class DeflectionTuner {
         phase           = Phase.PROBE_FMT;
         probeStepped    = false;
         probeStep       = INIT_PROBE_STEP;
+        probeStepDir    = 0;
         probeRetryCount = 0;
 
         System.out.printf(
