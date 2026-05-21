@@ -102,6 +102,7 @@ public class BoxOfActin {
 	// Automated deflection tuning controller (null when not running)
 	static DeflectionTuner deflTuner = null;
 	static DeflectionTunerV15 deflTunerV15 = null;  // armed when -bmTunerV15 flag is present
+	static DeflectionTunerV16 deflTunerV16 = null;  // armed when -bmTunerV16 flag is present
 	static int autoTuneStepCounter = 0;
 
 	public BoxOfActin (String[] args) {
@@ -285,11 +286,20 @@ public class BoxOfActin {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV15 = true;
 			}
+			if (args[i].equals("-bmTunerV16")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV16 = true;
+			}
 			if (args[i].equals("-bmNoiseProbe")) {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV15 = true;
 				Env.benchmarkNoiseProbe = true;
 			}
+		}
+		// Mutual exclusivity: -bmTunerV16 takes precedence; warn and clear if combined.
+		if (Env.benchmarkTunerV16 && Env.benchmarkTunerV15) {
+			System.err.println("[WARN] -bmTunerV16 and -bmTunerV15 both set — using v16, clearing v15");
+			Env.benchmarkTunerV15 = false;
 		}
 	}
 	
@@ -524,7 +534,7 @@ public class BoxOfActin {
 
 				// Automated deflection tuning: feed active controller at output-frame cadence.
 				// Uses a dedicated step counter so it fires in headless mode (no output frames).
-				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null)
+				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null || deflTunerV16 != null)
 					&& Env.benchmarkFilament && deflFil.midSeg != null
 					&& Env.benchmarkForceOn.getValue() != 0;
 				if (eitherTunerActive) {
@@ -533,8 +543,31 @@ public class BoxOfActin {
 						autoTuneStepCounter = 0;
 						BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 						if (snap != null) {
-							// v15 path
-							if (deflTunerV15 != null) {
+							if (deflTunerV16 != null) {
+								// v16 path
+								DeflectionTunerV16.ParamTriple update = deflTunerV16.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV16.isDone()) {
+									boolean converged = deflTunerV16.getPhase() == DeflectionTunerV16.Phase.CONVERGED;
+									System.out.println(deflTunerV16.resultSummary());
+									System.out.flush();
+									deflTunerV16 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV15 != null) {
+								// v15 path
 								DeflectionTunerV15.ParamTriple update = deflTunerV15.feed(snap.observed);
 								if (update != null) {
 									double oldFm  = Env.fracMove.getValue();
@@ -1137,7 +1170,16 @@ public class BoxOfActin {
 					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
 				}
 			}
-			if (Env.benchmarkTunerV15) {
+			if (Env.benchmarkTunerV16) {
+				deflTunerV16 = new DeflectionTunerV16();
+				deflTunerV16.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV15) {
 				deflTunerV15 = new DeflectionTunerV15();
 				if (Env.benchmarkNoiseProbe) deflTunerV15.enableNoiseProbe();
 				deflTunerV15.start(
@@ -1159,7 +1201,7 @@ public class BoxOfActin {
 			}
 			autoTuneStepCounter = 0;
 			System.out.printf("[AUTOTUNE] armed: tuner=%s  fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm%n",
-				Env.benchmarkTunerV15 ? "v15" : "v14",
+				Env.benchmarkTunerV16 ? "v16" : Env.benchmarkTunerV15 ? "v15" : "v14",
 				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}

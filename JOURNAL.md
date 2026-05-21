@@ -4,6 +4,313 @@ Last updated: 2026-05-20
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-20 — DeflectionTuner v16: implementation
+
+### File structure
+
+- **`boxOfActin/DeflectionTunerV16.java`** — new file, ~370 lines, `package boxOfActin`. Self-contained; signal pipeline copied verbatim from v15 with no shared state.
+- **`boxOfActin/DeflectionTuner.java`** — v14, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV15.java`** — v15, byte-identical (untouched).
+- **`boxOfActin/Env.java`** — one line added: `static boolean benchmarkTunerV16 = false;`
+- **`boxOfActin/BoxOfActin.java`** — four edits: (1) `static DeflectionTunerV16 deflTunerV16 = null;` field declaration; (2) `-bmTunerV16` arg parsed in `parseArgs()`, sets `Env.benchmarkTunerV16` and `Env.benchmarkFilament`; (3) mutual-exclusivity check after arg loop (`-bmTunerV16 + -bmTunerV15` warns and clears v15); (4) feed loop and arm block updated: v16 checked first, then v15, then v14 (if-else-if chain). `[AUTOTUNE] armed:` line prints `tuner=v16/v15/v14` accordingly.
+
+### Algorithm constants (all PLACEHOLDER in source)
+
+`W_A=12`, `W_TAU=6`, `TAU_STABLE_FRAC=0.15`, `W_POST_STEP=4`, `FIRST_STEP_FRACTION=0.5`, `INTO_BRACKET_FRACTION=0.5`, `MIN_STEP_FRACTION=0.01`, `CONV_TOL_UM=1e-5`. `wHoldMax` computed as `max(50, round(4·τ_theo / dtFrame))`. Noise floors `vNoise=8e-5`, `aNoise=1.3e-3` copied from v15 calibrated constants (not recomputed).
+
+### Non-obvious implementation choices
+
+**No phase machine in RUNNING.** After transitioning to RUNNING via `advanceToRunning()`, `framesSinceLastStep` starts at 0 and increments each frame. The crossing reference `crossingRef` is initialized as invalid (`crossingRefValid=false`). On the first frame where `framesSinceLastStep >= W_POST_STEP`, the reference is initialized to the current crossing signal. This means the first actionable crossing check is at frame `W_POST_STEP + 1`. The first actual step is via `forceStep` at frame `wHoldMax` unless a crossing occurs first.
+
+**`crossingRef` saved in `applyStep()` (Option A).** The pre-step signal (dInf or smoothed fallback) is saved immediately before the parameter change is applied. This is used as both the crossing detection reference and the bracket endpoint's dInf. The design doc pseudocode saves it on the first frame after the step — functionally equivalent since the chain responds over τ >> one frame.
+
+**Crossing signal dInf-vs-s fallback.** `signal = (tauStable && !isNaN(dInf)) ? dInf : smoothed`. This is used for crossing detection, recordEndpoint (as crossingRef), and convergence check. The design decision explicitly documents this as "fallback when tau_est unreliable, e.g. first frames after a step." Convergence uses `dInf` directly (with tauTheo fallback when tauStable==false) as specified in the design doc, without an additional tauStable gate.
+
+**Pre-probe probe phases.** Both probes (`PRE_PROBE_FR`, `PRE_PROBE_FMT`) wait for `smoothed > target` (the "early trigger") before taking the first probe step. This mirrors the v15 PROBE_FMT early trigger and ensures the probe happens from a deflected state rather than from the chain's zero initial position. After each probe, the modified parameter is restored to its pre-probe value and a ParamTriple is returned to push the restored value into the simulation.
+
+**`clearTauEstBuf()` on every step.** Copied from v15: ensures a fresh W_TAU-frame τ_est accumulation after every parameter change. This prevents stale τ_est values from prematurely declaring `tauStable` true during a transient.
+
+**Minimum step enforcement.** `enforceMinStep` nudges the target parameter toward the appropriate hardware limit if the computed step magnitude is less than `MIN_STEP_FRACTION × |currentParam|`. Direction is preserved from the computed step; if step is zero, falls back to the tooSoft direction flag.
+
+**`BracketEndpoint` is package-private static inner class**, not accessible outside. `ParamTriple` is package-private static inner class matching v14/v15 pattern.
+
+### Small in-scope discoveries handled silently
+
+- `enforceMinStep` needed to return an array (`double[]`) since Java lacks tuple returns. Implemented as `enforceMinStepArr` returning `double[]{fr, fmt}`.
+- The `prevSmoothed` / `prevSmoothedValid` fields present in v15 (for T3 crossing detection) are not needed in v16 — v16's crossing detection uses `crossingRef` (pre-step signal) vs current signal, not frame-by-frame sign tracking. Fields omitted.
+- `slopeWin` in `isSettled()` uses `framesSinceProbeStep` as the frame counter (not `framesSinceLastStep` which belongs to RUNNING). The two counters are independent.
+- The `minFramesPerStep` floor in `isSettled()` applies to probe phases only; RUNNING has no minimum hold (W_POST_STEP is the only gate, and it's separate from the crossing detection counter).
+
+### Runtime flag
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV16 -bmMonomer 32 -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV16 -pf ParameterFiles/boa10-64Seg -3jsLive 8081
+```
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings.
+
+### Dispatch verified
+
+- `-bm` → `[AUTOTUNE] armed: tuner=v14 ...` ✓
+- `-bmTunerV15` → `[V15] armed: ...` then `[AUTOTUNE] armed: tuner=v15 ...` ✓
+- `-bmTunerV16` → `[V16] armed: τ=0.057s  ... INTO_BRACKET=0.50  FIRST_STEP=0.50  CONV_TOL=1.00e-05` then `[AUTOTUNE] armed: tuner=v16 ...` ✓
+
+Next session: run 32-monomer benchmark with `-bmTunerV16 -bmMonomer 32`. Record: (1) whether PRE_PROBE_FR and PRE_PROBE_FMT pass sign checks; (2) first RUNNING crossing count, step count, and wall-clock vs v15's 21-step trace. Calibration of PLACEHOLDER constants is a separate session after the first trace.
+
+---
+
+## 2026-05-20 — DeflectionTuner v16 design — bracket-and-overshoot controller
+
+### Motivation
+
+v15 converges but its path is clumsy: deflection swings to 4× target, parameters move in zig-zag patterns inherited from probe→COARSE→FINE phase structure, and the controller hesitates after each step rather than committing. The user's manual tuning procedure is far more efficient:
+
+> When deflection crosses the target, change `fracR` and/or `fracMoveTorq` toward stiffer (or softer). Move them aggressively — enough to send the deflection back over the target. Each crossing is a piece of information: it brackets the target between the last two parameter settings. Shrink the bracket. Stop when within tolerance and not accelerating.
+
+v16 implements this directly. The phase machine is gone. There's a single control loop that runs every output frame.
+
+### Conceptual model
+
+For each parameter (fr, fmt) there is a 1-D axis on which "stiffer" is one direction and "softer" is the other. The chain's equilibrium deflection is a monotonic function of position on each axis (assumed; if violated, the controller will fail gracefully via a bracket-violation check). A *bracket* is a pair of parameter settings, one of which produced equilibrium-deflection above target ("too soft") and one of which produced equilibrium-deflection below target ("too stiff"). The target lies between these.
+
+The controller drives toward target by:
+1. Detecting deflection crossings of target.
+2. On each crossing, recording the parameter setting that produced the crossing as a new bracket endpoint (replacing the prior endpoint on the same side).
+3. Moving parameters aggressively into the bracket toward the *opposite* side, with enough magnitude to produce another crossing.
+4. Declaring converged when the predicted d_∞ is within CONV_TOL_UM and acceleration is below its noise floor.
+
+The signal pipeline from v15 (smoothed deflection s, regression-window velocity v and acceleration a, predicted d_∞, τ_est) is retained unchanged. These signals inform timing (when to step) and convergence detection. They do *not* drive parameter selection — that comes from the bracket geometry.
+
+### State
+
+```
+// hardware limits
+FRAC_R_MIN, FRAC_R_MAX        // existing
+FRAC_MT_MIN, FRAC_MT_MAX      // existing
+
+// current parameter values
+fracR, fracMoveTorq
+
+// bracket endpoints. null until first crossing on that side.
+softEndpoint: (fracR_s, fracMoveTorq_s, dInf_s)   // produced deflection > target
+stiffEndpoint: (fracR_t, fracMoveTorq_t, dInf_t)  // produced deflection < target
+
+// signal pipeline (from v15, reused unchanged)
+smoothed, v, a, dInf, tauEst, tauStable
+
+// loop state
+hasSeenFirstCrossing: boolean    // false until first d_∞ crossing of target
+                                  // observed after a step
+framesSinceLastStep: int
+stepCount: int
+lastStepParams: (fracR, fracMoveTorq)  // saved when each step is applied
+dInfAtLastStep: double           // saved just before each step
+firstCallSinceStep: boolean
+```
+
+### Algorithm parameters
+
+```
+CONV_TOL_UM           = 1e-5 (µm)         // empirical noise floor of smoothed
+A_SETTLED             = A_NOISE * 0.5     // from v15 calibration
+W_POST_STEP           = 4 (frames)        // post-step quiet period (same as v15)
+W_HOLD_MAX            = 4 × tauTheo / dtFrame
+                                          // max frames in a hold state before
+                                          // stepping regardless
+FIRST_STEP_FRACTION   = 0.5               // fraction of remaining range to use
+                                          // before a bracket is established
+INTO_BRACKET_FRACTION = 0.5               // fraction of bracket width to step
+                                          // into (0.5 = midpoint)
+MIN_STEP_FRACTION     = 0.01              // step floor (relative to current
+                                          // parameter value)
+```
+
+INTO_BRACKET_FRACTION = 0.5 means: cross to the bracket midpoint each step. Every step is intended to produce another crossing. The bracket halves per crossing — 2^N shrinkage per N steps.
+
+### Loop, run every output frame
+
+After computing the v15 signal pipeline (s, v, a, dInf, tauEst, tauStable):
+
+```
+framesSinceLastStep += 1
+
+// Convergence check
+if (haveBothBrackets()
+    && |dInf - target| < CONV_TOL_UM
+    && |a| < A_SETTLED
+    && framesSinceLastStep > W_POST_STEP) {
+  declareConverged()
+  return
+}
+
+// Quiet period after a step — let the immediate kick wash out
+if (framesSinceLastStep < W_POST_STEP) return null
+
+// Crossing detection. Has dInf crossed target since the last step?
+boolean newCrossing = detectCrossing()
+
+if (newCrossing) {
+  recordEndpoint()                // the *last step's* params become a new endpoint
+  hasSeenFirstCrossing = true
+  return stepIntoBracket()        // step toward the opposite endpoint
+}
+
+// No new crossing. If we've been holding too long, force a step
+if (framesSinceLastStep > W_HOLD_MAX) return forceStep()
+
+// Otherwise let the physics settle
+return null
+```
+
+### detectCrossing()
+
+A crossing of dInf across target. (We use dInf rather than smoothed s because dInf is a leading indicator — it tells us where the chain is heading, not where it currently is.)
+
+```
+boolean detectCrossing() {
+  if (firstCallSinceStep) {
+    dInfAtLastStep = dInf
+    firstCallSinceStep = false
+    return false
+  }
+  return sign(dInfAtLastStep - target) != sign(dInf - target)
+}
+```
+
+A refinement worth considering later: also fire on predicted crossings — if dInf is approaching target very fast (|v| × τ_est >> |dInf − target|), step before it actually crosses. **Skipped in v16.0.** Reactive only.
+
+### recordEndpoint()
+
+When a crossing happens, the parameter setting that *produced* the crossing is the previous step's params (saved in lastStepParams). That becomes the new endpoint on the side dInf came from.
+
+```
+void recordEndpoint() {
+  if (dInf < target) {
+    // crossed downward → just left "too soft" side
+    softEndpoint = (lastStepParams.fracR, lastStepParams.fracMoveTorq,
+                    dInfAtLastStep)
+  } else {
+    stiffEndpoint = (lastStepParams.fracR, lastStepParams.fracMoveTorq,
+                     dInfAtLastStep)
+  }
+}
+```
+
+### stepIntoBracket()
+
+Decide direction and magnitude. Always move both parameters simultaneously.
+
+```
+ParamTriple stepIntoBracket() {
+  boolean haveBoth = (softEndpoint != null && stiffEndpoint != null)
+  boolean tooSoft  = (dInf > target)   // chain currently too soft → step toward stiffer
+
+  double targetFracR, targetFracMoveTorq
+
+  if (haveBoth) {
+    // Step into the bracket toward the opposite endpoint
+    if (tooSoft) {
+      targetFracR        = lerp(softEndpoint.fracR, stiffEndpoint.fracR,
+                                INTO_BRACKET_FRACTION)
+      targetFracMoveTorq = lerp(softEndpoint.fracMoveTorq,
+                                stiffEndpoint.fracMoveTorq,
+                                INTO_BRACKET_FRACTION)
+    } else {
+      targetFracR        = lerp(stiffEndpoint.fracR, softEndpoint.fracR,
+                                INTO_BRACKET_FRACTION)
+      targetFracMoveTorq = lerp(stiffEndpoint.fracMoveTorq,
+                                softEndpoint.fracMoveTorq,
+                                INTO_BRACKET_FRACTION)
+    }
+  } else {
+    // No bracket yet on the far side. Step aggressively toward the limit
+    // (stiffer = lower fracR, higher fmt)
+    if (tooSoft) {
+      targetFracR        = lerp(fracR, FRAC_R_MIN, FIRST_STEP_FRACTION)
+      targetFracMoveTorq = lerp(fracMoveTorq, FRAC_MT_MAX, FIRST_STEP_FRACTION)
+    } else {
+      targetFracR        = lerp(fracR, FRAC_R_MAX, FIRST_STEP_FRACTION)
+      targetFracMoveTorq = lerp(fracMoveTorq, FRAC_MT_MIN, FIRST_STEP_FRACTION)
+    }
+  }
+
+  enforceMinimumStep(...)
+  fracR        = clamp(targetFracR, FRAC_R_MIN, FRAC_R_MAX)
+  fracMoveTorq = clamp(targetFracMoveTorq, FRAC_MT_MIN, FRAC_MT_MAX)
+
+  onStepTaken()
+  return new ParamTriple(fracMove, fracR, fracMoveTorq)
+}
+
+double lerp(double a, double b, double t) { return a + t * (b - a) }
+```
+
+### What this gets us
+
+- **Aggressive by design.** Every step crosses to the bracket midpoint (or half-way to a limit). The chain *will* overshoot. Each overshoot produces a new crossing in a few hundred frames. The bracket halves per step.
+- **No phase machine.** One loop, one set of state, no phase transitions to debug.
+- **Both parameters always.** No frozen-parameter modes. The bracket lives in 2-D (fracR, fracMoveTorq) joint space; we move toward the bracket midpoint in both dimensions simultaneously.
+- **Reuses v15 signal pipeline.** No throwaway work. The (v, a, d_∞) machinery is what makes the convergence check meaningful and what enables fast crossing detection from d_∞ instead of waiting for s.
+- **Inherent shrinkage.** Each crossing halves the bracket geometrically. ~6 crossings to go from initial bracket-width (say 1.0) to 0.01, likely fewer than v15's 21+ steps on the same chain.
+
+### What v16 does NOT handle
+
+- **Non-monotonic deflection in (fracR, fracMoveTorq) space.** If raising fracMoveTorq sometimes *increases* deflection (which the v15 traces showed at low fmt values), the bracket logic breaks. Mitigation: a pre-calibration probe at startup confirms sensitivity signs. Probe is one small step in each parameter direction.
+- **Mid-run sensitivity sign reversal.** If the chain enters a regime where sensitivity flips, the bracket becomes inconsistent. Detection: after each crossing, check that the new endpoint is on the *correct* side relative to its parameter values. If not, declare FAILED with a diagnostic.
+- **Convergence via parameter saturation.** If the bracket midpoint runs into a hardware limit and stays there across crossings, the controller can't shrink further. In this case, declare CONVERGED-WITH-CAVEAT and let the user inspect.
+
+### Pre-calibration probe (one-time, at startup)
+
+Before crossing-detection logic activates:
+
+1. From soft-start, take one step `fracR -= 0.05` (stiffer). After settling, check smoothed deflection *decreased*. If not, FAIL with "fracR sensitivity sign unexpected."
+2. Reset to soft-start, take one step `fracMoveTorq += 0.05`. After settling, check smoothed deflection *decreased*. If not, FAIL with "fracMoveTorq sensitivity sign unexpected."
+
+Total cost: 2 settling periods. Much cheaper than v15's PROBE_FMT/PROBE_FR which tried to extract sensitivity *magnitude* (and got it wrong by orders of magnitude). v16 only needs the *sign*.
+
+### Logging
+
+Per-frame WATCH lines as in v15 (s, v, a, dInf, tauEst, tauStable). Per-step STEP lines include bracket state before/after, the predicted target after step, and chosen parameter values:
+
+```
+[V16:STEP#N] cross-detected  dInf=0.01234 → 0.00876  (was tooSoft, now tooStiff)
+[V16:BRACKET] soft=(fracR=0.50, fmt=0.30, dInf=0.01234)
+              stiff=(fracR=0.30, fmt=0.40, dInf=0.00876)
+[V16:STEP#N+1] step-into-bracket  fracR: 0.30 → 0.40  fmt: 0.40 → 0.35
+```
+
+### Implementation notes for the next session
+
+- **New file:** `DeflectionTunerV16.java`. v15 stays unchanged for comparison.
+- **New flag:** `-bmTunerV16`.
+- **Dispatch:** same pattern as v15 — `Env.benchmarkTunerV16` flag, `BoxOfActin.java` arg parser updated, feed loop dispatches to v16 when active.
+- **Signal pipeline:** copy the v15 signal-pipeline code (EMA, regression slope/curvature, tauEst, tauStable, dInf prediction) into v16 unchanged. Do not refactor for shared use — v15 remains independent for comparison runs.
+- **Soft-start:** same as v14/v15.
+
+### Expected first-run behavior on 32-mer
+
+Soft-start: fracR=1.5, fmt=0.01. Chain deflects to ~37 nm (4× target) over the first ~50 frames. v15 took 21 steps and substantial overshoot to converge. v16 should:
+
+1. See the first crossing (s crosses 0.0098 µm on the way up, then dInf-based crossing detection catches it). Record stiff endpoint at default params.
+2. Step to midpoint between soft-start and (fracR_min, fmt_max): something like fracR ≈ 0.85, fmt ≈ 0.27.
+3. Chain re-equilibrates downward, likely overshoots target downward. Record soft endpoint.
+4. Step into bracket midpoint.
+5. Repeat ~4-6 times until bracket is below CONV_TOL_UM.
+
+Total: ~6-8 crossings, vs v15's 21 steps. Wall-clock should be faster, but the limit is settling time per step, set by physics (~τ_theo per equilibration). v16's advantage is fewer steps, not faster steps.
+
+### Open questions for the implementation session
+
+1. **dInf vs s for crossing detection.** v16.0 uses dInf. Should we fall back to smoothed s when tauStable is false? Probably yes — for the first few crossings, dInf might be unreliable.
+2. **Recording the endpoint d_∞.** Current dInf at crossing time is already on the other side. The endpoint dInf should approximate the chain's equilibrium at those parameters. Approximation: use the dInf measurement just before the new step (saved as dInfAtLastStep).
+3. **First crossing never happens.** If soft-start lands near target by chance, no crossing occurs. After W_HOLD_MAX frames, force a step toward stiffer to perturb the chain.
+
+---
+
+
 ## 2026-05-20 — DeflectionTuner v15.1: three parameter-handling fixes
 
 ### Motivation
