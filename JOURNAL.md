@@ -1,8 +1,816 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-20
+Last updated: 2026-05-21
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
+
+## 2026-05-21 — DeflectionTuner v18: implementation
+
+### File structure
+
+- **`boxOfActin/DeflectionTunerV18.java`** — new file, ~310 lines. Self-contained; signal pipeline copied verbatim from v17.1.
+- **`boxOfActin/DeflectionTuner.java`** — v14, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV15.java`** — v15, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV16.java`** — v16, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV17.java`** — v17.1, byte-identical (untouched).
+- **`boxOfActin/Env.java`** — one line added: `static boolean benchmarkTunerV18 = false;`
+- **`boxOfActin/BoxOfActin.java`** — six edits: (1) `static DeflectionTunerV18 deflTunerV18 = null;` field; (2) `-bmTunerV18` arg parsed; (3) mutual-exclusivity block extended (v18 > v17 > v16 > v15 > v14); (4) `eitherTunerActive` includes `deflTunerV18 != null`; (5) v18 feed path prepended to if-else chain; (6) v18 arm block prepended, `[AUTOTUNE] armed:` ternary extended to show `v18`.
+
+### What v18 changes from v17.1
+
+Signal pipeline (EMA + linear regression + running-avg |v|): **unchanged**. PHASE enum, ActiveParam enum, RETRY_LOWER_FRACMOVE handler, handleSettleCheck() (four branches), alternation budget (STEPS_PER_TURN=2), pinned-skip via boolean return from stepActiveParam(): **all unchanged**.
+
+Changed:
+1. `stepActiveParam(err)` — uses `|err| / sens` (empirical sensitivity) to compute idealMag; clamps to `[MIN_STEP_FRAC × |param|, MAX_STEP_FRAC × distToLimit]`. HALVE_FRACTION removed; MAX_STEP_FRAC takes over as ceiling.
+2. `chainHasSettledRelative()` — new method replacing the `SETTLE_ENTRY_FRAC × V_NOISE` absolute threshold for SETTLE_CHECK entry.
+3. `updateSensitivityFromCompletedStep()` — new method called just before PHASE transitions to SETTLE_CHECK; measures `|Δsmoothed / Δparam|` and updates `sensR` or `sensM`.
+4. `peakVAbsThisBurst` — new field tracking max `|v|` since the last step; updated every frame in `feed()`.
+
+### Non-obvious implementation choices
+
+**`stepParam` field.** `activeParam` may have switched (budget exhausted → `switchActiveParam()` inside `handleAdjust`) between the step and settling detection. `stepParam` is set to the param that was actually stepped in `stepActiveParam()` and is used by `updateSensitivityFromCompletedStep()` to update the right parameter's sensitivity. It is nulled after the update to prevent double-update if `chainHasSettledRelative()` would otherwise re-fire on the same turn before a new step.
+
+**`peakVAbsThisBurst` reset in `switchActiveParam()`.** Without this reset, a stale high peak from the previous turn (e.g., FRAC_R turn with peak=1e-3) could make `chainHasSettledRelative()` fire almost immediately on the new turn (FRAC_MT), producing a spurious SETTLE_CHECK → switch cycle before any step is taken on the new parameter. Resetting in `switchActiveParam()` gives the new turn a fresh peak accumulation.
+
+**`vaCount >= SLOPE_WIN` guard on SETTLE_CHECK entry** (copied from v17.1). During the first 12 frames, v is NaN → treated as 0.0 in `updateRunningAvgV` → `runningAvgV ≈ 0`. With `peakVAbsThisBurst = 0` (no step yet), `chainHasSettledRelative()` would return true immediately (relThresh = ABSOLUTE_V_FLOOR = 1e-5 > runningAvgV = 0). Guard prevents premature SETTLE_CHECK entry.
+
+**`SETTLE_FRAMES = 5` declared but unused.** `handleSettleCheck()` is unchanged from v17.1 and resolves in one frame. SETTLE_FRAMES is listed as a design constant but the handler was specified as "unchanged"; declared with a comment for future use.
+
+**`sAfter` timing (Design decision A).** `smoothed` at the frame where `chainHasSettledRelative()` first returns true is used directly as `sAfter`. No additional wait.
+
+**Outlier filter: none.** New sensitivity measurements are accepted as long as `deltaParam >= 1e-9` and `deltaS >= CONV_TOL_UM`. Per design.
+
+**Step sizing log format.** `stepActiveParam()` stores `lastIdealMag`, `lastClampedMag`, `lastStepSens` as instance fields (set before the meaningful/pinned check). `handleAdjust()` includes them in the STEP#N log line. The pinned log in `stepActiveParam()` also includes the sizing values.
+
+### STEP log format
+
+```
+[V18:STEP#N] drift-correcting  active=FRAC_R  budget=1/2  fr: 1.5000→1.2200  fmt: 0.0100→0.0100  err=0.012345  v=1.234e-03  idealMag=2.4680  clampedMag=0.7000  sens=0.0050
+```
+
+### Sensitivity update log format
+
+```
+[V18] sens update: FRAC_R  0.005000 → 0.023456  (deltaS=1.234e-02  deltaParam=0.5260)
+```
+
+### Armed line (what appears at start of a run)
+
+```
+[V18] armed: fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=<value>µm
+[V18]   FRAMES_BETWEEN_STEPS=5  MAX_STEP_FRAC=0.50  MIN_STEP_FRAC=0.001  RUNNING_AVG_WINDOW=10
+[V18]   SENS_R_INIT=0.0050  SENS_M_INIT=0.0500  PEAK_REL_THRESHOLD=0.10  ABSOLUTE_V_FLOOR=1.0e-05
+[V18]   CONV_TOL_UM=1.00e-05  STEPS_PER_TURN=2  MIN_MEANINGFUL_DELTA=0.001  SLOPE_WIN=12
+[AUTOTUNE] armed: tuner=v18  fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=<value> µm
+```
+
+### Runtime flag
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV18 -bmMonomer 32 -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV18 -pf ParameterFiles/boa10-64Seg -3jsLive 8081
+```
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings.
+
+### Dispatch verified (by code inspection)
+
+- `-bm` → v17/v16/v15/v18 flags all false → `else` branch → v14. `[AUTOTUNE] armed: tuner=v14` ✓
+- `-bmTunerV15` → `benchmarkTunerV15=true` → v15 arm block. `tuner=v15` ✓
+- `-bmTunerV16` → v16 arm block. `tuner=v16` ✓
+- `-bmTunerV17` → v17 arm block. `[V17] armed: ...` then `tuner=v17` ✓
+- `-bmTunerV18` → v18 arm block first in chain. `[V18] armed: ...` then `[AUTOTUNE] armed: tuner=v18` ✓
+
+Next session: run 32-monomer benchmark with `-bmTunerV18 -bmMonomer 32`. Record: (1) first sensitivity update frame and computed sensR; (2) whether idealMag is well-sized for the first overshoot (expect err ≈ 0.001–0.010 µm, idealMag ≈ 0.2–2.0 with SENS_R_INIT=0.005); (3) step count to convergence vs v17.1's 19 steps; (4) whether the near-target over-correction (v17.1 step #9 jumped fracR 0.122→0.811) is eliminated.
+
+---
+
+## 2026-05-20 — DeflectionTuner v18 design — empirical-sensitivity overshoot controller
+
+### Motivation from v17.1 32-mer trace
+
+v17.1 converged on the 32-mer benchmark in 19 steps, but the path was ugly:
+
+1. **Slow first-overshoot response.** Deflection peaked at 0.0193 µm (2× target) before the controller's stiffening had any visible braking effect. The HALVE_FRACTION = 0.5 rule produces *decreasing* steps in absolute terms as the parameter approaches its limit, so by step #4 the per-step magnitude was already shrinking.
+2. **Excessive settling waits.** A 148-frame quiet stretch occurred after the first reversal, where the chain was clearly responding (v < 0, |a| dropping) but `rav` hadn't reached the `V_NOISE = 8e-5` threshold yet. Most of those frames were dead time.
+3. **Catastrophic over-correction near target.** At step #9, err was -58 nm (chain 6× CONV_TOL below target). The "halve toward limit" rule applied to a stiffening parameter at value 0.122 produces a *6.6× multiplicative leap* to 0.811, vastly larger than needed. Chain shot from -58 nm err to +617 nm err in one step.
+
+All three failures share a root cause: **step magnitude is not informed by the chain's actual response.** v17.1 uses pure geometric halving toward the limit, regardless of how far off target we are, regardless of how much the parameter actually affects deflection. v18 replaces this with **empirical-sensitivity-driven step sizing**: track how much deflection each parameter step actually produces, then size subsequent steps to land approximately on target.
+
+### Conceptual core
+
+For each parameter (fracR, fracMoveTorq), maintain a running estimate `sens` = |Δsmoothed / Δparam| from the most recent completed step in that parameter. The "right" step magnitude is then:
+
+    step_magnitude = err / sens
+
+with safety bounds to handle the bootstrap case (no measurement yet), tiny err (don't waste a step), and limit clamping.
+
+By construction:
+- Large err → large step (handles initial overshoot naturally; no special "first-burst" case needed).
+- Small err → small step (no catastrophic over-correction near target).
+- Sensitivity captures whatever physics happens to be in play (no need for τ_est, d_∞, or other physics modeling).
+
+The alternation structure from v17.1 is preserved: 2 steps per turn, switch parameter, 2 steps per turn, switch back. Empirical sensitivity is tracked per parameter and refined as we get more data.
+
+### State
+
+```
+PHASE = { R_ADJUST, M_ADJUST, SETTLE_CHECK, RETRY_LOWER_FRACMOVE, CONVERGED, FAILED }
+activeParam = { FRAC_R, FRAC_MT }
+
+// Per-parameter empirical sensitivity (absolute magnitude)
+sensR              // |Δsmoothed / ΔfracR|, µm per unit-fracR. Updated on each
+                   // completed fracR step.
+sensM              // |Δsmoothed / ΔfracMoveTorq|, µm per unit-fmt. Updated on
+                   // each completed fmt step.
+
+sensR_valid        // true after first measured update; false at start.
+sensM_valid        // ditto.
+
+// Snapshot at the moment of each step (used to compute Δsmoothed/Δparam later)
+sBeforeStep        // smoothed value just before the step was applied.
+paramBeforeStep    // the param value just before the step was applied.
+
+// Peak-relative settling state
+peakVAbsThisBurst  // max |v| observed since the most recent step.
+
+// Existing v17.1 state, mostly unchanged:
+stepsThisTurn      // alternation budget counter
+framesSinceLastStep
+smoothed, v, runningAvgV  // signal pipeline (linear regression on EMA)
+fracMove, fracR, fracMoveTorq
+```
+
+### Algorithm constants
+
+```
+// Sensitivity bootstrap (initial guesses, only matter for the first step in each
+// parameter; replaced by empirical values after that)
+SENS_R_INIT          = 0.005      // µm per unit-fracR. PLACEHOLDER.
+                                   // Soft-start fracR = 1.5 produces ~0.037 µm
+                                   // deflection on 32-mer. (1.5 - 0.1) × 0.005
+                                   // = 0.007 µm — same order. Refined empirically.
+SENS_M_INIT          = 0.05       // µm per unit-fmt. PLACEHOLDER.
+
+// Step magnitude bounds
+MAX_STEP_FRAC        = 0.5        // step capped at fraction of distance-to-limit
+                                   // (the v17.1 HALVE_FRACTION, now as a CEILING)
+MIN_STEP_FRAC        = 0.001      // step floor (skipped if computed step is smaller)
+MIN_MEANINGFUL_DELTA = 0.001      // |Δparam| < this × |current_value| → counts as
+                                   // pinned (matches v17.1 MIN_STEP_DELTA_FRAC)
+
+// Settling
+PEAK_REL_THRESHOLD   = 0.10       // SETTLE_CHECK entry when rav < this × peak_v
+ABSOLUTE_V_FLOOR     = 1e-5       // safety floor: never declare settled if rav
+                                   // > this regardless of peak (handles tiny-peak
+                                   // bursts where 0.1 × peak is below noise)
+SETTLE_FRAMES        = 5          // wait this many frames in SETTLE_CHECK before
+                                   // declaring; same as v17.1's W_POST_STEP
+
+// Step pacing
+FRAMES_BETWEEN_STEPS = 5          // unchanged
+STEPS_PER_TURN       = 2          // unchanged
+
+// Convergence
+CONV_TOL_UM          = 1e-5       // 0.01 nm, unchanged
+
+// Sensitivity smoothing (optional refinement; start with no smoothing)
+SENS_SMOOTHING       = 0.0        // 0 = use most recent measurement directly.
+                                   // >0 = EMA the sensitivity for stability.
+
+// Existing fracMove fallback
+FRACMOVE_RETRY_STEP  = 0.05
+FRACMOVE_FLOOR       = 0.1
+```
+
+### Main loop, every output frame
+
+```
+updateSignalPipeline()           // smoothed s, velocity v
+framesSinceLastStep += 1
+err = s - target
+updateRunningAvgV()
+peakVAbsThisBurst = max(peakVAbsThisBurst, |v|)
+
+switch (PHASE):
+
+  case R_ADJUST or M_ADJUST:
+    if (framesSinceLastStep < FRAMES_BETWEEN_STEPS) return null
+
+    if (chainDriftingWrongWay(err, v)):
+      stepActiveParam(err)       // see below
+      // (if stepActiveParam returned with switch already triggered, return)
+      return new ParamTriple(...)
+
+    // Chain responding correctly. Check settling.
+    if (chainHasSettledRelative()):
+      // The completed step has produced a measurable effect; update sensitivity
+      updateSensitivityFromCompletedStep()
+      PHASE = SETTLE_CHECK
+    return null
+
+  case SETTLE_CHECK:
+    return handleSettleCheck()    // unchanged from v17.1
+
+  case RETRY_LOWER_FRACMOVE:
+    ... (unchanged from v17.1)
+
+  case CONVERGED:
+  case FAILED:
+    return null
+```
+
+### chainDriftingWrongWay(err, v) — unchanged from v17.1
+
+```
+return (err > 0 AND v > 0) OR (err < 0 AND v < 0)
+```
+
+### chainHasSettledRelative() — replaces v17.1's absolute threshold
+
+```
+relativeThreshold = max(PEAK_REL_THRESHOLD × peakVAbsThisBurst, ABSOLUTE_V_FLOOR)
+return runningAvgV < relativeThreshold
+```
+
+The `max` with ABSOLUTE_V_FLOOR prevents a tiny-peak burst (where peak |v| ~ 1e-5 µm/s) from declaring settled at peak × 0.1 = 1e-6 µm/s — below the meaningful signal floor.
+
+### stepActiveParam(err) — substantially revised
+
+```
+// 1. Determine direction. Stiffer if err > 0 (too soft); softer if err < 0.
+boolean stiffen = (err > 0)
+
+// 2. Determine the step's "ideal" magnitude from empirical sensitivity.
+double sens = (activeParam == FRAC_R) ? sensR : sensM
+boolean sensValid = (activeParam == FRAC_R) ? sensR_valid : sensM_valid
+double sensValue = sensValid ? sens : (activeParam == FRAC_R ? SENS_R_INIT : SENS_M_INIT)
+
+double idealMag = |err| / sensValue    // sized to land approximately on target
+
+// 3. Clamp to bounds.
+double currentParam = (activeParam == FRAC_R) ? fracR : fracMoveTorq
+double limit       = chooseLimit(activeParam, stiffen)   // returns FRAC_R_MIN/MAX or FRAC_MT_MIN/MAX
+double distToLimit = |limit - currentParam|
+double maxMag      = MAX_STEP_FRAC × distToLimit
+double minMag      = MIN_STEP_FRAC × |currentParam|
+
+double mag = clamp(idealMag, minMag, maxMag)
+
+// 4. Apply the step. Determine direction sign based on parameter and stiffen flag.
+double dirSign = directionSign(activeParam, stiffen)   // +1 or -1
+double newParam = currentParam + dirSign × mag
+
+// 5. Hardware-limit clamp.
+newParam = clamp(newParam, hardMin(activeParam), hardMax(activeParam))
+
+// 6. Check if the step was meaningful (matches v17.1 logic).
+double actualDelta = |newParam - currentParam|
+if (actualDelta < MIN_MEANINGFUL_DELTA × |currentParam|):
+  // pinned at limit
+  switchActiveParam()
+  return false
+
+// 7. Snapshot state for sensitivity measurement later.
+sBeforeStep = smoothed
+paramBeforeStep = currentParam
+
+// 8. Apply.
+setActiveParam(newParam)
+stepsThisTurn += 1
+framesSinceLastStep = 0
+peakVAbsThisBurst = 0       // reset for new burst
+
+// 9. If budget exhausted, switch.
+if (stepsThisTurn >= STEPS_PER_TURN):
+  switchActiveParam()
+
+return true
+```
+
+### updateSensitivityFromCompletedStep()
+
+Called when `chainHasSettledRelative()` first returns true after a step.
+
+```
+double sAfter = smoothed
+double sBefore = sBeforeStep
+double paramAfter = (activeParam == FRAC_R) ? fracR : fracMoveTorq
+double paramBefore = paramBeforeStep
+
+double deltaS = |sAfter - sBefore|
+double deltaParam = |paramAfter - paramBefore|
+
+if (deltaParam < 1e-9):
+  return       // shouldn't happen but be safe
+if (deltaS < CONV_TOL_UM):
+  return       // step had no measurable effect; don't pollute sens with noise
+
+double newSens = deltaS / deltaParam
+
+if (activeParam == FRAC_R):
+  sensR = (SENS_SMOOTHING > 0 && sensR_valid)
+          ? (SENS_SMOOTHING × sensR + (1 - SENS_SMOOTHING) × newSens)
+          : newSens
+  sensR_valid = true
+else:
+  // same for M
+  ...
+
+log("[V18] sens update: " + paramName + " " + oldSens + " → " + newSens)
+```
+
+### handleSettleCheck() — unchanged from v17.1
+
+Four branches: CONVERGED / RETRY_LOWER_FRACMOVE / FAIL / continue alternation. Same logic as v17.1.
+
+### What v18 does differently from v17.1, in summary
+
+1. **Step magnitude is err-proportional via empirical sensitivity**, not a fixed fraction of distance-to-limit. The pure geometric halving is gone.
+2. **Settling detection is peak-relative**, not absolute-threshold. The chain is "settled enough to act" when running-avg |v| drops to 10% of the burst's peak |v|.
+3. **Sensitivity is measured automatically** after each step, no PROBE phases needed. The first step in each parameter uses a hardcoded initial guess; subsequent steps use the empirical value.
+4. **Logging adds `[V18] sens update:` lines** when sensitivity is refined, so the user can see the controller learning.
+
+Removed from v17.1: the `HALVE_FRACTION` constant. Replaced conceptually by `MAX_STEP_FRAC` (now a ceiling, not the default step size).
+
+### Expected behavior on 32-mer
+
+- **First overshoot.** Chain rockets up, sBeforeStep snapshot taken at first step (when smoothed crosses target on the way up). Initial guess `SENS_R_INIT = 0.005` gives idealMag = err/0.005. If err = 0.0014 (peak overshoot value when the controller fires), idealMag = 0.28 unit-fracR. Clamped to MAX_STEP_FRAC × (1.5 - 0.1) = 0.7. So first step takes fracR from 1.5 to 1.5 - 0.28 = 1.22. Modest, not aggressive.
+- **As err grows during continued drift**, subsequent steps in the same direction grow proportionally. By the time err = 0.005, step size is 1.0 unit-fracR — large, aggressive, but bounded.
+- **After first reversal**, sensitivity updates. Empirical sens for 32-mer R is probably around 0.02-0.05 µm/unit-fracR (rough estimate from the v17.1 trace: 0.45 → 0.28 unit-fracR over a Δs of ~5 nm, so sens ≈ 5e-3/0.17 ≈ 0.03 µm/unit-fracR — order-of-magnitude right). Future steps use this.
+- **Near target**, err is tiny. Step magnitude = err/sens. At err = -58 nm = -5.8e-5 µm and sens = 0.03, step = 1.9e-3 unit-fracR. That's a tiny correction, exactly what the v17.1 trace needed and didn't have.
+
+### What v18 doesn't address
+
+- **Direction reversal mid-burst.** If sensitivity changes sign because the chain enters a new regime (unlikely but possible), the controller could oscillate. v18 trusts the sign and only learns magnitude.
+- **Cross-parameter coupling.** Changing fracR while fmt is at a particular value gives sens_R *at that fmt*. If fmt later changes a lot, sens_R may be stale. The alternation pattern (2 R steps, switch, 2 M steps, switch) means each parameter's sens is refreshed every 4 steps total, which should be fast enough.
+- **Initial sensitivity guess wrong.** If SENS_R_INIT is off by 10×, the first step is over- or under-sized by 10×. The next step's empirical update fixes it. So the cost of a bad initial guess is one bad step.
+
+### Open questions deferred to implementation
+
+1. How exactly to compute `sAfter` when settling? Use the smoothed value at the moment chainHasSettledRelative first returns true, or wait one more SETTLE_FRAMES period?
+2. Should sensitivity be discarded if the new measurement disagrees with the previous by more than (say) 5× — to filter outliers from spurious physics?
+3. Should the alternation budget reset on a parameter switch from "pinned"? Currently it does. Maybe a pinned-skip shouldn't consume a turn.
+
+---
+
+
+## 2026-05-21 — DeflectionTuner v17.1: implementation
+
+### What changed from v17.0
+
+**Constants removed:** `SWITCH_TOL_FRAC`, `PREFERRED_FRACR`, `PREFERRED_FRACMT` — no longer used. Strict alternation makes preferred-value tolerance unnecessary.
+
+**Constants added:**
+- `STEPS_PER_TURN = 2` (PLACEHOLDER) — budget of meaningful steps per R_ADJUST/M_ADJUST turn.
+- `MIN_STEP_DELTA_FRAC = 0.001` (PLACEHOLDER) — a step is "meaningful" only if it moves the parameter by more than 0.1% of its current value.
+
+**New state field:** `int stepsThisTurn` — incremented on each meaningful step in `stepActiveParam()`, reset to 0 in `switchActiveParam()` and in the `RETRY_LOWER_FRACMOVE` handler (which resets to soft-start without going through `switchActiveParam()`).
+
+### stepActiveParam() return type change (in-scope discovery)
+
+In v17.0 this was `void`. v17.1 makes it return `boolean` (true = meaningful step applied, false = parameter pinned → `switchActiveParam()` called inside). This was the only way for `handleAdjust()` to know whether to return a `ParamTriple` or `null` after a pinned step. No change to external API.
+
+### Budget and switching logic in handleAdjust()
+
+After a meaningful step:
+1. Log with `budget=stepsThisTurn/STEPS_PER_TURN`.
+2. If `stepsThisTurn >= STEPS_PER_TURN`, call `switchActiveParam()` (resets counter, changes phase/activeParam).
+3. Return `ParamTriple` with the changed parameter values regardless — the switch only affects the next turn.
+
+After a pinned step (returns false):
+- `switchActiveParam()` was already called inside `stepActiveParam()`; `handleAdjust()` returns null (no param change to push).
+
+### handleSettleCheck() revised branches
+
+v17.0 RETRY/FAIL conditions were physically inverted. v17.1 fixes them:
+
+| Branch | Condition | Action |
+|--------|-----------|--------|
+| (1) CONVERGED | `|err| < CONV_TOL_UM` | phase = CONVERGED |
+| (2) RETRY | `err < 0` AND fracR≥FRAC_R_MAX AND fmt≤FRAC_MT_MIN | phase = RETRY_LOWER_FRACMOVE |
+| (3) FAIL | `err > 0` AND fracR≤FRAC_R_MIN AND fmt≥FRAC_MT_MAX | phase = FAILED |
+| (4) continue | otherwise | switchActiveParam(), return null |
+
+v17.0 had (2) with `err > 0` at soft limits and (3) with `err < 0` at stiff limits — both inverted. v17.1: RETRY fires when chain is too stiff at softest (fracR, fmt) → lower fracMove to soften chain. FAIL fires when chain is too soft at stiffest (fracR, fmt) → nothing left to do.
+
+Branch (4) replaces v17.0 sub-cases 3 (near-preferred switch) and 4 (correction step). It just calls `switchActiveParam()` and returns null — no step taken from SETTLE_CHECK. The step happens in the next R_ADJUST/M_ADJUST turn.
+
+### isNearPreferred() removed
+
+Only used for SETTLE_CHECK sub-case 3 (near-preferred switch). Deleted entirely.
+
+### Updated armed line
+
+```
+[V17] armed: fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=<analyticDefl>µm
+[V17]   FRAMES_BETWEEN_STEPS=5  HALVE_FRACTION=0.50  RUNNING_AVG_WINDOW=10
+[V17]   V_NOISE=8.000e-05  V_STEADY_THRESHOLD=8.000e-05  SETTLE_ENTRY_FRAC=0.50
+[V17]   CONV_TOL_UM=1.00e-05  STEPS_PER_TURN=2  MIN_STEP_DELTA_FRAC=0.001  SLOPE_WIN=12
+```
+
+(SWITCH_TOL_FRAC removed; STEPS_PER_TURN and MIN_STEP_DELTA_FRAC added.)
+
+### Per-step log format
+
+```
+[V17:STEP#N] drift-correcting  active=FRAC_R  budget=1/2  fr: 1.5000→0.8000  fmt: 0.0100→0.0100  err=...  v=...
+```
+
+Budget shows `stepsThisTurn/STEPS_PER_TURN` after the increment (budget=1/2 on first step, 2/2 on second → triggers switch). Pinned-step log: `[V17] stepActiveParam: FRAC_R pinned (delta=... ≤ 0.001 × ...) → switching`.
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings.
+
+### Dispatch verified (by code inspection)
+
+- `-bm` → v14 unchanged ✓
+- `-bmTunerV15` → v15 unchanged ✓
+- `-bmTunerV16` → v16 unchanged ✓
+- `-bmTunerV17` → v17.1; armed line shows STEPS_PER_TURN=2 and MIN_STEP_DELTA_FRAC=0.001 ✓
+
+Next session: run 32-monomer with `-bmTunerV17 -bmMonomer 32`. Record: (1) whether alternation fires after exactly 2 steps (budget=2/2 in log); (2) whether the pinned-step immediate-switch path fires; (3) whether SETTLE_CHECK branch (4) "continue alternation" fires and how many alternation cycles to CONVERGED; (4) total step count vs v17.0's 50+ stuck steps.
+
+---
+
+## 2026-05-20 — DeflectionTuner v17.1: strict alternation, fixed switching
+
+### Diagnosis from v17.0 32-mer run
+
+v17.0 on 32-mer with `boaDebugParams` stiffened fracR aggressively (1.5 → 0.8 → 0.45 → 0.275 → 0.1875 → ...) and never switched to fracMoveTorq. By step #8 fracR was essentially pinned at FRAC_R_MIN = 0.1; v17.0 then made 50+ more "steps" that didn't move fracR at all because the parameter was at its limit. Chain stalled at deflection ≈ 0.0336 µm (3.4× target) with the controller stuck in R_ADJUST.
+
+The bug: the switch-to-M_ADJUST criterion was gated behind SETTLE_CHECK firing, but the chain never settled because the controller kept stepping fracR (even when each step changed nothing). Circular.
+
+The fix: drop the preferred-value-tolerance switch criterion. Use strict alternation instead — R_ADJUST takes a fixed budget of meaningful steps, then switches to M_ADJUST regardless of where fracR ended up. M_ADJUST takes the same budget, switches back. The half-step shrinkage rule (each step halves distance to the limit) is kept — three steps reaches 7/8 of the way to the limit, which is plenty aggressive without saturating.
+
+### Algorithm changes from v17.0
+
+1. **Strict alternation**, 2 steps per turn.
+   - `STEPS_PER_TURN = 2`
+   - Each `R_ADJUST` cycle takes up to 2 meaningful drift-correcting steps in fracR, then switches to `M_ADJUST`.
+   - Each `M_ADJUST` cycle takes up to 2 meaningful drift-correcting steps in fracMoveTorq, then switches to `R_ADJUST`.
+   - A "meaningful step" is one that actually moves the parameter by more than `MIN_STEP_DELTA_FRAC × current_value` (suggested `MIN_STEP_DELTA_FRAC = 0.001`, i.e. >0.1% change). If a step is essentially zero (parameter pinned at hardware limit), it does *not* consume budget; the controller switches to the other parameter immediately.
+
+2. **Remove SWITCH_TOL_FRAC and preferred-value-tolerance logic.** Preferred values are no longer used. The phase-switch is unconditional after STEPS_PER_TURN budget is consumed.
+
+3. **Remove the "near preferred → switch" branch in handleSettleCheck.** Switching now happens during R_ADJUST/M_ADJUST itself, not in SETTLE_CHECK.
+
+4. **handleSettleCheck branches (revised):**
+   - (1) `|err| < CONV_TOL` → CONVERGED.
+   - (2) `err < 0 AND fracR at FRAC_R_MAX (1.5) AND fracMoveTorq at FRAC_MT_MIN (0.01)` → RETRY_LOWER_FRACMOVE. (Chain too stiff at fully-soft parameters; lower fracMove to extend range.)
+   - (3) `err > 0 AND fracR at FRAC_R_MIN (0.1) AND fracMoveTorq at FRAC_MT_MAX (0.5)` → FAIL. (Chain too soft at fully-stiff parameters; nothing left to try.)
+   - (4) Otherwise: continue stepping in the *next* parameter (i.e., switch from R_ADJUST to M_ADJUST or vice versa, with a fresh STEPS_PER_TURN budget).
+
+5. **Step-budget counter.** New state: `stepsThisTurn` (int). Incremented on each meaningful drift-correcting step. Reset to 0 at every parameter switch. When `stepsThisTurn >= STEPS_PER_TURN`, the next drift-correcting opportunity becomes a switch instead of a step.
+
+### Constants summary (v17.1)
+
+```
+STEPS_PER_TURN       = 2          // PLACEHOLDER: 2 or 3 alternation budget
+MIN_STEP_DELTA_FRAC  = 0.001      // step counts as "meaningful" if it moves
+                                   // parameter by more than 0.1% of current value
+FRAMES_BETWEEN_STEPS = 5          // unchanged from v17.0
+HALVE_FRACTION       = 0.5        // unchanged from v17.0
+RUNNING_AVG_WINDOW   = 10         // unchanged
+V_NOISE              = 8.000e-05  // unchanged
+SETTLE_ENTRY_FRAC    = 0.5        // unchanged
+CONV_TOL_UM          = 1e-5       // unchanged
+FRACMOVE_RETRY_STEP  = 0.05       // unchanged
+FRACMOVE_FLOOR       = 0.1        // unchanged
+
+REMOVED:
+SWITCH_TOL_FRAC      // gone — strict alternation, no tolerance band
+PREFERRED_FRACR      // gone — not used
+PREFERRED_FRACMT     // gone — not used
+```
+
+### Expected behavior on 32-mer with boaDebugParams
+
+Soft-start: fracR=1.5, fmt=0.01. Chain rockets through target. R_ADJUST starts.
+
+- Step 1: fracR 1.5 → 0.8 (meaningful, budget = 1)
+- Step 2: fracR 0.8 → 0.45 (meaningful, budget = 2 = STEPS_PER_TURN) → **switch to M_ADJUST**
+- Step 3: fmt 0.01 → 0.255 (meaningful, budget = 1)
+- Step 4: fmt 0.255 → 0.378 (meaningful, budget = 2) → **switch to R_ADJUST**
+- Step 5: fracR 0.45 → 0.275 (meaningful) ...
+
+Within ~6-10 alternation steps the chain should land near target. SETTLE_CHECK then fires and either CONVERGED or one more alternation cycle.
+
+If both parameters end up near their stiff limits (fracR → 0.1, fmt → 0.5) and chain is still too soft: FAIL.
+If both parameters at their soft limits (fracR = 1.5, fmt = 0.01) and chain is too stiff: RETRY_LOWER_FRACMOVE, reset, try again.
+
+### What this doesn't address
+
+The chain dynamics during alternation may produce surprises we can't predict — e.g., the first M_ADJUST step at fmt = 0.255 might be too aggressive given fracR has already moved to 0.45, sending deflection past target downward. v17.1 is happy to keep stepping (R direction reverses, then M direction reverses) — that's the design. If it produces wild oscillation we add a step-magnitude cap in v17.2.
+
+---
+
+
+## 2026-05-21 — DeflectionTuner v17: implementation
+
+### File structure
+
+- **`boxOfActin/DeflectionTunerV17.java`** — new file, ~290 lines, `package boxOfActin`. Self-contained; no shared state with v14/v15/v16. Signal pipeline is a strict subset of v16: EMA + linear regression only (no quadratic fit, no acceleration, no τ_est, no d_∞).
+- **`boxOfActin/DeflectionTuner.java`** — v14, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV15.java`** — v15, byte-identical (untouched).
+- **`boxOfActin/DeflectionTunerV16.java`** — v16, byte-identical (untouched).
+- **`boxOfActin/Env.java`** — one line added: `static boolean benchmarkTunerV17 = false;`
+- **`boxOfActin/BoxOfActin.java`** — five edits: (1) `static DeflectionTunerV17 deflTunerV17 = null;` field; (2) `-bmTunerV17` arg parsed in `parseArgs()`; (3) mutual-exclusivity block extended (v17 > v16 > v15 > v14, both v16 and v15 cleared when v17 is set); (4) `eitherTunerActive` condition includes `deflTunerV17 != null`; (5) v17 path prepended to feed loop and arm block if-else-if chain; `[AUTOTUNE] armed:` prints `tuner=v17` when active.
+
+### Signal pipeline (v17 vs v15/v16)
+
+v17 uses only:
+- EMA (same α=0.05 as v15/v16)
+- Linear regression slope over `SLOPE_WIN=12` frames → velocity `v` (µm/s). Uses the same centered-coordinate least-squares formula as v16's quadratic fit, but with only the linear term (no acceleration term, no τ_est ring buffer).
+- Running average of |v| over `RUNNING_AVG_WINDOW=10` frames → `runningAvgV`.
+
+### Small in-scope discoveries handled silently
+
+**NaN-velocity guard on SETTLE_CHECK entry.** During the first `SLOPE_WIN=12` frames, the regression buffer is not full and `v` is NaN. `updateRunningAvgV` treats NaN as 0.0, so `runningAvgV` would be near zero. Without a guard, `handleAdjust` would enter SETTLE_CHECK after only 5 frames (FRAMES_BETWEEN_STEPS), before any real signal exists. Fixed by adding `vaCount >= SLOPE_WIN` as a second condition for SETTLE_CHECK entry. This silently extends the initial quiet period from 5 to 12 frames, consistent with the design's stated intent ("a short post-start delay lets the soft-start chain start deflecting before the first stepping decision").
+
+**Running-average buffer ordering.** When `ravCount < RUNNING_AVG_WINDOW` (buffer not yet full), `ravBuf[0..ravCount-1]` holds all valid entries (ravHead hasn't wrapped). When full, `ravBuf[0..RUNNING_AVG_WINDOW-1]` are all valid. In both cases, `sum(ravBuf[0..ravCount-1]) / ravCount` gives the correct mean. This avoids a separate circular-buffer read path.
+
+**RETRY_LOWER_FRACMOVE is a one-frame transient state.** The phase is set by `handleSettleCheck` sub-case (1), and resolved on the very next frame: `fracMove` decrements, state resets to soft-start, phase transitions to R_ADJUST, and a ParamTriple is returned. FAILED similarly resolves in one frame.
+
+### Non-obvious implementation choices
+
+**Linear regression direction.** After `pushVA(smoothed)`, `vaHead` points to the oldest slot (next to be overwritten). Iterating `k=0..SLOPE_WIN-1` from `vaHead` gives oldest-to-newest, with `u_k = (k - mid)*dtFrame`. Positive slope ↔ smoothed increasing. Same iteration order as v16's `computeVA()`, but without the quadratic term.
+
+**`isNearPreferred` is instance-level.** It reads `fracR` and `fracMoveTorq` instance fields directly. The SWITCH_TOL_FRAC check is `|param - preferred| <= SWITCH_TOL_FRAC * preferred`, i.e., a ±15% band around the preferred value. A fresh FRAC_R at soft-start (1.5) is nowhere near PREFERRED_FRACR=0.7 (deviation=114%), so sub-case (3) won't fire spuriously at the start.
+
+**handleSettleCheck is single-frame.** SETTLE_CHECK always transitions to another phase within the same call. Sub-case priority order: convergence → soft-limits retry → stiff-limits failure → near-preferred switch → correction step (fallback). The fallback (sub-case 4) fires unconditionally when all others fail, so SETTLE_CHECK is never a permanent holding state.
+
+**`tauSeconds` parameter accepted but not used.** `start()` takes `tauSeconds` to match the v14/v15/v16 signature (arm block passes `deflFil.tauTheo`). v17 doesn't need it (no τ_est, no τ_theo-based timer). Ignored; does not affect behavior.
+
+### Runtime flag
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV17 -bmMonomer 32 -3jsLive 8081
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -bmTunerV17 -pf ParameterFiles/boa10-64Seg -3jsLive 8081
+```
+
+### Expected arm output (what the planner sees at start of a run)
+
+```
+[V17] armed: fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=<analyticDefl>µm
+[V17]   FRAMES_BETWEEN_STEPS=5  HALVE_FRACTION=0.50  RUNNING_AVG_WINDOW=10
+[V17]   V_NOISE=8.000e-05  V_STEADY_THRESHOLD=8.000e-05  SETTLE_ENTRY_FRAC=0.50
+[V17]   CONV_TOL_UM=1.00e-05  SWITCH_TOL_FRAC=0.15  SLOPE_WIN=12
+[AUTOTUNE] armed: tuner=v17  fracMove=0.5000  fracR=1.5000  fracMoveTorq=0.0100  target=<analyticDefl> µm
+```
+
+### Compile verification
+
+`javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java` — zero errors, zero warnings.
+
+### Dispatch verified (by code inspection)
+
+- `-bm` → `Env.benchmarkTunerV17/V16/V15` all false → arm block falls to `else` → v14. `[AUTOTUNE] armed: tuner=v14 ...` ✓
+- `-bmTunerV15` → `benchmarkTunerV15=true` → arm block `else if (benchmarkTunerV15)` → v15. `tuner=v15` ✓
+- `-bmTunerV16` → `benchmarkTunerV16=true` → arm block `else if (benchmarkTunerV16)` → v16. `tuner=v16` ✓
+- `-bmTunerV17` → `benchmarkTunerV17=true` → arm block first branch → v17. `[V17] armed: ...` then `[AUTOTUNE] armed: tuner=v17 ...` ✓
+
+Next session: run 32-monomer benchmark with `-bmTunerV17 -bmMonomer 32`. Record: (1) first SETTLE_CHECK entry frame and runningAvgV at that point; (2) number of fracR steps before SETTLE_CHECK; (3) whether sub-case (3) (switch to fmt) fires; (4) total step count vs v15's 21 steps. Calibration of PLACEHOLDER constants (FRAMES_BETWEEN_STEPS, HALVE_FRACTION, SWITCH_TOL_FRAC) is a separate session after the first trace.
+
+---
+
+## 2026-05-20 — DeflectionTuner v17 design — single-parameter overshoot controller
+
+### Motivation
+
+v16's bracket-and-overshoot scheme mismatched the user's mental model in two ways: (a) joint (fracR, fmt) brackets become ambiguous because deflection responses to one parameter depend on the other's value, and (b) v16 took at most one step per crossing, then waited for settling, whereas the user's procedure is "step repeatedly *during* each drift while the chain is drifting in the wrong direction."
+
+The user provided pseudo-code (preserved in chat history) that crystallizes the procedure. v17 implements that procedure directly, with one parameter active at a time.
+
+### Algorithm in one paragraph
+
+One parameter is active at a time. Every 5 output frames, measure smoothed deflection s and regression-window velocity v. If err = s − target > 0 AND v > 0 (chain is too soft and getting softer), take an aggressive step toward stiffer — halve the distance from the activeParam to its hardware "stiffer" limit. If err < 0 AND v < 0, halve toward the "softer" limit. Otherwise the chain is responding correctly; don't step. When the running average of |v| falls below the noise floor for several frames, the chain has reached steady state. If |s − target| < CONV_TOL, the activeParam is done. If activeParam was fracR and it's close to its preferred mid-range value, switch to fmt and repeat. If neither parameter alone gets to target, decrease fracMove (the timestep base) and restart. If even that fails, declare FAILED.
+
+### Parameter facts (recapped from user's pseudo-code)
+
+- `fracR ∈ [0.1, 1.5]`. Larger = softer. Preferred ≈ 0.7.
+- `fracMoveTorq ∈ [0.01, 0.5]`. Larger = stiffer. Preferred ≈ 0.2.
+- `fracMove ∈ [0.1, 0.5]`. Larger = stiffer. Preferred ≈ 0.3.
+- Soft-start: `fracR = 1.5`, `fracMoveTorq = 0.01`, `fracMove = 0.5`.
+
+### State
+
+```
+PHASE = { R_ADJUST, M_ADJUST, SETTLE_CHECK, RETRY_LOWER_FRACMOVE,
+          CONVERGED, FAILED }
+
+activeParam: { FRAC_R, FRAC_MT }      // which parameter is currently being moved
+framesSinceLastStep: int
+runningAvgV: rolling mean of |v| over last RUNNING_AVG_WINDOW frames
+fracMove, fracR, fracMoveTorq        // current parameter values
+
+// Signal pipeline (subset of v15/v16; no acceleration, no tauEst, no dInf)
+smoothed (s)
+v   computed via regression over slopeWin frames of (frame_time, s)
+```
+
+### Algorithm constants
+
+```
+FRAMES_BETWEEN_STEPS = 5           // gap between consecutive parameter steps
+                                    // — long enough for v to update after a step
+HALVE_FRACTION       = 0.5          // each step halves the distance to the
+                                    // hardware limit on the active side
+RUNNING_AVG_WINDOW   = 10           // frames over which |v| is averaged for
+                                    // steady-state detection
+V_STEADY_THRESHOLD   = V_NOISE      // running-avg |v| below this = steady
+CONV_TOL_UM          = 1e-5         // 0.01 nm (empirical noise floor)
+SWITCH_TOL_FRAC      = 0.15         // PLACEHOLDER: switch to other parameter when
+                                    // activeParam within ±15% of preferred value
+PREFERRED_FRACR      = 0.7
+PREFERRED_FRACMT     = 0.2
+FRACMOVE_RETRY_STEP  = 0.05         // amount to decrease fracMove on retry
+FRACMOVE_FLOOR       = 0.1          // hard minimum for fracMove
+
+// Hardware limits (existing)
+FRAC_R_MIN  = 0.1,  FRAC_R_MAX  = 1.5
+FRAC_MT_MIN = 0.01, FRAC_MT_MAX = 0.5
+```
+
+### Main loop, every output frame
+
+```
+updateSignalPipeline()              // s, v
+framesSinceLastStep += 1
+err = s - target
+updateRunningAvgV()
+
+switch (PHASE) {
+
+  case R_ADJUST:
+  case M_ADJUST:
+    if (framesSinceLastStep < FRAMES_BETWEEN_STEPS) return null
+
+    if (chainDriftingWrongWay(err, v)) {
+      stepActiveParam(err)
+      framesSinceLastStep = 0
+      return new ParamTriple(fracMove, fracR, fracMoveTorq)
+    }
+
+    // Chain is responding correctly. Check if it has settled.
+    if (runningAvgV < V_STEADY_THRESHOLD) {
+      PHASE = SETTLE_CHECK
+    }
+    return null
+
+  case SETTLE_CHECK:
+    handleSettleCheck()              // see below
+    return null  (or stepping ParamTriple if SETTLE_CHECK decides to step)
+
+  case RETRY_LOWER_FRACMOVE:
+    fracMove -= FRACMOVE_RETRY_STEP
+    if (fracMove < FRACMOVE_FLOOR) {
+      PHASE = FAILED
+      return null
+    }
+    fracR = FRAC_R_MAX               // reset to soft-start
+    fracMoveTorq = FRAC_MT_MIN
+    activeParam = FRAC_R
+    PHASE = R_ADJUST
+    return new ParamTriple(fracMove, fracR, fracMoveTorq)
+
+  case CONVERGED:
+  case FAILED:
+    return null                      // controller is done; loop is no-op
+}
+```
+
+### chainDriftingWrongWay(err, v)
+
+```
+return (err > 0 AND v > 0) OR (err < 0 AND v < 0)
+```
+
+That's it: deflection on the wrong side of target *and* getting worse. v ≈ 0 (chain at instantaneous equilibrium) does *not* count as drifting; we let physics do its thing. v in the *correcting* direction also does not count.
+
+### stepActiveParam(err)
+
+The step always moves activeParam halfway toward the hardware limit on the side that *would correct err*. So we never step toward making err worse (even by accident).
+
+```
+if (activeParam == FRAC_R) {
+  if (err > 0) {
+    // chain too soft → stiffen fracR (decrease toward FRAC_R_MIN)
+    fracR = fracR + HALVE_FRACTION * (FRAC_R_MIN - fracR)
+  } else {
+    // chain too stiff → soften fracR
+    fracR = fracR + HALVE_FRACTION * (FRAC_R_MAX - fracR)
+  }
+  fracR = clamp(fracR, FRAC_R_MIN, FRAC_R_MAX)
+} else {  // FRAC_MT
+  if (err > 0) {
+    // chain too soft → stiffen fmt (increase toward FRAC_MT_MAX)
+    fracMoveTorq = fracMoveTorq + HALVE_FRACTION * (FRAC_MT_MAX - fracMoveTorq)
+  } else {
+    fracMoveTorq = fracMoveTorq + HALVE_FRACTION * (FRAC_MT_MIN - fracMoveTorq)
+  }
+  fracMoveTorq = clamp(fracMoveTorq, FRAC_MT_MIN, FRAC_MT_MAX)
+}
+```
+
+Note the implicit shrinkage: as fracR approaches FRAC_R_MIN, each subsequent stiffening step is smaller. As fracR overshoots and the chain becomes too stiff (err < 0), the next step softens toward FRAC_R_MAX from *the overshot value*, not from soft-start — so it doesn't go back to 1.5 in one step. The chain bounces back and forth within a narrowing range automatically, without any explicit bracket tracking.
+
+### handleSettleCheck()
+
+```
+// Chain has settled (running-avg |v| below noise floor).
+// Decide what to do based on err and current parameter positions.
+
+if (|err| < CONV_TOL_UM) {
+  PHASE = CONVERGED
+  return null
+}
+
+// Not converged. Three sub-cases:
+
+// (1) At the soft limits, still too soft. Can't stiffen further with
+//     activeParam alone. Need to lower fracMove.
+boolean atSoftLimits = (fracR >= FRAC_R_MAX - 1e-9) &&
+                       (fracMoveTorq <= FRAC_MT_MIN + 1e-9)
+if (err > 0 AND atSoftLimits) {
+  PHASE = RETRY_LOWER_FRACMOVE
+  return null
+}
+
+// (2) At the stiff limits, still too stiff. Failure.
+boolean atStiffLimits = (fracR <= FRAC_R_MIN + 1e-9) &&
+                        (fracMoveTorq >= FRAC_MT_MAX - 1e-9)
+if (err < 0 AND atStiffLimits) {
+  PHASE = FAILED
+  return null
+}
+
+// (3) activeParam is close to its preferred value but still not converged.
+//     Switch to other parameter.
+boolean nearPreferred = isNearPreferred(activeParam)
+if (nearPreferred) {
+  switchActiveParam()       // R_ADJUST → M_ADJUST or vice versa
+  return null
+}
+
+// (4) Otherwise, the chain settled but activeParam can still move.
+//     Take one more step in the appropriate direction (without the
+//     drift-direction gate, since v ≈ 0).
+stepActiveParam(err)
+framesSinceLastStep = 0
+PHASE = (activeParam == FRAC_R) ? R_ADJUST : M_ADJUST
+return new ParamTriple(fracMove, fracR, fracMoveTorq)
+```
+
+### Initialization
+
+```
+fracMove = 0.5
+fracR = FRAC_R_MAX = 1.5
+fracMoveTorq = FRAC_MT_MIN = 0.01
+activeParam = FRAC_R       // start by adjusting fracR (per design discussion)
+PHASE = R_ADJUST
+framesSinceLastStep = 0
+```
+
+A short post-start delay (~5-10 frames) lets the soft-start chain start deflecting before the first stepping decision. This is naturally handled by `framesSinceLastStep` starting at 0 and the FRAMES_BETWEEN_STEPS gate.
+
+### What v17 explicitly does *not* do
+
+- No phase machine beyond the single PHASE enum above (no COARSE / FINE / PROBE distinctions).
+- No τ_est. No d_∞ predictor. The v15/v16 unified (v, a)-aware machinery is not used.
+- No bracket-endpoint tracking, no soft/stiff endpoint state. The "tested range" is implicit in where the parameter has been.
+- No simultaneous adjustment of fracR and fmt. One parameter at a time.
+- No pre-calibration probe. Sensitivity signs are known a priori.
+
+### Logging
+
+Per-frame WATCH lines tagged `[V17:WATCH]` with `s`, `v`, `err`, `runningAvgV`, current PHASE and activeParam. Per-step STEP lines tagged `[V17:STEP#N]` with the parameter being changed, old and new values, and the reason. Phase-transition lines like `[V17] PHASE: R_ADJUST → SETTLE_CHECK`, `[V17] switch active: FRAC_R → FRAC_MT`, `[V17] CONVERGED` and `[V17] FAILED`.
+
+### Calibration constants (will need tuning after first run)
+
+- `FRAMES_BETWEEN_STEPS = 5`: too small → v is stale and the controller takes spurious steps. Too large → wall-clock convergence slowed.
+- `HALVE_FRACTION = 0.5`: 0.5 → step to midpoint. 0.7 → more aggressive overshoot. 0.3 → gentler.
+- `RUNNING_AVG_WINDOW = 10`: too small → false steady-state detection on transient pauses. Too large → slow to detect actual steady state.
+- `SWITCH_TOL_FRAC = 0.15`: how close to preferred value before we switch to the other parameter. Smaller → more parameter changes overall but each parameter ends nearer preferred. Larger → fewer changes but parameters end farther from preferred.
+
+### Open questions for the implementation session
+
+1. **Velocity computation window.** v17 needs v to be reasonably noise-free. The v15 regression-window approach (W_A = 12 frames) is fine; v17 can reuse it.
+2. **What if running-avg |v| oscillates around the threshold?** A persistent borderline case. Add a hysteresis margin: enter SETTLE_CHECK only when avg-|v| < 0.5 × V_STEADY_THRESHOLD; remain in R_ADJUST/M_ADJUST until that stricter threshold is met.
+3. **Soft-start chain still falling at the start.** During the first ~50 frames of soft-start, the chain is rocketing through target en route to its (off-target) equilibrium. v17's "err > 0 AND v > 0" condition is technically true during this transit but v17 would step every FRAMES_BETWEEN_STEPS frames during it, taking multiple stiffening steps before the chain settles. This may actually be the right behavior — v17 should stiffen aggressively while the chain is racing toward an off-target equilibrium. But if it produces wild overshoot, we can gate the first step on running-avg |v| being below some early-transient threshold.
+
+### Expected behavior on 32-mer
+
+Soft-start: chain falls rapidly toward equilibrium at ~37 nm (4× target). Sometime during the descent, smoothed crosses target = 9.8 nm on the way down. Then continues falling — err < 0 momentarily even though chain is *still* heading to be too soft. The transit-through-target produces a misleading err sign briefly. v17 sees err > 0 and v > 0 mostly, takes ~3-5 stiffening fracR steps in rapid succession (each FRAMES_BETWEEN_STEPS apart) bringing fracR from 1.5 → 0.8 → 0.45 → 0.27 → ... Eventually the chain's velocity reverses (it starts heading toward an equilibrium near target). v17 stops stepping, lets it settle. Running-avg |v| drops, SETTLE_CHECK fires. If err is within tolerance, CONVERGED. Otherwise switch to fmt or take one more step.
+
+Roughly: 3-6 fracR steps, possibly 2-4 fmt steps, total ~10 steps. Compared to v15's 21 steps and v16's pre-probe failure.
+
+---
+
 
 ## 2026-05-20 — DeflectionTuner v16: implementation
 

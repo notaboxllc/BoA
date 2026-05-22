@@ -263,6 +263,8 @@ public class Env {
 	static boolean benchmarkManual = false;  // -bmManual: no search loop; user tunes live from viewer
 	static boolean benchmarkTunerV15 = false; // -bmTunerV15: use DeflectionTunerV15 instead of v14
 	static boolean benchmarkTunerV16 = false; // -bmTunerV16: use DeflectionTunerV16 (bracket-and-overshoot)
+	static boolean benchmarkTunerV17 = false; // -bmTunerV17: use DeflectionTunerV17 (single-parameter overshoot)
+	static boolean benchmarkTunerV18 = false; // -bmTunerV18: use DeflectionTunerV18 (empirical-sensitivity overshoot)
 	static boolean benchmarkNoiseProbe = false; // -bmNoiseProbe: post-convergence tail capture for V_NOISE/A_NOISE calibration
 
 	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work.

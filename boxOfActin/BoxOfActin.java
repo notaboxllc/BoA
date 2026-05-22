@@ -103,6 +103,8 @@ public class BoxOfActin {
 	static DeflectionTuner deflTuner = null;
 	static DeflectionTunerV15 deflTunerV15 = null;  // armed when -bmTunerV15 flag is present
 	static DeflectionTunerV16 deflTunerV16 = null;  // armed when -bmTunerV16 flag is present
+	static DeflectionTunerV17 deflTunerV17 = null;  // armed when -bmTunerV17 flag is present
+	static DeflectionTunerV18 deflTunerV18 = null;  // armed when -bmTunerV18 flag is present
 	static int autoTuneStepCounter = 0;
 
 	public BoxOfActin (String[] args) {
@@ -290,13 +292,45 @@ public class BoxOfActin {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV16 = true;
 			}
+			if (args[i].equals("-bmTunerV17")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV17 = true;
+			}
+			if (args[i].equals("-bmTunerV18")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV18 = true;
+			}
 			if (args[i].equals("-bmNoiseProbe")) {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV15 = true;
 				Env.benchmarkNoiseProbe = true;
 			}
 		}
-		// Mutual exclusivity: -bmTunerV16 takes precedence; warn and clear if combined.
+		// Mutual exclusivity: v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
+		if (Env.benchmarkTunerV18) {
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV18 and -bmTunerV17 both set — using v18, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV18 and -bmTunerV16 both set — using v18, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV18 and -bmTunerV15 both set — using v18, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV17) {
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV17 and -bmTunerV16 both set — using v17, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV17 and -bmTunerV15 both set — using v17, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
 		if (Env.benchmarkTunerV16 && Env.benchmarkTunerV15) {
 			System.err.println("[WARN] -bmTunerV16 and -bmTunerV15 both set — using v16, clearing v15");
 			Env.benchmarkTunerV15 = false;
@@ -534,7 +568,7 @@ public class BoxOfActin {
 
 				// Automated deflection tuning: feed active controller at output-frame cadence.
 				// Uses a dedicated step counter so it fires in headless mode (no output frames).
-				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null || deflTunerV16 != null)
+				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null || deflTunerV16 != null || deflTunerV17 != null || deflTunerV18 != null)
 					&& Env.benchmarkFilament && deflFil.midSeg != null
 					&& Env.benchmarkForceOn.getValue() != 0;
 				if (eitherTunerActive) {
@@ -543,7 +577,53 @@ public class BoxOfActin {
 						autoTuneStepCounter = 0;
 						BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 						if (snap != null) {
-							if (deflTunerV16 != null) {
+							if (deflTunerV18 != null) {
+								// v18 path
+								DeflectionTunerV18.ParamTriple update = deflTunerV18.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV18.isDone()) {
+									boolean converged = deflTunerV18.getPhase() == DeflectionTunerV18.Phase.CONVERGED;
+									System.out.println(deflTunerV18.resultSummary());
+									System.out.flush();
+									deflTunerV18 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV17 != null) {
+								// v17 path
+								DeflectionTunerV17.ParamTriple update = deflTunerV17.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV17.isDone()) {
+									boolean converged = deflTunerV17.getPhase() == DeflectionTunerV17.Phase.CONVERGED;
+									System.out.println(deflTunerV17.resultSummary());
+									System.out.flush();
+									deflTunerV17 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV16 != null) {
 								// v16 path
 								DeflectionTunerV16.ParamTriple update = deflTunerV16.feed(snap.observed);
 								if (update != null) {
@@ -1170,7 +1250,25 @@ public class BoxOfActin {
 					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
 				}
 			}
-			if (Env.benchmarkTunerV16) {
+			if (Env.benchmarkTunerV18) {
+				deflTunerV18 = new DeflectionTunerV18();
+				deflTunerV18.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV17) {
+				deflTunerV17 = new DeflectionTunerV17();
+				deflTunerV17.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV16) {
 				deflTunerV16 = new DeflectionTunerV16();
 				deflTunerV16.start(
 					Env.fracMove.getValue(),
@@ -1201,7 +1299,7 @@ public class BoxOfActin {
 			}
 			autoTuneStepCounter = 0;
 			System.out.printf("[AUTOTUNE] armed: tuner=%s  fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm%n",
-				Env.benchmarkTunerV16 ? "v16" : Env.benchmarkTunerV15 ? "v15" : "v14",
+				Env.benchmarkTunerV18 ? "v18" : Env.benchmarkTunerV17 ? "v17" : Env.benchmarkTunerV16 ? "v16" : Env.benchmarkTunerV15 ? "v15" : "v14",
 				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}
