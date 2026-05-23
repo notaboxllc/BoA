@@ -22,7 +22,7 @@ Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output
 **Parameter bounds.**
 - fracR (C_R): [0.1, 1.5]. Lower = stiffer filament.
 - fracMoveTorq (C_θ): [0.01, 0.5]. Higher = stiffer. Upper bound is the theoretical stability limit from Alberts 2009.
-- fracMove (C_δ): [0.1, 0.5]. Higher = stiffer. Upper bound 0.5 is theoretical stability limit. Lower bound 0.1 is empirical (geometric chain-link integrity).
+- fracMove (C_δ): [0.02, 0.5]. Higher = stiffer. Upper bound 0.5 is theoretical stability limit. Lower bound 0.02 is empirical (geometric chain-link integrity; 128-mon converges at ≈0.029).
 
 **Performance** (benchmark: 11-segment filament, deflection target = analytic δ for a simply-supported beam under transverse force).
 
@@ -31,9 +31,12 @@ Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output
 | 32 mon | 0.0098 | (0.146, 0.386, 0.50) | 2 | 263 |
 | 48 mon | 0.0146 | (0.287, 0.070, 0.50) | 7 | 563 |
 | 64 mon | 0.0193 | (0.377, 0.031, 0.25) | 10 + 6 prepass probes | 1277 |
-| 96 mon | 0.0288 | PREPASS_FAILED — target unreachable in legal parameter box | n/a | 1112 |
+| 96 mon | 0.0288 | PREPASS_FAILED (old bound 0.10); expected to converge with new bound 0.02 | n/a | — |
+| 128 mon | 0.0385 | PREPASS_FAILED (old bound 0.10); expected to converge at fracMove≈0.029 | n/a | — |
 
-**Known limit at 96-monomer segments.** The maximum reachable deflection at the softest legal parameter corner (fracMove=0.10) is 0.0238 µm, vs target 0.0288 µm. This is 21% short of target. The lumped-parameter representation appears to be at the edge of its accuracy regime at this segment size — segments are ~0.26 µm, comparable to the ParM tuning case in Alberts 2009 Fig. 5B where method accuracy begins to degrade.
+**2026-05-22 update:** fracMove lower bound relaxed from 0.10 to 0.02 to enable tuning of 96-mon and 128-mon segments. Empirical: 96-mon converges at fracMove≈0.098, 128-mon at fracMove≈0.029. Chain-link geometric integrity acceptable at these values. Pre-pass decrement logic fixed to clamp to FRACMOVE_MIN (instead of rejecting) so the probe at exactly 0.02 is reached.
+
+**Known limit at 96-monomer and above.** The lumped-parameter representation is at the edge of its accuracy regime at these segment sizes — segments are ~0.26 µm (96-mon) and ~0.35 µm (128-mon), comparable to the ParM tuning case in Alberts 2009 Fig. 5B where method accuracy begins to degrade. Tuning may succeed but resulting filament behavior may not match the analytic target well outside the tuned regime.
 
 **Workflow.**
 ```

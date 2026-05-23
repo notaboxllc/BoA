@@ -28,7 +28,7 @@ class DeflectionTunerV25 {
     static final int    MAX_FRACMOVE_DROPS      = 8;
     static final int    INFEASIBILITY_THRESHOLD = 3;
     static final double FRACMOVE_DECREMENT      = 0.05;
-    static final double FRACMOVE_MIN            = 0.1;
+    static final double FRACMOVE_MIN            = 0.02;
     static final double FR_LO    = 0.1,  FR_HI  = 1.5;
     static final double FMT_LO   = 0.01, FMT_HI = 0.5;
     static final double BOUND_EPS = 1e-6;
@@ -215,8 +215,7 @@ class DeflectionTunerV25 {
         }
 
         // Not feasible — try lower fracMove.
-        double newFm = fracMove - FRACMOVE_DECREMENT;
-        if (newFm < FRACMOVE_MIN - 1e-9) {
+        if (fracMove <= FRACMOVE_MIN + 1e-9) {
             System.out.printf(
                 "[V25:PREPASS_FAILED] no fracMove in [%.2f, %.2f] reaches target+margin at softest 2D corner%n",
                 FRACMOVE_MIN, 0.5);
@@ -224,7 +223,7 @@ class DeflectionTunerV25 {
             return null;
         }
 
-        fracMove = newFm;
+        fracMove = Math.max(FRACMOVE_MIN, fracMove - FRACMOVE_DECREMENT);
         fr  = FR_HI;
         fmt = FMT_LO;
         resetSettle();
