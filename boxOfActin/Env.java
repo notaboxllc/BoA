@@ -265,6 +265,13 @@ public class Env {
 	static boolean benchmarkTunerV16 = false; // -bmTunerV16: use DeflectionTunerV16 (bracket-and-overshoot)
 	static boolean benchmarkTunerV17 = false; // -bmTunerV17: use DeflectionTunerV17 (single-parameter overshoot)
 	static boolean benchmarkTunerV18 = false; // -bmTunerV18: use DeflectionTunerV18 (empirical-sensitivity overshoot)
+	static boolean benchmarkTunerV19 = false; // -bmTunerV19: use DeflectionTunerV19 (fast-path for far-from-target)
+	static boolean benchmarkTunerV20 = false; // -bmTunerV20: use DeflectionTunerV20 (sensitivity tracking + velocity-trend gating)
+	static boolean benchmarkTunerV21 = false; // -bmTunerV21: use DeflectionTunerV21 (bounded sens + single-param near-target)
+	static boolean benchmarkTunerV22 = false; // -bmTunerV22: use DeflectionTunerV22 (Broyden's method, clean-slate 2D root finding)
+	static boolean benchmarkTunerV23 = false; // -bmTunerV23: use DeflectionTunerV23 (corrected bounds, stiffest start, fracMove outer loop)
+	static boolean benchmarkTunerV24 = false; // -bmTunerV24: use DeflectionTunerV24 (noise-aware Jacobian gate, physics-aware conv tolerance)
+	static boolean benchmarkTunerV25 = false; // -bmTunerV25: use DeflectionTunerV25 (coarse fracMove pre-pass + V24 convergence)
 	static boolean benchmarkNoiseProbe = false; // -bmNoiseProbe: post-convergence tail capture for V_NOISE/A_NOISE calibration
 
 	// Increment 4: force toggle — mutable at runtime so the Params panel and HUD button both work.

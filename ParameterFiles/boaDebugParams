@@ -36,7 +36,7 @@ nodeTransDiff:false:1.0E-16;            // Protein Node Translation Diffusivity
 nodeRotDiff:false:0.0010;               // Protein Node Rotational Diffusivity
 actinSeed:true:3.0;                     // Monomers to seed filament
 actinOnCortex:true:0.0;                 // Actin constrained to cortex
-filSegLength:true:32.0;                 // Std. segment length
+filSegLength:true:128.0;                 // Std. segment length
 filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
 BTransCoeff:true:0.5;                   // Brownian Translational Coefficient
 BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient

@@ -105,6 +105,13 @@ public class BoxOfActin {
 	static DeflectionTunerV16 deflTunerV16 = null;  // armed when -bmTunerV16 flag is present
 	static DeflectionTunerV17 deflTunerV17 = null;  // armed when -bmTunerV17 flag is present
 	static DeflectionTunerV18 deflTunerV18 = null;  // armed when -bmTunerV18 flag is present
+	static DeflectionTunerV19 deflTunerV19 = null;  // armed when -bmTunerV19 flag is present
+	static DeflectionTunerV20 deflTunerV20 = null;  // armed when -bmTunerV20 flag is present
+	static DeflectionTunerV21 deflTunerV21 = null;  // armed when -bmTunerV21 flag is present
+	static DeflectionTunerV22 deflTunerV22 = null;  // armed when -bmTunerV22 flag is present
+	static DeflectionTunerV23 deflTunerV23 = null;  // armed when -bmTunerV23 flag is present
+	static DeflectionTunerV24 deflTunerV24 = null;  // armed when -bmTunerV24 flag is present
+	static DeflectionTunerV25 deflTunerV25 = null;  // armed when -bmTunerV25 flag is present
 	static int autoTuneStepCounter = 0;
 
 	public BoxOfActin (String[] args) {
@@ -300,13 +307,251 @@ public class BoxOfActin {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV18 = true;
 			}
+			if (args[i].equals("-bmTunerV19")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV19 = true;
+			}
+			if (args[i].equals("-bmTunerV20")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV20 = true;
+			}
+			if (args[i].equals("-bmTunerV21")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV21 = true;
+			}
+			if (args[i].equals("-bmTunerV22")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV22 = true;
+			}
+			if (args[i].equals("-bmTunerV23")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV23 = true;
+			}
+			if (args[i].equals("-bmTunerV24")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV24 = true;
+			}
+			if (args[i].equals("-bmTunerV25")) {
+				Env.benchmarkFilament = true;
+				Env.benchmarkTunerV25 = true;
+			}
 			if (args[i].equals("-bmNoiseProbe")) {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV15 = true;
 				Env.benchmarkNoiseProbe = true;
 			}
 		}
-		// Mutual exclusivity: v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
+		// Mutual exclusivity: v25 > v24 > v23 > v22 > v21 > v20 > v19 > v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
+		if (Env.benchmarkTunerV25) {
+			if (Env.benchmarkTunerV24) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV24 both set — using v25, clearing v24");
+				Env.benchmarkTunerV24 = false;
+			}
+			if (Env.benchmarkTunerV23) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV23 both set — using v25, clearing v23");
+				Env.benchmarkTunerV23 = false;
+			}
+			if (Env.benchmarkTunerV22) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV22 both set — using v25, clearing v22");
+				Env.benchmarkTunerV22 = false;
+			}
+			if (Env.benchmarkTunerV21) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV21 both set — using v25, clearing v21");
+				Env.benchmarkTunerV21 = false;
+			}
+			if (Env.benchmarkTunerV20) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV20 both set — using v25, clearing v20");
+				Env.benchmarkTunerV20 = false;
+			}
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV19 both set — using v25, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV18 both set — using v25, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV17 both set — using v25, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV16 both set — using v25, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV25 and -bmTunerV15 both set — using v25, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV24) {
+			if (Env.benchmarkTunerV23) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV23 both set — using v24, clearing v23");
+				Env.benchmarkTunerV23 = false;
+			}
+			if (Env.benchmarkTunerV22) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV22 both set — using v24, clearing v22");
+				Env.benchmarkTunerV22 = false;
+			}
+			if (Env.benchmarkTunerV21) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV21 both set — using v24, clearing v21");
+				Env.benchmarkTunerV21 = false;
+			}
+			if (Env.benchmarkTunerV20) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV20 both set — using v24, clearing v20");
+				Env.benchmarkTunerV20 = false;
+			}
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV19 both set — using v24, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV18 both set — using v24, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV17 both set — using v24, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV16 both set — using v24, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV24 and -bmTunerV15 both set — using v24, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV23) {
+			if (Env.benchmarkTunerV22) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV22 both set — using v23, clearing v22");
+				Env.benchmarkTunerV22 = false;
+			}
+			if (Env.benchmarkTunerV21) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV21 both set — using v23, clearing v21");
+				Env.benchmarkTunerV21 = false;
+			}
+			if (Env.benchmarkTunerV20) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV20 both set — using v23, clearing v20");
+				Env.benchmarkTunerV20 = false;
+			}
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV19 both set — using v23, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV18 both set — using v23, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV17 both set — using v23, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV16 both set — using v23, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV23 and -bmTunerV15 both set — using v23, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV22) {
+			if (Env.benchmarkTunerV21) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV21 both set — using v22, clearing v21");
+				Env.benchmarkTunerV21 = false;
+			}
+			if (Env.benchmarkTunerV20) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV20 both set — using v22, clearing v20");
+				Env.benchmarkTunerV20 = false;
+			}
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV19 both set — using v22, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV18 both set — using v22, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV17 both set — using v22, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV16 both set — using v22, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV22 and -bmTunerV15 both set — using v22, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV21) {
+			if (Env.benchmarkTunerV20) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV20 both set — using v21, clearing v20");
+				Env.benchmarkTunerV20 = false;
+			}
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV19 both set — using v21, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV18 both set — using v21, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV17 both set — using v21, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV16 both set — using v21, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV21 and -bmTunerV15 both set — using v21, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV20) {
+			if (Env.benchmarkTunerV19) {
+				System.err.println("[WARN] -bmTunerV20 and -bmTunerV19 both set — using v20, clearing v19");
+				Env.benchmarkTunerV19 = false;
+			}
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV20 and -bmTunerV18 both set — using v20, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV20 and -bmTunerV17 both set — using v20, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV20 and -bmTunerV16 both set — using v20, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV20 and -bmTunerV15 both set — using v20, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
+		if (Env.benchmarkTunerV19) {
+			if (Env.benchmarkTunerV18) {
+				System.err.println("[WARN] -bmTunerV19 and -bmTunerV18 both set — using v19, clearing v18");
+				Env.benchmarkTunerV18 = false;
+			}
+			if (Env.benchmarkTunerV17) {
+				System.err.println("[WARN] -bmTunerV19 and -bmTunerV17 both set — using v19, clearing v17");
+				Env.benchmarkTunerV17 = false;
+			}
+			if (Env.benchmarkTunerV16) {
+				System.err.println("[WARN] -bmTunerV19 and -bmTunerV16 both set — using v19, clearing v16");
+				Env.benchmarkTunerV16 = false;
+			}
+			if (Env.benchmarkTunerV15) {
+				System.err.println("[WARN] -bmTunerV19 and -bmTunerV15 both set — using v19, clearing v15");
+				Env.benchmarkTunerV15 = false;
+			}
+		}
 		if (Env.benchmarkTunerV18) {
 			if (Env.benchmarkTunerV17) {
 				System.err.println("[WARN] -bmTunerV18 and -bmTunerV17 both set — using v18, clearing v17");
@@ -568,7 +813,7 @@ public class BoxOfActin {
 
 				// Automated deflection tuning: feed active controller at output-frame cadence.
 				// Uses a dedicated step counter so it fires in headless mode (no output frames).
-				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null || deflTunerV16 != null || deflTunerV17 != null || deflTunerV18 != null)
+				boolean eitherTunerActive = (deflTuner != null || deflTunerV15 != null || deflTunerV16 != null || deflTunerV17 != null || deflTunerV18 != null || deflTunerV19 != null || deflTunerV20 != null || deflTunerV21 != null || deflTunerV22 != null || deflTunerV23 != null || deflTunerV24 != null || deflTunerV25 != null)
 					&& Env.benchmarkFilament && deflFil.midSeg != null
 					&& Env.benchmarkForceOn.getValue() != 0;
 				if (eitherTunerActive) {
@@ -577,7 +822,168 @@ public class BoxOfActin {
 						autoTuneStepCounter = 0;
 						BenchmarkSnapshot snap = computeBenchmarkSnapshot();
 						if (snap != null) {
-							if (deflTunerV18 != null) {
+							if (deflTunerV25 != null) {
+								// v25 path
+								DeflectionTunerV25.ParamTriple update = deflTunerV25.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV25.isDone()) {
+									boolean converged = deflTunerV25.getPhase() == DeflectionTunerV25.Phase.CONVERGED;
+									System.out.println(deflTunerV25.resultSummary());
+									System.out.flush();
+									deflTunerV25 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV24 != null) {
+								// v24 path
+								DeflectionTunerV24.ParamTriple update = deflTunerV24.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV24.isDone()) {
+									boolean converged = deflTunerV24.getPhase() == DeflectionTunerV24.Phase.CONVERGED;
+									System.out.println(deflTunerV24.resultSummary());
+									System.out.flush();
+									deflTunerV24 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV23 != null) {
+								// v23 path
+								DeflectionTunerV23.ParamTriple update = deflTunerV23.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV23.isDone()) {
+									boolean converged = deflTunerV23.getPhase() == DeflectionTunerV23.Phase.CONVERGED;
+									System.out.println(deflTunerV23.resultSummary());
+									System.out.flush();
+									deflTunerV23 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV22 != null) {
+								// v22 path
+								DeflectionTunerV22.ParamTriple update = deflTunerV22.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV22.isDone()) {
+									boolean converged = deflTunerV22.getPhase() == DeflectionTunerV22.Phase.CONVERGED;
+									System.out.println(deflTunerV22.resultSummary());
+									System.out.flush();
+									deflTunerV22 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV21 != null) {
+								// v21 path
+								DeflectionTunerV21.ParamTriple update = deflTunerV21.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV21.isDone()) {
+									boolean converged = deflTunerV21.getPhase() == DeflectionTunerV21.Phase.CONVERGED;
+									System.out.println(deflTunerV21.resultSummary());
+									System.out.flush();
+									deflTunerV21 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV20 != null) {
+								// v20 path
+								DeflectionTunerV20.ParamTriple update = deflTunerV20.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV20.isDone()) {
+									boolean converged = deflTunerV20.getPhase() == DeflectionTunerV20.Phase.CONVERGED;
+									System.out.println(deflTunerV20.resultSummary());
+									System.out.flush();
+									deflTunerV20 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV19 != null) {
+								// v19 path
+								DeflectionTunerV19.ParamTriple update = deflTunerV19.feed(snap.observed);
+								if (update != null) {
+									double oldFm  = Env.fracMove.getValue();
+									double oldFr  = Env.fracR.getValue();
+									double oldFmt = Env.fracMoveTorq.getValue();
+									Env.fracMove.setValue(update.fracMove);
+									Env.fracR.setValue(update.fracR);
+									Env.fracMoveTorq.setValue(update.fracMoveTorq);
+									if (LiveFrameServer.isRunning()) {
+										if (update.fracMove     != oldFm)  LiveFrameServer.dispatchParamAck("fracMove",     oldFm,  update.fracMove);
+										if (update.fracR        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  update.fracR);
+										if (update.fracMoveTorq != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, update.fracMoveTorq);
+									}
+								}
+								if (deflTunerV19.isDone()) {
+									boolean converged = deflTunerV19.getPhase() == DeflectionTunerV19.Phase.CONVERGED;
+									System.out.println(deflTunerV19.resultSummary());
+									System.out.flush();
+									deflTunerV19 = null;
+									if (!Env.benchmarkManual) System.exit(converged ? 0 : 1);
+								}
+							} else if (deflTunerV18 != null) {
 								// v18 path
 								DeflectionTunerV18.ParamTriple update = deflTunerV18.feed(snap.observed);
 								if (update != null) {
@@ -1234,7 +1640,62 @@ public class BoxOfActin {
 				return;
 			}
 
-			// Automated deflection tuning (-bm / -bmTunerV15): arm the controller.
+			// Automated deflection tuning (-bm / -bmTunerVNN): arm the controller.
+			if (Env.benchmarkTunerV25) {
+				// V25 pre-pass starts at softest corner (fr=FR_HI=1.5, fmt=FMT_LO=0.01).
+				double oldFr  = Env.fracR.getValue();
+				double oldFmt = Env.fracMoveTorq.getValue();
+				Env.fracR.setValue(DeflectionTunerV25.FR_HI);
+				Env.fracMoveTorq.setValue(DeflectionTunerV25.FMT_LO);
+				if (LiveFrameServer.isRunning()) {
+					if (Env.fracR.getValue()        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  Env.fracR.getValue());
+					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
+				}
+				deflTunerV25 = new DeflectionTunerV25();
+				deflTunerV25.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV24) {
+				// V24 starts from the stiffest corner (fr=FR_LO=0.1, fmt=FMT_HI=0.5), not the soft-start.
+				double oldFr  = Env.fracR.getValue();
+				double oldFmt = Env.fracMoveTorq.getValue();
+				Env.fracR.setValue(DeflectionTunerV24.FR_LO);
+				Env.fracMoveTorq.setValue(DeflectionTunerV24.FMT_HI);
+				if (LiveFrameServer.isRunning()) {
+					if (Env.fracR.getValue()        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  Env.fracR.getValue());
+					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
+				}
+				deflTunerV24 = new DeflectionTunerV24();
+				deflTunerV24.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV23) {
+				// V23 starts from the stiffest corner (fr=FR_LO=0.1, fmt=FMT_HI=0.5), not the soft-start.
+				double oldFr  = Env.fracR.getValue();
+				double oldFmt = Env.fracMoveTorq.getValue();
+				Env.fracR.setValue(DeflectionTunerV23.FR_LO);
+				Env.fracMoveTorq.setValue(DeflectionTunerV23.FMT_HI);
+				if (LiveFrameServer.isRunning()) {
+					if (Env.fracR.getValue()        != oldFr)  LiveFrameServer.dispatchParamAck("fracR",        oldFr,  Env.fracR.getValue());
+					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
+				}
+				deflTunerV23 = new DeflectionTunerV23();
+				deflTunerV23.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else {
 			// Soft-start: override to softest legal configuration so the first crossing is
 			// guaranteed and convergence trajectory is independent of parameter-file state.
 			{
@@ -1250,7 +1711,43 @@ public class BoxOfActin {
 					if (Env.fracMoveTorq.getValue() != oldFmt) LiveFrameServer.dispatchParamAck("fracMoveTorq", oldFmt, Env.fracMoveTorq.getValue());
 				}
 			}
-			if (Env.benchmarkTunerV18) {
+			if (Env.benchmarkTunerV22) {
+				deflTunerV22 = new DeflectionTunerV22();
+				deflTunerV22.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV21) {
+				deflTunerV21 = new DeflectionTunerV21();
+				deflTunerV21.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV20) {
+				deflTunerV20 = new DeflectionTunerV20();
+				deflTunerV20.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV19) {
+				deflTunerV19 = new DeflectionTunerV19();
+				deflTunerV19.start(
+					Env.fracMove.getValue(),
+					Env.fracR.getValue(),
+					Env.fracMoveTorq.getValue(),
+					deflFil.analyticDefl,
+					deflFil.tauTheo
+				);
+			} else if (Env.benchmarkTunerV18) {
 				deflTunerV18 = new DeflectionTunerV18();
 				deflTunerV18.start(
 					Env.fracMove.getValue(),
@@ -1297,9 +1794,10 @@ public class BoxOfActin {
 					deflFil.tauTheo
 				);
 			}
+			} // ends the else from if (Env.benchmarkTunerV23)
 			autoTuneStepCounter = 0;
 			System.out.printf("[AUTOTUNE] armed: tuner=%s  fracMove=%.4f  fracR=%.4f  fracMoveTorq=%.4f  target=%.6f µm%n",
-				Env.benchmarkTunerV18 ? "v18" : Env.benchmarkTunerV17 ? "v17" : Env.benchmarkTunerV16 ? "v16" : Env.benchmarkTunerV15 ? "v15" : "v14",
+				Env.benchmarkTunerV25 ? "v25" : Env.benchmarkTunerV24 ? "v24" : Env.benchmarkTunerV23 ? "v23" : Env.benchmarkTunerV22 ? "v22" : Env.benchmarkTunerV21 ? "v21" : Env.benchmarkTunerV20 ? "v20" : Env.benchmarkTunerV19 ? "v19" : Env.benchmarkTunerV18 ? "v18" : Env.benchmarkTunerV17 ? "v17" : Env.benchmarkTunerV16 ? "v16" : Env.benchmarkTunerV15 ? "v15" : "v14",
 				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}
