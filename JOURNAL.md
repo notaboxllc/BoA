@@ -170,6 +170,18 @@ Added a ring-buffer long-window velocity estimate to `GlidingAssayEvaluator` alo
 
 **Test confirmation.** Short run (`deltaT=1e-5`, `toFileInterval=100`): 11 data rows; `instantaneousSpeed` ranged 4–111 µm/s (jittery); `longWindowSpeed` converged smoothly 111 → 16 µm/s as buffer accumulated; `longWindowSettling=1` throughout (expected — buffer fills after 1000 intervals = 1 s, run only reached 0.011 s sim time). Header and column order confirmed correct.
 
+### Addendum: barbed-end visualization
+
+**Axis transmission gate lifted.** `ThreeJSWriter.buildFrameJson()` previously emitted `axisX`/`axisY`/`axisZ` only when `Env.benchmarkFilament` was true. The gate has been restructured so `chainType` (`"defl"` or `"lp"`) is still benchmark-only, but axis fields are emitted for every non-LP segment regardless of benchmark mode. LP segments (`isLpSeg == true`) continue to omit axes — the performance rationale (LP chain has ~90 segments and the per-segment axis payload is significant) still applies.
+
+**`isBarbedEnd` field.** The per-segment schema now includes `"isBarbedEnd":true` on segments where `end2Fil == null` (the chain head — no barbed-side neighbor). This includes both the head of a multi-segment chain and single-segment filaments. The check is a direct read of the existing chain pointer; no new physics code, no walking.
+
+**Viewer: X axis length.** `updateAxisLines()` previously rendered all three axes at `halfLen = 0.15 × segLen` (total 0.3× segment length). The X axis (filament long axis, toward barbed end) is now drawn at `halfLen = 0.75 × segLen` (total 1.5× segment length), protruding visibly past end2. Y and Z axes remain at 0.15× halfLen for a compact local frame.
+
+**Viewer: barbed-end "+" glyph.** A sprite pool (`_barbedSpritePool`) is maintained alongside the segment mesh pool. Each frame, `updateBarbedEnds()` filters `segments` for `isBarbedEnd:true`, grows the pool as needed, and positions each sprite at `end2` of its segment. Sprites use a `CanvasTexture` "+" drawn in cyan (`#00ffff`) on a 64×64 canvas, rendered as `THREE.Sprite` (always camera-facing) with `depthTest: false` so the marker is always visible. Scale: `0.18 µm × 0.18 µm` — roughly 5× the segment radius, clearly legible without overwhelming the filament.
+
+**Display dropdown.** New "Barbed ends" checkbox (id `chkBarbedEnds`, default checked) added to the Display panel between "Segment axes" and "Supports". Toggling it calls `updateBarbedEnds()` immediately against `currentFrameData`. The existing "Segment Axes" checkbox already toggled `showAxes` and gates `updateAxisLines()` — no change needed there.
+
 ### Known limitations / open items
 
 **`splitSegment()` outside `noMonomersSimd` guard (highest priority).** `FilSegment.biochemStep()` at line 444 (`FilSegment.java`) runs the split check unconditionally:

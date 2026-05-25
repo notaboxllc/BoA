@@ -517,8 +517,9 @@
   <label><span class="pLabel">Motor head</span>      <input id="sMotor"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vMotor">1.00</span></label>
   <label><span class="pLabel">Lever arm</span>       <input id="sLever"    type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vLever">1.00</span></label>
   <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
-  <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"     type="checkbox"></label>
-  <label><span class="pLabel">Supports</span>        <input id="chkSupports" type="checkbox" checked></label>
+  <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"       type="checkbox"></label>
+  <label><span class="pLabel">Barbed ends</span>     <input id="chkBarbedEnds" type="checkbox" checked></label>
+  <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
 </div>
 
@@ -642,6 +643,43 @@ const axisLineMats = [
 ];
 let axisLines = [null, null, null]; // THREE.LineSegments, one per axis color
 let showAxes = false;               // toggled by #chkAxes; enabled on first benchmark frame
+
+// ── barbed-end marker sprites ─────────────────────────────────────────────────
+// "+" sprite placed at end2 of each barbed-end segment (isBarbedEnd:true in frame payload).
+let showBarbedEnds = true;  // toggled by #chkBarbedEnds
+const _barbedSpriteMat = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  const ctx = cv.getContext('2d');
+  ctx.strokeStyle = '#00ffff';
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(10, 32); ctx.lineTo(54, 32); ctx.stroke(); // horizontal
+  ctx.beginPath(); ctx.moveTo(32, 10); ctx.lineTo(32, 54); ctx.stroke(); // vertical
+  const tex = new THREE.CanvasTexture(cv);
+  return new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+})();
+let _barbedSpritePool = [];  // THREE.Sprite pool, grown as needed
+
+function updateBarbedEnds(segments) {
+  const barbedSegs = segments ? segments.filter(s => s.isBarbedEnd) : [];
+  while (_barbedSpritePool.length < barbedSegs.length) {
+    const sp = new THREE.Sprite(_barbedSpriteMat);
+    sp.scale.set(0.18, 0.18, 1);
+    sp.frustumCulled = false;
+    scene.add(sp);
+    _barbedSpritePool.push(sp);
+  }
+  for (let i = 0; i < _barbedSpritePool.length; i++) {
+    if (i < barbedSegs.length) {
+      const e2 = barbedSegs[i].end2;
+      _barbedSpritePool[i].position.set(e2[0], e2[1], e2[2]);
+      _barbedSpritePool[i].visible = showBarbedEnds;
+    } else {
+      _barbedSpritePool[i].visible = false;
+    }
+  }
+}
 
 // ── benchmark scene overlays ──────────────────────────────────────────────────
 let showSupports  = true;  // toggled by #chkSupports
@@ -973,6 +1011,7 @@ function applyFrameData(data) {
 
   updateMyosinData(data.myosins, data.minifilaments);
   updateAxisLines(data.segments);
+  updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
 
   hud.innerHTML =
@@ -1001,11 +1040,12 @@ function updateAxisLines(segments) {
       const cx = (seg.end1[0] + seg.end2[0]) / 2;
       const cy = (seg.end1[1] + seg.end2[1]) / 2;
       const cz = (seg.end1[2] + seg.end2[2]) / 2;
-      // Half-length of the axis indicator: 0.3 × half-segment-length
       const dx = seg.end2[0] - seg.end1[0];
       const dy = seg.end2[1] - seg.end1[1];
       const dz = seg.end2[2] - seg.end1[2];
-      const halfLen = 0.3 * Math.sqrt(dx*dx + dy*dy + dz*dz) / 2;
+      const segLen = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      // X axis: 1.5× segment length (protrudes past end2); Y/Z: 0.3× (short local frame)
+      const halfLen = a === 0 ? 0.75 * segLen : 0.15 * segLen;
       const av = seg[axes[a]];
       pts.push(cx - av[0]*halfLen, cy - av[1]*halfLen, cz - av[2]*halfLen,
                cx + av[0]*halfLen, cy + av[1]*halfLen, cz + av[2]*halfLen);
@@ -1317,6 +1357,10 @@ document.getElementById('chkSupports').addEventListener('change', e => {
 document.getElementById('chkArrow').addEventListener('change', e => {
   showForceArrow = e.target.checked;
   if (benchForceArrow) benchForceArrow.setToggleVisible(showForceArrow);
+});
+document.getElementById('chkBarbedEnds').addEventListener('change', e => {
+  showBarbedEnds = e.target.checked;
+  updateBarbedEnds(currentFrameData ? currentFrameData.segments : null);
 });
 
 window.addEventListener('keydown', e => {

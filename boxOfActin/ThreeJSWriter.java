@@ -78,12 +78,15 @@ public class ThreeJSWriter {
                     fs.end2.x, fs.end2.y, fs.end2.z));
             if (Env.benchmarkFilament) {
                 sb.append(fs.isLpSeg ? ",\"chainType\":\"lp\"" : ",\"chainType\":\"defl\"");
-                if (!fs.isLpSeg) {
-                    sb.append(String.format(
-                        ",\"axisX\":[%.4g,%.4g,%.4g],\"axisY\":[%.4g,%.4g,%.4g],\"axisZ\":[%.4g,%.4g,%.4g]",
-                        fs.uVec.x, fs.uVec.y, fs.uVec.z,
-                        fs.yVec.x, fs.yVec.y, fs.yVec.z,
-                        fs.zVec.x, fs.zVec.y, fs.zVec.z));
+            }
+            if (!fs.isLpSeg) {
+                sb.append(String.format(
+                    ",\"axisX\":[%.4g,%.4g,%.4g],\"axisY\":[%.4g,%.4g,%.4g],\"axisZ\":[%.4g,%.4g,%.4g]",
+                    fs.uVec.x, fs.uVec.y, fs.uVec.z,
+                    fs.yVec.x, fs.yVec.y, fs.yVec.z,
+                    fs.zVec.x, fs.zVec.y, fs.zVec.z));
+                if (fs.end2Fil == null) {
+                    sb.append(",\"isBarbedEnd\":true");
                 }
             }
             sb.append("}");
