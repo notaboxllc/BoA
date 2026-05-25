@@ -1837,10 +1837,21 @@ if (LIVE_MODE) {
     const nFils    = Array.isArray(ga.filaments) ? ga.filaments.length : 0;
     const t        = ga.simTime !== undefined ? ga.simTime.toFixed(3) : '—';
 
+    // Mean long-window speed across settled filaments (the quantity figures will plot).
+    let meanLwStr = '—';
+    if (Array.isArray(ga.filaments) && ga.filaments.length > 0) {
+      const settled = ga.filaments.filter(f => f.longWindowSpeed !== undefined && !f.settling);
+      if (settled.length > 0) {
+        const meanLw = settled.reduce((s, f) => s + f.longWindowSpeed, 0) / settled.length;
+        meanLwStr = meanLw.toFixed(3) + ' µm/s (' + settled.length + '/' + nFils + ')';
+      }
+    }
+
     gaSummary.innerHTML =
       `t: ${t} s<br>` +
       `density: ${density} /µm²<br>` +
       `duty ratio (reach): ${drWR}<br>` +
+      `mean avg speed: ${meanLwStr}<br>` +
       `filaments: ${nFils}`;
 
     if (!Array.isArray(ga.filaments) || ga.filaments.length === 0) {
@@ -1851,12 +1862,14 @@ if (LIVE_MODE) {
     const shown = ga.filaments.slice(0, 5);
     let html = '';
     for (const f of shown) {
-      const spd   = f.speed    !== undefined ? f.speed.toFixed(3)    : '—';
-      const len   = f.length   !== undefined ? f.length.toFixed(3)   : '—';
-      const avgB  = f.avgBoundMotors !== undefined ? f.avgBoundMotors.toFixed(1) : '—';
+      const spd   = f.speed            !== undefined ? f.speed.toFixed(3)            : '—';
+      const lwSpd = f.longWindowSpeed  !== undefined ? f.longWindowSpeed.toFixed(3)  : '—';
+      const len   = f.length           !== undefined ? f.length.toFixed(3)           : '—';
+      const avgB  = f.avgBoundMotors   !== undefined ? f.avgBoundMotors.toFixed(1)   : '—';
       const fpDR  = f.footprintDutyRatio !== undefined ? f.footprintDutyRatio.toFixed(3) : '—';
+      const stl   = f.settling ? ' <span style="color:#888">(settling)</span>' : '';
       html += `<div class="ga-filrow">` +
-        `fil ${f.id}: ${len} µm  ${spd} µm/s<br>` +
+        `fil ${f.id}: ${len} µm  inst ${spd} µm/s  avg ${lwSpd} µm/s${stl}<br>` +
         `&nbsp;&nbsp;bound: ${avgB}  DR: ${fpDR}` +
         `</div>`;
     }

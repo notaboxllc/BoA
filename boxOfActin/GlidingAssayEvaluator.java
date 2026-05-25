@@ -19,12 +19,25 @@ public class GlidingAssayEvaluator {
     // ≈ 0.218 µm, but orientation varies; 0.1 µm is a conservative cylinder radius.
     static final double MOTOR_REACH_UM = 0.1;
 
+    // Target window for the long-window (smoothed) velocity estimate in seconds.
+    // Buffer size is computed at first outputInterval() call from toFileInterval * deltaT.
+    // If toFileInterval changes mid-run, newer samples have different spacing — the approximation
+    // degrades but does not break (the endpoint slope is still a valid distance/time estimate).
+    static final double LONG_WINDOW_SECONDS = 1.0;
+
     private static class FilamentState {
         double boundMotorSum;
         int sampleCount;
         final Pt3D prevPos = new Pt3D();
         double prevTime;
         boolean initialized;
+
+        // Long-window velocity ring buffer — allocated once bufCap is known.
+        double[] lwBufX, lwBufY, lwBufZ, lwBufTime;
+        int lwBufHead;    // index of next write slot
+        int lwBufCount;   // number of valid entries (0..bufCap)
+        double longWindowSpeed;
+        boolean settling; // true until buffer has filled for the first time
     }
 
     private static GlidingAssayEvaluator instance;
@@ -40,6 +53,10 @@ public class GlidingAssayEvaluator {
     private PrintWriter dataWriter;
     private boolean headerWritten;
     public int densityIndex;
+
+    // Ring buffer capacity; computed once on first outputInterval() call.
+    // -1 means not yet computed.
+    private int bufCap = -1;
 
     private GlidingAssayEvaluator() {
         densityIndex = 0;
@@ -94,6 +111,13 @@ public class GlidingAssayEvaluator {
     public String outputInterval() {
         ensureFileOpen();
 
+        // Compute ring-buffer capacity on first call using current parameter values.
+        // toFileInterval is mutable at runtime; we snapshot it here once.
+        if (bufCap < 0) {
+            double dtPerInterval = Env.toFileInterval.getIntValue() * Env.deltaT.getValue();
+            bufCap = Math.max(2, (int) Math.round(LONG_WINDOW_SECONDS / dtPerInterval));
+        }
+
         double simTime = Env.simulationTime;
         double surfaceDensity = Env.fixedMyosinDensity.getValue();
 
@@ -134,7 +158,8 @@ public class GlidingAssayEvaluator {
             dataWriter.println(
                 "simTime\tdensityIndex\tsurfaceDensity\tfilamentId\tfilamentLength\t" +
                 "posX\tposY\tposZ\tdistMoved\tvecMovedX\tvecMovedY\tvecMovedZ\t" +
-                "instantaneousSpeed\tavgBoundMotors\tfootprintMotors\tfootprintDutyRatio\theadsWithinReachDR");
+                "instantaneousSpeed\tlongWindowSpeed\tlongWindowSettling\t" +
+                "avgBoundMotors\tfootprintMotors\tfootprintDutyRatio\theadsWithinReachDR");
             headerWritten = true;
         }
 
@@ -173,6 +198,34 @@ public class GlidingAssayEvaluator {
                 speed = dt > 1e-12 ? distMoved / dt : 0.0;
             }
 
+            // Long-window ring buffer: add current position/time, then compute endpoint slope.
+            if (state.lwBufX == null) {
+                state.lwBufX    = new double[bufCap];
+                state.lwBufY    = new double[bufCap];
+                state.lwBufZ    = new double[bufCap];
+                state.lwBufTime = new double[bufCap];
+            }
+            state.lwBufX[state.lwBufHead]    = cx;
+            state.lwBufY[state.lwBufHead]    = cy;
+            state.lwBufZ[state.lwBufHead]    = cz;
+            state.lwBufTime[state.lwBufHead] = simTime;
+            state.lwBufHead = (state.lwBufHead + 1) % bufCap;
+            if (state.lwBufCount < bufCap) state.lwBufCount++;
+            state.settling = (state.lwBufCount < bufCap);
+
+            if (state.lwBufCount >= 2) {
+                int newest = (state.lwBufHead - 1 + bufCap) % bufCap;
+                int oldest = (state.lwBufHead - state.lwBufCount + bufCap) % bufCap;
+                double lwDx = state.lwBufX[newest] - state.lwBufX[oldest];
+                double lwDy = state.lwBufY[newest] - state.lwBufY[oldest];
+                double lwDz = state.lwBufZ[newest] - state.lwBufZ[oldest];
+                double lwDist = Math.sqrt(lwDx*lwDx + lwDy*lwDy + lwDz*lwDz);
+                double lwDt   = state.lwBufTime[newest] - state.lwBufTime[oldest];
+                state.longWindowSpeed = lwDt > 1e-12 ? lwDist / lwDt : 0.0;
+            } else {
+                state.longWindowSpeed = 0.0;
+            }
+
             // Footprint: MyosinFixed motors whose pin is within MOTOR_REACH_UM of this filament.
             int footprintMotors = 0;
             for (int i = 0; i < MyoMotor.motorCt; i++) {
@@ -191,10 +244,11 @@ public class GlidingAssayEvaluator {
             // Write data row (skip first interval — no previous position yet).
             if (state.initialized && dataWriter != null) {
                 dataWriter.printf(
-                    "%.5g\t%d\t%.2f\t%d\t%.4f\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.4f\t%d\t%.4f\t%.4f%n",
+                    "%.5g\t%d\t%.2f\t%d\t%.4f\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%d\t%.4f\t%d\t%.4f\t%.4f%n",
                     simTime, densityIndex, surfaceDensity, fid, totalLen,
                     cx, cy, cz, distMoved, vmX, vmY, vmZ,
-                    speed, avgBound, footprintMotors, footprintDR, headsWithinReachDR);
+                    speed, state.longWindowSpeed, state.settling ? 1 : 0,
+                    avgBound, footprintMotors, footprintDR, headsWithinReachDR);
                 dataWriter.flush();
             }
 
@@ -210,10 +264,11 @@ public class GlidingAssayEvaluator {
             firstFil = false;
             json.append(String.format(
                 "{\"id\":%d,\"length\":%.4f,\"pos\":[%.5g,%.5g,%.5g]," +
-                "\"distMoved\":%.5g,\"speed\":%.5g,\"avgBoundMotors\":%.3f," +
-                "\"footprintMotors\":%d,\"footprintDutyRatio\":%.4f}",
-                fid, totalLen, cx, cy, cz, distMoved, speed, avgBound,
-                footprintMotors, footprintDR));
+                "\"distMoved\":%.5g,\"speed\":%.5g,\"longWindowSpeed\":%.5g,\"settling\":%s," +
+                "\"avgBoundMotors\":%.3f,\"footprintMotors\":%d,\"footprintDutyRatio\":%.4f}",
+                fid, totalLen, cx, cy, cz, distMoved, speed,
+                state.longWindowSpeed, state.settling ? "true" : "false",
+                avgBound, footprintMotors, footprintDR));
         }
 
         json.append("]}");

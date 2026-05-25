@@ -4,6 +4,65 @@ Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-25 — Planning: gliding assay data collection campaign
+
+Manual exploration with `-3jsLive 8081` confirmed the gliding assay infrastructure is working end-to-end. At 200 motors/µm² with a single 1 µm filament: speed 2.3 µm/s, 2 bound motors, duty ratio ≈ 0.05. Numbers are in the published range for myosin II and the live panel updates correctly. Time to plan a proper data-collection campaign.
+
+### Target figures
+
+Three figures to produce from this assay, in order of priority:
+
+1. **Velocity vs. surface density** — the canonical gliding-assay figure. Sweep density across roughly 10 → 3000 motors/µm² (log-spaced; ~6–8 density points). Expect a rising curve that plateaus at Vmax somewhere in the hundreds-to-low-thousands range. The plateau location and shape are what calibrate the model against literature (Harada 1990, Kron & Spudich 1986, Stam 2015, the recent β-cHMM paper at biorxiv 2025.05.01.651501).
+2. **Velocity vs. filament length** — at a chosen density in the rising regime (sub-saturating, ~50–100 motors/µm²) and at a saturating density. Short filaments should stall more at low density and be length-independent at saturation. Useful internal consistency check.
+3. **Velocity distribution at a single condition** — histogram of per-filament velocities at saturating density. Tests for stuck filaments and population heterogeneity. Free byproduct of the velocity-vs-density sweep if we run with ≥10 filaments per condition.
+
+ATP-dependence and F–V curves are deferred to later sessions.
+
+### Statistics requirements per density point
+
+Each density point needs enough filaments and enough simulated time to produce a velocity mean with reasonable error bars. Rough target:
+
+- **Per-filament velocity**: time-average over at least 5 seconds of sim time per filament after a 1 s settling period (to let any starting transients decay). At ~2 µm/s a filament travels ~10 µm in that window, which is plenty of displacement for an accurate distance/time measurement.
+- **Filaments per density point**: 10–20. With 10 filaments we get a mean ± SEM that's tight enough to distinguish density points cleanly; with 20 the distribution shape becomes meaningful for figure 3.
+- **Chamber size**: 4×4×0.5 µm currently holds one 1 µm filament. To fit 10–20 filaments without confounding inter-filament interactions, scale to perhaps 10×10×0.5 µm. Motor count at 200/µm² becomes 20000, which is fine for memory. At 3000/µm² it becomes 300000 — need to check that this is computationally tractable per second of sim time before committing to the high-density end of the sweep.
+
+### Open questions before committing to a campaign
+
+These are the things to resolve before kicking off a multi-hour data run, in roughly the order they need answers.
+
+**1. Filament length specification.** The current `glidingFilamentLength:true:1.0` produces a 1 µm filament. Published assays typically use 1–5 µm phalloidin-stabilized actin. Decide whether to use a fixed length per run or randomize within a biological range. For figure 1 (velocity vs. density), fixed length is cleaner; for figure 2 (velocity vs. length) a sweep is the point.
+
+**2. Initial filament orientation and seeding.** Are filaments seeded with random in-plane orientation, or aligned? Random is the experimental analog. If `makeGlidingAssayFilament()` seeds isotropically, good; if it has a preferred axis, that's a finding worth knowing before generating distributions.
+
+**3. Filament-filament interactions.** At 10–20 filaments per chamber the surface coverage is still low (fraction of plane occupied ≈ 1% at 1 µm × 10 nm widths), but two filaments could plausibly overlap a motor's reach and confound measurement. Either (a) confirm the existing collision/overlap handling is correct for the gliding context, or (b) accept the rare interaction event as part of the published-assay realism (real experiments have it too).
+
+**4. Parameter file audit for stable-filament gliding.** The Listeria nucleator is now defaulted off. Confirm that other biochemistry rates are also off for a clean velocity measurement: spontaneous nucleation (`kRdmNuc`, `kNodeNuc`), Arp2/3 branching (`kBranchNuc`), severing (`kSevering` and any cofilin-related rates), and end polymerization/depolymerization. Anything not gated by `noMonomersSimd` needs explicit zeroing in the gliding parameter file. Goal: a canonical `glidingAssayStable` parameter file that produces fixed-composition filaments for the entire run.
+
+**5. Myosin identity and parameter set.** The current run shows ~2.3 µm/s — that's on the high side for NMII (typical Vmax ~0.1–1 µm/s) and on the low side for skeletal HMM (~5–10 µm/s). Confirm what myosin parameter set BoA mainline currently uses, since this anchors the density-sweep interpretation. If we're nominally simulating NMII, the speed is high and the kinetics may need re-examination after the campaign (which connects back to the deferred catch-slip sign-convention question — F–V data from this campaign is what would resolve it).
+
+**6. Density-sweep mechanism.** The current code has `MyosinFixed.glidingAssayDataSetRun()` (the old density-sweep loop using `restartRun()` / `System.exit(0)`) and the new `GlidingAssayEvaluator` that emits per-filament rows to `gliding_assay.dat`. The journal entry from the port noted these aren't yet integrated — `densityIndex` is hard-coded to 0. To produce figure 1, this integration needs to happen. Two options:
+   - **In-process sweep**: extend `glidingAssayDataSetRun()` to drive the evaluator's `densityIndex` and emit a single contiguous data file across all density points. Cleanest output.
+   - **Shell-script sweep**: launch BoA repeatedly with different parameter files (different `fixedMyosinDensity` values), then concatenate the output files in post-processing. Less elegant but doesn't require Java code changes.
+   - Recommend in-process; the existing scaffolding is mostly there.
+
+**7. Velocity time-series shape.** Before averaging, look at per-filament velocity vs. time at a single density. A clean gliding assay produces a roughly constant velocity after a brief startup transient; if BoA produces something with strong oscillation or drift, that's a finding that affects how we compute mean velocity (windowed average vs. fit of position vs. time, etc.). One pilot run at 200/µm² with 10+ s of sim time would settle this.
+
+### Suggested order of next implementation sessions
+
+1. **Pilot session** (small Claude Code task): integrate `densityIndex` between `glidingAssayDataSetRun()` and `GlidingAssayEvaluator`; produce a canonical stable-gliding parameter file with the rate audit from open question 4. Single density-sweep run end-to-end. Deliverable: one `gliding_assay.dat` with 6–8 density points × 10 filaments × ~5 s simulated each, plus a quick post-processing script that produces the velocity-vs-density plot.
+
+2. **Analysis session** (planner reads the data): examine the velocity-vs-density curve shape, the velocity time-series at each density, and the duty ratio behavior. Decide whether (a) the curve matches published shape and we can move to figure 2, (b) something's anomalous (speed too high/low, no plateau, oscillating velocities) and we need to diagnose, or (c) the catch-slip sign question is now resolvable from F–V information embedded in the duty-ratio-vs-density behavior.
+
+3. **Length sweep** (if step 2 looks healthy): generate figure 2 data at two density points.
+
+4. **Catch-slip resolution** (informed by all of the above): revisit the sign-convention investigation with empirical data in hand rather than code-reading arguments.
+
+### What does NOT need to happen first
+
+- The two log paths (`logAndDraw` and `remoteLog`) can stay un-refactored. Tempting target, not the critical path.
+- The duty-ratio reach parameter (0.1 µm) seems to be working — the manual observation showed plausible bound counts. Leave alone unless a finding suggests otherwise.
+- The live viewer panel is fine as-is. No new visualization needed for the campaign; the `.dat` file is the artifact.
+
 ## 2026-05-25 — Gliding assay measurement system port (Phases 0–4)
 
 ### Pre-port reconciliation
@@ -92,6 +151,24 @@ Parameter file: `fixedMyosinDensity:true:200.0`, `glidingFilamentLength:true:1.0
 Compiled cleanly (zero errors) with `javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java`. Simulation started, `glidingAssay.dat` created, WebSocket dispatch confirmed (topic appeared in browser console). The evaluator, data file, and WS dispatch are all wiring correctly.
 
 **Segment-count variability observed:** frame_000000 (t=0.0001 s) reported 2 segments as expected (the 1 µm filament, possibly pre-split). By frame_000001 (t=0.0101 s), 8 segments were present — 5 at plausible positions spanning the filament, plus 3 mystery segments at extreme Y positions (approximately −5.0, −5.4, −6.2 µm, well outside the 4 µm box boundary). Mystery segments had length ≈ 0.0108 µm (≈ 2 monomers) and instance IDs sequentially following the last expected filament segment. Motor binding and velocity reporting were otherwise functioning.
+
+### Addendum: long-window velocity reporting
+
+Added a ring-buffer long-window velocity estimate to `GlidingAssayEvaluator` alongside the existing per-interval instantaneous value.
+
+**Buffer sizing.** `LONG_WINDOW_SECONDS = 1.0` (compile-time constant). Buffer capacity is computed once on the first `outputInterval()` call as `round(1.0 / (toFileInterval * deltaT))`. At the param-file defaults (`toFileInterval=100`, `deltaT=1e-5`), this gives `bufCap = 1000` entries (= 1 second of sim time). Using `toFileInterval` at first-call time rather than construction because `toFileInterval` is in the mid-run mutable whitelist; if it changes after the first call the window approximation degrades (newer samples have different spacing than older ones) but does not break. Known limitation.
+
+**Speed calculation.** Endpoint slope: magnitude of displacement from oldest to newest buffer entry, divided by time span. Matches the `instantaneousSpeed` convention (not a least-squares fit). A `settling` flag (true until buffer fills once) marks the transient where the window is shorter than the 1-second target.
+
+**New data file columns** (immediately after `instantaneousSpeed`):
+- `longWindowSpeed` — µm/s, endpoint slope over the full buffer span
+- `longWindowSettling` — 0 or 1 (1 = buffer not yet full)
+
+**New WebSocket fields** (per-filament in `glidingAssay` payload): `"longWindowSpeed"`, `"settling"`.
+
+**Viewer panel.** Per-filament row: `inst <speed> µm/s  avg <lwSpeed> µm/s`, with greyed `(settling)` when flag is set. Summary adds `mean avg speed` across settled filaments (the quantity figures will plot).
+
+**Test confirmation.** Short run (`deltaT=1e-5`, `toFileInterval=100`): 11 data rows; `instantaneousSpeed` ranged 4–111 µm/s (jittery); `longWindowSpeed` converged smoothly 111 → 16 µm/s as buffer accumulated; `longWindowSettling=1` throughout (expected — buffer fills after 1000 intervals = 1 s, run only reached 0.011 s sim time). Header and column order confirmed correct.
 
 ### Known limitations / open items
 
