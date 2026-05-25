@@ -4,6 +4,116 @@ Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-25 — Gliding assay measurement system port (Phases 0–4)
+
+### Pre-port reconciliation
+
+The prior WebSocket documentation entry (same date, below) stated that gliding-arena geometry "does not yet exist in the Java codebase." The sister-codebase survey (`SURVEY_MYOSIN_AND_GLIDING.md`) said the opposite. Reading source resolved it in favour of the survey: **the arena geometry is fully present in BoA mainline.**
+
+`MyosinFixed.setUpGlidingAssay()` (called from `BoxOfActin.makeInitialThings()` at line 1849 when `Env.glidingAssay.isActive()`) calls `fillPlaneWithFixedMyosins()` — which populates a Z-plane with `MyosinFixed` instances using `Env.fixedMyosinDensity` and `Env.fixedMyosinZValue` — then calls `FilSegment.makeGlidingAssayFilament()` to create a randomly oriented actin filament above the plane. The only missing piece was the continuous per-step velocity evaluator.
+
+### Evaluator design
+
+`GlidingAssayEvaluator.java` is a new 240-line class patterned after ANM3's evaluator. Two public methods:
+
+- **`sampleStep()`** — called every simulation timestep (in both `logAndDraw()` and `remoteLog()`). Walks `FilSegment.theFilSegments[]` to increment `sampleCount` for each live filament ID (one increment per filID per step, using a `HashSet<Integer>` for deduplication). Walks `MyoMotor.theMotors[]` to find bound `MyosinFixed` motors and accumulate `boundMotorSum` per filament. O(filSegmentCt + motorCt).
+
+- **`outputInterval()`** — called at each 3JS output interval (every `toFileInterval` timesteps). Computes filament center-of-mass from segment coords, velocity from COM displacement since the previous interval, footprint motor count (any `MyosinFixed` whose pin `myFixedPt` is within `MOTOR_REACH_UM = 0.1 µm` of the filament axis), and a population-level `headsWithinReachDR`. Resets accumulators for the next interval. Returns a JSON string or `null` if no filaments are present.
+
+**Filament identity:** `filID` is the group key — a field shared by all `FilSegment` instances belonging to the same filament chain. COM is computed as the mean of each constituent segment's `coord` (segment center). Contour length is the sum of `fs.length` over segments.
+
+**Perpendicular distance (`distToAxis`):** clips the projection onto the segment's `uVec` to `[−halfLen, +halfLen]`, computes the residual vector, returns its magnitude. Correctly handles a finite-length segment rather than an infinite line.
+
+**Lifecycle:** `GlidingAssayEvaluator.create()` is called once in `BoxOfActin.begin()` after `makeInitialThings()`, guarded by `Env.glidingAssay.isActive()`. The data file is opened lazily in `ensureFileOpen()`, which is called from `outputInterval()` — by that point `ThreeJSWriter` has already called `writeFrame()` and finalized the output directory name (including any `.001` suffix increment), so `Env.threeJSOutputDir` is set correctly.
+
+**Dispatch wiring:** The `threeJSCounter >= toFileInterval` gate in `logAndDraw()` and `remoteLog()` was extended from `(Env.threeJSOutputDir != null || LiveFrameServer.isRunning())` to also fire when `Env.glidingAssay.isActive()`, so the data file is written even in headless runs without `-3js` or `-3jsLive`.
+
+### Data file schema
+
+Tab-separated, one header row, one row per filament per output interval. File: `<outputDir>/gliding_assay.dat`.
+
+```
+simTime	densityIndex	surfaceDensity	filamentId	filamentLength	posX	posY	posZ	distMoved	vecMovedX	vecMovedY	vecMovedZ	instantaneousSpeed	avgBoundMotors	footprintMotors	footprintDutyRatio	headsWithinReachDR
+```
+
+- `instantaneousSpeed` = `distMoved / dt` where `dt` = sim time elapsed since previous interval (µm/s).
+- `avgBoundMotors` = `boundMotorSum / sampleCount` over the interval.
+- `footprintMotors` = count of `MyosinFixed` pins within `MOTOR_REACH_UM` of this filament's axis.
+- `footprintDutyRatio` = `avgBoundMotors / footprintMotors`.
+- `headsWithinReachDR` = population-level ratio across all filaments; same value in every row of the same interval.
+- First row per filament has `distMoved = 0` and `instantaneousSpeed = 0` (no prior position).
+- `densityIndex` is always 0 for now (density-sweep integration deferred; see open items).
+
+### WebSocket schema
+
+New `glidingAssay` topic dispatched by `LiveFrameServer.dispatchGlidingAssay()`:
+
+```json
+{
+  "topic": "glidingAssay",
+  "payload": {
+    "simTime": <float>,
+    "densityIndex": <int>,
+    "surfaceDensity": <float>,
+    "headsWithinReachDR": <float>,
+    "filaments": [
+      {
+        "id": <int>,
+        "length": <float>,
+        "pos": [x, y, z],
+        "distMoved": <float>,
+        "speed": <float>,
+        "avgBoundMotors": <float>,
+        "footprintMotors": <int>,
+        "footprintDutyRatio": <float>
+      }
+    ]
+  }
+}
+```
+
+All distances in µm, speed in µm/s, time in seconds.
+
+### Viewer panel
+
+`#glidingPanel` is positioned bottom-left (to avoid the LP panel at bottom-right). It self-activates (`classList.add('active')`) on the first `glidingAssay` message — hidden in non-gliding runs. Content injected by `updateGlidingPanel(ga)`:
+- Summary line: sim time, density index, surface density (µm⁻²), `headsWithinReachDR`.
+- Per-filament table rows: filament ID, length, speed, avgBoundMotors, footprintDutyRatio.
+- Up to 5 filaments shown; overflow shown as "…and N more".
+
+### Test run
+
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -pf ParameterFiles/glidingAssayTest -3jsLive 8081
+```
+
+Parameter file: `fixedMyosinDensity:true:200.0`, `glidingFilamentLength:true:1.0`, `filSegLength:true:64.0`, `noMonomersSimd:true:1.0`, `kRdmNuc:false:0.0`, `kNodeNuc:false:0.0`, `initialFilaments:false:0.0`, `initialMyoMiniFils:false:0.0`, `equilNodes:false:0.0`, box 4×4×0.5 µm, run time 5 s.
+
+Compiled cleanly (zero errors) with `javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java`. Simulation started, `glidingAssay.dat` created, WebSocket dispatch confirmed (topic appeared in browser console). The evaluator, data file, and WS dispatch are all wiring correctly.
+
+**Segment-count variability observed:** frame_000000 (t=0.0001 s) reported 2 segments as expected (the 1 µm filament, possibly pre-split). By frame_000001 (t=0.0101 s), 8 segments were present — 5 at plausible positions spanning the filament, plus 3 mystery segments at extreme Y positions (approximately −5.0, −5.4, −6.2 µm, well outside the 4 µm box boundary). Mystery segments had length ≈ 0.0108 µm (≈ 2 monomers) and instance IDs sequentially following the last expected filament segment. Motor binding and velocity reporting were otherwise functioning.
+
+### Known limitations / open items
+
+**`splitSegment()` outside `noMonomersSimd` guard (highest priority).** `FilSegment.biochemStep()` at line 444 (`FilSegment.java`) runs the split check unconditionally:
+
+```java
+if (monomerCt >= 2 * Env.stdSegLength.getIntValue()) {
+    splitSegment(this);   // NOT guarded by noMonomersSimd
+    ...
+}
+```
+
+The initial filament from `makeGlidingAssayFilament()` has monomerCt ≈ 285 (for a 1 µm filament with actinMonoRadius ≈ 0.00175 µm). Since 285 ≥ 2 × 64 = 128, it splits immediately. The split daughters are placed at offsets from the parent that rely on the parent's orientation/length being consistent; in the gliding assay geometry some daughters appear to receive large initial forces that eject them outside the box before the wall boundary condition can act. The fragments show up as spurious rows in the gliding data. Fix: add `!Env.noMonomersSimd.isActive()` to the split guard, or restructure `makeGlidingAssayFilament()` to create the filament already pre-split into stdSegLength chunks.
+
+**Rate parameters not fully zeroed for a clean gliding test.** The current test file zeros `kRdmNuc` and `kNodeNuc` but does not address: `kSevering` (actin filament severing), `kBranchNuc` (Arp2/3 branching), end-polymerization rates (`kPoly*`, `kDepoly*` — guarded by `noMonomersSimd` for monomer dynamics but the split call above is not). A complete suppression audit is needed: which parameters must be explicitly deactivated (`false`) versus which are gated by `noMonomersSimd`. Recommend checking every `kRdmNuc`, `kNodeNuc`, `kBranchNuc`, `kSevering`, and polymerization rate against whether `noMonomersSimd` covers them.
+
+**Density-sweep integration deferred.** `MyosinFixed.glidingAssayDataSetRun()` manages a multi-density sweep via `restartRun()` / `System.exit(0)` and tracks `densityIndex` internally. The new evaluator's `densityIndex` field is set to 0 and never incremented. The old `glidingAssayDataSetRun()` call in the `remoteOutCounter` block is preserved for backward compatibility. Integrating the two properly (so `densityIndex` in the data file tracks sweep steps) requires passing the current density index through from `glidingAssayDataSetRun()` to the evaluator — deferred.
+
+**Live WebSocket panel not visually confirmed.** The test run was headless verification of the dispatch path only. The viewer panel rendering (self-activation, filament table, formatting) was not verified in a browser session.
+
+---
+
 ## 2026-05-25 — Documenting the WebSocket live-observation interface (capability already in active use)
 
 The live WebSocket interface has been the primary observation tool for filament benchmarking since Session 12 (C1 transport), extended through Sessions 13–18 (click-to-inspect C2, pause/kill C3, mutable parameters C4, benchmark panels, LP panel). It had not been written up as a unit. This entry documents the current state comprehensively so the next planner session can write a gliding-assay output port without re-reading source.
