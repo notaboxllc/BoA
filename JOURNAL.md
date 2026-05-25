@@ -4,6 +4,178 @@ Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-25 — Investigation: force-dependent release path interaction
+
+### Path A — `MyoFilLink.ckRelease()`
+
+**Conditions.** Called from `MyoFilLink.step()`, which is reached via `MyoMotor.step()` → `updateMyoFilLinks()` → `tipLink.step()`. The call chain fires whenever the link is not free (`!isFree()`). There is **no nucleotide-state check** — ckRelease fires for NONE, ATP, ADPPi, and ADP states alike. The one exception is `inRigor`: if `myMotor.inRigor` is set, normal release is skipped (only the break-force ceiling at line 198 can detach a rigor motor).
+
+**Force variable and formula.**
+
+```java
+// MyoFilLink.java:197–219 (active ckRelease)
+public void ckRelease () {
+    if (forceMag > Env.myosinBreakForce.getValue()*1e-12) {  // ceiling at 12 pN default
+        release();
+        return;
+    }
+    if (myMotor.inRigor) { return; }
+
+    double guoCatchTerm = Env.alphaCatch.getValue()
+                          * Math.exp(-forceDotFil * Env.xCatch.getValue() / (Env.Boltz*Env.tempK));
+    double guoSlipTerm  = Env.alphaSlip.getValue()
+                          * Math.exp( forceDotFil * Env.xSlip.getValue()  / (Env.Boltz*Env.tempK));
+    double guoCatchSlipProb = Env.kOff.getValue() * (guoCatchTerm + guoSlipTerm);
+
+    if (myMotor.myPRNG.nextDouble() < guoCatchSlipProb * Env.deltaT.getValue()) {
+        release();
+    }
+}
+```
+
+`forceDotFil` is set in `addForces()` (see sign-convention section below). Default parameters (Env.java): `alphaCatch=0.92`, `xCatch=2.5e-9 m`, `alphaSlip=0.08`, `xSlip=0.4e-9 m`, `kOff=100 s⁻¹`, `myosinBreakForce=12 pN`.
+
+**Call site in doLoop().** Phase `Env.stepStart = 9`, line ~730 in `BoxOfActin.java`. `startAllThreadSets(Env.stepStart)` iterates `Thing.step()` over all Things; `MyoMotor.step()` calls `updateMyoFilLinks()` → `tipLink.step()` → `ckRelease()`. Moves and biochemistry have not yet fired this timestep.
+
+---
+
+### Path B — `MyoMotor.dissociateADP()`
+
+**Conditions.** Called from `MyoMotor.biochemStep()` only when `nucleotideState == ADP`. No explicit `onFil` check — this method fires whether or not the motor is mechanically attached.
+
+```java
+// MyoMotor.java:208–213
+public void dissociateADP() {
+    if (tipLink.forceDotFilTrack.averageVal() > 0) { return; }  // directional gate
+    if (myPRNG.nextDouble() < Env.myoOnFilADP_None.getValue() * Env.deltaT.getValue()) {
+        setStateNONE();
+    }
+}
+```
+
+`forceDotFilTrack` is a `ValueTracker(10)` — a 10-slot circular buffer of raw `forceDotFil` values from `addForces()`. `averageVal()` always divides by 10 regardless of how many slots have been filled (see note below). The gate blocks the ADP→NONE state roll when the 10-step average of `forceDotFil` is strictly positive. If the gate passes, the motor transitions to NONE state but **does not call `release()` on the link** — it stays mechanically attached.
+
+`Env.myoOnFilADP_None` defaults to 1000 s⁻¹.
+
+**Call site in doLoop().** Phase `Env.biochemStart = 11`, line ~759 in `BoxOfActin.java`. This fires AFTER step (phase 9) and after move (phase 10). `biochemStep()` is dispatched via `Thing.biochemStep()` on all Things.
+
+---
+
+### Sign convention verification
+
+`MyoFilLink.addForces()`:
+
+```java
+// MyoFilLink.java:80–97
+public void addForces() {
+    double dist = Pt3D.ptDist(motorPt, attachPt);
+    forceMag = dist * myoSpring;
+    F.unitVec(attachPt, motorPt);         // (1) F = (attachPt − motorPt) / |...|
+    F.scale(forceMag);
+    myMotor.incForceSum(F, motorPt);
+
+    // forceDotFil computed HERE — BEFORE sign flip
+    forceDotFil = Pt3D.Dot(F, mySeg.uVec); // (2) F is still force ON MOTOR
+    forceDotFilTrack.registerValue(forceDotFil);
+
+    F.scale(-1);                          // (3) sign flip
+    mySeg.incForceSum(F, attachPt);       // (4) −F applied to filament
+}
+```
+
+`Pt3D.unitVec(pt1, pt2)` computes `(pt1 − pt2) / |pt1 − pt2|` (verified at Pt3D.java:114–126). So `F.unitVec(attachPt, motorPt)` = unit vector FROM `motorPt` TOWARD `attachPt`. This is the spring restoring force on the motor: pulling the motor head (end2) back toward its attachment site on the filament.
+
+`mySeg.uVec` points from end1 toward end2 of the filament segment, i.e., toward the barbed (plus) end.
+
+**Physical meaning of sign:** `forceDotFil > 0` when the force on the motor points toward the barbed end — i.e., when `attachPt` is on the barbed side of `motorPt` (motor has been left behind on the pointed side while the filament or attachment site is further toward the barbed end). `forceDotFil < 0` when the force on the motor points toward the pointed end — i.e., when `motorPt` (end2) has advanced ahead of `attachPt` toward the barbed end.
+
+**During the power stroke** (ADPPi → ADP state transition): the alignment torque changes its target angle from 120° (cocked, tilted toward pointed end) to 90° (uncocked, perpendicular). This rotates the motor body such that end2 sweeps from the pointed side toward the barbed side of the motor center. After the stroke, end2 has advanced toward the barbed end while `attachPt` follows the filament. If the filament is stalled (load condition), end2 is now on the barbed side of `attachPt`. Result: `forceDotFil < 0`.
+
+**Conclusion:** forceDotFil < 0 corresponds to **LOAD** (motor has executed or is executing its power stroke against a resisting filament). forceDotFil > 0 corresponds to an **assisting** condition (filament has moved forward, leaving the motor lagging).
+
+The survey's claim (SURVEY_MYOSIN_AND_GLIDING.md line ~158) that BoA mainline computes `forceDotFil` before the sign flip is **confirmed**. forceDotFil is the component of force on the MOTOR along the filament barbed-end direction. This contrasts with boxOfActinMT-4, where `forceDotFil` is computed after the sign flip and represents the component of force on the FILAMENT — the two values are equal and opposite, and the `dissociateADP()` conditions (`< 0` vs `> 0`) account for this difference. Both codebases ultimately block ADP release when the motor is actively doing work.
+
+---
+
+### Interaction analysis
+
+**Can both fire in one timestep?** Yes. Path A fires in phase 9; Path B fires in phase 11. If Path A releases the motor in phase 9, the link's `release()` method sets `myMotor.onFil = false`, zeros `forceDotFil = 0`, and zeroes `forceDotFilTrack`. When Path B fires in phase 11 on the same motor (now detached, still in ADP state): `forceDotFilTrack.averageVal()` returns 0, the gate condition `0 > 0` is false, and the motor may transition to NONE. This is a harmless sequential detach-then-state-clear; the ADP→NONE transition on an already-unbound motor is physically innocuous (the motor would have released ADP anyway).
+
+If Path A does NOT fire, the motor remains bound in ADP state. Path B fires independently in phase 11 and transitions the motor to NONE state WITHOUT calling `release()`. The motor is still mechanically attached. On subsequent steps, ckRelease() continues to evaluate force-dependent detachment using the Guo-Guilford formula. The nucleotide state change (ADP→NONE) does not itself affect ckRelease() because the formula has no nucleotide-state dependence.
+
+**Relationship: complementary, but both inverted.**
+
+The two paths model **different physical events**:
+- Path A (ckRelease): mechanical detachment of the motor head from actin, force-dependent.
+- Path B (dissociateADP): biochemical release of ADP from the motor's active site, state-dependent, gated by force direction.
+
+They are structurally complementary: a motor in ADP state can lose its nucleotide via Path B without detaching, then proceed through NONE→ATP and eventually detach via Path A (or via Path A directly). This two-step structure mirrors the biology (ADP release is the rate-limiting step, ATP then triggers fast detachment).
+
+However, both paths are **inverted relative to NMII catch-slip biology**:
+
+**Path A inversion.** The Guo-Guilford formula requires F > 0 to mean LOAD for catch behavior. From the sign analysis above, LOAD = forceDotFil < 0. Substituting:
+
+- At small load (forceDotFil = −f, f > 0 pN):
+  - catchTerm = 0.92 × exp(−(−f×10⁻¹²)×2.5×10⁻⁹ / kT) = 0.92 × exp(+f×0.608) > 0.92 → increases with load
+  - slipTerm = 0.08 × exp((−f×10⁻¹²)×0.4×10⁻⁹ / kT) = 0.08 × exp(−f×0.097) < 0.08 → decreases
+  - Total at f=2 pN: ≈ 3.11 + 0.07 = 3.18 (vs. 1.0 at zero force) — **increases 3× at 2 pN load**
+
+  For NMII catch-slip (Melli 2018), the off-rate should DECREASE at 2 pN load, reaching a minimum near 2–4 pN. The current formula produces a monotone increasing off-rate with load — a pure slip bond.
+
+- Under assisting force (forceDotFil > 0): the total DECREASES at small positive f (catch-like). The formula produces catch behavior in the ASSISTING direction and slip in the LOAD direction — exactly backwards.
+
+  Correct formula (sign-flipped exponents):
+  ```java
+  guoCatchTerm = alphaCatch × exp(+forceDotFil × xCatch / kT);
+  guoSlipTerm  = alphaSlip  × exp(−forceDotFil × xSlip  / kT);
+  ```
+
+**Path B inversion.** The gate `if (forceDotFil > 0) { return; }` blocks ADP release under ASSISTING force (forceDotFil > 0) and ALLOWS it under LOAD (forceDotFil < 0). For catch-bond behavior (load slows ADP release), the gate should block under LOAD:
+  ```java
+  if (tipLink.forceDotFilTrack.averageVal() < 0) { return; }  // correct for catch
+  ```
+
+Both path inversions are consistent with each other: the combined effect is a slip bond for both detachment and ADP biochemistry.
+
+---
+
+### Biological assessment
+
+**Intended behavior.** NMII is a catch-slip bond: at small loads (0–2 pN per head), ADP release slows and the head remains strongly attached; above ~4 pN the bond enters the slip regime and off-rate increases. Path A (ckRelease) should implement the mechanical component of this: force-dependent detachment that decreases at small load and increases at high load. Path B (dissociateADP) should implement the biochemical component: ADP release rate that decreases under load, extending the strongly-bound lifetime.
+
+**Current behavior.** Path A implements a slip bond that INCREASES detachment rate monotonically with load. Path B allows ADP release to proceed under load (and blocks it under assisting force) — also slip-like. The combined effect is that loaded motors detach faster and transition out of the ADP state faster under load. This is the opposite of NMII behavior, which maintains tension at near-stall loads.
+
+**Practical consequence for gliding assay.** At near-zero external load (unloaded gliding), both motors experience small and variable spring forces; the formula evaluates near its zero-force value (kOff × 1.0 = 100 s⁻¹). The catch vs. slip distinction is small and the gliding velocity is primarily set by the duty-ratio parameters and step kinetics. **A basic gliding velocity measurement at saturating ATP is minimally affected by the formula inversion.** The inversion matters most for: (a) tethered-filament F–V curves, (b) stall force measurements, and (c) tension-maintenance at near-stall loads. These benchmarks would produce qualitatively wrong results with the current formula.
+
+---
+
+### Recommended fix (for planner decision)
+
+The simplest correct fix is to negate `forceDotFil` before feeding it to both the ckRelease formula and the dissociateADP gate. In `MyoFilLink.ckRelease()`, change the exponent signs so that positive input = load:
+
+```java
+// proposed corrected formula (do not implement — planner to decide)
+double F = -forceDotFil;  // positive under load (forceDotFil < 0 = motor ahead of attachment)
+double guoCatchTerm = Env.alphaCatch.getValue() * Math.exp(-F * Env.xCatch.getValue() / (Env.Boltz*Env.tempK));
+double guoSlipTerm  = Env.alphaSlip.getValue()  * Math.exp( F * Env.xSlip.getValue()  / (Env.Boltz*Env.tempK));
+```
+
+And in `MyoMotor.dissociateADP()`, flip the gate:
+
+```java
+if (tipLink.forceDotFilTrack.averageVal() < 0) { return; }  // block when under load
+```
+
+Before accepting this fix, the planner should decide: (a) run the gliding assay first and verify that gliding velocity is in the right ballpark before fixing the catch-slip formula — since gliding is minimally affected, this is reasonable; or (b) fix the formula first and re-run the tuning, accepting that the motor parameters (kOff, alphaCatch, etc.) may need retuning under the corrected formula.
+
+---
+
+### Incidental findings
+
+**`ValueTracker.averageVal()` does not guard against unfilled slots.** The method always divides by `stepsToTrack = 10` regardless of how many steps have elapsed since binding. For the first 9 steps after binding, the average is diluted by zeros from empty slots (slots are zeroed on `release()`). This makes the gate in `dissociateADP()` effectively transparent early in binding (average ≈ 0, gate condition `> 0` is false → gate allows ADP release). The bias disappears after 10 steps. Practically negligible but slightly distorts duty ratio for very short-lived binding events. The `runningAverageVal()` method handles this correctly but is not used here.
+
+**`dissociateADP()` does not check `onFil`.** The on-filament ADP rate (`myoOnFilADP_None`) is applied even to an unbound motor in ADP state. There is no off-filament ADP rate parameter. Given that a free motor should not be strongly bound in the ADP state in normal operation, this is unlikely to have practical consequence unless there is a code path that leaves a motor unbound in ADP state (which can happen when ckRelease fires in the same step as described above).
+
 ## 2026-05-25 — Sister-codebase survey: force-dependent release and gliding assay
 
 Surveyed `ActomyosinNet3` and `boxOfActinMT-4` in `~/Dropbox/CodeSync/codeToSurvey/`. Full findings in `SURVEY_MYOSIN_AND_GLIDING.md`.
