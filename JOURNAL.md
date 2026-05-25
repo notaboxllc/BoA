@@ -4,6 +4,16 @@ Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-25 — Addendum: 2D projection for long-window speed
+
+Long-window speed in `GlidingAssayEvaluator` now uses the XY-plane displacement only (`sqrt(dx²+dy²)`) rather than the full 3D displacement. Rationale: experimentalists observe gliding motion via epi-fluorescence microscopy, which is a 2D projection. A filament that tilts out of the focal plane or drifts in Z would register faster in 3D than in XY, contradicting what the microscope would record. Using XY matches the experimental observable.
+
+Renames: data-file column `longWindowSpeed` → `longWindowSpeedXY`; WebSocket JSON field `longWindowSpeed` → `longWindowSpeedXY`; viewer panel labels `avg` → `avg(xy)` and `mean avg speed` → `mean avg(xy) speed`.
+
+Intentional asymmetry retained: `instantaneousSpeed` remains 3D. Instantaneous values are noisy at 10 ms windows so 2D vs 3D is in the noise; keeping it 3D creates a diagnostic: a sustained `longWindowSpeedXY` ≪ `instantaneousSpeed` (3D) is a signature of Z-axis drift or escape events.
+
+---
+
 ## 2026-05-25 — Planning: gliding assay data collection campaign
 
 Manual exploration with `-3jsLive 8081` confirmed the gliding assay infrastructure is working end-to-end. At 200 motors/µm² with a single 1 µm filament: speed 2.3 µm/s, 2 bound motors, duty ratio ≈ 0.05. Numbers are in the published range for myosin II and the live panel updates correctly. Time to plan a proper data-collection campaign.

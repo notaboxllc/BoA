@@ -1884,9 +1884,9 @@ if (LIVE_MODE) {
     // Mean long-window speed across settled filaments (the quantity figures will plot).
     let meanLwStr = '—';
     if (Array.isArray(ga.filaments) && ga.filaments.length > 0) {
-      const settled = ga.filaments.filter(f => f.longWindowSpeed !== undefined && !f.settling);
+      const settled = ga.filaments.filter(f => f.longWindowSpeedXY !== undefined && !f.settling);
       if (settled.length > 0) {
-        const meanLw = settled.reduce((s, f) => s + f.longWindowSpeed, 0) / settled.length;
+        const meanLw = settled.reduce((s, f) => s + f.longWindowSpeedXY, 0) / settled.length;
         meanLwStr = meanLw.toFixed(3) + ' µm/s (' + settled.length + '/' + nFils + ')';
       }
     }
@@ -1895,7 +1895,7 @@ if (LIVE_MODE) {
       `t: ${t} s<br>` +
       `density: ${density} /µm²<br>` +
       `duty ratio (reach): ${drWR}<br>` +
-      `mean avg speed: ${meanLwStr}<br>` +
+      `mean avg(xy) speed: ${meanLwStr}<br>` +
       `filaments: ${nFils}`;
 
     if (!Array.isArray(ga.filaments) || ga.filaments.length === 0) {
@@ -1907,13 +1907,13 @@ if (LIVE_MODE) {
     let html = '';
     for (const f of shown) {
       const spd   = f.speed            !== undefined ? f.speed.toFixed(3)            : '—';
-      const lwSpd = f.longWindowSpeed  !== undefined ? f.longWindowSpeed.toFixed(3)  : '—';
+      const lwSpd = f.longWindowSpeedXY !== undefined ? f.longWindowSpeedXY.toFixed(3) : '—';
       const len   = f.length           !== undefined ? f.length.toFixed(3)           : '—';
       const avgB  = f.avgBoundMotors   !== undefined ? f.avgBoundMotors.toFixed(1)   : '—';
       const fpDR  = f.footprintDutyRatio !== undefined ? f.footprintDutyRatio.toFixed(3) : '—';
       const stl   = f.settling ? ' <span style="color:#888">(settling)</span>' : '';
       html += `<div class="ga-filrow">` +
-        `fil ${f.id}: ${len} µm  inst ${spd} µm/s  avg ${lwSpd} µm/s${stl}<br>` +
+        `fil ${f.id}: ${len} µm  inst ${spd} µm/s  avg(xy) ${lwSpd} µm/s${stl}<br>` +
         `&nbsp;&nbsp;bound: ${avgB}  DR: ${fpDR}` +
         `</div>`;
     }

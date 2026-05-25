@@ -36,7 +36,7 @@ public class GlidingAssayEvaluator {
         double[] lwBufX, lwBufY, lwBufZ, lwBufTime;
         int lwBufHead;    // index of next write slot
         int lwBufCount;   // number of valid entries (0..bufCap)
-        double longWindowSpeed;
+        double longWindowSpeedXY;
         boolean settling; // true until buffer has filled for the first time
     }
 
@@ -158,7 +158,7 @@ public class GlidingAssayEvaluator {
             dataWriter.println(
                 "simTime\tdensityIndex\tsurfaceDensity\tfilamentId\tfilamentLength\t" +
                 "posX\tposY\tposZ\tdistMoved\tvecMovedX\tvecMovedY\tvecMovedZ\t" +
-                "instantaneousSpeed\tlongWindowSpeed\tlongWindowSettling\t" +
+                "instantaneousSpeed\tlongWindowSpeedXY\tlongWindowSettling\t" +
                 "avgBoundMotors\tfootprintMotors\tfootprintDutyRatio\theadsWithinReachDR");
             headerWritten = true;
         }
@@ -218,12 +218,12 @@ public class GlidingAssayEvaluator {
                 int oldest = (state.lwBufHead - state.lwBufCount + bufCap) % bufCap;
                 double lwDx = state.lwBufX[newest] - state.lwBufX[oldest];
                 double lwDy = state.lwBufY[newest] - state.lwBufY[oldest];
-                double lwDz = state.lwBufZ[newest] - state.lwBufZ[oldest];
-                double lwDist = Math.sqrt(lwDx*lwDx + lwDy*lwDy + lwDz*lwDz);
+                // XY-only: matches 2D microscopy; Z stored in buffer for diagnostics
+                double lwDist = Math.sqrt(lwDx*lwDx + lwDy*lwDy);
                 double lwDt   = state.lwBufTime[newest] - state.lwBufTime[oldest];
-                state.longWindowSpeed = lwDt > 1e-12 ? lwDist / lwDt : 0.0;
+                state.longWindowSpeedXY = lwDt > 1e-12 ? lwDist / lwDt : 0.0;
             } else {
-                state.longWindowSpeed = 0.0;
+                state.longWindowSpeedXY = 0.0;
             }
 
             // Footprint: MyosinFixed motors whose pin is within MOTOR_REACH_UM of this filament.
@@ -247,7 +247,7 @@ public class GlidingAssayEvaluator {
                     "%.5g\t%d\t%.2f\t%d\t%.4f\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%.5g\t%d\t%.4f\t%d\t%.4f\t%.4f%n",
                     simTime, densityIndex, surfaceDensity, fid, totalLen,
                     cx, cy, cz, distMoved, vmX, vmY, vmZ,
-                    speed, state.longWindowSpeed, state.settling ? 1 : 0,
+                    speed, state.longWindowSpeedXY, state.settling ? 1 : 0,
                     avgBound, footprintMotors, footprintDR, headsWithinReachDR);
                 dataWriter.flush();
             }
@@ -264,10 +264,10 @@ public class GlidingAssayEvaluator {
             firstFil = false;
             json.append(String.format(
                 "{\"id\":%d,\"length\":%.4f,\"pos\":[%.5g,%.5g,%.5g]," +
-                "\"distMoved\":%.5g,\"speed\":%.5g,\"longWindowSpeed\":%.5g,\"settling\":%s," +
+                "\"distMoved\":%.5g,\"speed\":%.5g,\"longWindowSpeedXY\":%.5g,\"settling\":%s," +
                 "\"avgBoundMotors\":%.3f,\"footprintMotors\":%d,\"footprintDutyRatio\":%.4f}",
                 fid, totalLen, cx, cy, cz, distMoved, speed,
-                state.longWindowSpeed, state.settling ? "true" : "false",
+                state.longWindowSpeedXY, state.settling ? "true" : "false",
                 avgBound, footprintMotors, footprintDR));
         }
 
