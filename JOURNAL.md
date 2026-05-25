@@ -1,8 +1,83 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-22
+Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
+
+## 2026-05-25 — Sister-codebase survey: force-dependent release and gliding assay
+
+Surveyed `ActomyosinNet3` and `boxOfActinMT-4` in `~/Dropbox/CodeSync/codeToSurvey/`. Full findings in `SURVEY_MYOSIN_AND_GLIDING.md`.
+
+Short version:
+- **Force-dependent release:** BoA mainline already has the most complete model (Guo–Guilford catch-slip in `MyoFilLink.ckRelease()`). ANM3 has catch-only (Veigel 2003, 2D). boxOfActinMT-4 has slip-only — it's the commented-out precursor in BoA mainline. Nothing to port for this target.
+- **Gliding assay measurement:** The missing piece in BoA mainline is a per-step velocity evaluator. ANM3's `GlidingAssayEvaluator` (~120 lines) is the portable piece — logs per-filament distance moved, position, average motor count, duty ratio. The motor-pinning mechanism (`MyosinFixed`) is already in BoA mainline; what's needed is the output callback.
+- **Note flagged for planner:** The interaction between `MyoFilLink.ckRelease()` (runs every step, all nucleotide states) and `MyoMotor.dissociateADP()` (ADP state only, directional gate) may have sign-convention subtleties worth verifying before the gliding assay benchmark is instrumented.
+
+## 2026-05-22 — Planning: myosin motor validation benchmarks
+
+### Context
+
+Actin filament representation is in good shape: well-measured biochemical rate constants, and the V25 deflection tuner provides biophysical validation of the lumped-parameter mechanical model across 32–128 monomer segment lengths. Time to bring myosin motors up to a comparable level of validation confidence.
+
+Motor representation in BoA: lumped-parameter, three-element — head domain, short neck (compliant element), tail. Validation needs to exercise each element and the collective behavior they produce.
+
+### Validation battery (planned, not yet implemented)
+
+A single assay can't validate the motor model — different assays stress different parts. Plan is a small battery of three tests that triangulate the representation.
+
+**1. Gliding (sliding-filament) assay — primary**
+
+Geometry: shallow box arena, myosin tails locked to the bottom plane (mimics motor coating on a glass slide), small number of randomly oriented filaments above, dense random population of surface-bound motors.
+
+Reference numbers (skeletal myosin II): gliding velocity ~5–8 µm/s at saturating ATP. Uyeda/Spudich minimum-motor-density threshold below which motion becomes irregular or stops.
+
+Instrumentation should extract three things from one setup:
+- Mean filament velocity at saturating ATP
+- Velocity distribution per filament (not just mean)
+- Velocity-vs-motor-density curve (the density sweep is what most cleanly stresses duty ratio)
+
+Validates collective quantity (duty ratio × step size × cycle rate) but does not separate the factors.
+
+**2. Tethered-filament force–velocity — secondary**
+
+Same arena geometry as gliding, plus a virtual spring tether on one filament end. Sweep spring stiffness to produce a force–velocity curve. Expect roughly hyperbolic F–V; stall force should scale ~linearly with motor number in the small-N regime.
+
+This is the test that most directly validates the neck-as-compliant-element representation, since the neck is what sets how force feeds back onto stepping kinetics.
+
+**3. Attachment lifetime histogram — cheap add-on**
+
+Instrument the motor state machine to log bind/unbind events during either assay above. At zero load, attachment lifetime distribution should be ~exponential, with rate set by ADP release / ATP binding kinetics. Costs almost nothing to add once the motor state transitions are accessible.
+
+### Rationale for ordering
+
+Gliding first because it's the canonical assay, the experimental numbers are well-known, and one setup yields three measurements (mean velocity, distribution, density sweep). F–V second because it requires the gliding arena plus a tether — incremental code work, and it's where the neck-stiffness lumped parameter actually gets tested. Lifetime histogram is essentially free instrumentation added to whichever assay is running.
+
+### Tests considered and deferred
+
+- **Processivity / run-length:** mostly relevant for myosin V, not myosin II. Skip unless myosin V is added to the model later.
+- **Bidirectional / disordered gliding regime** (Gowrishankar–Rao and active-gel literature): qualitative validation that the model produces the right kinds of collective behavior at high density. Useful as a sanity check, not a tuning target. Maybe revisit after the quantitative battery passes.
+- **Mini-filament / bipolar thick filament assays:** muscle-relevant geometry (antiparallel actin pulled by bipolar motor assemblies). More involved setup. Defer.
+
+### Pass/fail criteria
+
+Not yet specified. Need to decide acceptable tolerance on gliding velocity, what counts as "matches F–V shape," and what counts as "approximately exponential" for lifetime histograms. To be settled before implementation begins, since these define what the assays are trying to show.
+
+### Sister-codebase merge
+
+A prior version of BoA in a sister project may contain a working gliding-assay arena setup. The merge is planned for the next few days. **Action item:** before specifying new gliding-assay code, survey the sister branch for existing arena geometry, motor surface-binding logic, and any initial-condition code for randomly oriented filaments. Decide then whether to revive, rewrite, or supplement.
+
+### Open questions for future session
+
+- Pass/fail tolerances for each assay.
+- What's in the sister branch.
+- Whether motor surface-binding (tail locked to plane) requires new infrastructure or is expressible with existing constraint primitives.
+- Whether the existing parameter-file format can express assay-specific initial conditions or if a new mechanism is needed.
+
+### Status
+
+Planning only. No code changes. Next session should start with the sister-branch survey.
+
+---
 
 ## V25 milestone — automatic deflection tuner
 
