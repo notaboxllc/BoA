@@ -84,6 +84,9 @@ public class BoxOfActin {
 	}
 	static LpFil lpFil = null;  // null until makeInitialThings() creates it
 
+	// Gliding assay evaluator (null when glidingAssay parameter is not active)
+	static GlidingAssayEvaluator glidingEvaluator = null;
+
 	// Shared snapshot struct returned by computeBenchmarkSnapshot()
 	static class BenchmarkSnapshot {
 		final double observed, expected, ratio;
@@ -163,6 +166,10 @@ public class BoxOfActin {
 		// make Things, etc
 		makeCrucible();
 		makeInitialThings();
+		if (Env.glidingAssay.isActive()) {
+			GlidingAssayEvaluator.create();
+			glidingEvaluator = GlidingAssayEvaluator.getInstance();
+		}
 		Mesh.createMeshes(); 	// for 2D grid collision detection
 		
 		// multithreading
@@ -1452,7 +1459,11 @@ public class BoxOfActin {
 			jSon2Ct = 0;
 		}
 
-		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if (Env.glidingAssay.isActive() && glidingEvaluator != null) {
+			glidingEvaluator.sampleStep();
+		}
+
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
@@ -1460,6 +1471,12 @@ public class BoxOfActin {
 				accumulateLpData();
 				String lpJson = buildLpJson();
 				if (lpJson != null) LiveFrameServer.dispatchLpBenchmark(lpJson);
+			}
+			if (Env.glidingAssay.isActive() && glidingEvaluator != null) {
+				String gaJson = glidingEvaluator.outputInterval();
+				if (gaJson != null && LiveFrameServer.isRunning()) {
+					LiveFrameServer.dispatchGlidingAssay(gaJson);
+				}
 			}
 			threeJSCounter = 0;
 		}
@@ -1528,7 +1545,11 @@ public class BoxOfActin {
 			remoteOutCounter = 0;
 		}
 
-		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if (Env.glidingAssay.isActive() && glidingEvaluator != null) {
+			glidingEvaluator.sampleStep();
+		}
+
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
@@ -1536,6 +1557,12 @@ public class BoxOfActin {
 				accumulateLpData();
 				String lpJson = buildLpJson();
 				if (lpJson != null) LiveFrameServer.dispatchLpBenchmark(lpJson);
+			}
+			if (Env.glidingAssay.isActive() && glidingEvaluator != null) {
+				String gaJson = glidingEvaluator.outputInterval();
+				if (gaJson != null && LiveFrameServer.isRunning()) {
+					LiveFrameServer.dispatchGlidingAssay(gaJson);
+				}
 			}
 			threeJSCounter = 0;
 		}

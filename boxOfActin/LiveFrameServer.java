@@ -262,6 +262,16 @@ public class LiveFrameServer extends WebSocketServer {
     }
 
     /**
+     * Dispatches a glidingAssay-topic message to all clients. Called from BoxOfActin
+     * at the same cadence as dispatchFrame() when glidingAssay mode is active.
+     */
+    public static void dispatchGlidingAssay(String gaJson) {
+        if (instance == null || !running || instance.clients.isEmpty()) return;
+        String msg = "{\"topic\":\"glidingAssay\",\"payload\":" + gaJson + "}";
+        enqueueAll(msg);
+    }
+
+    /**
      * Wraps frameJson in the protocol envelope and enqueues it for every
      * connected client. Non-blocking: if a client's queue is full the oldest
      * frame is dropped to make room. Returns immediately regardless of network.

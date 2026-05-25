@@ -418,6 +418,28 @@
       pointer-events: auto;
     }
     #btnPersist.persist-off { border-color: #555; color: #888; }
+
+    /* ── gliding assay panel ─────────────────────────────────────────────────── */
+    #glidingPanel {
+      position: absolute;
+      bottom: 80px;
+      left: 12px;
+      background: rgba(0,0,0,0.70);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 10px;
+      z-index: 10;
+      display: none;
+      font: 12px/1.9 monospace;
+      color: #ddd;
+      text-align: left;
+      pointer-events: auto;
+      min-width: 230px;
+    }
+    #glidingPanel.active { display: block; }
+    #glidingPanel .ga-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; }
+    #glidingPanel .ga-summary { color: #aaa; line-height: 1.7; margin-bottom: 4px; }
+    #glidingPanel .ga-filrow { color: #ddd; line-height: 1.6; border-top: 1px solid #333; padding-top: 2px; }
   </style>
 </head>
 <body>
@@ -468,6 +490,12 @@
     <canvas id="lpCanvas" width="220" height="130"></canvas>
     <div id="lpReadout">samples: 0</div>
   </div>
+</div>
+
+<div id="glidingPanel">
+  <div class="ga-title">— Gliding Assay —</div>
+  <div id="gaSummary" class="ga-summary"></div>
+  <div id="gaFilaments"></div>
 </div>
 
 <div id="controls">
@@ -1462,6 +1490,8 @@ if (LIVE_MODE) {
         updateBenchmarkHud(env.payload);
       } else if (env.topic === 'lpBenchmark') {
         updateLpPanel(env.payload);
+      } else if (env.topic === 'glidingAssay') {
+        updateGlidingPanel(env.payload);
       }
     };
     ws.onclose = () => {
@@ -1792,6 +1822,48 @@ if (LIVE_MODE) {
       `Lp_theo: ${lpTStr} µm<br>` +
       `Lp_meas: ${lpMStr} µm<br>` +
       `samples: ${lp.samples}`;
+  }
+
+  // ── Gliding assay panel ──────────────────────────────────────────────────
+  const glidingPanel    = document.getElementById('glidingPanel');
+  const gaSummary       = document.getElementById('gaSummary');
+  const gaFilaments     = document.getElementById('gaFilaments');
+
+  function updateGlidingPanel(ga) {
+    glidingPanel.classList.add('active');
+
+    const density  = ga.surfaceDensity !== undefined ? ga.surfaceDensity.toFixed(1) : '—';
+    const drWR     = ga.headsWithinReachDR !== undefined ? ga.headsWithinReachDR.toFixed(3) : '—';
+    const nFils    = Array.isArray(ga.filaments) ? ga.filaments.length : 0;
+    const t        = ga.simTime !== undefined ? ga.simTime.toFixed(3) : '—';
+
+    gaSummary.innerHTML =
+      `t: ${t} s<br>` +
+      `density: ${density} /µm²<br>` +
+      `duty ratio (reach): ${drWR}<br>` +
+      `filaments: ${nFils}`;
+
+    if (!Array.isArray(ga.filaments) || ga.filaments.length === 0) {
+      gaFilaments.innerHTML = '';
+      return;
+    }
+
+    const shown = ga.filaments.slice(0, 5);
+    let html = '';
+    for (const f of shown) {
+      const spd   = f.speed    !== undefined ? f.speed.toFixed(3)    : '—';
+      const len   = f.length   !== undefined ? f.length.toFixed(3)   : '—';
+      const avgB  = f.avgBoundMotors !== undefined ? f.avgBoundMotors.toFixed(1) : '—';
+      const fpDR  = f.footprintDutyRatio !== undefined ? f.footprintDutyRatio.toFixed(3) : '—';
+      html += `<div class="ga-filrow">` +
+        `fil ${f.id}: ${len} µm  ${spd} µm/s<br>` +
+        `&nbsp;&nbsp;bound: ${avgB}  DR: ${fpDR}` +
+        `</div>`;
+    }
+    if (ga.filaments.length > 5) {
+      html += `<div class="ga-filrow" style="color:#888">…and ${ga.filaments.length - 5} more</div>`;
+    }
+    gaFilaments.innerHTML = html;
   }
 
   setLiveState('reconnecting');
