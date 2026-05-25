@@ -1,5 +1,5 @@
 <BOA> Gliding assay test — single filament, fixed myosin carpet
-deltaT:true:1.0E-4;
+deltaT:true:1.0E-5;
 biochemDeltaT:true:0.01;
 collisionDeltaT:true:1.0E-5;
 brownianDeltaT:true:1.0E-5;

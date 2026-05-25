@@ -297,7 +297,7 @@ public class Env {
 	static final Parameter frameHeight = new Parameter("frameHeight"," Frame Height", frameHeight_init, "Pixels", Parameter.INT);
 
 	static final Parameter showCrucible = new Parameter("showCrucible", " Show Box/Bug Arena", 0, " ",Parameter.BOOLEAN, false);  // turns off painting 
-	static final Parameter simOutsideBug = new Parameter("simOutsideBug", " Sim. Outside Bug", 0, " ",Parameter.BOOLEAN, true);
+	static final Parameter simOutsideBug = new Parameter("simOutsideBug", " Sim. Outside Bug", 1, " ",Parameter.BOOLEAN, false);
 
 
 	static final int nodeTessalation = 24;
