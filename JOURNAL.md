@@ -4,6 +4,239 @@ Last updated: 2026-05-25
 
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
+## 2026-05-25 — Documenting the WebSocket live-observation interface (capability already in active use)
+
+The live WebSocket interface has been the primary observation tool for filament benchmarking since Session 12 (C1 transport), extended through Sessions 13–18 (click-to-inspect C2, pause/kill C3, mutable parameters C4, benchmark panels, LP panel). It had not been written up as a unit. This entry documents the current state comprehensively so the next planner session can write a gliding-assay output port without re-reading source.
+
+### Server side
+
+**Class:** `boxOfActin/LiveFrameServer.java` (417 lines). Extends `org.java-websocket.server.WebSocketServer`. One static singleton; per-client state is a bounded `ArrayBlockingQueue<String>(4)` plus a daemon sender thread, both created in `onOpen()`. Backpressure model: all `dispatch*()` calls use non-blocking `offer()` with drop-oldest semantics — the simulation thread is always O(1) regardless of network conditions.
+
+**Startup:** `-3jsLive <port>` CLI flag. `begin()` in `BoxOfActin.java:136–138` calls `LiveFrameServer.startServer(Env.threeJSLivePort)` immediately after `parseArgs()`, before param-file loading or `makeInitialThings()`. `TimeLoop.run()` (line 591) calls `LiveFrameServer.stopServer()` on exit. No hard-coded default port; `8081` is conventional in examples but any available port works.
+
+**Hook into main loop:** `threeJSCounter` is incremented by `updateCounters()` each step. In both `logAndDraw()` and `remoteLog()` (lines 1455 and 1531), when `threeJSCounter >= Env.toFileInterval.getIntValue()`, the frame is generated and dispatched:
+```java
+// BoxOfActin.java:1455–1464
+if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+    ThreeJSWriter.writeFrame();                     // generates JSON, dispatches to both consumers
+    if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
+        String bmJson = buildBenchmarkJson();
+        if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
+        accumulateLpData();
+        String lpJson = buildLpJson();
+        if (lpJson != null) LiveFrameServer.dispatchLpBenchmark(lpJson);
+    }
+    threeJSCounter = 0;
+}
+```
+The safe-point dispatch order is: **pause wait** (with inspect drain inside) → **kill check** → **inspect drain** → **param drain** → `logAndDraw()` / `remoteLog()` → frame + benchmark dispatch.
+
+### Message protocol
+
+**Server → client** (all topics pushed to all clients; no per-topic filtering):
+
+| topic | payload summary |
+|---|---|
+| `frame` | per-frame geometry — see schema below |
+| `inspectResult` | object inspection payload — see CLAUDE.md for field-by-field list by `kind` |
+| `simState` | `{"state":"running"\|"paused"\|"terminating","step":<N>}` |
+| `paramList` | array of `{"name","displayName","type","value","mutable"}` for all Parameters |
+| `paramAck` | `{"success":true,"name","oldValue","newValue"}` or `{"success":false,"name","error":"..."}` |
+| `benchmark` | deflection/relaxation metrics — see benchmark topic schema below |
+| `lpBenchmark` | persistence-length metrics — see LP topic schema below |
+
+**Client → server:**
+
+| action | fields | notes |
+|---|---|---|
+| `subscribe` | `topics:[...]` | informational only; server ignores for filtering |
+| `inspect` | `id:<N>` | thingInstanceId; queued in `Env.inspectQueue` |
+| `pause` | — | sets `Env.paused = true` |
+| `resume` | — | clears `Env.paused`, notifies safe point |
+| `kill` | — | sets `Env.terminating = true` (absorbing state) |
+| `queryParams` | — | triggers immediate `paramList` response to that client |
+| `setParam` | `name,value` | validated on WS thread, queued for safe-point application |
+
+### Per-frame schema
+
+`ThreeJSWriter.buildFrameJson()` (ThreeJSWriter.java:60–160) constructs the `frame` payload:
+
+```json
+{
+  "frame": <int>,           // monotone frame counter since process start
+  "t": <float>,             // simulation time in seconds (6 significant figures)
+  "bounds": {               // µm; absent in benchmark mode (Env.benchmarkFilament=true)
+    "xDim": <float>, "yDim": <float>, "zDim": <float>
+  },
+  "segments": [
+    {
+      "id": <int>,          // FilSegment.thingInstanceId — stable, monotone across cleanup
+      "end1": [x, y, z],   // µm, always current (FilSegment.initialize() runs every step)
+      "end2": [x, y, z],   // µm
+      "r": 0.035,           // hardcoded radius in µm
+      // benchmark-only fields (present when Env.benchmarkFilament=true):
+      "chainType": "defl"|"lp",
+      "axisX": [ux, uy, uz],  // body X axis (defl chain only; LP chain omits for performance)
+      "axisY": [ux, uy, uz],
+      "axisZ": [ux, uy, uz]
+    }
+  ],
+  "myosins": [
+    {
+      "id": <int>,           // MyoMotor.thingInstanceId (canonical group key — motor carries state)
+      "rod": {
+        "end1": [x, y, z], "end2": [x, y, z],
+        "r": <float>,        // MyoRod.radius in µm (~0.010 µm)
+        "invisible": <bool>  // true for rods bundled inside MyoMiniFilament
+      },
+      "lever": {
+        "end1": [x, y, z], "end2": [x, y, z],
+        "r": <float>         // MyoLever.radius in µm
+      },
+      "motor": {
+        "end1": [x, y, z], "end2": [x, y, z],
+        "r": <float>,        // MyoMotor.radius in µm
+        "state": "NONE"|"ATP"|"ADPPi"|"ADP",
+        "onFil": <bool>
+      }
+    }
+  ],
+  "minifilaments": [
+    {
+      "id": <int>,           // MyoMiniFilament.thingInstanceId
+      "end1": [x, y, z], "end2": [x, y, z],
+      "r": <float>           // MyoMiniFilament.radius in µm
+    }
+  ],
+  // benchmark overlay — present only when Env.benchmarkFilament=true:
+  "pinnedEndpoints": [       // anchor1, anchor2 positions in µm — null until chain is created
+    {"x":..., "y":..., "z":...},
+    {"x":..., "y":..., "z":...}
+  ] | null,
+  "forceArrows": [
+    {
+      "point": {"x":..., "y":..., "z":...},     // midSeg center in µm
+      "direction": {"x":..., "y":..., "z":...}, // unit vector
+      "magnitude": <float>,                       // force in Newtons
+      "label": "F",
+      "visible": <bool>                           // false when benchmarkForceOn=false
+    }
+  ]
+}
+```
+
+**Units throughout:** positions in µm, radii in µm, time in seconds, force in Newtons. The viewer multiplies deflections by 1000 to display in nm; everything else is rendered in µm-space directly.
+
+### benchmark topic schema
+
+`buildBenchmarkJson()` (BoxOfActin.java:1216–1261):
+
+```json
+{
+  "chainSegments": <int>,         // Env.benchmarkNSegs (default 11)
+  "monomersPerSegment": <int>,    // benchMonCt
+  "chainSpanMicrons": <float>,    // end-to-end span in µm
+  "viscosity": <float>,           // Env.aeta (Pa·s)
+  "observedDeflection": <float>,  // midSeg.coord.y displacement from rest, in µm
+  "expectedDeflection": <float>,  // analyticDefl (= frac × span), in µm
+  "ratio": <float>,               // observed/expected, 3 decimal places
+  "forceOn": <bool>,
+  "stepCount": <int>,
+  "tauTheo": <float>,             // optional; 1st bending mode relaxation time in s
+  "tauMeas": <float>,             // optional; elapsed time since force toggle off
+  "tauMeasFrozen": <bool>         // optional; true when 1/e crossing has fired
+}
+```
+
+### lpBenchmark topic schema
+
+`buildLpJson()` (BoxOfActin.java:1294–1334):
+
+```json
+{
+  "nSegs": <int>,             // number of LP chain segments
+  "segLen": <float>,          // per-segment length in µm
+  "contourLength": <float>,   // nSegs × segLen in µm
+  "monomersPerSegment": <int>,
+  "EI": <float>,              // bending stiffness in N·m² (Env.EI, compile-time constant)
+  "lpTheo": <float>,          // Env.persistenceLength = 15.0 µm
+  "samples": <int>,           // EWMA accumulation count since last reset
+  "lpMeas": <float>,          // optional; weighted log-linear fit result in µm
+  "cc": [1.0, C(1), C(2), ...] // EWMA tangent-tangent correlation array; length nSegs
+}
+```
+
+### Parameter-mutation mechanism
+
+The mutable parameter whitelist (authoritative: `grep setMutableAtRuntime boxOfActin/Env.java`):
+
+| label | physical meaning | side-effect hook |
+|---|---|---|
+| `fracMove` | PAIRS translational coefficient C_δ | none |
+| `fracR` | PAIRS rotational coefficient C_R | none |
+| `fracMoveTorq` | PAIRS torque-arm coefficient C_θ | none |
+| `toFileInterval` | output frame interval (timesteps) | advances `threeJSCounter` to `newInterval-1` for immediate next output |
+| `benchmarkForceFrac` | deflection force fraction | recomputes `transForce` and `analyticDefl` immediately |
+| `benchmarkForceOn` | boolean — apply midpoint force | none (toggle button in viewer bypasses Params panel) |
+| `lpEwmaAlpha` | LP EWMA smoothing factor | none |
+| `lpActive` | boolean — LP chain active | 0→1 transition: resets accumulator and sampleCount |
+| `aeta` | viscosity in Pa·s | calls `calculateProperties()` on all `FilSegment` instances; refreshes `tauTheo` if benchmark chain present |
+| `BTransCoeff` | Brownian translational scale | none |
+| `BRotCoeff` | Brownian rotational scale | none |
+
+End-to-end flow: user clicks Apply in Params panel → viewer sends `setParam` → `handleSetParam()` on WS thread validates (unknown label / not mutable / parse failure → immediate `paramAck` error) → valid change queued as `Env.PendingParamChange` in `Env.paramQueue` → `drainParamQueue()` at next safe point applies, runs hooks, dispatches success `paramAck` → viewer's `handleParamAck()` updates input to confirmed value, shows ✓ for 2s.
+
+```java
+// LiveFrameServer.java:339–376 (handleSetParam, abridged)
+private static void handleSetParam(String name, String valueStr) {
+    Parameter target = null;
+    for (int i = 0; i < Parameter.paramCt; i++) {
+        Parameter p = Parameter.theParams[i];
+        if (p != null && name.equals(p.label)) { target = p; break; }
+    }
+    if (target == null)                { dispatchParamAckError(name, "unknown parameter"); return; }
+    if (!target.isMutableAtRuntime())  { dispatchParamAckError(name, "not mid-run mutable"); return; }
+    // ... type parse, positiveValue check ...
+    Env.paramQueue.offer(new Env.PendingParamChange(target, parsedValue));
+}
+```
+
+`benchmarkForceOn` and `lpActive` are excluded from the Params panel list in `buildParamPanel()` (viewer line ~1527) because they have dedicated toggle buttons in their respective panels. Everything else with `mutable:true` appears in the Params panel.
+
+### Special-purpose panels: gating mechanism
+
+Both benchmark panels are gated by a double condition:
+
+```java
+if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
+    // build and dispatch benchmark / lpBenchmark topics
+}
+```
+
+`Env.benchmarkFilament` is set by any of: `-bm`, `-bmManual`, `-bmDiag`, `-bmTuner*` flags. The condition is checked in both `logAndDraw()` and `remoteLog()` — same code path, just calling the same private methods. The dispatch is tightly coupled to these flags; there is no runtime toggle to suppress or enable the benchmark dispatch (short of not starting the sim in benchmark mode).
+
+On the viewer side, the panels self-activate: `updateBenchmarkHud()` adds `benchmarkHud.classList.add('active')` unconditionally on first message; `updateLpPanel()` does the same for `lpPanel`. Neither panel is shown if no `benchmark` or `lpBenchmark` messages ever arrive — which is the case in non-benchmark runs. A future panel (e.g. gliding assay) would follow this same self-activation pattern: add a new `dispatchGlidingAssay(json)` static method in `LiveFrameServer`, build and dispatch it conditionally in `logAndDraw()`/`remoteLog()`, add a handler branch in `ws.onmessage`, and write a `updateGlidingPanel()` function that self-activates on first call.
+
+### Viewer side
+
+**File:** `sim_viewer_boa.html` (1802 lines) — single self-contained file. No external JS files beyond three.js.
+
+**Three.js:** v0.168.0 from CDN via ES module importmap. `OrbitControls` from `three/addons/controls/OrbitControls.js`.
+
+**Port discovery:** `new URL(location.href).searchParams.get('live')` at module top. `LIVE_MODE = true` if the parameter is present and non-empty; `LIVE_PORT = parseInt(value)`. Opening without `?live=` uses file-based mode (directory browser, frame scrubber). The two modes are mutually exclusive per page load.
+
+**Connection failure / missed frames:** `ws.onclose` triggers `scheduleReconnect()` with exponential backoff from 1s to 8s. Missed frames during reconnect are just not rendered — the viewer accepts whatever the next `frame` message is. No sequence gap recovery.
+
+**Rendering:** Six instanced meshes covering all object types. Each frame, identity maps (`segIdToSlot`, `segSlotToId`, etc.) are rebuilt from scratch — enables click-to-inspect raycasting (raycast `instanceId` → `thingInstanceId` → WS `inspect` action). Motor heads are `InstancedMesh` spheres, colored per nucleotide state (NONE blue, ATP yellow, ADPPi orange, ADP red) via `motorMesh.instanceColor`.
+
+**Panel infrastructure:** Each panel is an absolutely-positioned `<div>`. Benchmark panels and inspect panel self-activate (add `.active` or `.open` class) when data arrives. The Params panel requires user click on "Params ▶" button. All panels share the same CSS variable pattern (header div → body div → DOM content injected by the corresponding `update*()` function). A new gliding-assay panel would follow the same structure: static HTML shell, `.active` class added on first data, `updateGlidingPanel(lp)` function injecting DOM content from the payload.
+
+### Implications for the planned gliding assay work
+
+The transport layer, viewer infrastructure, and parameter-mutation round-trip are fully in place and require no changes for a gliding-assay extension. What the gliding assay needs to add: (a) a per-filament velocity estimator on the Java side (distance moved per output interval / elapsed sim time — ANM3's `GlidingAssayEvaluator` is directly portable), wired into `logAndDraw()` alongside the existing benchmark dispatch; (b) a new `dispatchGlidingAssay(json)` method in `LiveFrameServer` and a `{"topic":"glidingAssay","payload":{...}}` message branch in the viewer's `ws.onmessage`; (c) a `gliding-assay` panel HTML shell and `updateGlidingPanel()` JS function; and (d) a data-file output path for velocity-vs-density figures — `FileOps.writeToGAssayFile()` is already called from `logAndDraw()` at line 1472 but is commented out, and `MyosinFixed.glidingAssayDataSetRun()` is called at line 1471. The per-frame schema already carries motor `onFil` and `state` fields, so duty ratio can be computed client-side from existing data without schema changes. The arena geometry (motors pinned to a plane, randomly oriented filaments) is the other gap — it does not yet exist in the Java codebase and will require new initialization code or a parameter-file convention.
+
+---
+
 ## 2026-05-25 — Investigation: force-dependent release path interaction
 
 ### Path A — `MyoFilLink.ckRelease()`
