@@ -981,6 +981,64 @@ After that, the path is open to TornadoVM integration on aorus (the GPU machine)
 
 ---
 
+## 2026-05-25 — Gliding assay density-sweep batch infrastructure
+
+### Phase 0 — glidingAssayDataSetRun() investigation
+
+`glidingAssayDataSetRun()` in `MyosinFixed.java` IS active in all runs where `glidingAssay:true`. It calls `storeGlidingAssayPos()` (stores X-position of `theFilSegments[0]` to a static 2D array) every `remoteWriteInterval` timesteps, then checks `Env.simulationTime >= finalTimeForEachDataPoint` (hardcoded 2.0 s). If true, it either increments the density by `myoDensityIncrement=100` and calls `restartRun(false)` (runs 1–10) or calls `System.exit(0)` (run 11).
+
+Impact: for `-t 0.5` test runs the restart never fires (0.5s < 2.0s — dormant). For `-t 4.0` production runs it fires at t=2.0s, calls `restartRun(false)`, restarts the JVM with density+100, and the new `GlidingAssayEvaluator` inherits stale filament state from the previous run. The two systems are unintegrated: `restartRun()` does not reinitialize `glidingEvaluator`.
+
+### Phase 1 — Java changes
+
+Added `Env.externalDensitySweep` boolean parameter (default false, `Parameter.BOOLEAN`). Added a guard at the top of `glidingAssayDataSetRun()`:
+```java
+if (Env.externalDensitySweep.isActive()) return;
+```
+When `externalDensitySweep:true:1.0;` is in the parameter file, `glidingAssayDataSetRun()` returns immediately, leaving the `GlidingAssayEvaluator` fully in charge of output. The template sets this unconditionally.
+
+`fixedMyosinDensity` is already a standard `Parameter` read by `fillPlaneWithFixedMyosins()` at run time — no change needed. Setting `fixedMyosinDensity:true:__DENSITY__;` in the per-run param file is sufficient.
+
+### Phase 2 — Deliverables
+
+**`runGlidingSweep.sh`** — executable shell script at repo root.
+- Args: `-o <parentDir>` (default `~/Desktop/gliding_batch`), `-p <templateFile>` (default `ParameterFiles/glidingAssayBatch_template`), `-t <runTimeSec>` (default 4.0), `-h`.
+- If parent dir already exists, auto-increments (`gliding_batch.001`, `.002`, …).
+- Loops over 8 densities: `10, 25, 50, 100, 200, 500, 1000, 2500` motors/µm² (sparse-to-saturating log-ish spacing).
+- Generates per-density param file via `sed`, passes `-pf` and `-3js` flags to BoA, copies `params.txt` into the output subdir after BoA finishes.
+- Continues on failure per density; summarizes failures at end.
+
+**`ParameterFiles/glidingAssayBatch_template`** — based on `glidingAssayTest`, with `runTime:true:__RUNTIME__;`, `fixedMyosinDensity:true:__DENSITY__;`, and `externalDensitySweep:true:1.0;`.
+
+**Output tree example:**
+```
+gliding_batch/
+  density_10/
+    frame_000000.json … frame_000500.json
+    gliding_assay.dat
+    params.txt
+    source.zip
+  density_25/ …
+  density_50/ …
+  density_100/ …
+  density_200/ …
+  density_500/ …
+  density_1000/ …
+  density_2500/ …
+```
+
+**Tested:** verified with `-t 0.5`. Density 10 produced 501 frame JSONs, 501-row `gliding_assay.dat` (header + 500 data rows), `params.txt`, and `source.zip`. `surfaceDensity` column reads 10.00 in the data file.
+
+**Multi-batch accumulation:** each `./runGlidingSweep.sh` invocation creates a new parent dir (or auto-incremented variant). Post-processing globs across them: `cat gliding_batch*/density_*/gliding_assay.dat`.
+
+**Wall-clock note:** at `-t 4.0`, each density takes roughly 40–50 min on the MBP (10 min/sim-sec × 4 s). Full sweep ≈ 5–7 hours. Run overnight or in a `screen` session.
+
+### Next steps
+
+- Post-processing script (Python or awk): read all `gliding_assay.dat` files in a batch, filter to non-settling rows (`longWindowSettling==0`), and produce a velocity-vs-density CSV or matplotlib scatter/box plot. Suggested columns to use: `longWindowSpeedXY` (µm/s) vs `surfaceDensity` (motors/µm²). Deferred to next session.
+
+---
+
 ## Workflow note
 
 This project uses a two-Claude workflow:

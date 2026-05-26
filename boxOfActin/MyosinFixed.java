@@ -90,6 +90,7 @@ public class MyosinFixed extends Myosin {
 	}
 	
 	public static void glidingAssayDataSetRun () {
+		if (Env.externalDensitySweep.isActive()) return;
 		storeGlidingAssayPos();
 		if (Env.simulationTime >= finalTimeForEachDataPoint) {
 			if (curRun == numRunCols-1) { 
