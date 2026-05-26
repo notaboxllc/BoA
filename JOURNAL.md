@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ## 2026-05-25 — Addendum: frame-by-frame export for movie generation
 
@@ -1046,6 +1046,137 @@ OOM observed at densities ≥ 200 motors/µm² with the default `-Xmx800M`. At 2
 | ≤ 100 motors/µm² | `-Xmx2G` |
 | 200–500 motors/µm² | `-Xmx4G` |
 | 1000–2500 motors/µm² | `-Xmx8G` |
+
+---
+
+## 2026-05-26 — Survey: Brownian-on-FilSegments GPU port readiness
+
+### 1. Where Brownian forces are computed today
+
+`Thing.calcRandomForces()` (Thing.java:348–368). Calls `UCircRnd.newValue(deltaT, this)` three times (x, y, z axes) to generate Box-Muller pairs using the per-Thing PRNG. Reads `bTransDiff` and `bRotDiff` (body-fixed diffusion coefficients) to scale the Gaussian samples; also reads `bTransGam` and `bRotGam` for the final force scaling. Writes `randForces` and `randTorques` (Pt3D fields on Thing).
+
+```java
+// Thing.java:348–368
+public void calcRandomForces () {
+    xVals.newValue(Env.brownianDeltaT.getValue(),this);
+    yVals.newValue(Env.brownianDeltaT.getValue(),this);
+    zVals.newValue(Env.brownianDeltaT.getValue(),this);
+    v1.setVals(xVals.v1,yVals.v1,zVals.v1);
+    v2.setVals(xVals.v2,yVals.v2,zVals.v2);
+    rsq.setVals(xVals.rsq,yVals.rsq,zVals.rsq);
+    facterm.setVals(xVals.facterm,yVals.facterm,zVals.facterm);
+    tempPt.mult(bTransDiff, facterm);
+    fac1.vecSqrt(tempPt);
+    tempPt.mult(bRotDiff, facterm);
+    fac2.vecSqrt(tempPt);
+    randForces.mult(1.0/Env.brownianDeltaT.getValue(), v1, fac1, bTransGam);
+    randTorques.mult(1.0/Env.brownianDeltaT.getValue(), v2, fac2, bRotGam);
+}
+```
+
+`FilSegment` overrides this (FilSegment.java:536–548): root segments (no `motherFil`) call `super.calcRandomForces()` and optionally store the results in body-frame coords for Arp2/3 branches to copy; branch segments just zero `randForces`/`randTorques` and return.
+
+ThreadSet: `Thing.ThingBrownianThreads` (Thing.java:201–233). Fan-out over `theThings[]`, 16 threads (`numBForceThreads = allThreadCt = 16`), phase `Env.bForcesStart = 5`.
+
+doLoop dispatch (BoxOfActin.java:709–713):
+```java
+if (applyBrownianForcesCounter >= Thing.brownianApplyInt | Env.simulationTime == 0) {
+    brownianTimer.start();
+    startAllThreadSets(Env.bForcesStart);
+    waitOnAllThreadSets(Env.bForcesStop);
+    brownianTimer.stopInc();
+}
+```
+`brownianApplyInt = (int)(brownianDeltaT / deltaT)` — Brownian forces are applied every N timesteps, not every step. For glidingAssayBatch_template: `brownianDeltaT = deltaT = 1e-5`, so N = 1 (every step).
+
+### 2. FilSegment position storage today
+
+All position and force state lives in per-object `Pt3D` fields on `Thing`. No flat arrays exist anywhere in the codebase.
+
+```java
+// Thing.java:32–55 (relevant field declarations)
+Pt3D coord = new Pt3D();            // x,y,z position
+Pt3D bTransGam = new Pt3D();        // body-fixed drag (x,y,z)
+Pt3D bRotGam = new Pt3D();          // body-fixed rotational drag
+Pt3D bTransDiff = new Pt3D();       // body-fixed translational diffusion coefficients
+Pt3D bRotDiff = new Pt3D();         // body-fixed rotational diffusion coefficients
+Pt3D randForces = new Pt3D();       // random translational forces (written by calcRandomForces)
+Pt3D randTorques = new Pt3D();      // random torques
+Pt3D forceSum = new Pt3D();         // fixed-frame accumulated force (read in step/moveThing)
+```
+
+`Pt3D` has `public double x, y, z` fields. `FilSegment` also has `end1`, `end2` (Pt3D) for segment endpoints, updated every step by `initialize()`.
+
+No pre-existing SoA FloatArrays. The entire SoA layout (xPos, yPos, zPos, xForce, yForce, zForce, dragCoeff, radius arrays) is absent.
+
+### 3. FilSegment count in real runs
+
+**boa10-64Seg:** `initialFilaments:true:100` seeds each created with `actinSeed.getIntValue()` monomers (default 3) → 100 FilSegments at t=0. With `kNodeNuc:true:10` active, new filaments nucleate and grow over the run. Segments split (FilSegment.java:444) when `monomerCt >= 2 * stdSegLength = 128`. Steady-state count requires running the code; estimated 200–500 FilSegments based on 10×10 µm box with active polymerization.
+
+**glidingAssayBatch_template:** `makeGlidingAssayFilament()` creates one FilSegment with `monCt = (int)(glidingFilamentLength / actinMonoRadius) = (int)(2.0 / 0.0027) = 740` monomers (actinMonoRadius = actinMonoDiam/2 = 0.0054/2 = 0.0027 µm). With `filSegLength:true:64.0` (stdSegLength = 64), the 740-monomer segment splits repeatedly on successive `biochemStep()` calls until all segments are ≤ 64 monomers. At steady state: **~11–12 FilSegments per run** for a 2 µm filament (confirmed by test-run observation of ~8 segments within the first few frames in the prior journal entry).
+
+Motor count: `numMyos = (int)(boxXDim × boxYDim × density) = (int)(14 × 2 × density) = (int)(28 × density)`. Sweep range:
+
+| Density (motors/µm²) | Motor count |
+|---|---|
+| 10 | 280 |
+| 100 | 2,800 |
+| 500 | 14,000 |
+| 2500 | 70,000 |
+
+**Largest BoA run to date:** Not determinable without running. Design capacity is 1M slots in both `Thing.theThings[]` and `FilSegment.theFilSegments[]`.
+
+### 4. RNG today
+
+`Thing.myPRNG` is a `MersenneTwisterFast` (ec.util), one per-Thing instance, seeded with a random long at construction (Thing.java:62):
+```java
+MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
+```
+
+When `calcRandomForces()` calls `xVals.newValue(deltaT, this)`, `UCircRnd` uses `thing.myPRNG.nextDouble()` explicitly (UCircRnd.java:33). RNG state is **per-FilSegment** — each segment has independent random draws.
+
+GPU port implication: GPU threads will use a Wang hash keyed on `(threadId, stepCounter)` — a completely different algorithm, different sequence. Frame-by-frame position comparison between CPU and GPU paths is meaningless. Validation requires statistical tests only (mean and variance of `randForces` per segment type over many steps should match theoretical values). Flag this to any A/B test design.
+
+### 5. ThreadSet dispatch options for GPU
+
+The existing doLoop (BoxOfActin.java:709–713) invokes `ThingBrownianThreads` as one of ~12 sequential `start/wait` pairs per timestep. Three integration shapes for a GPU path:
+
+**Option A — Replace the ThreadSet, same per-step call site.** Insert a `-gpu` flag; `doLoop` calls a GPU kernel in place of `startAllThreadSets(bForcesStart)`. Positions are downloaded after every step (same as the current CPU path). Simplest code change; zero persistent residency benefit. This is the Sim3D approach that gave 1.6× due to transfer bottleneck — at ~11 FilSegments in the gliding assay it would be measurably slower than CPU.
+
+**Option B — GPU-resident simulation (GPU_STRATEGY.md architecture).** Replace the entire inner `for` loop in `TimeLoop.run()` under a `-gpu` flag. GPU runs `toFileInterval` steps on-device; CPU downloads positions once per output frame. Requires restructuring doLoop around the output cadence rather than the per-step cadence. The ThreadSet infrastructure becomes irrelevant for GPU phases. This is the architecture that yields 10–20× for high particle counts.
+
+**Option C — Selective ThreadSet replacement.** GPU handles the Brownian phase only (same call site as A), but positions are kept GPU-resident across the Brownian and step/moveThing phases within one timestep and downloaded once at the end of the timestep. Middle-ground complexity; partial benefit.
+
+Option B is the only one that realizes GPU_STRATEGY.md's persistent-residency speedup. Options A and C are transfer-limited and not worth implementing for a small number of segments.
+
+### 6. State BoA does not yet have that the port will need
+
+Confirmed absent by exhaustive grep: no `FloatArray`, no `TornadoVM`, no `@Parallel`, no `TaskGraph`, no `xPos[]`, `yPos[]`, `zPos[]`, `xForce[]`, `yForce[]`, `zForce[]` anywhere in `boxOfActin/`.
+
+Everything the port will need to add from scratch:
+- `FloatArray xPos, yPos, zPos` for all FilSegments (GPU-resident positions)
+- `FloatArray xForce, yForce, zForce` (zeroed on GPU at start of each step kernel)
+- `FloatArray dragPar, dragPerp, dragRot` (per-segment drag coefficients, FIRST_EXECUTION upload)
+- `FloatArray segRadius` (FIRST_EXECUTION upload)
+- A step counter `IntArray` for Wang-hash seeding
+- TornadoVM imports and `TaskGraph` / `TornadoExecutionPlan` wiring
+- A topology-rebuild path for when FilSegment count changes (split/creation events invalidate the SoA arrays)
+
+### 7. Coexistence with WebSocket live observer
+
+No plausible interaction. `calcRandomForces()` writes `randForces`/`randTorques` on the `FilSegment` instance. `ThreeJSWriter.buildFrameJson()` reads `end1`, `end2`, and `coord` (positions). These are different fields. Moreover, frame dispatch occurs in `logAndDraw()` / `remoteLog()`, which is called at the safe point after all physics phases have completed — including `moveThing()`, which translates forces into updated positions. By the time `dispatchFrame()` runs, `randForces` has already been consumed and positions are stable.
+
+A GPU kernel writing into `xForce[]`/`yForce[]`/`zForce[]` FloatArrays would be even more isolated from the WebSocket path, since those SoA arrays won't be the same fields that `ThreeJSWriter` reads. The download step (positions only, at output boundary) is already outside the force-computation phases.
+
+### 8. Open question for the planner
+
+**Is FilSegment-Brownian still the right first GPU kernel given current BoA scales?**
+
+At steady state the gliding-assay template runs with ~11 FilSegments. Any GPU kernel over those 11 segments will be slower than the 16-thread CPU path due to launch overhead alone. The boa10-64Seg run has an estimated 200–500 segments — still below the thousands needed to saturate even a fraction of an RTX 5070's SMs.
+
+The `MyosinFixed` binding search is a better-scaling target: O(motors × segments) with each motor independent. At 70,000 motors and ~11 segments, the inner loop is trivial per motor, but the 70K parallel threads do fill GPU occupancy. More importantly, as density sweeps grow, motor count scales with density and the per-motor work stays constant — the compute-to-transfer ratio improves with density rather than depending on FilSegment count.
+
+Question: should the first GPU kernel target MyosinFixed binding search rather than FilSegment-Brownian? The Brownian port is architecturally simpler (embarrassingly parallel, no neighbor reads) and establishes the SoA infrastructure that the binding search also needs. But if the gliding assay is the primary science driver, the binding search is where measurable speedup will first appear and where the density-sweep data quality would improve. Planner should decide before the port begins.
 
 ---
 
