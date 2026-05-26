@@ -440,6 +440,97 @@
     #glidingPanel .ga-title { color: #aaa; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; }
     #glidingPanel .ga-summary { color: #aaa; line-height: 1.7; margin-bottom: 4px; }
     #glidingPanel .ga-filrow { color: #ddd; line-height: 1.6; border-top: 1px solid #333; padding-top: 2px; }
+
+    /* ── render panel (post-run export) ──────────────────────────────────────── */
+    #renderToggle {
+      position: absolute;
+      top: 78px;
+      right: 12px;
+      background: rgba(0,0,0,0.75);
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 3px 10px;
+      cursor: pointer;
+      font: 12px monospace;
+      z-index: 11;
+      white-space: nowrap;
+      display: none;
+    }
+    #renderToggle:hover { color: #fff; }
+    #renderPanel {
+      position: absolute;
+      top: 106px;
+      right: 12px;
+      background: rgba(0,0,0,0.87);
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px 14px;
+      z-index: 11;
+      display: none;
+      font: 12px/2.0 monospace;
+      color: #ccc;
+      min-width: 310px;
+    }
+    #renderPanel.open { display: block; }
+    #renderPanel .rn-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; flex-wrap: wrap; }
+    #renderPanel .rn-label { width: 72px; flex-shrink: 0; color: #aaa; }
+    #renderPanel input[type=number] {
+      width: 64px;
+      background: #1a1a1a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 2px 5px;
+      font: 12px monospace;
+      outline: none;
+    }
+    #renderPanel input[type=number]:focus { border-color: #4a7aaa; }
+    #renderPanel select {
+      background: #1a1a1a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 2px 5px;
+      font: 12px monospace;
+      outline: none;
+    }
+    #rnCustomRes { display: none; align-items: center; gap: 4px; }
+    #rnCustomRes input { width: 60px; }
+    #rnDirName { color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+    #rnChooseDir {
+      font: 11px monospace;
+      padding: 2px 8px;
+      background: #2a2a2a;
+      color: #ccc;
+      border: 1px solid #444;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #rnChooseDir:hover:not(:disabled) { color: #fff; }
+    #rnChooseDir:disabled { opacity: 0.4; cursor: default; }
+    #rnStartBtn {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      background: #1a3a5a;
+      color: #adf;
+      border: 1px solid #4a7aaa;
+      border-radius: 3px;
+      padding: 4px 0;
+      cursor: pointer;
+      font: 12px monospace;
+    }
+    #rnStartBtn:hover:not(:disabled) { background: #2a4a6a; }
+    #rnStartBtn:disabled { opacity: 0.4; cursor: default; }
+    #rnStartBtn.rn-cancel { background: #3a1a1a; color: #faa; border-color: #833; }
+    #rnStartBtn.rn-cancel:hover { background: #4a2a2a; }
+    #rnProgressArea { margin-top: 4px; display: none; }
+    #rnProgressText { color: #aaa; font-size: 11px; line-height: 1.6; }
+    #rnProgressBarOuter { background: #333; height: 3px; border-radius: 2px; margin-top: 3px; }
+    #rnProgressBar { background: #4a7aaa; height: 3px; width: 0%; border-radius: 2px; }
   </style>
 </head>
 <body>
@@ -523,6 +614,37 @@
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
 </div>
 
+<button id="renderToggle">Render ▶</button>
+<div id="renderPanel">
+  <div class="rn-row">
+    <span class="rn-label">Range</span>
+    From <input id="rnFrom" type="number" min="0" value="0"> to <input id="rnTo" type="number" min="0" value="0">
+  </div>
+  <div class="rn-row">
+    <span class="rn-label">Stride</span>
+    every <input id="rnStride" type="number" min="1" value="1" style="width:50px"> frame(s)
+  </div>
+  <div class="rn-row">
+    <span class="rn-label">Format</span>
+    <select id="rnFormat"><option value="jpeg">JPG (q=0.92)</option><option value="png">PNG (lossless)</option></select>
+  </div>
+  <div class="rn-row" style="flex-direction:column;align-items:flex-start;gap:2px">
+    <span class="rn-label" style="width:auto">Resolution</span>
+    <label style="display:flex;align-items:center;gap:5px;line-height:1.8"><input type="radio" name="rnRes" id="rnResViewport" value="viewport" checked> Current viewport</label>
+    <label style="display:flex;align-items:center;gap:5px;line-height:1.8"><input type="radio" name="rnRes" id="rnResCustom" value="custom"> Custom: <span id="rnCustomRes"><input id="rnWidth" type="number" value="1920" min="100"> × <input id="rnHeight" type="number" value="1080" min="100"> px</span></label>
+  </div>
+  <div class="rn-row">
+    <span class="rn-label">Output</span>
+    <button id="rnChooseDir">Choose folder…</button>
+    <span id="rnDirName">not set</span>
+  </div>
+  <button id="rnStartBtn" disabled>Render</button>
+  <div id="rnProgressArea">
+    <div id="rnProgressText"></div>
+    <div id="rnProgressBarOuter"><div id="rnProgressBar"></div></div>
+  </div>
+</div>
+
 <div id="inspectPanel">
   <div class="ip-title">
     <span id="inspectKind">—</span>
@@ -553,7 +675,7 @@ const LIVE_PORT  = LIVE_MODE ? (parseInt(_liveParam, 10) || 0) : 0;
 let ws = null;
 
 // ── renderer ──────────────────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(devicePixelRatio);
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
@@ -873,6 +995,16 @@ if (LIVE_MODE) {
   document.getElementById('dirBar').style.display   = 'none';
   document.getElementById('controls').style.display = 'none';
   document.getElementById('liveBar').style.display  = 'flex';
+} else {
+  document.getElementById('renderToggle').style.display = 'block';
+  if (!('showDirectoryPicker' in window)) {
+    const el = document.getElementById('rnChooseDir');
+    el.disabled = true;
+    el.title    = 'Render export requires a Chromium-based browser (Chrome, Edge)';
+    const nm = document.getElementById('rnDirName');
+    nm.textContent = 'not supported in this browser';
+    nm.style.color = '#f88';
+  }
 }
 
 // ── display scale factors (updated by panel sliders) ─────────────────────────
@@ -894,6 +1026,7 @@ let boundsObj        = null;
 let apiPopulated     = false;
 let currentFrameData = null;
 const recentDirs     = [];
+let syncRenderFrameRange = () => {}; // replaced by render panel init in post-run mode
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function normalizeDir(d) {
@@ -1217,6 +1350,7 @@ async function discoverFrames() {
 
   totalFrames = n;
   updateUI();
+  syncRenderFrameRange();
   loadFrame(0);
 }
 
@@ -1396,6 +1530,173 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+// ── render panel (post-run export) ───────────────────────────────────────────
+if (!LIVE_MODE) {
+  const renderToggle   = document.getElementById('renderToggle');
+  const renderPanel    = document.getElementById('renderPanel');
+  const rnFrom         = document.getElementById('rnFrom');
+  const rnTo           = document.getElementById('rnTo');
+  const rnStride       = document.getElementById('rnStride');
+  const rnFormat       = document.getElementById('rnFormat');
+  const rnChooseDir    = document.getElementById('rnChooseDir');
+  const rnDirName      = document.getElementById('rnDirName');
+  const rnStartBtn     = document.getElementById('rnStartBtn');
+  const rnProgressArea = document.getElementById('rnProgressArea');
+  const rnProgressText = document.getElementById('rnProgressText');
+  const rnProgressBar  = document.getElementById('rnProgressBar');
+  const rnCustomRes    = document.getElementById('rnCustomRes');
+  const rnResCustom    = document.getElementById('rnResCustom');
+
+  let rnDirHandle  = null;
+  let rnExporting  = false;
+  let rnCancelFlag = false;
+
+  syncRenderFrameRange = function() {
+    if (totalFrames > 0) {
+      rnFrom.max = totalFrames - 1;
+      rnTo.max   = totalFrames - 1;
+      rnTo.value = totalFrames - 1;
+      rnStartBtn.disabled = !rnDirHandle;
+    }
+  };
+
+  renderToggle.addEventListener('click', () => {
+    const open = renderPanel.classList.toggle('open');
+    renderToggle.textContent = open ? 'Render ▼' : 'Render ▶';
+  });
+
+  if (!rnChooseDir.disabled) {
+    rnChooseDir.addEventListener('click', async () => {
+      try {
+        rnDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        rnDirName.textContent = rnDirHandle.name;
+        rnDirName.style.color = '#ccc';
+        rnStartBtn.disabled = totalFrames === 0;
+      } catch (e) {
+        if (e.name !== 'AbortError') console.warn('showDirectoryPicker:', e);
+      }
+    });
+  }
+
+  document.querySelectorAll('input[name="rnRes"]').forEach(r =>
+    r.addEventListener('change', () => {
+      rnCustomRes.style.display = rnResCustom.checked ? 'flex' : 'none';
+    })
+  );
+
+  function rnToBlob(canvas, type, quality) {
+    return new Promise(resolve => canvas.toBlob(resolve, type, quality));
+  }
+
+  async function rnWriteBlob(dirHandle, filename, blob) {
+    const fh = await dirHandle.getFileHandle(filename, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  }
+
+  rnStartBtn.addEventListener('click', async () => {
+    if (rnExporting) { rnCancelFlag = true; return; }
+
+    const from   = Math.max(0, Math.min(totalFrames - 1, parseInt(rnFrom.value,  10) || 0));
+    const to     = Math.max(from, Math.min(totalFrames - 1, parseInt(rnTo.value, 10) || 0));
+    const stride = Math.max(1, parseInt(rnStride.value, 10) || 1);
+    const fmt      = rnFormat.value;
+    const mimeType = fmt === 'png' ? 'image/png' : 'image/jpeg';
+    const quality  = fmt === 'png' ? undefined : 0.92;
+    const ext      = fmt === 'png' ? 'png' : 'jpg';
+    const useCustom = rnResCustom.checked;
+    const customW   = parseInt(document.getElementById('rnWidth').value,  10) || 1920;
+    const customH   = parseInt(document.getElementById('rnHeight').value, 10) || 1080;
+
+    const frames = [];
+    for (let f = from; f <= to; f += stride) frames.push(f);
+    if (frames.length === 0) return;
+
+    const origSize = new THREE.Vector2();
+    renderer.getSize(origSize);
+    const origPixelRatio = renderer.getPixelRatio();
+    const origAspect = camera.aspect;
+
+    if (useCustom) {
+      renderer.setPixelRatio(1);
+      renderer.setSize(customW, customH);
+      camera.aspect = customW / customH;
+      camera.updateProjectionMatrix();
+    }
+
+    rnExporting = true; rnCancelFlag = false;
+    setPlaying(false);
+    rnStartBtn.textContent = 'Cancel';
+    rnStartBtn.classList.add('rn-cancel');
+    rnStartBtn.disabled = false;
+    rnChooseDir.disabled = true;
+    rnProgressArea.style.display = 'block';
+    rnProgressBar.style.width = '0%';
+
+    let done = 0, failed = 0;
+    const total = frames.length;
+    try {
+      for (const fi of frames) {
+        if (rnCancelFlag) break;
+        rnProgressText.textContent = `Rendering frame ${fi}  (${done + 1} / ${total})`;
+
+        let data;
+        try {
+          const r = await fetch(frameUrl(fi));
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          data = await r.json();
+        } catch (_) {
+          failed++; done++;
+          rnProgressBar.style.width = Math.round(done / total * 100) + '%';
+          continue;
+        }
+
+        currentFrameData = data;
+        applyFrameData(data);
+        renderer.render(scene, camera);
+
+        let blob;
+        try { blob = await rnToBlob(renderer.domElement, mimeType, quality); }
+        catch (_) {
+          failed++; done++;
+          rnProgressBar.style.width = Math.round(done / total * 100) + '%';
+          continue;
+        }
+
+        const filename = 'frame_' + String(fi).padStart(6, '0') + '.' + ext;
+        try { await rnWriteBlob(rnDirHandle, filename, blob); }
+        catch (_) {
+          failed++; done++;
+          rnProgressBar.style.width = Math.round(done / total * 100) + '%';
+          continue;
+        }
+
+        done++;
+        rnProgressBar.style.width = Math.round(done / total * 100) + '%';
+      }
+    } finally {
+      if (useCustom) {
+        renderer.setPixelRatio(origPixelRatio);
+        renderer.setSize(origSize.x, origSize.y);
+        camera.aspect = origAspect;
+        camera.updateProjectionMatrix();
+      }
+      const cancelled = rnCancelFlag;
+      rnExporting = false; rnCancelFlag = false;
+      rnStartBtn.classList.remove('rn-cancel');
+      rnStartBtn.textContent = 'Render';
+      rnChooseDir.disabled = false;
+      rnStartBtn.disabled = !rnDirHandle;
+      rnProgressBar.style.width = '100%';
+      const ok = done - failed;
+      rnProgressText.textContent = cancelled
+        ? `Cancelled — ${ok} frame(s) written${failed ? `, ${failed} failed` : ''}.`
+        : `Done — ${ok} frame(s) to "${rnDirHandle.name}"${failed ? ` (${failed} failed)` : ''}.`;
+    }
+  });
+}
 
 // ── render + playback loop ────────────────────────────────────────────────────
 function animate(ts) {

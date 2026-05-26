@@ -2,6 +2,27 @@
 
 Last updated: 2026-05-25
 
+## 2026-05-25 — Addendum: frame-by-frame export for movie generation
+
+Added a collapsible **Render** panel to `sim_viewer_boa.html`, visible only in post-run (file-loaded) mode. The panel is hidden in live WebSocket mode (`?live=N`). It appears as a "Render ▶" toggle button at `top: 78px, right: 12px` (below the Display toggle).
+
+**Panel controls:** frame range From/To (auto-populated to 0…N-1 when a directory loads), stride (every Nth frame), format (JPG q=0.92 or PNG lossless), resolution (current viewport or custom W×H at pixel ratio 1), output folder (File System Access API).
+
+**Export loop:** for each frame in range, fetches the frame JSON, calls `applyFrameData()`, calls `renderer.render(scene, camera)` explicitly, then `canvas.toBlob()` immediately after (same sync block — buffer is captured before the RAF can re-render). Writes each blob via the File System Access API writable stream. Progress bar and cancel button are shown during export. Camera position, zoom, orbit state, and Display checkbox settings are not modified by the export loop — the user frames the view manually on frame 0 before clicking Render.
+
+**Camera preservation invariant:** the export loop reads the scene state set by `applyFrameData()` and renders it. It does not touch `camera.position`, `camera.quaternion`, or `orbitControls` target.
+
+**Custom resolution:** temporarily sets `renderer.setPixelRatio(1)` + `renderer.setSize(W, H)`, then restores the original pixel ratio and size after the loop. This produces pixel-exact output at the requested dimensions regardless of device DPI.
+
+**Browser requirement:** File System Access API (`showDirectoryPicker`) is Chromium-only. If not present, the Choose folder button is disabled and a red note is shown. No download-dialog fallback (unusable for thousands of frames).
+
+**`preserveDrawingBuffer: true`:** added to the renderer constructor. Required so the WebGL backbuffer is not discarded between `render()` and `toBlob()` calls. Slight perf cost during normal playback, acceptable for a viewer.
+
+**ffmpeg assembly:**
+```
+ffmpeg -framerate 30 -i frame_%06d.jpg -c:v libx264 -pix_fmt yuv420p out.mp4
+```
+
 Older entries are in `JOURNAL_ARCHIVE.md`. Run logs and pasted simulation output go in `RUN_LOGS/`.
 
 ## 2026-05-25 — Addendum: 2D projection for long-window speed
