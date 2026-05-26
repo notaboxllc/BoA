@@ -261,6 +261,13 @@ Two-field model:
 
 ---
 
+## Hardware
+
+| Machine | Role | Address |
+|---|---|---|
+| MBP | Primary development machine | — |
+| Aorus | High-memory / GPU build target | `10.0.0.187` (local network) |
+
 ## GPU Acceleration Strategy
 
 GPU acceleration via TornadoVM is planned. The only remaining prerequisite is `brew install openjdk@21` on the MBP (Phase 5), followed by a clean compile under Java 21 with `--enable-preview`. Full implementation strategy, phase priorities, write-write hazard analysis, and TornadoVM specifics are in `~/Dropbox/CodeSync/Sim3D/GPU_STRATEGY.md` and the JOURNAL.md GPU sections.
