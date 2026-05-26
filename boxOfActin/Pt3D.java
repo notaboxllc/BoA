@@ -3,7 +3,6 @@ package boxOfActin;
 
 import java.lang.Math;
 import java.io.*;
-import java.text.*;
 import edu.cornell.lassp.houle.RngPack.RanMT;
 import ec.util.*;
 
@@ -17,7 +16,6 @@ public class Pt3D {
 	public Pt3D (double [] pt) { this.x = pt[0]; this.y = pt[1]; this.z = pt[2]; }
 	public Pt3D (double x, double y, double z) { this.x = x; this.y = y; this.z = z; }
 	public Pt3D (Pt3D pt) { this.x = pt.x; this.y= pt.y; this.z = pt.z; }
-	DecimalFormat pt3DFormat = new DecimalFormat ("#0.000000000000#;#000.000000000000#");
 	
 	
 	// methods for calculating the distance between two points
@@ -577,7 +575,7 @@ public class Pt3D {
 	}
 	
 	public String reportCoords() {
-		return "(" + String.valueOf(pt3DFormat.format(this.x))+","+String.valueOf(pt3DFormat.format(this.y))+","+String.valueOf(pt3DFormat.format(this.z))+")";
+		return String.format("(%.12f,%.12f,%.12f)", this.x, this.y, this.z);
 	}
 	
 	// *** Write and Read the Pt3D to/from a file ***

@@ -1,12 +1,12 @@
 <BOA> A 10x10 micron field, no monomers simulated, 64-monomer length rigid filament segments
-deltaT:true:1.0E-4;                     // Time Step
+deltaT:true:1.0E-5;                     // Time Step
 biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
 collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
 brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
 runTime:true:100.0;                     // Run Time
-fracMove:true:0.5;                      // Coeff. for PALM movement
-fracR:true:0.807;                       // Coeff. torque arm for PALM movement
-fracMoveTorq:true:0.303;             		// Coeff. for PALM torque movement
+fracMove:true:0.02191;                  // Coeff. for PAIRs movement
+fracR:true:1.0;                       	// Coeff. torque arm for PAIRs movement
+fracMoveTorq:true:0.01;             	// Coeff. for PAIRs torque movement
 drawInterval:true:100.0;                // Drawing Interval
 toFileInterval:true:100.0;              // JPEG Interval
 toQKFileInterval:true:100.0;            // QK Interval
@@ -15,7 +15,7 @@ remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
 frameWidth:true:800.0;                  // Frame Width
 frameHeight:true:800.0;                 // Frame Height
 bugOff:true:1.0;                       // Bug Off
-simOutsideBug:false:0.0;         	// Sim Outside Bug
+simOutsideBug:false:0.0;         		// Sim Outside Bug
 initialFilaments:true:100.0;           // Initial Actin Filaments
 initialMyoMiniFils:true:100.0;          // Initial Myosin Minifilaments
 minFilLength:true:0.2;                  // Min. Filament Length
@@ -36,7 +36,7 @@ nodeTransDiff:false:1.0E-16;            // Protein Node Translation Diffusivity
 nodeRotDiff:false:0.0010;               // Protein Node Rotational Diffusivity
 actinSeed:true:3.0;                     // Monomers to seed filament
 actinOnCortex:true:0.0;                 // Actin constrained to cortex
-filSegLength:true:128.0;                 // Std. segment length
+filSegLength:true:64.0;                 // Std. segment length
 filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
 BTransCoeff:true:0.5;                   // Brownian Translational Coefficient
 BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient
