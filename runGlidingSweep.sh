@@ -76,10 +76,16 @@ for density in "${densities[@]}"; do
       -e "s/__RUNTIME__/${run_time}/g" \
       "$template_file" > "$param_file"
 
+  # Scale heap with density (motor count grows with density²/area)
+  if   [[ $density -le 100 ]]; then heap=2G
+  elif [[ $density -le 500 ]]; then heap=4G
+  else                               heap=8G
+  fi
+
   # subdir path passed to -3js  (BoA creates it; must not pre-exist)
   subdir="${parent_dir}/density_${density}"
 
-  if java -Xmx800M -cp ".:libs/*" BoxOfActin -r \
+  if java -Xmx${heap} -cp ".:libs/*" BoxOfActin -r \
        -pf "$param_file" \
        -3js "$subdir"; then
     elapsed=$(( $(date +%s) - t0 ))

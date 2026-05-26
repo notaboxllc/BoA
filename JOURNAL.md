@@ -1037,6 +1037,16 @@ gliding_batch/
 
 - Post-processing script (Python or awk): read all `gliding_assay.dat` files in a batch, filter to non-settling rows (`longWindowSettling==0`), and produce a velocity-vs-density CSV or matplotlib scatter/box plot. Suggested columns to use: `longWindowSpeedXY` (µm/s) vs `surfaceDensity` (motors/µm²). Deferred to next session.
 
+### Addendum: heap-size scaling for high-density runs
+
+OOM observed at densities ≥ 200 motors/µm² with the default `-Xmx800M`. At 2500 motors/µm² in a 9×3 µm chamber, motor count is ~67,500 (×4 Things/motor = 270,000 Things), requiring multiple GB of heap. This is a JVM configuration issue, not a code bug — high-motor-count runs have historically required a larger heap. `runGlidingSweep.sh` now scales `-Xmx` per density:
+
+| Density range | Heap |
+|---|---|
+| ≤ 100 motors/µm² | `-Xmx2G` |
+| 200–500 motors/µm² | `-Xmx4G` |
+| 1000–2500 motors/µm² | `-Xmx8G` |
+
 ---
 
 ## Workflow note
