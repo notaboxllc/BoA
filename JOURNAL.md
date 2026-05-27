@@ -1410,6 +1410,129 @@ No race risk. The collision and motor-binding phases write: `mot.onFil`, `mot.ti
 
 ---
 
+## 2026-05-26 — Follow-up survey: tipClearance dependency in collision detection
+
+### 1. What is `tipClearance` exactly?
+
+Two `double` fields on `FilSegment` (FilSegment.java:144–145):
+```java
+double end1TipC = 1e6; // large number for initial tip clearance of end1
+double end2TipC = 1e6; // large number for initial tip clearance of end2
+```
+Both are clearance distances in µm. `1e6` is the "no obstacle" sentinel. They are **min-accumulators within each timestep**: `registerATipClearance` only updates `end2TipC` if the new value is smaller (FilSegment.java:979). Reset to `1e6` at the end of each step by `resetCounters()` (FilSegment.java:1126–1127), which runs in phase `resetCtStart=12`, after biochemistry. Field initializers set `1e6` at object creation; the per-step reset thereafter is `resetCounters()`.
+
+### 2. Where is `tipClearance` written?
+
+**Write site A — `registerATipClearance()` (FilSegment.java:978–986):**
+```java
+public void registerATipClearance (double tipC, boolean arpActivator) {
+    if (tipC < end2TipC) {
+        end2TipC = tipC;
+        if (end2TipC < Env.branchZone.getValue() && arpActivator) {
+            end2NearArpFactor = true;
+        } else {
+            end2NearArpFactor = false;
+        }
+    }
+}
+```
+Called from `checkNodeFilTipsCollision` (FilSegment.java:1892) as:
+```java
+fil.registerATipClearance(Pt3D.ptDist(node.coord, fil.end2) - node.getRadius(), node.iAmHotRho);
+```
+The write is **unconditional** — it fires for any `(StickyNode, FilSegment)` pair that share a mesh cell, regardless of whether a physical collision is detected. The force application that follows is conditional; the clearance write is not.
+
+**Write site B — `bugForcesFromInside()` (FilSegment.java:2471–2474):** Sets `end1TipC = 0` or `end2TipC = 0` when a filament tip is embedded in the Bug surface (Listeria motility path only).
+
+**Write site C — `checkBugCollisionFromOutside()` (FilSegment.java:1158–1179):** Sets `end2TipC = 0` on collision, or `end2TipC = cE.delta` (actual surface clearance) on non-collision. Listeria motility path only.
+
+**Write site D — `resetCounters()` (FilSegment.java:1126–1127):** Resets both fields to `1e6` each step (phase 12).
+
+### 3. Where is `tipClearance` read?
+
+Primary consumer — `stericHindranceEnd2()` (FilSegment.java:2736–2738):
+```java
+public boolean stericHindranceEnd2() {
+    if (end2TipC < halfmono) return true;  // halfmono = Env.actinMonoRadius ≈ 0.00175 µm
+    return false;
+}
+```
+Called from `end2BiochemSim()` (FilSegment.java:939):
+```java
+if ((capConditionOKEnd2()) && (!stericHindranceEnd2())) {
+    double rate = getPolyRateEnd2();
+    boolean monomerAdded = addMonomerSim(rate);
+    ...
+}
+```
+Decision: if `end2TipC < halfmono` (tip within ~1.75 nm of node surface), barbed-end monomer addition is blocked entirely for that step. Both normal and non-hydrolyzable actin polymerization are gated by the same call.
+
+Secondary consumer — `checkCapping()` (FilSegment.java:997):
+```java
+if (end2TipC < 2*Env.actinMonoDiam && end2NearArpFactor) { return; }
+```
+Blocks capping-protein binding when the tip is near an Arp2/3-activating node.
+
+`Env.registerPlusMon(end2TipC)` (FilSegment.java:948, 958): statistics only — passes `end2TipC` to a proximity counter when a monomer is added.
+
+### 4. Phase ordering
+
+Timestep sequence (doLoop):
+
+| Phase | ID | Action | Runs every |
+|---|---|---|---|
+| Mesh fill | 0–2 | Build FILSEG/NODE/MOTOR meshes | `collisionCheckInt` steps (default 10) |
+| Mesh queries | 3 | `checkNodeFilTipsCollision` → **writes `end2TipC`** | Same gate as fill |
+| Motor binding | 4 | `motorFilMeshCollisions` | Every step |
+| Brownian, Xlinks, Joints | 5–8 | Force accumulation | Various |
+| step | 9 | Integrate forces → velocities | Every step |
+| moveThing | **10** | **Update positions (end1, end2, coord)** | Every step |
+| biochem | **11** | `end2BiochemSim()` → **reads `end2TipC`** | Every step |
+| resetCounters | 12 | `end2TipC = 1e6` | Every step |
+
+`end2TipC` is written at phase 3 and read at phase 11, within the **same timestep**. `moveThing()` (phase 10) runs between the write and read, meaning positions have already been updated when biochemistry consults the clearance value. The clearance was computed against pre-move positions.
+
+Critical corollary: on the **9 out of every 10 steps** when collision detection does not run, nothing writes `end2TipC` (resetCounters set it to `1e6` at the end of the previous step). `stericHindranceEnd2()` therefore returns false on those steps, and polymerization is ungated by steric proximity. Steric blocking from nodes is only enforced every 10th step by default.
+
+### 5. What happens if `tipClearance` is stale or wrong?
+
+**Stale (1e6):** `stericHindranceEnd2()` returns false → polymerization allowed regardless of node proximity. The barbed end can add monomers while physically overlapping a StickyNode. This is already the design on 9/10 steps, so the existing code already accepts this approximation. It is a physics-correctness issue (not numerical stability), but one the original design tolerates by running collision detection at a coarser cadence than biochemistry.
+
+**Prematurely zero (false starvation):** Polymerization blocked on a step where the tip is actually clear. Bounded error — next collision-detection step would correctly update the value.
+
+**Wrong value from stale mesh (positions have moved):** The clearance was computed against positions from the grid-rebuild step, while `moveThing()` has since run. The position error scales with `deltaT × v_tip`. At typical segment velocities this is sub-nanometer per step — well within the `halfmono ≈ 1.75 nm` threshold. Not a concern.
+
+### 6. Is `tipClearance` used by every FilSegment, or only some?
+
+**Gliding assay: entirely inactive.** `membraneFilMeshCollisions()` (FilSegment.java:1877) only processes nodes that pass `if (node instanceof StickyNode)`. The gliding-assay parameter file (`glidingAssayBatch_template`) sets `equilNodes:false:0.0`, `initialMyoMiniFils:false:0.0`, and creates no membrane nodes. With `NODE_MESH` empty (or containing no `StickyNode` entries), `checkNodeFilTipsCollision` is never called. `end2TipC` remains at its reset value of `1e6` throughout every run. `stericHindranceEnd2()` is always false. **The tipClearance design problem is entirely irrelevant to the gliding-assay GPU port.**
+
+**Bug/Listeria mode: partially active.** Write sites B and C (`bugForcesFromInside`, `checkBugCollisionFromOutside`) fire in Listeria motility runs against the Bug surface. No StickyNodes involved.
+
+**boa10-64Seg (standard box of actin):** Active if `equilNodes` is enabled and creates `StickyNode` instances. This is the only configuration where the node→tipClearance→polymerization dependency is live.
+
+### 7. Three port-design options
+
+**Option α — motor-binding to GPU first, node/tip-clearance stays on CPU:**
+Motor binding (phase 4, `motCollStart`) is already in a separate ThreadSet from the mesh collision queries (phase 3, `meshCollStart`) that contains `checkNodeFilTipsCollision`. There is no shared data between the two phases within a step — motor binding reads `mot.bindTip` and `fil.end1/end2`; the node-tip check reads `node.coord` and `fil.end2`. Moving motor binding to GPU does not require touching the node-tip code path at all. **Cleanly feasible with zero restructuring of the tipClearance dependency.**
+
+**Option β — extract tipClearance write into its own CPU phase after GPU collision detection:**
+Inside `checkNodeFilTipsCollision` (FilSegment.java:1890–1910), the structure is:
+1. `registerATipClearance(...)` — unconditional clearance write (1 distance computation)
+2. `filTipCenter` / `pDist` computation — conditional force application
+
+The clearance write does not depend on whether the force condition is met (it uses `ptDist(node.coord, fil.end2)`, not `filTipCenter`). These are separable. A GPU kernel for node-tip forces could produce a candidate list of `(nodeId, filId, clearance)` tuples; a CPU phase could then drain that list and call `registerATipClearance` serially. **Technically feasible, but more invasive than α and only relevant once the full mesh collision phase goes to GPU.**
+
+**Option γ — download filament tip positions to CPU between collision and biochemistry:**
+The download footprint is `filSegmentCt × 12 bytes` (3 floats per `end2`). For the gliding assay: 11 × 12 = 132 bytes — trivial. For boa10-64Seg: ~500 × 12 = 6 KB — fast. For a dense 3D network with 10,000 segments: 120 KB. All cases are well within acceptable PCIe transfer budgets. **Viable as a fallback if the tipClearance write must move to GPU but a structural refactor is not yet done. Not needed if α is chosen.**
+
+### 8. Open question for the planner
+
+The collision detection cadence (default every 10 steps) means `end2TipC` is updated only on those steps; biochemistry reads a stale `1e6` value on the other 9. This is already the accepted approximation. **If the GPU port of motor-binding also changes the effective cadence of the node-tip check (e.g., the mesh rebuild becomes cheaper on GPU and could run every step), should the tipClearance check also move to every-step cadence?** This would tighten the steric-hindrance enforcement and potentially change polymerization dynamics in node-rich simulations. The planner should decide whether this is a physics improvement worth making at the CPU-rewrite stage, or whether the current every-10-steps approximation is intentional and should be preserved in the GPU port.
+
+**Major finding from Q6 (flagged):** The gliding assay does not exercise `tipClearance` at all. The entire Q7 design problem (α/β/γ) is irrelevant to the first GPU target (motor binding in the gliding assay). The tipClearance dependency only matters for the node-tip collision phase, which is a later GPU porting target and only active in boa10-64Seg-style runs with StickyNodes.
+
+---
+
 ## Workflow note
 
 This project uses a two-Claude workflow:
