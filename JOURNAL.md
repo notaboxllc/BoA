@@ -1178,6 +1178,236 @@ The `MyosinFixed` binding search is a better-scaling target: O(motors × segment
 
 Question: should the first GPU kernel target MyosinFixed binding search rather than FilSegment-Brownian? The Brownian port is architecturally simpler (embarrassingly parallel, no neighbor reads) and establishes the SoA infrastructure that the binding search also needs. But if the gliding assay is the primary science driver, the binding search is where measurable speedup will first appear and where the density-sweep data quality would improve. Planner should decide before the port begins.
 
+## 2026-05-26 — Pivot: collision detection, not Brownian, as first GPU target
+
+The Brownian-on-FilSegments survey (above) surfaced the right strategic question in section 8: is FilSegment-Brownian the right first GPU kernel given current scales? Discussion with jba clarified that the question was framed wrong. Two corrections:
+
+1. **The gliding-assay scale (~11 FilSegments) is a teaching case, not the target workload.** The science BoA exists to support — branched actin networks, lamellipodial dynamics, dense myosin minifilament arrays — scales to thousands of filaments and proportionally more FilSegments. The GPU port should be designed for that target workload and validated on smaller cases, not optimized for the smaller cases.
+
+2. **Sim3D's lesson was that collision detection is where the asymptotic GPU win lives.** Brownian is O(N) and embarrassingly parallel; even at thousands of segments it won't dominate the timestep. Collision detection between motor heads and FilSegments (and FilSegment–FilSegment, and any other proximity queries BoA performs) is O(N²) brute force or O(N) with a spatial grid — that's the kernel whose speedup transforms what BoA can simulate.
+
+BoA already has a partial spatial-grid implementation: a coarse 2×2D grid painting of objects that pre-filters pairs before a finer-scale collision check. This is the analog of Sim3D's MuttonGrid before its GPU port.
+
+**Three-phase plan** (revised from the strategy doc's two-phase structure):
+
+1. **Survey** (current session): document the existing 2×2D grid, what proximity queries it serves, the data flow for each, the call structure, and the current per-query work. No edits.
+
+2. **CPU rewrite**: refactor BoA's collision detection into a SoA-friendly, GPU-mappable shape that still runs on CPU. Validate it produces identical results to the current implementation. This is where the algorithm gets debugged in a debuggable environment, before TornadoVM's constraints (FloatArray-only, no nested objects, restricted kernel control flow) enter the picture.
+
+3. **GPU port**: translate the CPU-rewritten version into TornadoVM kernels. With the algorithm already proven, what gets debugged in this phase is purely the TornadoVM mapping (FloatArray layout, kernel boundaries, transfer modes, persistent-residency architecture per `GPU_STRATEGY.md`).
+
+**Open design question for phase 2**: the existing grid is 2×2D, which is appropriate for the gliding-assay slab geometry. The target dense-3D actin-network workload likely needs a full 3D grid. The CPU-rewrite phase should make this choice deliberately, since the grid's dimensionality will be frozen into the kernel data layout in phase 3.
+
+**No update to `GPU_STRATEGY.md` yet.** The persistent-residency architecture, SoA layouts, and transfer-mode tables in that document remain correct. Only the choice of first kernel changes — and the change confirms rather than contradicts the strategy.
+---
+
+## 2026-05-26 — Survey: BoA collision detection, current state and CPU-rewrite readiness
+
+### 1. The 2D grid implementation
+
+`Mesh.java` (521 lines). Three static singleton instances: `FILSEG_MESH`, `NODE_MESH`, `MYOHEADS_MESH`. Each is a **pure XY projection** — Z is completely ignored in all fill and query paths.
+
+Data structure per `Mesh` instance (Mesh.java:22–27):
+```java
+double[][][] meshpoints;   // [nXBins][nYBins][binDepth=1000] — stores double-cast int array indices
+int[][]      timeStamps;   // [nXBins][nYBins] — Env.counter at last write (stale-cell detection)
+int[][]      activeCts;    // [nXBins][nYBins] — count of objects in cell for current timestamp
+Object[][]   mSync;        // [nXBins][nYBins] — per-cell monitor for concurrent fill
+```
+
+Cell size: `X_BIN_WIDTH = Y_BIN_WIDTH = 0.2 µm` (Mesh.java:16–17, static, set at class load). Bin count: `nXBins = 1 + ceil(boxXDim / 0.2)`, `nYBins = 1 + ceil(boxYDim / 0.2)`, computed from `Env.boxXDim`/`Env.boxYDim` at class load (Mesh.java:38–40). For a 14×2 µm gliding box: 71×11 = 781 cells; for a 10×10 µm boa10 box: 51×51 = 2601 cells.
+
+What each cell stores: **array indices** cast to double, not object references:
+- FILSEG_MESH: `curSeg.filArrayPos` (index into `FilSegment.theFilSegments[]`) — Mesh.java:127
+- NODE_MESH: `node.myNodeNumber` (index into `ProteinNode.theNodes[]`) — Mesh.java:132
+- MYOHEADS_MESH: `motor.myMotorNumber` (index into `MyoMotor.theMotors[]`) — Mesh.java:137
+
+Z dimension: absent from all fill methods. `fillFilSegMesh` (Mesh.java:301) uses only `startPt.x`/`startPt.y`/`stopPt.x`/`stopPt.y`. `fillMotorMesh` (Mesh.java:404) uses only `motor.bindTip.x`/`motor.bindTip.y`. Objects at different Z coordinates sharing the same XY bins are treated as candidates.
+
+Fill algorithm: `fillFilSegMesh` — for short segments (< `MIN_LENGTH_FOR_LINE_ALGORITHM = 200` nm) fills the XY bounding box of end1→end2; for longer segments, Bresenham line from end1 to end2 then `fillMeshCell` pads ±1 bin around each raster point (Mesh.java:301–351). `fillNodeMesh` and `fillMotorMesh` fill the XY bounding box of coord ± radius or bindTip ± myoColTol (Mesh.java:354–452).
+
+Grid build call site: `BoxOfActin.doLoop()` lines 688–693, inside `if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0)` — three sequential ThreadSet dispatches: `meshFilsStart=0`, `meshNodesStart=1`, `meshMotorsStart=2`. Rebuild interval: `collisionCheckInt = collisionDeltaT / deltaT` (default 1e-4/1e-5 = 10 steps).
+
+Grid query call sites:
+- `meshCollStart=3`: immediately after mesh fills, inside the same gate. FilSeg–FilSeg, Node–Node, Node–FilSeg queries.
+- `motCollStart=4`: **outside** the gate (BoxOfActin.java:704) — runs every timestep against stale mesh data from the last rebuild. The stale check passes because `Mesh.lastWriteTime` (set during fill) equals `timeStamps[x][y]` from the last rebuild.
+
+### 2. Grid-based queries
+
+**Q2.1 — FilSeg–FilSeg crosslinking** (FilSegment.java:1846, `filSegMeshCollisions(int xStart, int xStop)`):
+- Objects: FilSegment ↔ FilSegment from `FILSEG_MESH` (same cell, different filament IDs).
+- Guard: `iSeg.filID != jSeg.filID && Env.xLinks.isActive()`.
+- Produces: candidate pair passed to `checkToLink` → `FilLink.makeLink` (event-producing: creates a new crosslink object).
+- Phase: `meshCollStart=3`, inside collision-check gate.
+
+**Q2.2 — Node–Node collision** (ProteinNode.java:545, `nodeMeshCollisions(int xStart, int xStop)`):
+- Objects: ProteinNode ↔ ProteinNode from `NODE_MESH` (same cell, distinct nodes).
+- Guard: `Env.collideProteinNodes.isActive()` (outer gate in `CkMeshThreads.execute`, Mesh.java:175).
+- Produces: repulsion force via `checkNodeCollision` → `forceCollision` (force-producing: writes to both nodes' `forceSum`).
+- Phase: `meshCollStart=3`, inside collision-check gate.
+
+**Q2.3 — StickyNode–FilSeg barbed-tip collision** (FilSegment.java:1867, `membraneFilMeshCollisions(int xStart, int xStop)`):
+- Objects: `StickyNode` (from `NODE_MESH`) × FilSegment (from `FILSEG_MESH`), same cell.
+- Produces: mixed — repulsion force on node and filament + registers tip clearance for polymerization biochemistry (`fil.registerATipClearance(...)` — side effect used by barbed-end dynamics).
+- Phase: `meshCollStart=3`, inside collision-check gate.
+
+**Q2.4 — Motor–FilSeg binding** (MyoMotor.java:329, `motorFilMeshCollisions(int xStart, int xStop)`):
+- Objects: unbound `MyoMotor` (`!mot.onFil`) × FilSegment, from `MYOHEADS_MESH` × `FILSEG_MESH`, same cell.
+- Uses stale grid (from last rebuild); actual positions read from current `mot.bindTip`, `fil.end1`, `fil.end2`.
+- Produces: motor binding event → `mot.ontoFilament(fil, arcOnFil)` (event-producing, synchronized on `mot.attachSync`).
+- Phase: `motCollStart=4`, **every timestep** (outside collision-check gate).
+- Covers all `MyoMotor` subclasses, including `MyosinFixed` motors (registered in `MyoMotor.theMotors[]` at construction via `MyoMotor.addMyoMotor(this)`).
+
+**Non-grid proximity queries (dead code):**
+- `FilSegment.nodeCollisions()` (FilSegment.java:2002): per-segment brute-force scan over all ProteinNodes. Defined but never called from doLoop.
+- `FilSegment.filSegCollisions()` (FilSegment.java:1806): commented out — O(N²) brute-force predecessor to the grid-based version. Uses `roughCollisionCheck` (bounding-box prefilter in 3D). Both `roughCollisionCheck` and this function are dead code.
+- `ProteinNode.nodeMeshCollisions()` (ProteinNode.java:524): no-arg version, comment says "not called anymore with multi-threaded architecture." Dead.
+- Two `/*public void myoMotorCollisions()`/`nodeCollisions()` blocks in FilSegment.java at lines 2030 and 2047: commented out.
+
+### 3. Finer-scale collision/proximity checks
+
+**Q2.1 — `checkToLink(iSeg, jSeg)` (FilSegment.java:1930)**:
+```java
+// Reads: fil1.uVec, fil2.uVec, fil2.uVecR (orientation dot-product gate)
+double angTween  = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVec));
+double angTweenR = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVecR));
+if ((angTween > maxAngle) & (angTweenR > maxAngle)) { return; }  // angle gate
+
+// Fine check: line-segment-to-line-segment minimum distance
+lineSegmentIntersectTest(fil1.end1, fil1.end2, fil2.end1, fil2.end2, retO);
+if (retO.collision && retO.conDist < Env.crossLinkGrabDist.getValue()) {
+    // Writes: FilLink.makeLink(fil1, loc1, fil2, loc2) — event
+}
+```
+Reads: `fil1/fil2.end1`, `fil1/fil2.end2`, `fil1/fil2.uVec`, `fil2.uVecR`, `fil1.nodeAtEnd2`, `fil1/fil2.filID`, `fil1.end2Node`. Writes (on success): `FilLink` object created; `fil1.linkCt` incremented.
+
+**Q2.2 — `checkNodeCollision` → `forceCollision` (ProteinNode.java:604)**:
+```java
+double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+double radDist = pP.getRadius() + iP.getRadius();
+if (pDist < radDist) {
+    double mag = attnF * (1e-6 * (radDist-pDist) / Env.collisionDeltaT.getValue())
+                       / (1/iP.bTransGam.x + 1/pP.bTransGam.x);
+    iP.incForceSum(Pt3D.Scale(mag, iVec));   // Writes: iP.forceSum
+    pP.incForceSum(Pt3D.Scale(mag, pVec));   // Writes: pP.forceSum
+}
+```
+Reads: `coord.x/y/z`, `getRadius()`, `bTransGam.x`. Writes: both nodes' `forceSum`.
+
+**Q2.3 — `checkNodeFilTipsCollision(node, fil)` (FilSegment.java:1890)**:
+```java
+fil.registerATipClearance(Pt3D.ptDist(node.coord, fil.end2) - node.getRadius(), node.iAmHotRho);
+Pt3D filTipCenter = Pt3D.Add(fil.end2, filTipR, fil.uVecR);
+double pDist = Pt3D.ptDist(node.coord, filTipCenter);
+if (pDist < node.getRadius() + filTipR) {
+    double mag = attnFactor * 1e-6 * impingeDist / Env.collisionDeltaT.getValue()
+                 / (1/node.bTransGam.x + 1/fil.bTransGam.y);
+    node.incForceSum(...);   // Writes: node.forceSum
+    fil.incForceSum(...);    // Writes: fil.forceSum (with torque)
+}
+```
+Reads: `node.coord`, `fil.end2`, `fil.uVecR`, `node.iAmHotRho`, `node.getRadius()`, `fil.bTransGam.y`. Writes: both `forceSum` plus `fil.tipClearance` (used in barbed-end biochemistry).
+
+**Q2.4 — `checkFilSegCollision(mot, fil)` (MyoMotor.java:353)**:
+```java
+if (Pt3D.Dot(mot.uVec, fil.uVec) < Env.myoMotorAlignWithFilTolerance.getValue()) { return; }
+if (Pt3D.Dot(mot.myMyosin.myoRod.uVec, fil.uVec) < 0) { return; }
+if (fil.nodeAtEnd2) { return; }
+Thing.pointAndLineIntersectTest(mot.bindTip, fil.end1, fil.end2, retO);
+if (retO.collision && retO.conDist < Env.myoColTol.getValue()) {
+    mot.ontoFilament(fil, Pt3D.ptDist(fil.end1, retO.conPt1));  // Writes: state transition
+}
+```
+Reads: `mot.bindTip` (current), `fil.end1/end2` (current), `mot.uVec`, `mot.myMyosin.myoRod.uVec`, `fil.uVec`, `fil.nodeAtEnd2`. Writes (on success): `mot.onFil=true`, `mot.tipLink` attachment fields.
+
+### 4. Event vs. force semantics
+
+| Query | Semantics | GPU shape |
+|---|---|---|
+| FilSeg–FilSeg crosslink | **Event-producing**: `FilLink.makeLink()` creates a new object | Candidate-list output; serial CPU resolution |
+| Node–Node collision | **Force-producing**: writes `forceSum` on both nodes | Needs atomic adds (two writers per pair) |
+| StickyNode–FilSeg tip | **Mixed**: writes `forceSum` on both + `tipClearance` side effect | Force part: atomic adds; tipClearance: serial |
+| Motor–FilSeg binding | **Event-producing**: `ontoFilament()` transitions motor state | Candidate-list output; serial CPU resolution |
+
+### 5. Per-step call structure
+
+`BoxOfActin.doLoop()` lines 684–706:
+
+```java
+// Conditional block — fires every collisionCheckInt steps (default: every 10)
+if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
+    startAllThreadSets(Env.meshFilsStart);   waitOnAllThreadSets(Env.meshFilsStop);   // phase 0
+    startAllThreadSets(Env.meshNodesStart);  waitOnAllThreadSets(Env.meshNodesStop);  // phase 1
+    startAllThreadSets(Env.meshMotorsStart); waitOnAllThreadSets(Env.meshMotorsStop); // phase 2
+    startAllThreadSets(Env.meshCollStart);   waitOnAllThreadSets(Env.meshCollStop);   // phase 3
+    collisionCkCounter = 0;
+}
+// Unconditional — every timestep
+startAllThreadSets(Env.motCollStart); waitOnAllThreadSets(Env.motCollStop);           // phase 4
+```
+
+Three ThreadSets: `Mesh.meshThreads` (fill, phases 0–2), `Mesh.ckMeshThreads` (query, phase 3), `Mesh.ckMotsThreads` (motor query, phase 4). All are sequential fan-out/gather pairs from `TimeLoop`.
+
+Grid is built once per `collisionCheckInt` steps. Xlink/node queries fire at the same cadence. Motor–filament query fires every step using the stale grid, reading current positions. Query results (binding events, force accumulation) are consumed within the same step — there is no multi-step candidate accumulation.
+
+### 6. Current scaling characteristics
+
+**Gliding assay (~11 FilSegments, 280–70,000 motors):**
+- Grid fill cost scales with motor count. At 70K motors: dominant per-step cost.
+- Motor–FilSeg query: with only 11 segments spread across a 14×2 µm / 0.2 µm = 71×11 bin grid, each occupied bin has ≤1 segment. Per-step pair-check count ≈ motorCount × 1 ≈ brute-force O(M×N). The grid adds fill overhead without reducing pair checks — **grid is not winning at current scales**.
+- FilSeg–FilSeg xlink: 11 segments in 781 bins → most bins empty; check is effectively O(N) — trivially fast.
+
+**boa10-64Seg (~200–500 FilSegments, fewer motors):**
+- At 500 segments in a 51×51 bin 10×10 µm box, avg ~0.2 seg/bin, still sparse. Grid begins winning when local density drives multiple-segment bins. Dense branched networks (1000+ segments) are the crossover point.
+- No measured timer data in journal or comments. `collisionMeshTimer` and `motorsAndFilsColTimer` are present (BoxOfActin.java:22–23) and print % of runtime at run end (BoxOfActin.java:641–642), but no per-phase breakdown (fill vs query) is available. Separate fill and query timers would need to be added.
+
+### 7. What the CPU rewrite will need to change
+
+**Grid data structure:**
+- `meshpoints[x][y][i]` stores int IDs as `double`. Replace with `int[][][] meshpoints` (eliminates cast).
+- Three separate mesh arrays → three separate `int[][]` cell-count arrays and `int[][][]` id arrays. Keep three logical meshes or unify into one with object-type tag (planner decision, Q9.2).
+- Cell indices stored as `filArrayPos`, `myNodeNumber`, `myMotorNumber` — these are compact array indices, SoA-friendly. They become direct indices into SoA FloatArrays.
+
+**Fine-scale checks rewritten in SoA terms:**
+- `checkFilSegCollision`: replace `mot.bindTip.x/y/z` with `motX[motorId]`/`motY[motorId]`/`motZ[motorId]`; replace `fil.end1.x/y/z` with `filEnd1X[filId]` etc.; replace `mot.uVec` with `motUX[motorId]` etc.
+- `mot.myMyosin.myoRod.uVec` is a 3-hop object chain — requires a flat `rodUX[motorId]` SoA array populated per motor.
+- `fil.nodeAtEnd2` → `filNodeAtEnd2[filId]` (boolean SoA flag).
+- `mot.onFil` → `motorOnFil[motorId]` (boolean SoA flag, also the output of the query).
+- `fil.filID` → `filFilID[filId]` (int SoA field, for the same-filament exclusion in xlink query).
+
+**Event-producing queries:**
+- Both motor binding and crosslink creation must be refactored into a candidate-list pattern: kernel writes `(motorId, filId, arcOnFil)` tuples to a bounded output buffer; CPU iterates the buffer and calls `ontoFilament`/`makeLink` serially. This is the key structural change and must be validated at the CPU-rewrite stage before GPU port.
+
+**Hard points:**
+1. `fil.end2Node == mot.myMyosin.myNode` — object reference equality used in `checkFilSegCollision`. Must become `filEnd2NodeId[filId] == motNodeId[motorId]` with -1 for null.
+2. `fil1.retObj` shared across threads in `checkToLink` — if a filament spans bin boundaries, concurrent threads share its retObj (data race). Fix: use thread-local RetObj, not `fil1.retObj`.
+3. `checkNodeFilTipsCollision` writes `fil.tipClearance` (a non-force side effect for polymerization). This is a non-trivial interaction between collision detection and biochemistry — the polymerization path reads `tipClearance` later. Must be preserved or restructured.
+4. Node–Node force output requires per-node atomic adds if two pairs involving the same node are processed by different threads (which the X-bin partition can allow if a node spans bin boundaries).
+
+**Grid dimensionality choice:**
+- Keep 2D (XY only): correct for gliding-assay slab. Dense 3D actin networks (boa10-64Seg) lose Z-axis pre-filtering — all objects at different Z positions appear as candidates. For 10×10×10 µm boxes at high density this is a significant false-positive load.
+- Move to 3D: a 50×50×50 bin grid for a 10×10×10 µm box is 125K cells — manageable. Gliding-assay slab (Z ≈ 0.5 µm) would use only 2–3 Z bins; behavior approximates the current 2D grid with no overhead penalty. 3D is correct for both geometries. The CPU rewrite is the right place to make this choice, since the GPU layout locks in the grid dimensionality.
+
+### 8. Coexistence with WebSocket live observer
+
+No race risk. The collision and motor-binding phases write: `mot.onFil`, `mot.tipLink.*`, `fil.linkCt`, `FilLink` objects, `node.forceSum`, `fil.forceSum`. `ThreeJSWriter.buildFrameJson()` reads: `fil.end1`, `fil.end2`, `fil.coord`, `mot.nucleotideState`, `mot.myRod.end1/end2`, etc. These are disjoint fields. Positions (`end1`, `end2`, `coord`) are updated in phase `moveStart` (BoxOfActin.java:754), well before the safe point where `logAndDraw()` dispatches. The safe-point ordering (pause wait → kill check → inspect drain → param drain → logAndDraw) guarantees all physics phases are complete before any frame is dispatched.
+
+### 9. Open questions for the planner
+
+1. **2D vs 3D grid**: 3D is correct for both gliding-assay slab and dense 3D networks. The CPU rewrite is the right place to decide and implement. Survey recommends 3D; planner to confirm.
+
+2. **Unify queries or keep separate**: The four query types (xlink, node-node, node-filseg, motor-filseg) currently share the grid infrastructure but have separate query loops. Keep separate (lower risk, independent GPU porting schedule) or unify under one kernel with object-type dispatch (cleaner but larger change). Node/xlink GPU porting is likely lower priority than motor binding — separate keeps the scope of the first GPU kernel tight.
+
+3. **SoA-ify only the fine checks vs rewrite both layers**: Option A — keep current grid structure (int cells, array-index contents), rewrite only the per-pair checks to read from SoA FloatArrays instead of Pt3D fields. Option B — rewrite grid storage as SoA-indexed too (int arrays per cell). Option A is a smaller CPU-rewrite step with lower validation risk; Option B is cleaner for the eventual GPU port. Recommend A for the CPU-rewrite session, then B in the GPU-port session.
+
+4. **`fil1.retObj` data race in `checkToLink`**: a filament spanning two X-bin ranges can be processed by two concurrent `CkMeshThreads` threads with different partners, both writing to `fil1.retObj`. Effect is occasional missed or doubled crosslink; not currently crashing. Fix in CPU rewrite: pass a thread-local RetObj stack variable rather than reading from the filament instance. This is a correctness issue that should not be left for the GPU-port session.
+
+5. **Timer granularity**: `collisionMeshTimer` covers fill + query combined; `motorsAndFilsColTimer` covers the per-step motor query. No per-phase breakdown. Adding separate fill-timer and query-timer in the CPU-rewrite session would clarify whether the grid overhead is paying off at current scales and what the target speedup is.
+
+6. **`Env.collideProteinNodes` conditional**: node-node collision is runtime-gated. GPU kernel design must decide: always launch the kernel (zero-cost if node count is 0) or check the flag on CPU before kernel launch. In gliding-assay mode there are no ProteinNodes, so the node queries are dead weight in the gliding assay. Consider whether to short-circuit them earlier in the CPU rewrite.
+
+7. **`checkNodeFilTipsCollision` → `tipClearance` dependency**: this side effect feeds barbed-end polymerization biochemistry. If the collision check is moved to GPU and the tipClearance write stays on CPU, there needs to be a download of filament endpoint positions before the barbed-end biochemistry phase. This is an interaction between the GPU port and the biochemistry phase that must be planned before the GPU port begins.
+
 ---
 
 ## Workflow note
