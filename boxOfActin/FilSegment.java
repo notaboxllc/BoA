@@ -1928,7 +1928,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public static void checkToLink (FilSegment fil1, FilSegment fil2) {
-		RetObj retO = fil1.retObj;
+		RetObj retO = new RetObj();
 		if (fil1.nodeAtEnd2 && fil2.nodeAtEnd2) {
 			if (fil1.end2Node == fil2.end2Node) { return; }  // no xlinks between first segments from same node
 		}

@@ -1533,6 +1533,20 @@ The collision detection cadence (default every 10 steps) means `end2TipC` is upd
 
 ---
 
+## 2026-05-26 — Fix: fil1.retObj data race in checkToLink
+
+**Race confirmed.** `retObj` is an instance field on `Thing` (Thing.java:72), inherited by all `FilSegment` instances. In `checkToLink` (FilSegment.java:1931), it was aliased as `RetObj retO = fil1.retObj` then written by `lineSegmentIntersectTest` (Thing.java:440). `fillFilSegMesh` places each segment into multiple x-bins (Bresenham walk + OVERLAP ±1 padding; Mesh.java:301–350), so the same segment can appear in two `CkMeshThreads` worker partitions simultaneously. Two threads calling `checkToLink(filA, ...)` with the same `filA` as `fil1` both wrote `filA.retObj.{collision, conDist, conPt1, conPt2, ray1–ray4}` concurrently.
+
+**Sibling fields.** No other instance field on `FilSegment` is scratch space within `checkToLink`. `myPRNG` is accessed (`fil1/fil2.myPRNG.nextDouble()`) only when `retO.collision` is true, but is lower-severity and out of scope. The `v1`/`v2`/`tempPt` Pt3D scratch fields on `Thing` are not touched by `checkToLink` or `lineSegmentIntersectTest`.
+
+**Fix: Option A** (local allocation). Made `RetObj` a `static class` in `Thing.java` (was non-static inner; made static so it can be instantiated in the static `checkToLink`). Changed FilSegment.java:1931 from `RetObj retO = fil1.retObj` to `RetObj retO = new RetObj()`. Per-call stack allocation; negligible cost at every-10-step cadence.
+
+**Files changed:** `boxOfActin/Thing.java:107` (`public class` → `public static class`), `boxOfActin/FilSegment.java:1931` (field alias → local allocation).
+
+**Validation.** Clean compile. Ran headless with `boa10-64Seg` 30+ seconds — no crash, no NullPointerException. `remoteReportInterval = 100k steps` meant no step-count output appeared in the window, but startup and mesh init completed correctly. No pre/post determinism comparison possible (no fixed-seed mechanism); fix is logically complete — shared-state race source removed.
+
+---
+
 ## Workflow note
 
 This project uses a two-Claude workflow:

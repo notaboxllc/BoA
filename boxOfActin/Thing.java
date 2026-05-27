@@ -104,7 +104,7 @@ public class Thing extends Object {
 		addThing(this);
 	}
 	
-	public class RetObj {
+	public static class RetObj {
 		// this is the object passed by from line-line and line-point intersect tests
 		Pt3D conPt1, conPt2, ray1, ray2, ray3, ray4;
 		double conDist = 0;
