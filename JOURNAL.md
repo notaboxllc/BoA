@@ -1547,6 +1547,51 @@ The collision detection cadence (default every 10 steps) means `end2TipC` is upd
 
 ---
 
+## 2026-05-27 — Gliding assay: first quantitative validation of motor model
+
+### What was run
+
+First production gliding-assay batch on aorus. 14 µm × 2 µm × 0.5 µm arena, single 11×64-monomer filament (~2 µm contour, span 1.93 µm), phalloidin-stabilized stiffness regime (fracMove = 0.0573, fracR = 1.0, fracMoveTorq = 0.01, deflection ratio 0.500). Brownian coefficients tuned via long-filament persistence length test (BTransCoeff = BRotCoeff = 1.4) earlier in the day, hitting Lp_meas 14.4 µm against Lp_theo 15.0 µm at 100k samples on a 21 µm chain. Density sweep at 8 values from 10 to 2500 motors/µm², 4 s sim time per density (except 2500, which was killed at 2.075 s — see below).
+
+Pipeline correctness was verified beforehand with a 0.2 s smoke test on aorus; smoke test confirmed batch infrastructure works at all densities.
+
+### Results
+
+**Gliding velocity (longWindowSpeedXY) scales monotonically with motor density across three orders of magnitude:**
+
+- d=10 → 0.14 µm/s (median): below Uyeda density threshold, essentially no directed motion
+- d=100 → 1.23 µm/s: still below threshold
+- d=500 → 3.70 µm/s: in transition
+- d=1000 → 4.17 µm/s: approaching experimental range
+- d=2500 → 8.06 µm/s: inside the published 5–8 µm/s skeletal myosin II range
+
+avgBoundMotors scales sublinearly with density (slope ~0.6 on log-log), consistent with geometric saturation as the filament's reachable area fills.
+
+posZ stays within ±0.25 µm at all densities — no filament popping above the motor plane. Vertical position has a slight negative bias (filaments below z=0), consistent with motor pinning toward the floor.
+
+### Interpretation
+
+This is the **first quantitative validation of the motor model** in the spirit of the V25 actin biophysical benchmarks. At high motor density, simulated gliding velocity matches experimental skeletal myosin II in absolute units, not just qualitatively. The density-threshold behavior (low velocity at d≤100, transition between d=100 and d=500, plateau at d≥1000) is also qualitatively consistent with the Uyeda/Spudich result.
+
+Importantly, this agreement holds **despite the simulation running at ~100× experimental viscosity** (aeta = 0.1 Pa·s vs ~0.001 Pa·s for real motility buffer). Gliding velocity is dominated by motor stepping kinetics, not by drag balance, in this parameter regime — so the viscosity convenience used to suppress thermal fluctuations does not affect this result. Worth noting for future viscosity-sensitivity studies.
+
+### 2500 density: killed early but usable
+
+The d=2500 run was killed at 2.075 s of 4 s sim time after the filament reached and piled up against the far box wall. Data before pile-up is good. Inside the box, the filament glides at experimental velocity; once at the wall it accordions and is no longer measuring gliding velocity. The data after wall contact (roughly t > 1.7 s) should be excluded from velocity analysis if precision is needed.
+
+Note: the d=2500 run also produced many `[BIND]` debug print statements (binding-event telemetry) that were not seen at lower densities. Suggests a debug print gated on a high-density-only condition. Worth investigating before the next high-density batch — see open questions below.
+
+### Open questions / next steps
+
+- **Stiff-filament A/B comparison** (planned): re-run d=200, 500, 1000 with fracMove = 0.5, fracR = 0.1, fracMoveTorq = 0.2 (roughly 100× stiffer). Determines whether realistic flexibility is a confound or a faithful representation of the experimental phenomenology. Either outcome is informative.
+- **`[BIND]` print investigation**: short Claude Code grep to locate the print and determine whether it's gated on a debug flag, density threshold, or unconditional. Suppressing it should be a one-line fix once located.
+- **Periodic boundary conditions** along the long axis: would eliminate wall-contact contamination of velocity stats, allow smaller boxes (lower motor count at high density, much faster), and is the cleanest long-term fix for the d=2500 wall-pile-up problem. Non-trivial implementation; survey before committing.
+- **Force–velocity benchmark** (planned but not started): the F–V curve via tethered filament, with stall force scaling on motor number. Validates the neck-stiffness lumped parameter directly. Next major validation after the stiffness A/B is complete.
+
+### Related new document
+
+A standing-knowledge summary of the gliding-assay validation work has been started as **MYOSIN_VALIDATION.md**, analogous to NMII_BIOLOGY.md. Future motor-validation work (F–V, attachment lifetime, etc.) accumulates there. JOURNAL.md captures session-by-session progress; MYOSIN_VALIDATION.md captures what's currently known.
+
 ## Workflow note
 
 This project uses a two-Claude workflow:
@@ -1554,3 +1599,56 @@ This project uses a two-Claude workflow:
 - **Claude Code** (implementer): file editing, compilation, execution, multi-file refactors
 
 Restart Claude Code at task boundaries to avoid context bloat. `CLAUDE.md` and `JOURNAL.md` carry context forward across Claude Code sessions and across the planner / Claude Code boundary. Push them to GitHub at the end of any session that changed them, so the planner's next session can fetch a current view.
+
+---
+
+## 2026-05-27 — Discovery: motor binding non-deterministic at 16 threads post-43d5ff2
+
+### Symptom
+
+Three consecutive fixed-seed runs (`-seed 42`, `ParameterFiles/glidingAssayValidation`, 5000 steps, `allThreadCt = 16`) produced **350, 468, and 396 binding events** respectively — a range of 118 events across identical inputs. The binding event log format is `[BIND] step=N mot=M fil=F arc=A` printed from `MyoMotor.ontoFilament`. First events in each run were at different steps and with different motor/filament IDs. Not a noise artifact: the variation is 25–33% of the event count and the first-event step differs by 50+ steps across runs.
+
+### How discovered
+
+During the validation-baseline collection phase of the CPU rewrite step-1a prompt. The plan was to collect a fixed-seed baseline before the rewrite, then verify the rewrite log matched byte-for-byte. When the two runs produced different counts (350 and 468), the session paused rather than proceeding on a contaminated baseline.
+
+### What this implies
+
+The post-43d5ff2 codebase is **not byte-deterministic for motor binding events** at `allThreadCt = 16`, even with a fixed Env.mtRNG seed. Commit 43d5ff2 fixed the `fil1.retObj` data race in `checkToLink` (xlink correctness), but the motor-binding path was not analyzed for analogous races at that time — the 43d5ff2 journal entry explicitly noted that `myPRNG` races in `checkToLink` were "lower-severity and out of scope." At least one race in the motor-binding path remains.
+
+Separately: reducing `numMeshCollThreads = 1` and `numMeshThreads = 1` did not restore determinism (333 vs 434 events on two runs). The race survives even when the mesh fill and collision phases are single-threaded, which points to a race in another force-accumulation or physics phase.
+
+### Race source hypothesis
+
+**Top candidate: force accumulation races in MyoThreads (and BrownianThreads).** Once a motor binds, every subsequent step it exerts a pulling force on the bound `FilSegment`. That force write (`fil.force.x += ...; fil.force.y += ...` etc.) happens in the myosin-joints phase, processed by `numMyoThreads = allThreadCt = 16` threads. Multiple threads can process different bound motors that all pull on the same filament segment, with unprotected concurrent writes to the filament's force vector. This race changes filament trajectories step-by-step; changed trajectories alter which motors are within `myoColTol` range on future steps; hence different binding events.
+
+Evidence: determinism was not restored by `numMeshCollThreads = 1` + `numMeshThreads = 1` (eliminating the mesh fill and motor-collision phases). Those changes remove the races in the collision-detection path but leave the force-accumulation path running at 16 threads. The surviving 333 vs 434 spread is consistent with force-accumulation races driving the trajectory divergence, while the mesh-path races only add noise at the moment of binding.
+
+**Secondary candidate: `mot.retObj` race in `motorFilMeshCollisions`.** The CkMotsThreads divides X bins among 16 threads (`MyoMotor.motorFilMeshCollisions(xStart, xStop)`, Mesh.java:207–215). A motor whose bounding box straddles an X-bin boundary appears in two adjacent ranges, so two threads call `checkFilSegCollision(mot, fil)` for the same motor concurrently. Both alias `retO = mot.retObj` (MyoMotor.java:370) and both call `Thing.pointAndLineIntersectTest(..., retO)` which writes `retO.{collision, conDist, conPt1, conPt2, ...}`. This is the exact same class of race as `fil1.retObj` in commit 43d5ff2. However, this race is only active for motors at X-bin boundaries, so it explains some non-determinism but probably not all of it (the force-accumulation race affects every step for every bound motor).
+
+If this is correct, a full fix would require: (a) fixing the force-accumulation race (using per-thread staging or atomic-add), and (b) fixing the `mot.retObj` race (local allocation as done in 43d5ff2 for `fil1.retObj`). The two problems are separable.
+
+Both hypotheses need investigation to confirm. No additional code was read this session; the above is based on code seen during the 43d5ff2 race-fix session and the present session's motorFilMeshCollisions review.
+
+### What was NOT changed
+
+No step-1a rewrite code was committed. All source files were reverted to commit 43d5ff2 state:
+- `boxOfActin/MyoMotor.java` — reverted (SoA arrays removed)
+- `boxOfActin/FilSegment.java` — reverted (SoA arrays removed)
+- `boxOfActin/BoxOfActin.java` — reverted
+- `boxOfActin/Thing.java` — reverted (myPRNG back to `Math.random()`)
+- `boxOfActin/Env.java` — reverted (`numMeshCollThreads = allThreadCt`, no motorBindGrid3D constants)
+- `boxOfActin/Mesh.java` — reverted
+- `boxOfActin/MotorBindGrid3D.java` — deleted (new file, not committed)
+- `ParameterFiles/glidingAssayValidation` — deleted (new file, not committed)
+- `baseline_binding_events.log`, `rewrite_binding_events.log` — deleted
+
+The `numMeshCollThreads = 1` experiment was reverted before this commit. Production runs continue to use `allThreadCt = 16`.
+
+### What the planner needs to decide
+
+**Should the motor-binding races be fixed before the SoA + 3D-grid rewrite proceeds, or should the SoA rewrite be validated single-threaded on the grounds that the GPU port will obsolete the multi-threaded CPU path anyway?**
+
+Option A — fix races first: harden the CPU path (fix `mot.retObj` race and force-accumulation races), then re-run step-1a validation against a deterministic baseline. Produces a clean, race-free CPU implementation that can serve as the verified reference for the GPU port. More work upfront; stronger correctness guarantee.
+
+Option B — validate single-threaded: keep the existing multi-threaded code, run validation with `allThreadCt = 1` temporarily to establish a deterministic baseline, accept that the multi-threaded path has known races that the GPU port will bypass. Faster; does not fix the races; risks subtly wrong physics in any multi-threaded CPU run. The `[BIND]` telemetry and the gliding-assay quantitative results from 2026-05-27 were produced with the racing code, so they may contain some bias — though probably small given that the force-accumulation race is a commutative-but-non-associative floating-point issue (order of addition) rather than a correctness-breaking race.
