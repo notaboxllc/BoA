@@ -714,13 +714,14 @@ public class BoxOfActin {
 
 				// Motor domain - filament collisions... check every time-step
 				motorsAndFilsColTimer.start();
+				// Iteration 2: CPU FillThreads now runs in both paths — GPU kernel
+				// reads the CPU-built grid via the CSR upload. CPU 27-neighbour
+				// query (motCollStart/Stop) only runs on the CPU path.
+				startAllThreadSets(Env.motorBindGrid3DStart);
+				waitOnAllThreadSets(Env.motorBindGrid3DStop);
 				if (Env.useGPU) {
-					// GPU one-plan spike: brute-force motor × segment fine-check kernel.
-					// CPU grid fill is skipped — the GPU brute-forces over all segments.
 					GPUMotorBinding.detectBindings();
 				} else {
-					startAllThreadSets(Env.motorBindGrid3DStart);
-					waitOnAllThreadSets(Env.motorBindGrid3DStop);
 					startAllThreadSets(Env.motCollStart);
 					waitOnAllThreadSets(Env.motCollStop);
 				}
@@ -1190,12 +1191,13 @@ public class BoxOfActin {
 		}
 		if (Env.useGPU && GPUMotorBinding.getCallCount() > 0) {
 			int    calls = GPUMotorBinding.getCallCount();
-			double tot   = GPUMotorBinding.getTotalNanos()  / 1.0e9;
-			double pk    = GPUMotorBinding.getPackNanos()   / 1.0e9;
-			double ex    = GPUMotorBinding.getExecNanos()   / 1.0e9;
-			double un    = GPUMotorBinding.getUnpackNanos() / 1.0e9;
-			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
-				tot, calls, pk, ex, un);
+			double tot   = GPUMotorBinding.getTotalNanos()    / 1.0e9;
+			double pk    = GPUMotorBinding.getPackNanos()     / 1.0e9;
+			double gp    = GPUMotorBinding.getGridPackNanos() / 1.0e9;
+			double ex    = GPUMotorBinding.getExecNanos()     / 1.0e9;
+			double un    = GPUMotorBinding.getUnpackNanos()   / 1.0e9;
+			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs gridPack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk, gp, ex, un);
 		}
 		reportAllThreadSetTimes();
 		
