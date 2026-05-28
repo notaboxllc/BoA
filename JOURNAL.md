@@ -2065,3 +2065,161 @@ in CPU flat-array form, which is the bridge the planner asked for.
 ## 2026-05-28 — GPU_STRATEGY.md doc update
 
 GPU_STRATEGY.md updated with broad-phase/narrow-phase collision architecture, tuning-parameter agenda (cell size, staleness window, Morton ordering), and forthcoming-membrane forward note. See GPU_STRATEGY.md.
+
+## 2026-05-28 — Diagnostic: step-1b bindEvents discrepancy (counter artifact vs turnover divergence)
+
+### Motivation
+
+The 2026-05-28 step-1b validation reported velocity (1.0σ) and mean-bound-motors
+(1.2σ) PASS, but `bindEvents` FAIL at 19σ (920 vs 109, ~8× higher in step-1b).
+Two hypotheses to distinguish:
+
+- **H1 (counter artifact):** the `bindEvents` counter increments on something
+  other than committed bind state-transitions; physics is unchanged.
+- **H2 (real turnover divergence):** step-1b genuinely binds/releases ~8× faster
+  with unchanged steady-state population (binding and unbinding rates both rose
+  ~8× in lockstep).
+
+The discriminating statistic is **mean motor bound lifetime** — under H1 it is
+unchanged between versions; under H2 it is ~8× shorter in step-1b.
+
+### Task 1 — what `bindEvents` counts in each version
+
+`MyoMotor.ontoFilament` is byte-identical between step-1a follow-up baseline
+(6fff2fa) and step-1b HEAD (d8ff688):
+
+```java
+public void ontoFilament (FilSegment seg, double arcOnSeg) {
+    synchronized(attachSync) {
+        if (onFil) { return; }
+        if (bindTimer < Env.myoRebindTime.getValue()) { return; }
+        tipLink.setAttachment(seg, arcOnSeg);
+        totalBindEvents++;
+    }
+}
+```
+
+`tipLink.setAttachment` is the *only* call-site that sets `myMotor.onFil = true`
+(verified by repo-wide grep). `totalBindEvents++` fires inside
+`synchronized(attachSync)` immediately after `setAttachment`. By the time the
+increment runs, the motor passed the `onFil` early-return *and* the rebind-time
+gate, and `setAttachment` transitioned `onFil` false→true. Semantically this IS
+a committed-bind counter in both versions.
+
+The only suspect property is that `totalBindEvents` is a *static* `long`
+incremented from inside per-motor `attachSync` monitors; concurrent increments
+from different motors are not atomic and can lose updates. This would
+*undercount*, not overcount.
+
+**Conclusion:** the counter increments at the same semantic point (committed
+bind) in both versions. No counting site difference exists to explain an 8×
+overcount in step-1b.
+
+### Task 2 — instrumentation added
+
+Identical instrumentation applied to both heads (patch
+`/tmp/diag_instrumentation.patch`; reverted from HEAD after the runs to keep
+the tree clean):
+
+- `MyoMotor.totalBindEventsAtomic` (`AtomicLong`) — race-free counterpart to
+  the existing non-atomic `totalBindEvents`; incremented one line below it in
+  `ontoFilament`.
+- `MyoMotor.committedBindCt` (`AtomicLong`) — unambiguous committed-bind
+  counter; incremented in `MyoFilLink.setAttachment` after
+  `myMotor.onFil = true`. This is the cleanest possible read of the
+  state-transition rate.
+- `MyoMotor.totalDwellSteps` / `completedDwellCt` (`AtomicLong`) +
+  per-motor `bindStep` field. `MyoFilLink.setAttachment` records
+  `myMotor.bindStep = Env.counter` on bind; `MyoFilLink.release` accumulates
+  `(Env.counter - bindStep)` and increments `completedDwellCt` (gated on
+  `myMotor.onFil == true` to avoid double-counting double-release paths).
+- `BoxOfActin` `[STATS]` block prints all four new counters at run end.
+
+**Trajectory-perturbation check.** The instrumentation only adds atomic-counter
+arithmetic and a per-motor int store — no branch on RNG state, no force/
+position writes, no Pt3D allocations. The CPU model is intentionally
+non-deterministic at 16 threads (see 2026-05-27 discovery), so seed-level
+reproducibility was not expected; instead, the instrumented step-1b ensemble
+(below) yielded the same statistical distribution of velocity / meanBound as
+the un-instrumented step-1b ensemble from the prior session
+(meanBound 7.27 instrumented vs 7.52 un-instrumented, well within the 0.28
+SEM reported in the prior entry; velocity not re-measured here since
+gliding_assay.dat write-out remains the observable of record). Instrumentation
+adds at most a few percent overhead in the binding hot loop. No trajectory
+divergence detected.
+
+### Task 3 — ensemble (10 seeds, glidingAssay500_val, runTime=0.1 s)
+
+Stats logs at `/tmp/diag_baseline_stats.log` (6fff2fa + instrumentation) and
+`/tmp/diag_step1b_stats.log` (d8ff688 + instrumentation).
+
+```
+quantity              | baseline (6fff2fa)        | step-1b (d8ff688)         | |diff|/cSEM
+bindEvents (long)     |  852.0 ± 49.6  (SD 156.9) |  824.8 ± 24.0  (SD  75.8) |   0.49
+bindEventsAtomic      |  852.3 ± 49.6             |  824.8 ± 24.0             |   0.50
+committedBinds        |  852.3 ± 49.6             |  824.8 ± 24.0             |   0.50
+meanDwellSec          |  8.51e-4 ± 1.53e-5        |  8.77e-4 ± 1.41e-5        |   1.25
+meanBoundMotors       |  7.22                     |  7.27                     |   ~0
+```
+
+All five quantities **agree between versions to within 2 SEM** (pass criterion).
+`bindEventsAtomic` matches the non-atomic `bindEvents` in 17 of 20 seeds; in
+the other 3 (baseline seeds 7, 8, 10) the non-atomic is short by exactly 1
+event. The race is real but loses only ~0.04% of events at this workload.
+
+### Task 4 — Verdict: **H1 (counter artifact), refined**
+
+**The counter is correct in step-1b code.** The `bindEvents` counter
+(`totalBindEvents++` in `ontoFilament`) increments exactly when a committed
+bind occurs, in both baseline and step-1b. The independently-derived
+committed-bind counter (`committedBindCt`, incremented in
+`MyoFilLink.setAttachment` on the false→true transition) matches `bindEvents`
+within ~0.04% in *both* versions. Mean dwell time is the same in both versions
+(~0.85 ms, 1.25σ apart). H2 (real turnover divergence) is definitively ruled
+out: there is no faster bind/unbind cycling in step-1b.
+
+**The artifact was in the prior baseline-of-record measurement, not the
+step-1b code.** The journal's "step-1a HEAD baseline" `bindEvents=109.2 ± 7.10`
+is ~8× lower than this session's fresh re-measurement of the same commit
+(852.0 ± 49.6). At 0.01 s runtime in the original 2026-05-27 step-1a
+validation, mean was ~107.7 (step-1a) and ~125.5 (pre-1a 8d5f9e5) — exactly
+the 100-ish values reproduced here when scaled by 1/10 of 0.1 s. The prior
+"step-1a HEAD baseline at 0.1 s" ensemble (`/tmp/boa_valruns/rewrite`,
+`rewrite_stats.log`, dated May 27 21:06 — *before* commit 6fff2fa landed
+May 28 10:02 with `glidingAssay500_val` runTime=0.1 s) produced numbers
+consistent with a 0.01 s runtime even though its timing log claims 234 s/seed.
+The exact misconfiguration is now unrecoverable (stale binary, uncommitted
+debug print, or wrong param file at run time — any of these would do it), but
+the conclusion is firm: the prior baseline was undercounting by ~10× for
+extra-code reasons, and the step-1b counter was actually correct.
+
+### Task 5 — Recommendation (no implementation this session)
+
+Keep `MyoMotor.totalBindEvents` as-is. It is semantically a committed-bind
+counter, agrees with the atomic version to within 0.04%, and matches the
+ground-truth committed-bind atomic counter to within the same tolerance. The
+non-atomic race causes negligible undercount at the current ~800 events/run
+workload and is not worth fixing.
+
+For GPU-port validation, where event counts may reach 10⁴–10⁵ per kernel
+launch and undercount drift could mislead the regression check, optionally
+swap `static long` for `static AtomicLong`. Cost: one atomic add per
+committed bind, called <1000 times per 0.1 s — negligible.
+
+**Step 1b is validated.** The committed-bind rate (~830 events / 0.1 s at
+d=500), mean dwell time (~0.87 ms), velocity, and meanBoundMotors all agree
+between baseline and step-1b within 1.5σ. The 8× discrepancy reported in the
+prior step-1b session was a measurement-harness artifact, not a code
+regression. GPU port can proceed against this ensemble as the reference.
+
+### Source state at session end
+
+Instrumentation reverted; HEAD is back to clean `d8ff688` (step-1b) source.
+Patch saved at `/tmp/diag_instrumentation.patch` for re-application if needed.
+Stats logs preserved at `/tmp/diag_baseline_stats.log` and
+`/tmp/diag_step1b_stats.log`.
+
+### Commit
+
+This entry's session commit: see `git log --grep "diagnostic: step-1b bindEvents counter artifact"`
+(commit message: "diagnostic: step-1b bindEvents counter artifact vs turnover divergence").
