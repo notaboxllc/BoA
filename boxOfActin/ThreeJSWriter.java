@@ -168,6 +168,9 @@ public class ThreeJSWriter {
      * given).  Increments frameNumber after dispatch.
      */
     public static void writeFrame() {
+        // Skip expensive JSON build when there is no consumer (no -3js dir, no live WebSocket).
+        if (Env.threeJSOutputDir == null && !LiveFrameServer.isRunning()) { frameNumber++; return; }
+
         String json = buildFrameJson();
 
         if (Env.threeJSOutputDir != null) {

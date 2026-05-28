@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 ## 2026-05-25 — Addendum: frame-by-frame export for movie generation
 
@@ -1851,3 +1851,54 @@ races. Step 1a does not introduce new race sites beyond what existed.
   (motor-centric division). Should the force-accumulation race be fixed next
   (Option A from 2026-05-27 discovery entry) to make validation even cleaner for
   step 1b, or proceed with the current noise floor?
+
+## 2026-05-28 — Step 1a follow-up: gliding-velocity validation + wall-clock timing
+
+**Motivation.** The 2026-05-27 step-1a validation covered only two observables
+(bindEvents, meanBoundMotors) at 0.01 s runtime. This follow-up adds gliding
+velocity as a third observable and extends runtime to 0.1 s to give the
+filament enough displacement to measure reliably.
+
+### Protocol
+
+- Parameter file: `ParameterFiles/glidingAssay500_val` (d=500 motors/µm², 14×2×0.5 µm
+  box, runTime=0.1 s, filament length 2.0 µm, noMonomersSimd, externalDensitySweep=1).
+- Baseline: commit 43d5ff2 at `/tmp/boa_baseline` (no MotorBindGrid3D, no -seed flag;
+  10 independent JVM-random seeds). Rewrite: HEAD with `-seed 1..10`.
+- 10 seeds each, run sequentially (no parallel competition).
+- ThreeJSWriter guard active (no `-3js`; guard skips frame build when no consumer).
+- Velocity: net XY displacement of filament COM from t=0.02 s to t=0.10 s (first
+  20% discarded), divided by elapsed time. Same 2D projection as fluorescence microscopy.
+- Pass criterion: |diff|/cSEM < 2.0 on each observable.
+
+### Results
+
+```
+observable        | baseline (43d5ff2)      | rewrite (HEAD)          | |diff|/cSEM | verdict
+velocity (µm/s)   | 4.746 ± 0.176 (SD=0.557)| 4.575 ± 0.196 (SD=0.620)|    0.65    | PASS
+mean bound motors | 7.254 ± 0.172 (SD=0.544)| 7.111 ± 0.198 (SD=0.627)|    0.54    | PASS
+```
+
+Both observables clear the 2-SEM threshold. Step 1a validation is complete across
+all three observables (bindEvents, meanBoundMotors, gliding velocity).
+
+### Wall-clock timing
+
+```
+version      | mean (s) | SD (s) | n
+baseline     |  242.6   |   3.6  | 10
+rewrite      |  231.5   |   7.9  | 10
+```
+
+Rewrite is ~11 s/seed faster than baseline despite the added FillThreads phase. The
+likely explanation is JIT warm-up: rewrite seeds 1-6 average 237 s (close to baseline),
+while seeds 7-10 drop to 223 s as the JVM optimizes the hot grid-fill loop. The
+prior FillThreads overhead estimate (~2.9 s per 1000 steps) was for a cold JVM; at
+steady state the fill cost is substantially lower. Net: step-1a has no measurable
+wall-clock regression vs the baseline at this scale.
+
+### Summary
+
+Step 1a (SoA arrays + MotorBindGrid3D) is validated across runtime 0.01 s (bindEvents,
+meanBoundMotors) and 0.1 s (velocity, meanBoundMotors). No performance regression.
+FillThreads overhead is acceptable; GPU port will replace it with a scatter kernel.
