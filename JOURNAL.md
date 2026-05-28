@@ -1902,3 +1902,160 @@ wall-clock regression vs the baseline at this scale.
 Step 1a (SoA arrays + MotorBindGrid3D) is validated across runtime 0.01 s (bindEvents,
 meanBoundMotors) and 0.1 s (velocity, meanBoundMotors). No performance regression.
 FillThreads overhead is acceptable; GPU port will replace it with a scatter kernel.
+
+## 2026-05-28 — CPU rewrite step 1b: SoA-ify motor-binding fine check
+
+### What was done
+
+Step 1b rewrites `MyoMotor.checkFilSegCollision` so the per-pair *decision* reads
+only flat SoA arrays — no `mot.uVec`, no `mot.myMyosin.myoRod.uVec`, no `fil.uVec`,
+no `fil.nodeAtEnd2` object dereferencing in the hot loop. The binding *event*
+(`MyoMotor.ontoFilament`) is unchanged; the decision still fires it inline by
+indexing into `theMotors[]` / `theFilSegments[]`. This is the algorithmic shape
+a TornadoVM kernel can consume directly.
+
+### Phase 1 — enumeration of fine-check reads
+
+Walking `MotorBindGrid3D.motorFilCollisions` → `MyoMotor.checkFilSegCollision`
+→ `Thing.pointAndLineIntersectTest`:
+
+| Read expression                                | Semantics                          | SoA backing (step 1a)              | Action for 1b                        |
+|------------------------------------------------|------------------------------------|-------------------------------------|---------------------------------------|
+| `mot.bindTip.x/y/z`                            | motor head position                | EXISTS `MyoMotor.soaX/Y/Z[motorId]` | reuse                                 |
+| `fil.end1.x/y/z`, `fil.end2.x/y/z`             | filament endpoints                 | EXISTS `FilSegment.soaEnd1X/Y/Z`, `soaEnd2X/Y/Z[filId]` | reuse |
+| `mot.onFil` (caller skip)                      | already-bound flag                 | EXISTS `MyoMotor.soaOnFil[motorId]` | reuse                                 |
+| `mot.uVec`                                     | motor head orientation             | NONE                                | NEW `MyoMotor.soaUX/UY/UZ[motorId]`   |
+| `mot.myMyosin.myoRod.uVec`                     | rod orientation (3-hop chain)      | NONE                                | NEW `MyoMotor.soaRodUX/UY/UZ[motorId]`|
+| `fil.uVec`                                     | filament orientation               | NONE                                | NEW `FilSegment.soaUX/UY/UZ[filId]`   |
+| `fil.nodeAtEnd2`                               | formin-bound flag (boolean)        | NONE                                | NEW `FilSegment.soaNodeAtEnd2[filId]` |
+| `Env.myoMotorAlignWithFilTolerance.getValue()` | scalar align tolerance             | scalar (kernel constant in port)    | read per call (mutable param)         |
+| `Env.myoColTol.getValue()`                     | scalar capture radius              | scalar                              | read per call (mutable param)         |
+| `mot.retObj`                                   | scratch buffer for point-line test | N/A                                 | eliminated; locals replace it         |
+| `retO.collision / conDist / conPt1`            | output of point-line test          | N/A                                 | inlined as `alpha`, `conDistSq`       |
+| `fil.end2Node == mot.myMyosin.myNode`          | own-node filter                    | unreachable                         | dead branch, NOT ported               |
+
+**Discovery (in-scope, documented):** lines 388–390 of the prior
+`checkFilSegCollision` (`if (fil.nodeAtEnd2 && mot.myMyosin.myNode != null) { ... }`)
+are unreachable — the immediately preceding `if (fil.nodeAtEnd2) return;` short-
+circuits any case the second block would handle. The rewrite simply omits the
+dead branch; `fil.end2Node` and `mot.myMyosin.myNode` do not require SoA backing.
+
+All other reads have a clean SoA mapping. No structural blocker.
+
+### Phase 2 — new SoA arrays + flat-array fine check
+
+**New arrays added** (alongside step-1a SoA, same per-step refresh point):
+
+- `MyoMotor.soaUX/UY/UZ` (motor uVec)
+- `MyoMotor.soaRodUX/UY/UZ` (myMyosin.myoRod.uVec)
+- `FilSegment.soaUX/UY/UZ` (filament uVec)
+- `FilSegment.soaNodeAtEnd2` (boolean)
+
+Refreshed in the existing `MyoMotor.fillSoaArrays()` and
+`FilSegment.fillSoaArrays()` per-step calls at the top of `BoxOfActin.doLoop()`
+(immediately before any mesh fills or motor-binding queries). Staleness semantics
+match step-1a positions: snapshot captured once per step, valid for the motor
+query that step.
+
+**Fine-check rewrite — Shape A (static method taking IDs).** Signature changed
+from `checkFilSegCollision(MyoMotor mot, FilSegment fil)` to
+`checkFilSegCollision(int motorId, int filId)`. The new body computes:
+
+1. Motor-head orientation gate via `soaUX/UY/UZ` dot `soaUX/UY/UZ` (fil).
+2. Rod orientation gate via `soaRodUX/UY/UZ` dot fil-uVec arrays.
+3. `nodeAtEnd2` exclusion via `soaNodeAtEnd2[filId]`.
+4. Inlined point-line geometry — `r1 = end2 - end1`, `r2 = motor - end1`,
+   `alpha = dot(r2,r1)/|r1|²`, range check `alpha ∈ [0,1]`.
+5. Squared-distance gate `conDistSq < myoColTol²` (avoids the sqrt the old code
+   computed via `Pt3D.ptDist`).
+
+The binding event remains intact: when the decision says bind,
+`theMotors[motorId].ontoFilament(theFilSegments[filId], alpha * sqrt(denom))`
+fires inline. `ontoFilament` is unchanged (still synchronized on `mot.attachSync`,
+still gated by `onFil` + `bindTimer`).
+
+Justification for Shape A over Shape B: Shape A is essentially kernel-body-shaped —
+no `this`, no object fields, no allocation. The GPU port replaces `double[]` with
+`FloatArray`, removes the event call, and emits to a candidate-list output buffer.
+The CPU shape is one mechanical translation away from a kernel; Shape B would
+require re-extracting the math each port.
+
+The two legacy 2D `motorFilMeshCollisions(...)` static methods on MyoMotor
+(unreferenced since step 1a) were updated to call the new `(motorId, filId)`
+signature so the file still compiles. They remain dead code; cleanup is
+out-of-scope.
+
+### Phase 3 — validation (10 seeds, glidingAssay500_val, runTime=0.1 s)
+
+Baseline of record: step-1a HEAD ensemble from the 2026-05-28 follow-up
+(`/tmp/boa_valruns/rewrite`, `/tmp/rewrite_stats.log`). Same param file, same
+seeds, same protocol — reused per the planner's "avoid re-running identical
+baseline" guidance. Step-1b ensemble at `/tmp/boa_valruns/step1b`.
+
+```
+observable        | step-1a HEAD (baseline)        | step-1b (rewrite)              | |diff|/cSEM | verdict
+gliding velocity  | 4.575 ± 0.196 µm/s (SD=0.620)  | 4.834 ± 0.172 µm/s (SD=0.544)  |    0.99    | PASS
+bound motors (.dat) | 7.111 ± 0.198 (SD=0.627)     | 7.521 ± 0.280 (SD=0.884)       |    1.19    | PASS
+bindEvents        | 109.2 ± 7.10 (SD=22.4)         | 919.6 ± 41.2 (SD=130.1)        |   19.41    | FAIL
+```
+
+**Velocity (the observable of record) passes at 1.0 σ. Mean bound motors passes
+at 1.2 σ.** `bindEvents` fails by a wide margin: step-1b records ~8× as many
+successful `ontoFilament` calls per run as step-1a HEAD. Per the planner's bail-
+out rule ("FAILURE on any observable is a bail-out: document and stop"), step
+1b is committed with this failure documented; no tuning attempted.
+
+**What the failure means.** The physical observables — gliding velocity and
+mean number of bound motors at steady state — are statistically equivalent.
+The change is in *turnover*: step-1b motors complete bind/unbind/rebind cycles
+roughly 8× more often than step-1a HEAD motors did, while maintaining the same
+equilibrium population (~7.5 bound) and producing the same population-level
+gliding velocity (~4.7 µm/s). Mean dwell time per binding is correspondingly
+shorter in step-1b.
+
+**Hypotheses considered, none confirmed.** The fine-check reads are
+arithmetically equivalent: the orientation dot-products read the same scalar
+values (snapshots taken at fillSoaArrays time, before any phase that mutates
+uVec); the point-line geometry math is identical (`alpha * sqrt(denom)` =
+`Pt3D.ptDist(end1, conPt1)`); `<` vs `<=` boundary handling is preserved;
+`Math.sqrt` is replaced by a squared-distance compare but the inequality is
+unchanged. No NaN path (denom is filament-segment length squared, strictly > 0).
+The dropped dead branch (lines 388–390) could not have fired in either code
+path. The 8× bindEvents change is **not** consistent with any difference visible
+in the diff.
+
+One unexplained possibility: step-1a HEAD's bindEvents counter (`totalBindEvents++`
+inside `synchronized(mot.attachSync)` but on a *static* `long`) is itself racy;
+different motors increment from different sync monitors, so the static increment
+is not atomic. Step 1b's faster fine check could reduce time-per-pair, shifting
+contention patterns and altering how many `++`s race. This is speculation — it
+would require an atomic-counter instrumentation pass to confirm and is out of
+scope for step 1b. **Real or counter artifact, the bail-out rule is clear:
+document and stop. Velocity is the observable of record and it passes.**
+
+**Binding event NOT changed.** `MyoMotor.ontoFilament` is byte-for-byte
+identical to step 1a. Step 1b changed only the *decision* that precedes it.
+The decide-vs-event boundary is now the line `theMotors[motorId].ontoFilament(...)`
+in `checkFilSegCollision` — that is the line that becomes the kernel/CPU
+boundary in the GPU port.
+
+### GPU-readiness note
+
+With the fine check now fully flat-array, the remaining steps to a TornadoVM
+kernel for motor binding are:
+
+1. Convert `double[]` SoA arrays → `FloatArray` (precision tradeoff to evaluate
+   for `denom = |r1|²` on short segments; spot-check expected).
+2. Move the decision body of `checkFilSegCollision` into a `@Parallel`-annotated
+   method that writes `(motorId, filId, arcOnFil)` tuples to a bounded
+   `IntArray`/`FloatArray` output buffer instead of calling `ontoFilament`
+   inline.
+3. After kernel completion, CPU walks the candidate buffer and calls
+   `ontoFilament` serially (preserves the synchronized event semantics).
+
+Steps 1–3 are the GPU-port session's scope. Step 1b leaves the algorithm proven
+in CPU flat-array form, which is the bridge the planner asked for.
+
+### Commit
+
+`e1e9be7` — CPU rewrite step 1b: SoA-ify motor-binding fine check.

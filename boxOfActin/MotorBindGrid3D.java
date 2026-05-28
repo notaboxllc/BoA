@@ -187,7 +187,6 @@ public class MotorBindGrid3D {
     void motorFilCollisions(int motorStart, int motorStop) {
         for (int i = motorStart; i < motorStop; i++) {
             if (MyoMotor.soaOnFil[i]) continue;
-            MyoMotor mot = MyoMotor.theMotors[i];
             int cx = getBinX(MyoMotor.soaX[i]);
             int cy = getBinY(MyoMotor.soaY[i]);
             int cz = getBinZ(MyoMotor.soaZ[i]);
@@ -203,8 +202,8 @@ public class MotorBindGrid3D {
                         if (filTimeStamps[nx][ny][nz] != lastWriteTime) continue;
                         int ct = filActiveCts[nx][ny][nz];
                         for (int j = 0; j < ct; j++) {
-                            FilSegment fil = FilSegment.theFilSegments[filCells[nx][ny][nz][j]];
-                            MyoMotor.checkFilSegCollision(mot, fil);
+                            // Flat-array fine check (step 1b): no object dereferencing in the hot path
+                            MyoMotor.checkFilSegCollision(i, filCells[nx][ny][nz][j]);
                         }
                     }
                 }

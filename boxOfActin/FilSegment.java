@@ -23,14 +23,20 @@ public class FilSegment extends Thing {
 	static FilSegment [] theFilSegments = new FilSegment [1000000];	// array holding all filament segments
 	static int filSegmentCt = 0;
 
-	// SoA arrays for GPU-ready collision path (step 1a)
-	static double[] soaEnd1X = new double[1000000];
-	static double[] soaEnd1Y = new double[1000000];
-	static double[] soaEnd1Z = new double[1000000];
-	static double[] soaEnd2X = new double[1000000];
-	static double[] soaEnd2Y = new double[1000000];
-	static double[] soaEnd2Z = new double[1000000];
-	static int[]    soaFilID = new int[1000000];
+	// SoA arrays for GPU-ready collision path
+	// Step 1a: filament endpoints + filament ID
+	// Step 1b: filament orientation (uVec) + nodeAtEnd2 gate — fine-check inputs
+	static double[]  soaEnd1X      = new double[1000000];
+	static double[]  soaEnd1Y      = new double[1000000];
+	static double[]  soaEnd1Z      = new double[1000000];
+	static double[]  soaEnd2X      = new double[1000000];
+	static double[]  soaEnd2Y      = new double[1000000];
+	static double[]  soaEnd2Z      = new double[1000000];
+	static int[]     soaFilID      = new int[1000000];
+	static double[]  soaUX         = new double[1000000];
+	static double[]  soaUY         = new double[1000000];
+	static double[]  soaUZ         = new double[1000000];
+	static boolean[] soaNodeAtEnd2 = new boolean[1000000];
 
 	static void fillSoaArrays() {
 		for (int i = 0; i < filSegmentCt; i++) {
@@ -38,6 +44,10 @@ public class FilSegment extends Thing {
 			soaEnd1X[i] = fs.end1.x;  soaEnd1Y[i] = fs.end1.y;  soaEnd1Z[i] = fs.end1.z;
 			soaEnd2X[i] = fs.end2.x;  soaEnd2Y[i] = fs.end2.y;  soaEnd2Z[i] = fs.end2.z;
 			soaFilID[i] = fs.filID;
+			soaUX[i]    = fs.uVec.x;
+			soaUY[i]    = fs.uVec.y;
+			soaUZ[i]    = fs.uVec.z;
+			soaNodeAtEnd2[i] = fs.nodeAtEnd2;
 		}
 	}
 

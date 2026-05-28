@@ -5,11 +5,19 @@ public class MyoMotor extends Thing {
 	static int motorCt = 0;
 	int myMotorNumber;
 
-	// SoA arrays for GPU-ready motor-binding path (step 1a)
+	// SoA arrays for GPU-ready motor-binding path
+	// Step 1a: motor head position + bound-state flag
+	// Step 1b: motor head orientation (uVec) + rod orientation (myMyosin.myoRod.uVec) — fine-check inputs
 	static double[]  soaX     = new double[100000];
 	static double[]  soaY     = new double[100000];
 	static double[]  soaZ     = new double[100000];
 	static boolean[] soaOnFil = new boolean[100000];
+	static double[]  soaUX    = new double[100000];
+	static double[]  soaUY    = new double[100000];
+	static double[]  soaUZ    = new double[100000];
+	static double[]  soaRodUX = new double[100000];
+	static double[]  soaRodUY = new double[100000];
+	static double[]  soaRodUZ = new double[100000];
 
 	static void fillSoaArrays() {
 		for (int i = 0; i < motorCt; i++) {
@@ -18,6 +26,13 @@ public class MyoMotor extends Thing {
 			soaY[i]     = m.bindTip.y;
 			soaZ[i]     = m.bindTip.z;
 			soaOnFil[i] = m.onFil;
+			soaUX[i]    = m.uVec.x;
+			soaUY[i]    = m.uVec.y;
+			soaUZ[i]    = m.uVec.z;
+			MyoRod rod  = m.myMyosin.myoRod;
+			soaRodUX[i] = rod.uVec.x;
+			soaRodUY[i] = rod.uVec.y;
+			soaRodUZ[i] = rod.uVec.z;
 		}
 	}
 
@@ -333,20 +348,15 @@ public class MyoMotor extends Thing {
 	}
 	
 	public static void motorFilMeshCollisions(){
-		MyoMotor mot;
-		FilSegment fil;
 		for(int x=0;x<Mesh.nXBins;x++){
 			for(int y=0;y<Mesh.nYBins;y++) {
 				if (Mesh.MYOHEADS_MESH.timeStamps[x][y]==Env.counter && Mesh.FILSEG_MESH.timeStamps[x][y]==Env.counter) {
-				
 					for(int i=0;i<Mesh.MYOHEADS_MESH.activeCts[x][y];i++){
 						int motorID=(int)Mesh.MYOHEADS_MESH.meshpoints[x][y][i];
-						mot=theMotors[motorID];
-						if (!mot.onFil) {  // don't even check for collisions if already attached
+						if (!soaOnFil[motorID]) {
 							for (int j=0;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
 								int filID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
-								fil=FilSegment.theFilSegments[filID];
-								checkFilSegCollision(mot,fil);
+								checkFilSegCollision(motorID, filID);
 							}
 						}
 					}
@@ -354,22 +364,17 @@ public class MyoMotor extends Thing {
 			}
 		}
 	}
-	
+
 	public static void motorFilMeshCollisions(int xStart, int xStop){
-		MyoMotor mot;
-		FilSegment fil;
 		for(int x=xStart;x<xStop;x++){
 			for(int y=0;y<Mesh.nYBins;y++) {
-				if (Mesh.MYOHEADS_MESH.timeStamps[x][y]==Mesh.lastWriteTime && Mesh.FILSEG_MESH.timeStamps[x][y]==Mesh.lastWriteTime) { // this time-step?
-				
+				if (Mesh.MYOHEADS_MESH.timeStamps[x][y]==Mesh.lastWriteTime && Mesh.FILSEG_MESH.timeStamps[x][y]==Mesh.lastWriteTime) {
 					for(int i=0;i<Mesh.MYOHEADS_MESH.activeCts[x][y];i++){
 						int motorID=(int)Mesh.MYOHEADS_MESH.meshpoints[x][y][i];
-						mot=theMotors[motorID];
-						if (!mot.onFil) {  // don't even check for collisions if already attached
+						if (!soaOnFil[motorID]) {
 							for (int j=0;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
 								int filID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
-								fil=FilSegment.theFilSegments[filID];
-								checkFilSegCollision(mot,fil);
+								checkFilSegCollision(motorID, filID);
 							}
 						}
 					}
@@ -377,22 +382,61 @@ public class MyoMotor extends Thing {
 			}
 		}
 	}
-	
-	
-	public static void checkFilSegCollision (MyoMotor mot, FilSegment fil) {
-		RetObj retO = mot.retObj;
-		if (retO==null | mot.bindTip==null | fil.end1==null | fil.end2==null) { return; }
-		if (Pt3D.Dot(mot.uVec,fil.uVec) < Env.myoMotorAlignWithFilTolerance.getValue()) { return; }  // orientation of motor constraint on binding to filament
-		if (Pt3D.Dot(mot.myMyosin.myoRod.uVec,fil.uVec) < 0) { return; } // orientation of motor rod constraint on binding to filament
-		if (fil.nodeAtEnd2) { return; }  // *** this line disallows binding to any filSeg that is formin bound
-		if (fil.nodeAtEnd2 && mot.myMyosin.myNode != null) {
-			if (fil.end2Node == mot.myMyosin.myNode) { return; }  // don't walk on filaments from own node
-		}
-		Thing.pointAndLineIntersectTest(mot.bindTip, fil.end1, fil.end2, retO);
-		if (retO.collision && retO.conDist < Env.myoColTol.getValue()) {
-			double arcOnFil = Pt3D.ptDist(fil.end1, retO.conPt1);
-			mot.ontoFilament(fil,arcOnFil);
-		}
+
+
+	/**
+	 * Step 1b: flat-array motor-binding fine check.
+	 *
+	 * Per-pair decision reads only static SoA arrays indexed by motor ID and FilSegment ID —
+	 * no object dereferencing in the hot path. Translates directly to a TornadoVM kernel
+	 * (replace double[] with FloatArray, drop the event call).
+	 *
+	 * The binding *event* (ontoFilament) is unchanged: when the decision says bind, the
+	 * event fires inline by indexing into theMotors[] / theFilSegments[]. The decide-vs-event
+	 * boundary is the line that becomes the kernel/CPU boundary in the GPU port.
+	 */
+	public static void checkFilSegCollision (int motorId, int filId) {
+		// Motor-head orientation gate: dot(motUVec, filUVec) >= align tolerance
+		final double fUx = FilSegment.soaUX[filId];
+		final double fUy = FilSegment.soaUY[filId];
+		final double fUz = FilSegment.soaUZ[filId];
+		final double motDotFil = soaUX[motorId]*fUx + soaUY[motorId]*fUy + soaUZ[motorId]*fUz;
+		if (motDotFil < Env.myoMotorAlignWithFilTolerance.getValue()) { return; }
+		// Rod orientation gate: dot(rodUVec, filUVec) >= 0
+		final double rodDotFil = soaRodUX[motorId]*fUx + soaRodUY[motorId]*fUy + soaRodUZ[motorId]*fUz;
+		if (rodDotFil < 0) { return; }
+		// Formin-bound filament excluded (dead `&& myNode` branch from prior code not ported — unreachable)
+		if (FilSegment.soaNodeAtEnd2[filId]) { return; }
+
+		// Point-line geometry — perpendicular drop from motor bindTip onto fil end1→end2 segment
+		final double e1x = FilSegment.soaEnd1X[filId];
+		final double e1y = FilSegment.soaEnd1Y[filId];
+		final double e1z = FilSegment.soaEnd1Z[filId];
+		final double r1x = FilSegment.soaEnd2X[filId] - e1x;
+		final double r1y = FilSegment.soaEnd2Y[filId] - e1y;
+		final double r1z = FilSegment.soaEnd2Z[filId] - e1z;
+		final double mx  = soaX[motorId];
+		final double my  = soaY[motorId];
+		final double mz  = soaZ[motorId];
+		final double r2x = mx - e1x;
+		final double r2y = my - e1y;
+		final double r2z = mz - e1z;
+		final double numer = r2x*r1x + r2y*r1y + r2z*r1z;
+		final double denom = r1x*r1x + r1y*r1y + r1z*r1z;
+		final double alpha = numer/denom;
+		if (alpha < 0 || alpha > 1) { return; }
+		final double cpx = e1x + alpha*r1x;
+		final double cpy = e1y + alpha*r1y;
+		final double cpz = e1z + alpha*r1z;
+		final double dx = cpx - mx, dy = cpy - my, dz = cpz - mz;
+		final double conDistSq = dx*dx + dy*dy + dz*dz;
+		final double myoColTol = Env.myoColTol.getValue();
+		if (conDistSq >= myoColTol*myoColTol) { return; }
+
+		// Decision: bind. Fire the event (state-changing, synchronized inside ontoFilament).
+		// arcOnFil = |conPt - end1| = alpha * |end2 - end1| = alpha * sqrt(denom)
+		final double arcOnFil = alpha * Math.sqrt(denom);
+		theMotors[motorId].ontoFilament(FilSegment.theFilSegments[filId], arcOnFil);
 	}
 	
 	public void updateMyoFilLinks () {
