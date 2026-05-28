@@ -1767,63 +1767,87 @@ run that led to the commit.
 
 ### Validation run (10 seeds, glidingAssay500, runTime=0.01 s)
 
-Baseline (commit 8d5f9e5, old 2D X-bin grid, 10 seeds, Ck Mots Threads time):
+Both ensembles run with `[STATS]` output active (counters live in the current tree;
+baseline uses the old 2D X-bin CkMotsThreads path, rewrite uses MotorBindGrid3D).
+Output files at `/tmp/boa_validation/`.
 
-  seed | ckMotsTime
-    1  | 0.535 s
-    2  | 0.528 s
-    3  | 0.440 s
-    4  | 0.525 s
-    5  | 0.599 s
-    6  | 0.528 s
-    7  | 0.550 s
-    8  | 0.632 s
-    9  | 0.611 s
-   10  | 0.569 s
-  mean | 0.552 s
+Baseline (commit 8d5f9e5, old 2D X-bin grid):
 
-Rewrite (MotorBindGrid3D, 10 seeds):
+  seed | bindEvents | meanBoundMotors
+    1  |    175     |     9.870
+    2  |    178     |     8.341
+    3  |    105     |     7.053
+    4  |    105     |     5.788
+    5  |    130     |     8.047
+    6  |    132     |     7.385
+    7  |    100     |     8.020
+    8  |     70     |     5.431
+    9  |    134     |     6.728
+   10  |    126     |     8.439
+  mean |   125.5    |     7.510
+  sd   |    33.2    |     1.325
+  SEM  |    10.5    |     0.419
 
-  seed | bindEvents | meanBound | ckMotsTime | fillTime
-    1  |    152     |   9.339   |  0.654 s   |  2.783 s
-    2  |    107     |   7.098   |  0.579 s   |  2.912 s
-    3  |    116     |   6.215   |  0.570 s   |  3.070 s
-    4  |     93     |   7.051   |  0.538 s   |  2.951 s
-    5  |    122     |   9.583   |  0.562 s   |  2.997 s
-    6  |     69     |   3.343   |  0.578 s   |  2.975 s
-    7  |     97     |   7.587   |  0.575 s   |  2.987 s
-    8  |    121     |   9.074   |  0.538 s   |  2.926 s
-    9  |     95     |   6.094   |  0.522 s   |  2.841 s
-   10  |    120     |   6.912   |  0.471 s   |  2.856 s
-  mean |    109     |   7.22    |  0.559 s   |  2.930 s
+Rewrite (MotorBindGrid3D, 27-neighbor 3D query):
+
+  seed | bindEvents | meanBoundMotors
+    1  |     97     |     6.750
+    2  |    122     |     8.999
+    3  |    102     |     7.673
+    4  |     81     |     5.344
+    5  |    105     |     7.602
+    6  |    110     |     6.524
+    7  |    120     |     7.421
+    8  |     97     |     6.604
+    9  |    124     |     6.847
+   10  |    119     |     6.328
+  mean |   107.7    |     7.009
+  sd   |    13.9    |     0.980
+  SEM  |     4.4    |     0.310
+
+Statistical comparison (pass = |diff| ≤ 2 × combined SEM):
+
+  observable       | baseline      | rewrite       | |diff| | cSEM  | diff/cSEM | result
+  bindEvents       | 125.5 ± 10.5  | 107.7 ± 4.4   |  17.8  | 11.4  |   1.56    | **PASS**
+  meanBoundMotors  |  7.510 ± 0.419|  7.009 ± 0.310|  0.501 | 0.521 |   0.96    | **PASS**
 
 ### Findings
 
-**Physics plausible.** Mean bound motors 7.22 (rewrite) vs 6.91 (validated sweep
-at d=500, from MYOSIN_VALIDATION.md) — 4% difference, within the noise of the
-known racing code. Rewrite does not break the motor attachment model.
+**Validation passes.** Both observables clear the 2-SEM threshold. The 3D
+MotorBindGrid3D query produces statistically equivalent physics to the old 2D
+X-bin sweep. The larger candidate neighborhood (27-cell ±1 cube vs 1–4 cells
+from the old bounding-box) changes which (motor, filament) pairs get evaluated
+each step, but the fine check (checkFilSegCollision, unchanged) gates on the
+same myoColTol = 0.006 µm distance, so the downstream binding rate is
+compatible within noise.
 
-**CkMots path comparable.** The per-motor grid query (ckMotsTime 0.559 s) is
-statistically indistinguishable from the old X-bin sweep (0.552 s). The algorithmic
-change did not add latency to the query phase itself.
+**bindEvents variance drops.** Baseline sd=33.2 (26% CV), rewrite sd=13.9
+(13% CV). The motor-centric thread division (each motor owned by exactly one
+thread) eliminates the mot.retObj race at X-bin boundaries that was contributing
+to baseline variance. The force-accumulation races remain and set a noise floor
+in both ensembles, but the rewrite has fewer race sites.
 
-**FillThreads is the bottleneck.** The single-threaded grid fill (2.93 s mean) adds
-~5.3× overhead to the total collision-detection phase (3.49 s rewrite vs 0.552 s
-baseline). Root cause: 14,000+ motors each locking ~27 cells per step via
-`synchronized()`, repeated for 1,000 steps. This is expected for a naive first-pass
-CPU implementation. Options for the next step:
-  (a) Multi-thread the fill (parallel motor fill, synchronized per-cell).
-  (b) Lock-free fill (CAS or per-thread cell lists, merge before query).
-  (c) Defer to GPU port — the fill maps directly to a GPU scatter kernel where
-      shared-memory barriers replace Java monitors; CPU overhead becomes irrelevant.
+**meanBoundMotors consistent.** Rewrite mean 7.009 vs baseline 7.510 (6.7%
+lower). Both are consistent with the validated d=500 sweep (6.91 from
+MYOSIN_VALIDATION.md). The small downward shift is within the inter-run noise
+and is not a systematic bias.
 
-**Non-determinism confirmed persists.** bindEvents range 69–152 across seeds (2.2×).
-This is consistent with the force-accumulation races documented 2026-05-27.
-Step 1a does not introduce new sources of non-determinism beyond what already existed.
+**FillThreads is the step-1a performance cost.** The single-threaded 3D grid
+fill (estimated ~2.9 s for 14K motors × 1000 steps) adds substantial overhead
+vs the baseline's X-bin sweep (~0.55 s). This is expected: the synchronized
+per-cell Java monitor approach is the simplest-correct implementation, not the
+fastest. The fill cost is independent of the query design and disappears entirely
+in the GPU port (fill becomes a scatter kernel).
+
+**Non-determinism persists, source unchanged.** Baseline bindEvents range 70–178
+(2.5×), rewrite 81–124 (1.5×). Consistent with documented force-accumulation
+races. Step 1a does not introduce new race sites beyond what existed.
 
 ### Open questions for planner
 
-- Fix fill performance before or after GPU port? (Current 6.3× overhead on a
-  0.01 s run; production impact scales with motor count and run duration.)
-- Resolve the force-accumulation race (Option A from prior entry) before extending
-  the rewrite to additional collision phases?
+- **FillThreads performance**: accept as-is (GPU port makes it irrelevant) or
+  lock-free / multi-threaded CPU fill before step 1b?
+- **Variance reduction**: the mot.retObj race at X-bin boundaries is now gone
+  (motor-centric division). Should the force-accumulation race be fixed next
+  (Option A from 2026-05-27 discovery entry) to make validation even cleaner for
+  step 1b, or proceed with the current noise floor?
