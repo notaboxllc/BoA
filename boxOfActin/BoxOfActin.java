@@ -1639,7 +1639,7 @@ public class BoxOfActin {
 			// --- LP benchmark chain (free BCs, Brownian forces) ---
 			int monCtLp = benchMonCt;
 			double segLenLp = (monCtLp + 1) * FilSegment.halfmono; // µm
-			int nLp = (int) Math.round(8.0 / segLenLp);
+			int nLp = (int) Math.round(Env.testLpFilLength / segLenLp);
 			double lpYOff = -1.5, lpZOff = -0.5;
 			FilSegment[] lpSegs = FilSegment.makeLpChain(nLp, lpYOff, lpZOff);
 			lpFil = new LpFil();

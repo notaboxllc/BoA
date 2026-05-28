@@ -292,6 +292,9 @@ public class Env {
 	static final Parameter lpActive = new Parameter("lpActive",
 			" LP benchmark active", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
 	
+	// LP benchmark filament length
+	static final double testLpFilLength = 21; // (microns) length of the test filament used for observing effective Lp in simulation
+	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;
 	static private final int frameHeight_init = 800;
