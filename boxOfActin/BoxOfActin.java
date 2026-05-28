@@ -171,7 +171,8 @@ public class BoxOfActin {
 			glidingEvaluator = GlidingAssayEvaluator.getInstance();
 		}
 		Mesh.createMeshes(); 	// for 2D grid collision detection
-		
+		MotorBindGrid3D.create();  // 3D grid for motor-binding path (step 1a)
+
 		// multithreading
 		loadAllThreadSets();
 		
@@ -346,6 +347,10 @@ public class BoxOfActin {
 				Env.benchmarkFilament = true;
 				Env.benchmarkTunerV15 = true;
 				Env.benchmarkNoiseProbe = true;
+			}
+			if (args[i].equals("-seed") && i + 1 < args.length) {
+				long seed = Long.parseLong(args[++i]);
+				Env.mtRNG.setSeed(seed);
 			}
 		}
 		// Mutual exclusivity: v25 > v24 > v23 > v22 > v21 > v20 > v19 > v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
@@ -601,7 +606,7 @@ public class BoxOfActin {
 	}
 	
 	private static void loadAllThreadSets () {
-		tSets = new ThreadSet [16];
+		tSets = new ThreadSet [17];
 		tSets[0] = Thing.stepThreads;
 		tSets[1] = Thing.brownianThreads;
 		tSets[2] = Myosin.myoThreads;
@@ -618,8 +623,9 @@ public class BoxOfActin {
 		tSets[13] = NodeLink.nodeLinkThreads;
 		tSets[14] = StickyNode.membraneNodeThreads;
 		tSets[15] = ActA.actAThreads;
+		tSets[16] = MotorBindGrid3D.FillThreads.fillThreads;
 
-	
+
 	}
 	
 	private static void reportAllThreadSetTimes () {
@@ -681,6 +687,9 @@ public class BoxOfActin {
 
 				// set biophysical values needed for this next time step
 				FilSegment.setBiophysValues();
+				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
+				MyoMotor.fillSoaArrays();
+				FilSegment.fillSoaArrays();
 				 // Meshed Collisions
 				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
 					 collisionMeshTimer.start();
@@ -701,9 +710,12 @@ public class BoxOfActin {
 
 				// Motor domain - filament collisions... check every time-step
 				motorsAndFilsColTimer.start();
+				startAllThreadSets(Env.motorBindGrid3DStart);
+				waitOnAllThreadSets(Env.motorBindGrid3DStop);
 				startAllThreadSets(Env.motCollStart);
 				waitOnAllThreadSets(Env.motCollStop);
 				motorsAndFilsColTimer.stopInc();
+				MyoMotor.sampleBoundMotors();
 
 				// Brownian Motion
 				if (applyBrownianForcesCounter >= Thing.brownianApplyInt | Env.simulationTime == 0) {
@@ -1162,6 +1174,10 @@ public class BoxOfActin {
 		}
 		System.out.println("collisionTime = " + collisionTime);
 		System.out.println("myosinTime = " + myosinTime);
+		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
+		if (MyoMotor.boundMotorSampleCt > 0) {
+			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
+		}
 		reportAllThreadSetTimes();
 		
 	}

@@ -1652,3 +1652,178 @@ The `numMeshCollThreads = 1` experiment was reverted before this commit. Product
 Option A — fix races first: harden the CPU path (fix `mot.retObj` race and force-accumulation races), then re-run step-1a validation against a deterministic baseline. Produces a clean, race-free CPU implementation that can serve as the verified reference for the GPU port. More work upfront; stronger correctness guarantee.
 
 Option B — validate single-threaded: keep the existing multi-threaded code, run validation with `allThreadCt = 1` temporarily to establish a deterministic baseline, accept that the multi-threaded path has known races that the GPU port will bypass. Faster; does not fix the races; risks subtly wrong physics in any multi-threaded CPU run. The `[BIND]` telemetry and the gliding-assay quantitative results from 2026-05-27 were produced with the racing code, so they may contain some bias — though probably small given that the force-accumulation race is a commutative-but-non-associative floating-point issue (order of addition) rather than a correctness-breaking race.
+
+## 2026-05-27 (cont.) — Gliding assay: stiff-vs-flexible comparison + session state
+
+### Validation status
+
+Flexible-filament gliding velocity (yesterday's 8-density batch) is the headline
+validated result: 8 µm/s median at 2500 motors/µm², inside experimental skeletal
+myosin II range (5-8 µm/s), with correct density-threshold behavior. Filament shape
+dynamics (curving, end-leading) qualitatively match Mansson lab gliding-assay videos
+(Melbacke et al. 2024, Sci. Rep., open-access supplementary movies) -- the flexible
+2x-phalloidin regime is the physically correct one, NOT the very-stiff test regime.
+See MYOSIN_VALIDATION.md for full results table and setup.
+
+### Stiff-vs-flexible comparison (today)
+
+Re-ran d=200, 500, 1000 with very stiff filament (fracMove=0.5, fracR=0.1,
+fracMoveTorq=0.2, ~100x stiffer) to test whether realistic flexibility is a
+measurement confound. It is not dominant. Stiff is faster, but modestly:
+
+  density | flex median | stiff median | ratio
+   200    |   2.15      |   2.69       | 1.25x
+   500    |   3.70      |   4.38       | 1.18x
+   1000   |   4.17      |   7.54       | 1.81x  (stiff run was short, 0.75s)
+
+Gap grows with density -- "flexibility tax" larger when more motors pull the
+filament off-axis. Stiff d=1000 run died early (likely Claude Code accidentally
+killed it); data still good, not re-running.
+
+Conclusion: wall interactions and flexibility both measurably affect velocity but
+neither dominates. Flexible numbers are trustworthy. Validation holds.
+
+### Wall-interaction check
+
+At d=200 stiff, split run at t=2s (filament reaches side wall ~t=2s):
+0-2s median 2.84 µm/s, 2-4s median 2.46 µm/s (~13% drop). Motor engagement drops
+~28% as wall blocks half the footprint. Measurable but not catastrophic. Speed
+columns confirmed to use full vector magnitude (instantaneousSpeed = 3D, 
+longWindowSpeedXY = xy-plane), not just box-x component.
+
+### Code change in progress
+
+Early-termination patch handed to Claude Code: stop the run when filament pointed
+end reaches either x-wall (tolerance 0.15 µm), graceful stop, termination reason
+written to output (prompt specified Option B = sibling termination.txt preferred).
+This saves large amounts of wasted compute -- e.g. stiff d=1000 reaches far wall in
+~2s of a 4s run. NOT YET CONFIRMED COMPLETE -- verify Claude Code finished, tested
+(high-density terminates early, low-density runs full 4s), and committed.
+
+### Watch item: numMeshCollThreads
+
+During unrelated Claude Code work it set Env.numMeshCollThreads from 16 to 1 for
+deterministic binding-event validation. CONFIRM whether this was reverted to 16.
+Leaving it at 1 is a real perf hit at high motor density. Do not run production
+batches until verified back at 16 (or intentionally left at 1 with reason noted).
+
+### Aorus environment notes
+
+- BoA repo cloned to ~/Code/BoA. Compiles clean (Java 21) with:
+  javac -cp ".:libs/*" *.java boxOfActin/*.java ec/util/*.java edu/cornell/lassp/houle/RngPack/*.java
+- Three jars in libs/ (Java-WebSocket, json, slf4j-api) -- WebSocket viewer deps,
+  NOT Java3D (which is fully gone). ec/ and edu/ RNG sources compile in-tree.
+- RNG mix: ThreadLocalRandom (kinetics), MersenneTwisterFast (per-Thing), one
+  MersenneTwister (Env). RanMT dead/commented. Bug.java + FilSegment.java seed
+  Random via (long)Math.random() which is ~always 0 -- minor latent bug, noted.
+- aorus IP 10.0.0.187 recorded in CLAUDE.md.
+
+### Open questions / next steps
+
+- Stiffness sweep at fixed density (suggest d=1000): vary filament stiffness across
+  ~5-6 values from bare F-actin up to very stiff, plot velocity vs persistence
+  length (measured via existing benchmark, the physically meaningful x-axis). Tests
+  whether velocity-vs-stiffness is monotonic and whether it saturates. Strengthens
+  validation by showing sensible dependence on an independently-calibrated parameter.
+- Narrow-box + motor-buffer idea (deferred): physical box ~1 µm wide but motors
+  seeded out to full reach distance beyond the wall, so a wall-riding filament still
+  sees full motor complement. Halves motor count at fixed density. More useful if
+  combined with a LONGER x-axis (trade lateral dim for longitudinal at fixed motor
+  budget). Probably not worth it for the few remaining validation batches; revisit
+  if F-V work needs many runs. If pursued: clarify which "density" the .dat reports.
+- Periodic BC (deferred): cleanest fix for wall contamination but ~1-2 day Claude
+  Code task and not biologically general. Not worth it for 3-5 remaining batches.
+- Force-velocity benchmark: next major validation after gliding. Tethered filament,
+  sweep spring stiffness, stall force vs motor number. Validates neck-compliance
+  lumped parameter. Different geometry from gliding.
+- Box width increase for future batches if wall interaction becomes limiting (no
+  code change needed, just costs motor count).
+
+---
+
+## 2026-05-27 — CPU rewrite step 1a: SoA arrays + MotorBindGrid3D
+
+### What was done
+
+Implemented CPU rewrite step 1a (SoA layout + 3D spatial grid) for the motor-binding
+collision path. All changes are in the working tree; this entry documents the validation
+run that led to the commit.
+
+**New/changed files:**
+- `boxOfActin/MotorBindGrid3D.java` — new 3D spatial hash grid (71×11×4 cells at
+  0.2 µm/cell for the 14×2×0.5 µm gliding-assay box). Single-threaded fill phase;
+  27-neighbor query in place of the old X-bin sweep.
+- `boxOfActin/MyoMotor.java` — SoA arrays (`soaX[]`, `soaY[]`, `soaZ[]`,
+  `soaOnFil[]`) snapshotted per step; binding-event counters (`totalBindEvents`,
+  `boundMotorSum`, `boundMotorSampleCt`).
+- `boxOfActin/FilSegment.java` — SoA arrays (`soaEnd1X/Y/Z[]`, `soaEnd2X/Y/Z[]`,
+  `soaFilID[]`) snapshotted per step.
+- `boxOfActin/Mesh.java` — `CkMotsThreads` divides by motor index (not X-bin) and
+  calls `MotorBindGrid3D.motorFilCollisions(motorStart, motorStop)`.
+- `boxOfActin/BoxOfActin.java` — adds `-seed <N>` CLI arg (sets Env.mtRNG);
+  calls `MotorBindGrid3D.create()` at startup; inserts FillThreads phase before
+  CkMots; prints `[STATS] bindEvents=N` and `[STATS] meanBoundMotors=X` at end.
+- `boxOfActin/Env.java` — `motorBindGrid3DStart/Stop` phase-ID constants.
+
+### Validation run (10 seeds, glidingAssay500, runTime=0.01 s)
+
+Baseline (commit 8d5f9e5, old 2D X-bin grid, 10 seeds, Ck Mots Threads time):
+
+  seed | ckMotsTime
+    1  | 0.535 s
+    2  | 0.528 s
+    3  | 0.440 s
+    4  | 0.525 s
+    5  | 0.599 s
+    6  | 0.528 s
+    7  | 0.550 s
+    8  | 0.632 s
+    9  | 0.611 s
+   10  | 0.569 s
+  mean | 0.552 s
+
+Rewrite (MotorBindGrid3D, 10 seeds):
+
+  seed | bindEvents | meanBound | ckMotsTime | fillTime
+    1  |    152     |   9.339   |  0.654 s   |  2.783 s
+    2  |    107     |   7.098   |  0.579 s   |  2.912 s
+    3  |    116     |   6.215   |  0.570 s   |  3.070 s
+    4  |     93     |   7.051   |  0.538 s   |  2.951 s
+    5  |    122     |   9.583   |  0.562 s   |  2.997 s
+    6  |     69     |   3.343   |  0.578 s   |  2.975 s
+    7  |     97     |   7.587   |  0.575 s   |  2.987 s
+    8  |    121     |   9.074   |  0.538 s   |  2.926 s
+    9  |     95     |   6.094   |  0.522 s   |  2.841 s
+   10  |    120     |   6.912   |  0.471 s   |  2.856 s
+  mean |    109     |   7.22    |  0.559 s   |  2.930 s
+
+### Findings
+
+**Physics plausible.** Mean bound motors 7.22 (rewrite) vs 6.91 (validated sweep
+at d=500, from MYOSIN_VALIDATION.md) — 4% difference, within the noise of the
+known racing code. Rewrite does not break the motor attachment model.
+
+**CkMots path comparable.** The per-motor grid query (ckMotsTime 0.559 s) is
+statistically indistinguishable from the old X-bin sweep (0.552 s). The algorithmic
+change did not add latency to the query phase itself.
+
+**FillThreads is the bottleneck.** The single-threaded grid fill (2.93 s mean) adds
+~5.3× overhead to the total collision-detection phase (3.49 s rewrite vs 0.552 s
+baseline). Root cause: 14,000+ motors each locking ~27 cells per step via
+`synchronized()`, repeated for 1,000 steps. This is expected for a naive first-pass
+CPU implementation. Options for the next step:
+  (a) Multi-thread the fill (parallel motor fill, synchronized per-cell).
+  (b) Lock-free fill (CAS or per-thread cell lists, merge before query).
+  (c) Defer to GPU port — the fill maps directly to a GPU scatter kernel where
+      shared-memory barriers replace Java monitors; CPU overhead becomes irrelevant.
+
+**Non-determinism confirmed persists.** bindEvents range 69–152 across seeds (2.2×).
+This is consistent with the force-accumulation races documented 2026-05-27.
+Step 1a does not introduce new sources of non-determinism beyond what already existed.
+
+### Open questions for planner
+
+- Fix fill performance before or after GPU port? (Current 6.3× overhead on a
+  0.01 s run; production impact scales with motor count and run duration.)
+- Resolve the force-accumulation race (Option A from prior entry) before extending
+  the rewrite to additional collision phases?

@@ -101,6 +101,8 @@ public class Env {
 	static final int membraneLinksStop = 14;
 	static final int membraneMoveStart = 15;
 	static final int membraneMoveStop = 15;
+	static final int motorBindGrid3DStart = 16;
+	static final int motorBindGrid3DStop  = 16;
 
 	// **** Times and Counters
 	static private final double deltaT_init = 1e-4; // seconds

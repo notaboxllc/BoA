@@ -4,9 +4,38 @@ public class MyoMotor extends Thing {
 	static MyoMotor [] theMotors = new MyoMotor[100000];
 	static int motorCt = 0;
 	int myMotorNumber;
+
+	// SoA arrays for GPU-ready motor-binding path (step 1a)
+	static double[]  soaX     = new double[100000];
+	static double[]  soaY     = new double[100000];
+	static double[]  soaZ     = new double[100000];
+	static boolean[] soaOnFil = new boolean[100000];
+
+	static void fillSoaArrays() {
+		for (int i = 0; i < motorCt; i++) {
+			MyoMotor m = theMotors[i];
+			soaX[i]     = m.bindTip.x;
+			soaY[i]     = m.bindTip.y;
+			soaZ[i]     = m.bindTip.z;
+			soaOnFil[i] = m.onFil;
+		}
+	}
+
 	static double radius = 0.01; // microns
 	Object attachSync = new Object();	// synchronize attachment to filament
-	
+
+	// Binding-event statistics (validation instrumentation)
+	static long totalBindEvents = 0;
+	static long boundMotorSum = 0;
+	static long boundMotorSampleCt = 0;
+
+	static void sampleBoundMotors() {
+		int ct = 0;
+		for (int i = 0; i < motorCt; i++) { if (theMotors[i].onFil) ct++; }
+		boundMotorSum += ct;
+		boundMotorSampleCt++;
+	}
+
 	// binding and unbinding related
 	static double bindTimer = 1e6;
 	
@@ -398,6 +427,7 @@ public class MyoMotor extends Thing {
 			if (onFil) { return; }
 			if (bindTimer < Env.myoRebindTime.getValue()) { return; }  // don't bind if too soon after unbinding
 			tipLink.setAttachment(seg, arcOnSeg);
+			totalBindEvents++;
 		}
 	}
 	

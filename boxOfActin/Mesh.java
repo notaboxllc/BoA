@@ -183,32 +183,33 @@ public class Mesh {
 		CkMotsThreads () {
 			super (Env.numMeshCollThreads, "Ck Mots Threads");
 		}
-	
+
 		public void divideAndConquer (int jobId) {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.motCollStart:
+					// Divide by motor count for motor-centric 3D grid query
 					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*Mesh.nXBins/numThreads;	// divide the job amongst threads
+						jobDiv[i] = i*MyoMotor.motorCt/numThreads;
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.motCollStop:
 					gather(); break;
 			}
 		}
-		
+
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.motCollStart:
-					int xStart = jobDiv[threadId];
-					int xStop = jobDiv[threadId+1];
-					MyoMotor.motorFilMeshCollisions(xStart, xStop);
+					int motorStart = jobDiv[threadId];
+					int motorStop  = jobDiv[threadId+1];
+					MotorBindGrid3D.INSTANCE.motorFilCollisions(motorStart, motorStop);
 					break;
 			}
 		}

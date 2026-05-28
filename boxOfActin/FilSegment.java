@@ -22,6 +22,25 @@ public class FilSegment extends Thing {
 	
 	static FilSegment [] theFilSegments = new FilSegment [1000000];	// array holding all filament segments
 	static int filSegmentCt = 0;
+
+	// SoA arrays for GPU-ready collision path (step 1a)
+	static double[] soaEnd1X = new double[1000000];
+	static double[] soaEnd1Y = new double[1000000];
+	static double[] soaEnd1Z = new double[1000000];
+	static double[] soaEnd2X = new double[1000000];
+	static double[] soaEnd2Y = new double[1000000];
+	static double[] soaEnd2Z = new double[1000000];
+	static int[]    soaFilID = new int[1000000];
+
+	static void fillSoaArrays() {
+		for (int i = 0; i < filSegmentCt; i++) {
+			FilSegment fs = theFilSegments[i];
+			soaEnd1X[i] = fs.end1.x;  soaEnd1Y[i] = fs.end1.y;  soaEnd1Z[i] = fs.end1.z;
+			soaEnd2X[i] = fs.end2.x;  soaEnd2Y[i] = fs.end2.y;  soaEnd2Z[i] = fs.end2.z;
+			soaFilID[i] = fs.filID;
+		}
+	}
+
 	static int filamentRenderCt = 0;	// for rendering only
 	static int filSegRenderCt = 0;		// for rendering only
 	static double monosize=Env.actinMonoDiam;  
