@@ -194,6 +194,9 @@ public class Env {
 	// **** For Synchronization of Methods ****
 	static Object safeO = new Object(); // handle for operations that cannot be performed at the same time
 
+	// **** GPU Acceleration ****
+	static boolean useGPU = false; // -gpu flag: route motor-binding through GPUMotorBinding kernel
+
 	// **** Flags and Counters for Graphics ****
 	static boolean remote = false; // flag for no graphics instantiation
 	static boolean monomerGraphics = false; // one dependent flag for simplicity, set at start of sim.

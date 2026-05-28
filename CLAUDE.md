@@ -48,20 +48,29 @@ curl -L -o libs/json-20231013.jar \
 - `libs/json-20231013.jar` — org.json JSON parser used for C4 setParam/queryParams actions (75 KB)
 
 ```
-javac -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
+javac -g -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
 ```
 
-`-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries. The `libs/*` glob picks up all three jars.
+`-XDignore.symbol.file` suppresses warnings about internal-API usage from the bundled libraries. The `libs/*` glob picks up all three jars. `-g` emits local variable tables — TornadoVM's PTX compiler reads them at kernel-build time; without `-g` the kernel fails at runtime with an opaque PTX error.
 
 If you are not using `-3jsLive`, you can still compile and run without the jars on the classpath (the server class is loaded lazily). But the simplest practice is to always include them.
 
 ### Build (post-Phase 5, once Java 21 is installed)
 
 ```
-javac --release 21 --enable-preview -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
+javac -g --release 21 --enable-preview -XDignore.symbol.file -cp ".:libs/*" boxOfActin/*.java *.java
 ```
 
-Phase 5 has not yet been performed. The MBP needs `brew install openjdk@21` before this command will work. Once Java 21 is installed and the codebase is validated under it, this becomes the canonical build command and `--enable-preview` is required for TornadoVM compatibility (TornadoVM's `FloatArray` is a Java 21 preview feature).
+Phase 5 has not yet been performed on the MBP (needs `brew install openjdk@21`). On **aorus** Java 21 is already installed and TornadoVM 4.0.1-dev (PTX backend) is at `$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64`. To compile with TornadoVM on the classpath:
+
+```
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+      boxOfActin/*.java *.java
+```
+
+`-g` is required for TornadoVM's PTX compiler (local variable tables); `--enable-preview` is required because TornadoVM's `FloatArray` is a Java 21 preview feature.
 
 ### Run
 
@@ -74,6 +83,18 @@ java -Xmx800M -cp ".:libs/*" BoxOfActin -3jsLive 8081          # live WebSocket 
 java -Xmx800M -cp ".:libs/*" BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js ~/Desktop/run1 -3jsLive 8081
 java -Xmx800M -cp ".:libs/*" BoxOfActin -help                  # full option list
 ```
+
+**GPU run (aorus, requires Java 21 + TornadoVM):**
+
+```
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
+```
+
+`@tornado-argfile` injects `--add-modules`, `--add-exports`, JVMCI, and native library paths in one shot. The `-gpu` flag replaces the CPU motor-binding ThreadSet dispatch with `GPUMotorBinding.detectBindings()`; CPU and GPU paths are mutually exclusive per run. All other phases (mesh, brownian, xlink, joints, step, move, biochem, membrane) remain on CPU.
 
 The full command-line option list, as of Session 12:
 
@@ -88,6 +109,7 @@ The full command-line option list, as of Session 12:
 | `-3js <dir>` | write Three.js per-frame JSON files; directory auto-increments `.001` suffix if it exists |
 | `-3jsLive <port>` | start WebSocket server on the given port; viewer connects via `?live=<port>` |
 | `-oc` | ordered filaments (in a biochem-only run) are centered |
+| `-gpu` | route motor-binding decision through `GPUMotorBinding` (TornadoVM); CPU motor-binding ThreadSets skipped. Requires Java 21 + TornadoVM on the classpath. |
 
 Both `-3js` and `-3jsLive` can be given together. Frame JSON is generated once and dispatched to both consumers.
 

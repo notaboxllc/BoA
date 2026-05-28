@@ -195,6 +195,7 @@ public class BoxOfActin {
 				talkln (" -3js (directory) : write Three.js per-frame JSON files to the specified directory (auto-increments .001 suffix if exists)");
 				talkln (" -3jsLive (port)  : start WebSocket server on specified port for live frame streaming to sim_viewer_boa.html?live=<port>");
 				talkln (" -oc : ordered filaments (in a biochem only run) are centered");
+				talkln (" -gpu : route motor-binding decision through GPUMotorBinding (TornadoVM); CPU motor-binding ThreadSets skipped");
 				System.exit(0);
 			}
 			
@@ -351,6 +352,9 @@ public class BoxOfActin {
 			if (args[i].equals("-seed") && i + 1 < args.length) {
 				long seed = Long.parseLong(args[++i]);
 				Env.mtRNG.setSeed(seed);
+			}
+			if (args[i].equals("-gpu")) {
+				Env.useGPU = true;
 			}
 		}
 		// Mutual exclusivity: v25 > v24 > v23 > v22 > v21 > v20 > v19 > v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
@@ -710,10 +714,16 @@ public class BoxOfActin {
 
 				// Motor domain - filament collisions... check every time-step
 				motorsAndFilsColTimer.start();
-				startAllThreadSets(Env.motorBindGrid3DStart);
-				waitOnAllThreadSets(Env.motorBindGrid3DStop);
-				startAllThreadSets(Env.motCollStart);
-				waitOnAllThreadSets(Env.motCollStop);
+				if (Env.useGPU) {
+					// GPU one-plan spike: brute-force motor × segment fine-check kernel.
+					// CPU grid fill is skipped — the GPU brute-forces over all segments.
+					GPUMotorBinding.detectBindings();
+				} else {
+					startAllThreadSets(Env.motorBindGrid3DStart);
+					waitOnAllThreadSets(Env.motorBindGrid3DStop);
+					startAllThreadSets(Env.motCollStart);
+					waitOnAllThreadSets(Env.motCollStop);
+				}
 				motorsAndFilsColTimer.stopInc();
 				MyoMotor.sampleBoundMotors();
 
@@ -1177,6 +1187,15 @@ public class BoxOfActin {
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
+		}
+		if (Env.useGPU && GPUMotorBinding.getCallCount() > 0) {
+			int    calls = GPUMotorBinding.getCallCount();
+			double tot   = GPUMotorBinding.getTotalNanos()  / 1.0e9;
+			double pk    = GPUMotorBinding.getPackNanos()   / 1.0e9;
+			double ex    = GPUMotorBinding.getExecNanos()   / 1.0e9;
+			double un    = GPUMotorBinding.getUnpackNanos() / 1.0e9;
+			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk, ex, un);
 		}
 		reportAllThreadSetTimes();
 		

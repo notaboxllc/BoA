@@ -4,6 +4,261 @@ Last updated: 2026-05-28
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-28 — First GPU kernel: motor-binding via TornadoVM (one-plan spike)
+
+First TornadoVM kernel for BoA. Deliberately Sim3D-shaped: one plan, per-step
+EVERY_EXECUTION pack/execute/unpack, brute-force motor × segment fine check.
+Validates the toolchain end-to-end, statistically agrees with the CPU baseline,
+measures the transfer-bound wall-clock floor honestly. Iteration 2 will move to
+two-plan persistent residency with the spike numbers below as the baseline.
+
+### Files added/changed
+
+- `boxOfActin/GPUMotorBinding.java` — new file (305 lines). Static-only kernel
+  class; mirrors `Sim3D/GPUCollisionDetector.java` structure with BoA-shaped
+  inputs.
+- `boxOfActin/Env.java:198` — added `static boolean useGPU = false;`.
+- `boxOfActin/BoxOfActin.java` — `-gpu` flag parsing (after the `-seed` block,
+  ~line 356); dispatch mutex in `doLoop()` (~line 713); GPU timing in `[STATS]`
+  block (~line 1192); `-help` line.
+- `CLAUDE.md` — `-g` added to both the current and post-Phase-5 javac lines
+  with PTX-local-variable-table note; new "GPU run (aorus)" block with the
+  `@tornado-argfile` invocation; `-gpu` row added to flag table.
+- `MyoFilLink.java` — **not** modified. The committed-bind instrumentation from
+  the diagnostic session was already reverted from HEAD per its own session
+  notes; the spike does not re-add it. `MyoMotor.totalBindEvents` (semantically
+  the committed-bind counter, verified in the diagnostic session) is sufficient
+  as the regression observable.
+
+### The kernel (full quote)
+
+```java
+private static void bindKernel(
+        FloatArray motPos, FloatArray motUVec, FloatArray motRodUVec,
+        IntArray   motOnFil,
+        FloatArray filEnd1, FloatArray filEnd2,
+        IntArray   filNodeAtEnd2,
+        IntArray   counts,
+        IntArray   boundSegId,
+        float      alignTol,
+        float      myoColTolSq) {
+    int M = counts.get(0);
+    int S = counts.get(1);
+    for (@Parallel int m = 0; m < motPos.getSize() / 3; m++) {
+        if (m >= M) { return; }
+        boundSegId.set(m, -1);
+        if (motOnFil.get(m) != 0) { continue; }
+        float mx = motPos.get(m*3),     my = motPos.get(m*3+1),     mz = motPos.get(m*3+2);
+        float mux = motUVec.get(m*3),   muy = motUVec.get(m*3+1),   muz = motUVec.get(m*3+2);
+        float rux = motRodUVec.get(m*3),ruy = motRodUVec.get(m*3+1),ruz = motRodUVec.get(m*3+2);
+        for (int s = 0; s < S; s++) {
+            if (filNodeAtEnd2.get(s) != 0) { continue; }
+            float e1x = filEnd1.get(s*3), e1y = filEnd1.get(s*3+1), e1z = filEnd1.get(s*3+2);
+            float r1x = filEnd2.get(s*3)-e1x, r1y = filEnd2.get(s*3+1)-e1y, r1z = filEnd2.get(s*3+2)-e1z;
+            float denom = r1x*r1x + r1y*r1y + r1z*r1z;
+            float invLen = 1.0f / (float) Math.sqrt(denom);
+            float fUx = r1x*invLen, fUy = r1y*invLen, fUz = r1z*invLen;
+            if (mux*fUx + muy*fUy + muz*fUz < alignTol) { continue; }
+            if (rux*fUx + ruy*fUy + ruz*fUz < 0f)       { continue; }
+            float r2x = mx-e1x, r2y = my-e1y, r2z = mz-e1z;
+            float alpha = (r2x*r1x + r2y*r1y + r2z*r1z) / denom;
+            if (alpha < 0f || alpha > 1f) { continue; }
+            float cpx = e1x + alpha*r1x, cpy = e1y + alpha*r1y, cpz = e1z + alpha*r1z;
+            float dx = cpx-mx, dy = cpy-my, dz = cpz-mz;
+            if (dx*dx + dy*dy + dz*dz < myoColTolSq) {
+                boundSegId.set(m, s); break;
+            }
+        }
+    }
+}
+```
+
+Translation from CPU step-1b is mechanical: `double[]` reads become
+`FloatArray.get(i)`; the orientation/range gates and the squared-distance
+compare are unchanged; `Pt3D.ptDist`'s `sqrt` is dropped per Sim3D survey §4
+(squared compare suffices). Inactive-thread early-return at the top of the
+parallel loop is mandatory per §9.
+
+### TaskGraph build (full quote)
+
+```java
+TaskGraph tg = new TaskGraph("motorBinding")
+    .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                      motPos, motUVec, motRodUVec, motOnFil,
+                      filEnd1, filEnd2, filNodeAtEnd2,
+                      counts)
+    .task("bind",
+          GPUMotorBinding::bindKernel,
+          motPos, motUVec, motRodUVec, motOnFil,
+          filEnd1, filEnd2, filNodeAtEnd2,
+          counts, boundSegId,
+          alignTol, myoColTolSq)
+    .transferToHost(DataTransferMode.EVERY_EXECUTION, boundSegId);
+
+itg  = tg.snapshot();
+plan = new TornadoExecutionPlan(itg);
+```
+
+Single TaskGraph, single task. All inputs EVERY_EXECUTION (this is the
+transfer-bound shape — iteration 2 promotes static topology to FIRST_EXECUTION
+once persistent residency is wired in). `alignTol` and `myoColTolSq` are
+captured at build time as scalar kernel parameters; neither is marked
+`setMutableAtRuntime` in Env.java so the plan-invalidation hook from Sim3D §9
+is not needed for this kernel.
+
+### Pack/unpack
+
+Pack walks `MyoMotor.soa*` and `FilSegment.soa*` arrays (already populated by
+`fillSoaArrays()` at the top of `doLoop()`), casting `double → float` at the
+copy site:
+
+```java
+motPos.set(j,     (float) MyoMotor.soaX[i]);
+motPos.set(j + 1, (float) MyoMotor.soaY[i]);
+motPos.set(j + 2, (float) MyoMotor.soaZ[i]);
+// ... (all 9 motor floats + onFil int per motor; 6 segment floats + nodeAtEnd2 int per segment)
+```
+
+Unpack walks `boundSegId`; for each motor `i` with `boundSegId[i] >= 0` it
+recomputes `arcOnFil = alpha * sqrt(|r1|²)` from the CPU SoA arrays (cheaper
+than downloading alpha) and calls `MyoMotor.theMotors[i].ontoFilament(seg,
+arcOnFil)`. The serialized synchronized event semantics of `ontoFilament` are
+unchanged from step 1b — kernel produces the decision, CPU resolves the event.
+
+### Discovery: TornadoVM `task()` parameter cap
+
+Strict per-coordinate SoA (separate `xPos/yPos/zPos`) would have given the
+kernel 21 array/scalar parameters. TornadoVM's `TaskGraph.task()` variadic
+overloads cap at 15 (`Task1` … `Task15` in `TornadoFunctions`). The first
+compile attempt failed with the "no suitable method" overload-resolution error
+naming all 15 Task arities.
+
+Workaround for this iteration: pack each three-vector attribute into one
+FloatArray (`motPos[m*3..m*3+2]`, `motUVec[…]`, `motRodUVec[…]`, etc.). Sim3D
+already uses this AoS-by-attribute pattern (e.g. `muttonPos[m*3+0..2]`); it
+was unclear from the survey whether the limit forced that choice or whether it
+was style. It is forced. Strict-SoA per `GPU_STRATEGY.md` is deferred to
+iteration 2, where the kernel will likely be split into smaller cooperating
+kernels (or use a different launch API) so each individual kernel stays under
+the 15-param ceiling.
+
+### Wang-hash salt reservation
+
+`GPUMotorBinding.KERNEL_ID = 1` is declared and documented; the
+recommended-by-survey seed scheme is `m * 1000003 + step * 999983 + KERNEL_ID
+* 7919`. **This kernel does not currently consume RNG** — motor binding is
+deterministic given positions. The salt slot is reserved for the next kernels
+(integration, biochem). `counts[2]` carries `Env.counter` each step so the
+step counter is already on the GPU for future RNG seeding.
+
+### Validation (10 seeds × glidingAssay500\_val × 0.1 s)
+
+CPU baseline and `-gpu` runs at the same HEAD (CPU path unchanged). Protocol
+matches step-1b and diagnostic sessions. Apples-to-apples seed-by-seed
+ensemble; statistical comparison is |diff| / cSEM < 2.0 per observable.
+
+Raw per-seed values + full run output at
+`RUN_LOGS/2026-05-28_gpu-spike-validation.txt`.
+
+```
+observable        | CPU (10 seeds)               | GPU (10 seeds)               | |diff|/cSEM | verdict
+bindEvents        |  816.1 ± 30.4  (SD  96.0)    |  852.1 ± 27.7  (SD  87.5)    |    0.88    | PASS
+meanBoundMotors   |    7.275 ± 0.197 (SD 0.622)  |    7.242 ± 0.179 (SD 0.566)  |    0.12    | PASS
+velocity (µm/s)   |    4.606 ± 0.191 (SD 0.604)  |    4.741 ± 0.156 (SD 0.493)  |    0.54    | PASS
+```
+
+All three observables agree well within 1σ. SD ratios within ~1.1× across
+ensembles. **Kernel produces correct binding behavior.** GPU `bindEvents` mean
+(852) is consistent with the step-1b diagnostic baseline of 824.8 ± 24.0 from
+the 2026-05-28 session. The 5–6 difference between the CPU baseline here and
+the diagnostic-session baseline (816 vs 825) is within the noise floor of
+the documented force-accumulation race.
+
+### Wall-clock
+
+```
+mode | mean (s/seed) | SD (s) | n  | ratio (vs CPU)
+CPU  |     228.2     |  0.92  | 10 |  1.000×
+GPU  |     251.5     |  0.44  | 10 |  1.102×
+```
+
+**GPU is 10.2% slower than CPU at this workload — the expected outcome.** The
+ratio > 1 confirms the transfer-bound diagnosis and motivates iteration 2.
+This is a successful spike per the session's success criterion.
+
+GPU per-call breakdown (10101 calls/run, averaged across 10 seeds):
+
+```
+phase  | total (s) | per call (ms)
+pack   |    1.32   |   0.131
+exec   |   41.63   |   4.121
+unpack |    0.62   |   0.061
+total  |   44.19   |   4.375
+```
+
+The `exec` phase dominates by 30× over pack+unpack combined. This rules out
+"transfers between calls" as the bottleneck and points to **per-call exec
+overhead** (kernel launch + EVERY_EXECUTION transfer batching done inside the
+TaskGraph runtime) as the lever. Two-plan persistent residency directly
+attacks this: positions move at `FIRST_EXECUTION` once and stay on-device, so
+each step's `plan.execute()` should drop substantially.
+
+Reading the gap another way: total wall-clock minus the GPU motor-binding
+total (251 − 44 = 207 s) is roughly the non-binding CPU work. The CPU baseline
+wall-clock minus the same 207 s ≈ 21 s for CPU motor-binding (16-thread grid
++ fine check). So **CPU is ~2× faster than GPU on this kernel today**:
+21 s CPU vs 44 s GPU. The GPU kernel is doing more work per call (O(M × S)
+brute force vs CPU's grid-cell candidate set) and paying per-call overhead.
+Iteration 3+ (GPU broad-phase grid) is the asymptotic-scaling lever; iteration
+2 (persistent residency) is the per-call-overhead lever.
+
+### Open questions for iteration 2
+
+1. **TaskGraph parameter limit and SoA refactor.** Iteration 2 needs to
+   actually deliver per-coordinate SoA per GPU\_STRATEGY's mandate. Options:
+   (a) split into two sub-kernels (separate motor-state-prep kernel and
+   actual-collision kernel) joined by a TaskGraph dependency; (b) use a
+   different TaskGraph API surface that does not cap at 15. Worth a survey of
+   `Task` interfaces vs the `TornadoFunctions` extension points before
+   committing.
+
+2. **Per-call exec overhead.** 4.1 ms/call exec time on a brute-force
+   O(M × S) kernel at d=500 is the headline finding to investigate. Tornado
+   profiling (`-Dtornado.profiler=true`) should split that 4.1 ms into kernel
+   wall-clock, transfer wall-clock, and host-side overhead. We do not yet know
+   which dominates; the assumption is transfer but it could be kernel-launch
+   overhead from rebuilding the same 8 transferToDevice descriptors every step.
+
+3. **Persistent-residency boundaries.** When iteration 2 makes positions
+   FIRST\_EXECUTION, every CPU phase that reads positions between motor-binding
+   and the GPU's next sync becomes a stale-read problem. The cleanest answer
+   is to either port more phases (forces, integration) to GPU together, or to
+   carefully audit which CPU phases read SoA position arrays after the kernel
+   call. The current loop order means `xLink`, `membraneLinks`, `myoJoints`,
+   `step`, `move`, `biochem` all run between consecutive motor-binding calls;
+   all read Pt3D objects, not SoA arrays, so today's spike does not surface
+   the issue, but iteration 2 will need to either upload positions every step
+   or move more work to GPU.
+
+4. **Cross-validation against `bindEventsAtomic` and `committedBinds`.** The
+   diagnostic session showed `bindEvents` (non-atomic) loses ~0.04% of events
+   to the race; for GPU regression, if event counts climb 10×–100× per kernel
+   launch the undercount could grow. Optional task for iteration 2: swap
+   `static long` → `AtomicLong` per the diagnostic session's recommendation,
+   especially before the kernel handles the `unbind` decision too.
+
+5. **Brute-force vs grid asymptotic.** This kernel walks all S segments per
+   motor (S = 14 segs for gliding-assay; trivially fast). At BoA's research
+   scale (thousands of motors × thousands of segments) the brute-force wall
+   could swamp the CPU savings entirely. Iteration 3+ (GPU broad-phase) is
+   gated on the iteration 2 measurement of when brute force becomes the bound.
+
+### Commit
+
+See `git log --grep "first GPU kernel: motor-binding via TornadoVM"` for the
+session commit (a self-referential hash inside the same commit's journal entry
+isn't expressible via amend).
+
 ## 2026-05-26 — Survey: Brownian-on-FilSegments GPU port readiness
 
 ### 1. Where Brownian forces are computed today
