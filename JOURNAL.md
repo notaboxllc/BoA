@@ -2059,3 +2059,9 @@ in CPU flat-array form, which is the bridge the planner asked for.
 ### Commit
 
 `e1e9be7` — CPU rewrite step 1b: SoA-ify motor-binding fine check.
+
+---
+
+## 2026-05-28 — GPU_STRATEGY.md doc update
+
+GPU_STRATEGY.md updated with broad-phase/narrow-phase collision architecture, tuning-parameter agenda (cell size, staleness window, Morton ordering), and forthcoming-membrane forward note. See GPU_STRATEGY.md.
