@@ -2223,3 +2223,471 @@ Stats logs preserved at `/tmp/diag_baseline_stats.log` and
 
 This entry's session commit: see `git log --grep "diagnostic: step-1b bindEvents counter artifact"`
 (commit message: "diagnostic: step-1b bindEvents counter artifact vs turnover divergence").
+
+## 2026-05-28 — Survey: Sim3D TornadoVM patterns for reuse in BoA GPU port
+
+Read-only survey of `~/Code/Sim3D/` to extract the toolchain idioms BoA's
+first TornadoVM kernel will inherit. Sim3D's `-gpu` path already runs on the
+target hardware (aorus, RTX 5070, PTX backend, Java 21 `--enable-preview`,
+TornadoVM 4.0.1-dev) and is the authoritative pattern reference. No source
+in either repo was modified.
+
+### 1. Inventory
+
+The GPU path in Sim3D is two self-contained kernel classes plus three
+integration sites. There is no separate plan-builder, data-layout helper, or
+dispatcher class — each kernel class owns its own arrays, plan lifecycle,
+pack/unpack code, and timing.
+
+| File | Role |
+|---|---|
+| `GPUCollisionDetector.java` | Glutton×Mutton collision kernel + plan; static-only. Owns muttonPos/gluttonPos/eatenBy/counts arrays. |
+| `GPUPhysicsKernel.java` | Brownian + bounds-collision + integration kernel + plan; static-only. Owns pos/radius/bTransGam/diffCoeff/forceSum/count arrays. |
+| `Sim3D.java:53–55, 111–114, 161–162` | `-gpu` flag, main-loop dispatch, `restartRun()` reset hook. |
+| `Glutton.java:29` | `invalidatePlan()` call from `grow()` when radius changes (FIRST_EXECUTION arrays go stale). |
+| `Env.java:50–51` | `static boolean useGPU = false;` and `static boolean fastRNG = false;` flags. |
+
+That's the entire GPU footprint — five touched files, two of them new. The
+collision detector is ~170 lines; the physics kernel is ~350 lines (most of
+which is the inline RNG, not control flow).
+
+### 2. TornadoVM imports and annotations
+
+Both kernel classes use the same seven-line import block; nothing else from
+`uk.ac.manchester.tornado.api.*` is referenced. The only annotation in use is
+`@Parallel` on the outermost loop. There is no `@Reduce`, no custom
+annotations, no DSL — kernels are plain static methods over `FloatArray` /
+`IntArray` parameters.
+
+```java
+// GPUCollisionDetector.java:1–7 (identical in GPUPhysicsKernel.java:1–7)
+import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
+import uk.ac.manchester.tornado.api.TaskGraph;
+import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
+import uk.ac.manchester.tornado.api.annotations.Parallel;
+import uk.ac.manchester.tornado.api.enums.DataTransferMode;
+import uk.ac.manchester.tornado.api.types.arrays.FloatArray;
+import uk.ac.manchester.tornado.api.types.arrays.IntArray;
+```
+
+`@Parallel` annotates the outer `for` loop only; the inner loop over G
+gluttons is sequential within each thread (`GPUCollisionDetector.java:57`).
+
+Notably absent: no `TornadoMath` import. Both kernels call `Math.abs`,
+`Math.sqrt`, `Math.log`, `Math.cos` directly (e.g. `GPUPhysicsKernel.java:117,
+119, 132, 194, 195`). TornadoVM's compiler is evidently translating these to
+PTX intrinsics without ceremony. BoA can do the same — no need to seek out
+`TornadoMath` unless a specific call refuses to compile.
+
+### 3. FloatArray allocation pattern
+
+Pattern: **private static fields on the kernel class**, **lazy allocation on
+the first call**, sized to `Env.maxThings` (the global object cap). No
+wrapper class, no per-object fields, no shared static collection. Each
+kernel class owns its own arrays.
+
+```java
+// GPUCollisionDetector.java:23–34 — declarations
+private static FloatArray muttonPos;   // M*3: x,y,z per mutton (float)
+private static FloatArray gluttonPos;  // G*4: x,y,z,r per glutton (float)
+private static IntArray   eatenBy;     // M: glutton index that ate mutton m, or -1
+private static IntArray   counts;      // [0]=muttonCt, [1]=gluttonCt
+
+private static ImmutableTaskGraph   itg;
+private static TornadoExecutionPlan plan;
+```
+
+Allocation is gated by `plan == null` on the first dispatch:
+
+```java
+// GPUCollisionDetector.java:95–101 — first-call allocation
+if (plan == null) {
+    int cap = Env.maxThings;
+    muttonPos  = new FloatArray(cap * 3);
+    gluttonPos = new FloatArray(cap * 4);
+    eatenBy    = new IntArray(cap);
+    counts     = new IntArray(2);
+    ...
+}
+```
+
+The arrays survive across plan rebuilds — `invalidatePlan()` closes the plan
+but leaves the FloatArrays in place; only `reset()` (called from
+`restartRun()`) nulls the arrays themselves (`GPUPhysicsKernel.java:326–346`).
+That separation matters: re-uploading static topology after a single Glutton
+radius change is cheap; reallocating a million-element FloatArray would not be.
+
+**Layout note for BoA:** Sim3D uses **interleaved AoS** (`m*3+0=x, m*3+1=y,
+m*3+2=z`). `GPU_STRATEGY.md` mandates SoA for BoA (separate xPos, yPos, zPos
+arrays). This is the single biggest pattern divergence BoA must make from the
+Sim3D template — see §10.
+
+### 4. The kernel method itself
+
+The collision-detection kernel is the cleaner example and the closer
+structural analog to BoA's first-target motor-binding query (search nearby
+candidates, write a per-thread result). Quoted in full:
+
+```java
+// GPUCollisionDetector.java:47–80
+private static void checkCollisionsKernel(
+        FloatArray muttonPos,
+        FloatArray gluttonPos,
+        IntArray   eatenBy,
+        IntArray   counts,
+        float      muttonRadius) {
+
+    int M = counts.get(0);
+    int G = counts.get(1);
+
+    for (@Parallel int m = 0; m < muttonPos.getSize() / 3; m++) {
+        if (m >= M) {
+            return;  // inactive thread slot — nothing to do
+        }
+
+        float mx = muttonPos.get(m * 3);
+        float my = muttonPos.get(m * 3 + 1);
+        float mz = muttonPos.get(m * 3 + 2);
+
+        eatenBy.set(m, -1);
+
+        for (int g = 0; g < G; g++) {
+            float dx = mx - gluttonPos.get(g * 4);
+            float dy = my - gluttonPos.get(g * 4 + 1);
+            float dz = mz - gluttonPos.get(g * 4 + 2);
+            float gr = gluttonPos.get(g * 4 + 3);
+            float radiiSum = gr + muttonRadius;
+            if (dx * dx + dy * dy + dz * dz < radiiSum * radiiSum) {
+                eatenBy.set(m, g);
+                break;
+            }
+        }
+    }
+}
+```
+
+Annotation:
+
+- **Parallel loop boundary.** `@Parallel int m` bounds the parallelism over
+  the *full allocated capacity* (`muttonPos.getSize() / 3`), not the live
+  count `M`. Inactive threads early-return at line 58. This avoids re-sizing
+  the dispatch on every step; the cost is a few thousand dead threads at low
+  populations, which is negligible.
+
+- **`TornadoMath` use.** None. The kernel is pure float arithmetic plus
+  comparisons. Squared-distance comparison (`d² < r²`) avoids `sqrt`
+  entirely — standard collision-detection optimization, important to keep
+  on GPU where it also cuts a transcendental per inner iteration.
+
+- **RNG.** Not used in this kernel — no stochasticity in collision
+  detection. The Wang-hash pattern is in `GPUPhysicsKernel.java:55–62` and is
+  worth quoting in full because BoA's motor-binding kernel *will* need
+  per-thread random numbers for the bind/unbind decision:
+
+  ```java
+  // GPUPhysicsKernel.java:55–62 — pure-integer Wang hash, inlinable
+  private static int wangHash(int seed) {
+      seed = (seed ^ 61) ^ (seed >>> 16);
+      seed += (seed << 3);
+      seed ^= (seed >>> 4);
+      seed *= 0x27d4eb2d;
+      seed ^= (seed >>> 15);
+      return seed;
+  }
+  ```
+
+  Seed pattern (per-thread, per-step):
+  `int base = m * 1000003 + step * 999983;` (`GPUPhysicsKernel.java:151`),
+  then XOR small constants for each sub-draw (e.g. `wangHash(base ^ 1)`,
+  `wangHash(base ^ 0x9e3779b9)`). The `step` value is uploaded each call via
+  `count.set(1, stepCounter)` (`GPUPhysicsKernel.java:296`). This is the
+  pattern BoA should follow.
+
+- **Control flow.** Two branches: the inactive-thread early-return at the
+  top, and the `break` on first collision. No comments in either kernel
+  about warp divergence; Sim3D's payoff (6× on collision detection) was
+  large enough that divergence wasn't the bottleneck. BoA's broad-phase
+  candidate-list traversal will have a similar structure.
+
+- **Output.** Single `IntArray eatenBy[]` — one entry per mutton, holding
+  the glutton index that ate it, or `-1` if none. The CPU then walks
+  `eatenBy[]` sequentially to apply growth/death (`GPUCollisionDetector.java:
+  141–149`). For BoA: an `IntArray boundSegId[]` (one entry per motor head,
+  with the segment ID it bound to, or `-1`) is the obvious direct analog.
+
+### 5. TaskGraph and ExecutionPlan structure
+
+Both kernels build a single `TaskGraph`, snapshot it to an
+`ImmutableTaskGraph`, and construct one `TornadoExecutionPlan`. There is no
+two-plan split — Sim3D uploads positions every step (`EVERY_EXECUTION`) and
+downloads them every step. BoA will be the first place where the two-plan
+stepPlan/outputPlan pattern in `GPU_STRATEGY.md` is actually implemented.
+
+```java
+// GPUPhysicsKernel.java:264–275 — the more interesting of the two, with mixed transfer modes
+TaskGraph tg = new TaskGraph("gpuPhysics")
+    .transferToDevice(DataTransferMode.FIRST_EXECUTION,
+                      radius, bTransGam, diffCoeff)
+    .transferToDevice(DataTransferMode.EVERY_EXECUTION, pos, count, forceSum)
+    .task("step",
+          GPUPhysicsKernel::physicsKernel,
+          pos, radius, bTransGam, diffCoeff, forceSum, count,
+          halfCylLen, boundsR, bCX, bCY, bCZ, dT, useFastRNG)
+    .transferToHost(DataTransferMode.EVERY_EXECUTION, pos);
+
+itg  = tg.snapshot();
+plan = new TornadoExecutionPlan(itg);
+```
+
+Task graph name (`"gpuPhysics"`) and task name (`"step"`) appear to be free
+strings for diagnostics. The kernel reference is a method handle
+(`GPUPhysicsKernel::physicsKernel`). Scalar parameters (`halfCylLen`,
+`boundsR`, …, `useFastRNG`) are captured at graph-build time — they cannot
+change without rebuilding the plan. This is why `Glutton.grow()` triggers
+`invalidatePlan()`: a Glutton's radius is on a FIRST_EXECUTION array and
+won't re-upload otherwise.
+
+The collision detector's task graph is structurally simpler — all transfers
+EVERY_EXECUTION, no FIRST_EXECUTION partitioning
+(`GPUCollisionDetector.java:104–110`).
+
+### 6. Where `executionPlan.execute()` is called
+
+The call site is the inner loop body of `Sim3D.doLoop()`, guarded by the
+`-gpu` flag:
+
+```java
+// Sim3D.java:110–122
+synchronized(Env.safeO) {
+    if (Env.useGPU) {
+        GPUCollisionDetector.detectCollisions();
+        GPUPhysicsKernel.stepParticles();
+    } else {
+        Glutton.checkMuttonCollision();
+        if (Env.enableBruteForce.getIntValue() != 0) {
+            Glutton.checkMuttonCollisionBruteForce();
+        }
+        for (int i=0;i<Thing.thingCt;i++) {
+            Thing.theThings[i].step();
+        }
+    }
+    Mutton.spawnMuttons();
+    ...
+}
+```
+
+Notes:
+
+- **CPU and GPU paths are mutually exclusive per step**, not run side-by-side
+  for comparison. The CPU baseline is still runnable simply by omitting
+  `-gpu`. BoA should preserve this — keep the CPU path always-available for
+  regression checks against ensemble metrics (cf. step 1b validation).
+- **Per-step pre/post-call work is non-trivial in both kernels.**
+  `detectCollisions()` packs all mutton+glutton positions before `execute()`
+  and walks `eatenBy[]` after (`GPUCollisionDetector.java:117–149`).
+  `stepParticles()` packs pos+radius+bTransGam+diffCoeff before `execute()`
+  and copies pos back to each `SphereThing.coord` plus calls
+  `resetCounters()` after (`GPUPhysicsKernel.java:286–308`). This is the
+  transfer-bound antipattern `GPU_STRATEGY.md` explicitly rejects for BoA.
+
+### 7. CPU↔GPU data movement around the kernel call
+
+This is the most important section to internalize: **Sim3D does not have
+persistent GPU residency.** Each step:
+
+1. CPU writes `s.coord.x/y/z` (or `mut.coord.*`) into the relevant FloatArray
+   slot (`GPUPhysicsKernel.java:286–294`).
+2. `plan.execute()` runs — uploads everything tagged EVERY_EXECUTION (which
+   includes `pos`), runs the kernel, downloads `pos`.
+3. CPU reads pos[] back into `s.coord.x = pos.get(m*3)` etc.
+   (`GPUPhysicsKernel.java:302–307`).
+4. CPU's next phase (Mutton spawn, output, etc.) reads from `s.coord`, not
+   from the FloatArray.
+
+So the kernel output is fully marshalled back into Java object fields each
+step. The Java-side `Pt3D coord` remains the source of truth between
+timesteps; the FloatArray is a per-step staging buffer.
+
+**For BoA:** GPU_STRATEGY's two-plan architecture flips this. Positions stay
+on the GPU between steps. CPU object fields become stale during the
+`stepPlan.execute()` loop and are only refreshed when `outputPlan.execute()`
+downloads at the output frame boundary. Any CPU phase that runs between
+GPU step kernel launches must either be ported to GPU or accept that it sees
+no per-step position updates.
+
+For the *first* BoA kernel (motor-binding decision only), the question is
+narrower: does the binding result need to land back in `MyoMotor.boundSegId`
+each step for the subsequent CPU step/move/biochem phases to read, or can
+those CPU phases read directly from a GPU-output IntArray? The simplest
+first-kernel scope is to marshal back into `MyoMotor` state each step (the
+Sim3D pattern) — accept the transfer cost for the first iteration, measure
+it, then move to persistent residency in iteration 2. This is the path
+GPU_STRATEGY's "first kernel ships brute-force, grid arrives in iteration 2"
+guidance is consistent with.
+
+### 8. Sim3D-specific stuff BoA will NOT inherit
+
+Flag explicitly so the BoA port doesn't copy semantic patterns that don't
+fit:
+
+- **Bounds geometry (cylinder + hemispherical caps).** The bulk of
+  `GPUPhysicsKernel.physicsKernel` (lines 117–140) is bespoke
+  `SimBounds`-shaped collision math. BoA's chamber is a box. The structural
+  pattern (compute bounds-restoring force, add to totalF before integration)
+  transfers; the geometry does not.
+- **Glutton vs Mutton roles, `eatenBy` semantics.** Sim3D's collision is
+  unidirectional: muttons get eaten by gluttons, with a "first-hit wins"
+  break. BoA's motor-binding has a different decision rule (capture-radius
+  weighted, stochastic) and may want all-candidates-considered, not
+  first-hit. The IntArray output pattern transfers; the resolution rule does
+  not.
+- **SphereThing/Glutton/Mutton class flattening.** Sim3D has a clean
+  `SphereThing.theSpheres[]` array of homogeneous spheres. BoA's `Thing`
+  hierarchy is much richer (FilSegment chains, MyoMotor parts of myosin,
+  ProteinNode, etc.). The "one FloatArray per attribute, indexed by a flat
+  per-class counter" pattern transfers — but BoA will need a per-entity-type
+  flat array (one for filament segments, one for motor heads, etc.), not one
+  global pos[].
+- **Brownian-force structure.** The Brownian integration in
+  `GPUPhysicsKernel` is isotropic-sphere only (one `bTransGam` scalar per
+  particle). BoA's FilSegments have anisotropic drag (translational +
+  rotational + cross-coupling). The Wang-hash RNG and per-step seeding
+  transfer; the force assembly does not.
+
+### 9. Pitfalls and gotchas
+
+Things in Sim3D's code that read as "we learned this the hard way" — worth
+more than the patterns themselves. Quoted or paraphrased:
+
+- **`-g` flag required at compile.** From `CLAUDE.md:20` in Sim3D:
+  "`-g` is required so TornadoVM's PTX compiler can read local variable
+  tables from the bytecode." Easy to miss; manifests as opaque PTX errors at
+  runtime. BoA's `javac` line currently doesn't pass `-g`; add it for the
+  GPU build.
+
+- **`@tornado-argfile` is non-optional.** Run line from Sim3D `CLAUDE.md:30–
+  33`: `java @$TORNADOVM_HOME/tornado-argfile -cp ... Sim3D -r -gpu`. The
+  argfile injects `--add-modules`, `--add-exports`, JVMCI, native library
+  paths, and similar. There is no "just import the jar" path.
+
+- **Plan invalidation on hidden state changes.** `Glutton.java:29`:
+  `if (Env.useGPU) { GPUPhysicsKernel.invalidatePlan(); }` is called from
+  `Glutton.grow()` because `radius` is on a `FIRST_EXECUTION`-mode array and
+  won't re-upload on its own. The kernel comment at `GPUPhysicsKernel.java:
+  323–325` makes this explicit:
+  > "Call from Glutton.grow(): Glutton radius changed, so radius/bTransGam/
+  > diffCoeff on the GPU are stale. Closing the plan forces FIRST_EXECUTION
+  > re-transfer on the next step. Arrays are kept — no reallocation needed."
+
+  For BoA: any param that's uploaded `FIRST_EXECUTION` (drag tensor, segment
+  radius, capture radius) needs an analogous hook in whatever code mutates
+  it. The `aeta` mid-run param handling in `drainParamQueue` is the closest
+  existing precedent.
+
+- **Inactive-thread early-return at the top of the parallel loop is
+  mandatory.** Both kernels open with `if (m >= N) return;` after the
+  `@Parallel for` (`GPUCollisionDetector.java:58`, `GPUPhysicsKernel.java:91`).
+  The parallel dispatch is over allocated capacity, not live count; without
+  the guard, dead slots execute garbage.
+
+- **Wang hash must be defined in the same class as the kernel.** From the
+  kernel comment at `GPUPhysicsKernel.java:53–54`:
+  > "Pure integer ops: safe to call from within a TornadoVM GPU kernel.
+  > TornadoVM/Graal inlines static helpers in the same class at compile
+  > time."
+
+  Implication: a shared `GPUUtils.wangHash` in another class is risky.
+  Duplicate the helper into each kernel class, or accept the risk and verify
+  the PTX output.
+
+- **Float vs double.** All FloatArrays. The pack site casts
+  `(float) coord.x` and the unpack site implicit-widens back to double
+  (`GPUPhysicsKernel.java:304`). No documented numerical issues, but BoA's
+  geometry (microns at micrometer precision) is similar enough that
+  `float` should be safe — confirm during validation.
+
+- **`pos` is read+write in the same kernel.** `physicsKernel` reads
+  `pos.get(m*3)` and later writes `pos.set(m*3, ...)`. TornadoVM accepts
+  this without explicit marking; the `FloatArray` parameter doesn't need any
+  in/out tag.
+
+- **`forceSum` is uploaded EVERY_EXECUTION even though it's zeroed every
+  step.** Comment at `GPUPhysicsKernel.java:282–285`: the array stays at
+  zero from `s.resetCounters()`, the transfer mechanism is kept "available"
+  for future external-force use. This is a workaround the GPU_STRATEGY
+  explicitly retires — BoA should zero forces *on the GPU* at kernel start,
+  eliminating the upload entirely.
+
+### 10. Open questions for the planner
+
+Architectural decisions BoA must make differently from Sim3D. Frame as
+questions to resolve before writing the first-kernel prompt.
+
+1. **One plan or two?** Sim3D ships one plan; GPU_STRATEGY mandates two
+   (stepPlan with no downloads, outputPlan with no kernel). For the *first*
+   BoA kernel (motor-binding only), is the simpler one-plan Sim3D pattern
+   acceptable as a stepping stone, with the two-plan split deferred to
+   iteration 2 when positions actually become GPU-resident? Or commit to
+   the two-plan pattern from kernel one even though motor-binding alone
+   doesn't yet need persistent residency? Recommend the former — ship Sim3D-
+   shaped first, refactor when adding more kernels.
+
+2. **AoS vs SoA — when does the rewrite happen?** Sim3D uses interleaved
+   `pos[m*3+0..2]`; GPU_STRATEGY mandates separate `xPos/yPos/zPos`. The
+   answer might be: ship SoA from kernel one (it's the smaller change to
+   defer than the two-plan), since the cost is only how the pack/unpack
+   code addresses the arrays. Worth committing to SoA from day one rather
+   than carrying an interleaved layout forward and rewriting later.
+
+3. **Per-entity-type FloatArrays vs unified.** Sim3D has one `pos[]` for
+   all spheres. BoA has motors, segments, nodes, etc., each with their own
+   geometry and lifecycle. Separate FloatArrays per entity type seem
+   obvious; GPU_STRATEGY's broad-phase section reinforces this with its
+   tagged-grid design. Confirm: motor-binding kernel reads
+   `motorPos_{x,y,z}` and `segPos_{x,y,z}` as four separate arrays, not a
+   unified one.
+
+4. **Where does the inactive-thread cap live?** Sim3D parallelizes over
+   `getSize()/3`. For BoA's motor-binding query, the natural parallel axis
+   is per-motor, capped at `motorCt`. Using `MyoMotor.theMotors.length`
+   (allocated cap) avoids dispatch-size changes; using live `motorCt`
+   avoids inactive-thread waste. Sim3D chose the former — recommend BoA
+   match.
+
+5. **Plan invalidation hooks for BoA's mutable params.** Several BoA params
+   currently mid-run-mutable (`aeta`, `BTransCoeff`, `BRotCoeff`,
+   `benchmarkForceFrac`) will affect FIRST_EXECUTION arrays once GPU-port
+   work begins. The existing `drainParamQueue` recomputation hook for
+   `aeta` is the right place to add `GPUKernel.invalidatePlan()` calls.
+   Worth a brief audit of the mid-run whitelist against the GPU array
+   inventory before kernel one.
+
+6. **CPU baseline coexistence.** Sim3D's `-gpu` is mutually exclusive with
+   CPU per step (`if (Env.useGPU) { GPU path } else { CPU path }`). For
+   BoA's validation workflow — where the ensemble committed-bind rate is the
+   regression metric — does the GPU path replace the CPU motor-binding
+   call entirely, or run alongside for ensemble comparison? Sim3D's mutual-
+   exclusion is the simpler default; ensemble runs alternate which path is
+   active across separate runs, not within one run.
+
+7. **Wang-hash seed namespace collisions.** Sim3D's per-thread seed is
+   `m * 1000003 + step * 999983`, where `m` is the per-thread index in one
+   kernel. With multiple BoA kernels (motor-binding, integration, biochem)
+   sharing a thread-index namespace, two different kernels at the same
+   step would derive identical seeds for the same `m`. Solution: add a
+   per-kernel salt constant (`m*1000003 + step*999983 + KERNEL_ID*7919`)
+   so streams don't alias across kernels. Worth deciding the salt scheme
+   before the first kernel rather than retrofitting.
+
+---
+
+**Deliverable summary.** A future BoA session writing the first GPU kernel
+should be able to consult this entry rather than re-reading Sim3D source.
+Patterns transferable verbatim: imports + `@Parallel`, lazy plan-build under
+`if (plan == null)`, `Env.maxThings`-sized FloatArrays as static fields on
+the kernel class, mixed FIRST_EXECUTION/EVERY_EXECUTION transfer modes,
+inactive-thread early-return, in-class Wang hash with `m*P1 + step*P2`
+seeding, IntArray output for per-thread results, plan invalidation hook on
+mutated FIRST_EXECUTION inputs. Patterns to *not* inherit: AoS layout, single
+plan, per-step pos round-trip, isotropic-sphere bounds math, mutex CPU/GPU
+in main loop without ensemble-validation tooling.
