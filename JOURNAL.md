@@ -1,8 +1,532 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-05-29 — Iter2b design survey: unified all-Things moveThing GPU kernel
+
+Survey only — no source edits, no compile, no run. Goal: assess feasibility of
+a single GPU kernel handling `moveThing()` for ALL Thing subclasses, with
+per-type Brownian logic collapsed into per-Thing scalars pre-computed on CPU
+so the kernel itself is branchless.
+
+**Bottom line:** the unified kernel is feasible for the *standard pattern*
+types — FilSegment, MyoMotor, MyoRod, MyoLever, MyoMiniFilament, ProteinNode,
+and (via pre-pass) StickyNode and FillNode — covering the entire population
+in every production workload. Bug and AnchorNode are the exceptions: Bug
+adds friction-from-tips and max-displacement scaling that don't fit the
+branchless pattern, but N=1 so it stays CPU; AnchorNode is inert. Two
+showstoppers were considered and resolved: (1) FilSegment branch's
+`motherFil` cross-entity read is collapsible via a CPU pre-pass that
+materialises an effective `randForces`/`randTorques` per branch; (2)
+StickyNode's pre-pass `forceSum` additions (spherical constraint /
+internal pressure / constricting ring) can be handled by a small CPU
+pre-pass that increments `forceSum` before kernel dispatch — no kernel
+branching needed. Neither requires restructuring moveThing's physics.
+
+### A. Exhaustive moveThing catalog
+
+Read every Thing subclass with `moveThing` overrides. Default `Thing.moveThing()`
+at `Thing.java:291` is empty `{}`.
+
+| Class | Override? | Standard pattern? | Brownian (scale, conditions) | Special notes |
+|---|---|---|---|---|
+| `Thing` | empty default (291) | — | none | base case; inherited by Crucible, Chamber |
+| `FilSegment` (488) | yes | yes | root: trans=`BTransCoeff/(1+xLinkTransAttn*linkedToCt)` × (`bTransGam.y/lmBug.bTransGam.y` if `actAOn`); rot=`BRotCoeff/(1+xLinkRotAttn*linkedToCt)` × bug-ratio if `actAOn`, **applied only if `!filAtEnd1 \| !filAtEnd2`**; branch (`motherFil!=null`): reads `motherFil.randForcesInX`/`motherFil.randTorquesInX`, trans=`min(1, bTransGam.y/motherFil.bTransGam.y)` (×`actATetherTransAttn` if `actAOn`), rot same with rot gam ratio | early-exit `isLpSeg && lpActive==0`; gated by `!brownianFilMotionOff && !brownianOff`; root path optionally swaps `randForces` to `lmBug.randForcesInX` for `actAOn` |
+| `StaticFilSegment` (41) | yes (wrapper) | inherits FilSegment | inherits | only invokes `super.moveThing()` while `simulationTime < likeARealFilTime`; otherwise no-op |
+| `MyoMotor` (263) | yes | yes | trans = `myoBrownianAttn`; rot = `myoBrownianAttn` | early-exit `myosinsOff`; "Crazy forceSum/torqueSum" recovery: zero + `inc(randForces/randTorques)`; NaN bVeloc/bAngVeloc early-exit |
+| `MyoRod` (93) | yes | yes | trans = `myoBrownianAttn`; rot = `myoBrownianAttn` | identical body to MyoMotor; gated by `!brownianMyoMotionOff` |
+| `MyoLever` (90) | yes | yes (modulo Brownian) | **none — commented out** | identical body to MyoMotor/MyoRod but the two Brownian `bForceSum.inc`/`bTorqueSum.inc` lines are commented; effectively `transScale=0, rotScale=0` |
+| `Myosin` | not a Thing (composite) | — | — | container; owns MyoMotor/MyoLever/MyoRod sub-Things which dispatch independently |
+| `MyosinDimer` | not a Thing | — | — | composite |
+| `MyoMiniFilament` (166) | yes | yes | trans = 1.0; rot = 1.0 (raw `randForces`/`randTorques`) | gated by `!myoMiniFilBrownianMotionOff`; "Crazy" recovery same as MyoMotor; teleport diag block (snapshot/dump) wrapping the call when `Env.myoMiniTeleportDiag` is set — debug instrumentation, not physics |
+| `MyosinFixed` | inherits Myosin (not a Thing) | — | — | not its own Thing dispatch |
+| `ProteinNode` (203) | yes | yes | trans = 1.0; rot = 1.0 | gated by `!nodeBrownianMotionOff`; **bYMove** check zeroes `bVeloc.y` in body frame; **xMove/yMove/zMove** checks zero `veloc.{x,y,z}` in fixed frame; early-return on "Crazy" forceSum/torqueSum (silent — no zeroing pre-pass) |
+| `StickyNode` (258) | yes (pre-pass wrapper) | yes (delegates) | pre-scales `randForces`/`randTorques` in place by `membraneBrownianScale` (or `(1e-6, 1e-40)` during spherical-init pre-equilibration), then calls `super.moveThing()` (ProteinNode) | **adds force to `forceSum`** before super call: `addSphericalConstraintForce` (when spherical & simT<0), `internalPressure` (when spherical), `fakeConstrictingRing` (when `iAmConstricting` & simT>10·deltaT); post-call: `updateStickyPointsInX()` (recomputes `valence`-many body-attached link points in fixed frame) |
+| `FillNode` (37) | yes (pre-pass wrapper) | yes (delegates) | pre-scales `randForces`/`randTorques` in place by `fillNodeBrownianScale`, then calls `super.moveThing()` | no other side effects in moveThing; growth happens in `step()` |
+| `AnchorNode` (18) | yes (empty `{}`) | n/a | — | drag set to ~immobile (`bTransGam=(1e6,1e6,1e6)`) at construction; explicitly inert in moveThing |
+| `Crucible` | inherits Thing default (empty) | n/a | — | Chamber identical (empty) |
+| `Chamber` | inherits Crucible (empty) | n/a | — | no override |
+| `Bug` (174) | yes | mostly | trans = 1.0; rot = 1.0; gated by `!bugBrownianMotionOff` | early-return on "Crazy" forceSum/torqueSum; **addFrictionFromTips()** mutates bForceSum/bTorqueSum and side-effects `Env.addPathFrictionForceOnBug`; **max-displacement scaling**: scales bForceSum/bTorqueSum if a test displacement would exceed `maxMove`; side-effect `Env.addPathForceWBrownianInx(bForceSum.x)`; updates `pathCoord` (separate Pt3D not on standard Thing). N=1 per run. |
+
+Connectors (`FilLink`, `NodeLink`, `Arp23`, `ActA`, `MyoFilLink`, `Monomer`) are not `Thing` subclasses and don't enter the `moveStart`-phase dispatch. Out of scope.
+
+The standard pattern, observed verbatim in 6 of the 8 "physics-bearing" overrides (FilSegment, MyoMotor, MyoRod, MyoLever, MyoMiniFilament, ProteinNode):
+
+```
+1. bForceSum.XTox(this, forceSum)        // fixed → body frame
+2. bTorqueSum.XTox(this, torqueSum)
+3. bForceSum.inc(transScale, randForces) // Brownian add (per-type)
+   bTorqueSum.inc(rotScale, randTorques) // (sometimes gated)
+4. bVeloc.div(1e6, bForceSum, bTransGam) // overdamped EOM
+5. bAngVeloc.div(bTorqueSum, bRotGam)
+6. veloc.xToX(this, bVeloc)              // body → fixed
+7. coord.inc(deltaT, veloc)              // position update
+8. small-angle uVec/yVec update via bAngVeloc-driven body-frame increments,
+   xToX, unitVec
+9. initialize()                          // recompute zVec, transMat, uVecR,
+                                         //  end1/end2/length/xyzRange (per-type)
+```
+
+ProteinNode and Bug add veloc/bVeloc zero-masks (movement restrictions) between steps 5 and 7. Bug additionally does friction-from-tips (mutates bForceSum/bTorqueSum), max-displacement scaling, and side-effect path bookkeeping. StickyNode/FillNode treat the pattern as an unmodified subroutine and only touch `randForces` (scale) and `forceSum` (additive pre-pass) before delegating.
+
+### B. The motherFil cross-entity dependency
+
+FilSegment branches (filaments born from an Arp2/3 junction; identified by `motherFil != null`) read from another FilSegment instance in their Brownian block:
+
+```
+randForces.XTox(this, motherFil.randForcesInX);   // mother fixed-frame → branch body-frame
+transScale = min(1, bTransGam.y / motherFil.bTransGam.y);
+if (actAOn) transScale *= Env.actATetherTransAttn;
+bForceSum.inc(transScale, randForces);
+randTorques.XTox(this, motherFil.randTorquesInX);
+rotScale = min(1, bRotGam.y / motherFil.bRotGam.y);
+if (actAOn) rotScale *= Env.actATetherRotAttn;
+bTorqueSum.inc(rotScale, motherFil.randTorques);  // note: mother.randTorques, not the local transform
+```
+
+What's read from the mother, and in what frame:
+- `motherFil.randForcesInX` — **fixed-frame** copy of mother's `randForces`, written by mother in `FilSegment.calcRandomForces()` (line 570) via `randForcesInX.xToX(this, randForces)`. Only populated when `arpChildCt > 0`. The branch then re-transforms it into its own body frame via `XTox`.
+- `motherFil.randTorquesInX` — same pattern, fixed-frame.
+- `motherFil.bTransGam.y`, `motherFil.bRotGam.y` — drag-coefficient scalars; static within a run absent `aeta` mutation.
+- `motherFil.randTorques` — read directly without re-frame for the torque add (likely a code quirk; preserves the legacy behaviour and irrelevant to feasibility analysis).
+
+CPU pre-pass collapses this cleanly. After `calcRandomForces()` completes for ALL FilSegments (one ThreadSet barrier), a second short pass over branch segments materialises an `effRandForces` and `effRandTorques` per branch, where:
+
+```
+effRandForces = mother.randForcesInX  (kept in fixed frame; the per-branch
+                XTox is folded into the kernel since the branch already has
+                its own transXTox via uVec/yVec which the kernel re-derives)
+                
+effRandTorques (for the inc call) = mother.randTorques  (fixed frame, raw)
+
+transScale_eff = min(1, bTransGam.y / mother.bTransGam.y) [× actATetherTransAttn if actAOn]
+rotScale_eff   = min(1, bRotGam.y / mother.bRotGam.y)   [× actATetherRotAttn if actAOn]
+applyRotBrownian_eff = true (no filAtEnd1/filAtEnd2 gate for branches)
+```
+
+The kernel then reads only its own SoA slot — no cross-entity lookup at GPU
+time. Pre-pass is O(branchCt), trivial relative to the kernel body.
+
+Branch prevalence: heavily configuration-dependent. Arp2/3-branched networks
+(`arpChildCt > 0` on parent segments, kNodeNuc-driven nucleation) produce
+many branches — boa10-64Seg-class runs sit here. **Gliding-assay
+configurations have zero branches** (no Arp2/3 anywhere in the parameter
+file). Branch pre-pass cost in the target dense-gliding workload is therefore
+zero; in branched-network workloads it's a single linear scan that doesn't
+move the wall.
+
+### C. Per-Thing Brownian pre-computation design
+
+The aim is one packed SoA `brownianScales[m*3]` with three slots per Thing:
+`[transScale, rotScale, applyRotMask]`. Kernel does:
+
+```
+bForceSum  += transScale * randForces      (always, unconditional)
+bTorqueSum += rotScale   * randTorques     (always, but rotScale=0 if masked)
+```
+
+Per-Thing values:
+
+| Type | transScale | rotScale | applyRotMask | Recomputed every step? |
+|---|---|---|---|---|
+| Thing (default), Crucible, Chamber, AnchorNode | 0 | 0 | 0 | no (skip kernel slot entirely) |
+| FilSegment root, no links, no actA | `BTransCoeff` | `BRotCoeff` | `!(filAtEnd1 & filAtEnd2)` | param change rare; mask depends on filAtEnd flags (change on split/join) |
+| FilSegment root, linkedToCt>0 | `BTransCoeff/(1+xLinkTransAttn·linkedToCt)` | `BRotCoeff/(1+xLinkRotAttn·linkedToCt)` | as above | linkedToCt changes step-to-step (xLink phase) → recompute every step |
+| FilSegment root, actAOn=true | adds `× bTransGam.y/lmBug.bTransGam.y` factor | adds bRotGam factor | as above | actAOn changes step-to-step → recompute every step |
+| FilSegment branch (motherFil!=null) | `min(1, bTransGam.y/mother.bTransGam.y)` [× actATetherTransAttn if actAOn] | `min(1, bRotGam.y/mother.bRotGam.y)` [× actATetherRotAttn if actAOn] | 1 (always apply rot) | depends on actAOn and on which-mother (mother handle can change on topology event) → recompute every step is safest |
+| MyoMotor, MyoRod | `myoBrownianAttn` | `myoBrownianAttn` | 1 | param change is mutability-gated; effectively recompute every step if mutable, else FIRST_EXECUTION |
+| MyoLever | 0 | 0 | 0 | constant (commented-out) |
+| MyoMiniFilament | 1 | 1 | 1 | constant |
+| ProteinNode | 1 | 1 | 1 | constant |
+| StickyNode (handled by CPU pre-pass; see D) | n/a (post-scale) | n/a | n/a | — |
+| FillNode (handled by CPU pre-pass; see D) | n/a (post-scale) | n/a | n/a | — |
+
+Subtleties:
+
+- For FilSegment root with `actAOn`, the branch path SWAPS `randForces` to `lmBug.randForcesInX` (FilSegment.java:505). The pre-pass must either (a) overwrite the FilSegment's own `randForces` SoA slot with the bug's pre-transformed values, or (b) add an `actAOnOverride` slot pointing at the bug's randForces. Simplest: write effective `randForces` per FilSegment after `calcRandomForces` completes, blending in the actA / branch / bug cases. The kernel then reads "the right randForces" without knowing which case.
+
+- The FilSegment `filAtEnd1`/`filAtEnd2` gating becomes part of the mask. CPU pre-pass evaluates `mask = !(filAtEnd1 & filAtEnd2) ? 1 : 0` and packs into the float slot (or use an IntArray applyRot if cleaner).
+
+- `rotScale=0` and `applyRotMask=0` are equivalent. One scalar (rotScale, zeroed if masked) is enough; the IntArray applyRot slot is redundant. Recommend dropping `applyRotMask` and just zeroing `rotScale` in the pre-pass.
+
+So per-Thing brownian is exactly **2 scalars** (`transScale`, `rotScale`). The `randForces`/`randTorques` slots are independently per-Thing fixed-frame vectors that the pre-pass has already "blended" (root vs branch vs actA vs bug).
+
+### D. Inert Things
+
+`moveThing()` is empty or no-op for:
+
+- `Thing` (default empty)
+- `Crucible` (inherits default)
+- `Chamber` (inherits Crucible default)
+- `AnchorNode` (explicit empty override)
+- `StaticFilSegment` once `simulationTime ≥ likeARealFilTime` (≥ 200·deltaT, i.e. after ~200 steps the moveThing is a no-op)
+
+These should be excluded from GPU packing. A boolean `gpuMoveActive` per Thing
+or a presence-bit IntArray decides participation. For AnchorNode and the
+static-Things-after-eq case, the bit stays 0 forever (or for the rest of the
+run). For Chamber/Crucible/Thing, the bit is 0 from construction.
+
+`Bug` is **not** inert but does NOT fit the branchless pattern — friction
+mutates bForceSum, max-displacement scales it, side-effects update path
+counters. Bug N=1 in any run; leave it on CPU. Set its bit to 0 in the
+GPU packing.
+
+**MyoLever** is technically standard-pattern but its Brownian terms are
+commented out (effective scales = 0). It still does the EOM integration
+and uVec/yVec update — so it MUST stay in the kernel, just with
+`transScale=rotScale=0` rather than being excluded.
+
+**StickyNode** and **FillNode** add a CPU pre-pass that:
+- Pre-scales `randForces`/`randTorques` in the per-Thing SoA slot (just
+  the slot-write — no other state changes).
+- For StickyNode only: adds a few force terms to `forceSum` (spherical
+  constraint, internal pressure, constricting ring) BEFORE the kernel
+  runs.
+
+That second part is the only "physics-additive" pre-pass — it's modest
+(O(stickyNodeCt), each computation is ~10 flops + one Pt3D dist). Kernel
+reads the post-add `forceSum` and proceeds with standard math. Post-call,
+StickyNode also runs `updateStickyPointsInX()` (recompute body→fixed
+attached link points) — this happens on CPU after kernel unpack, same
+slot as `initialize()`.
+
+### E. doLoop phase ordering
+
+From `BoxOfActin.doLoop()` (lines 680–812) and `Env.java` phase IDs (70–105):
+
+```
+phase | id | dispatch                              | ThreadSet
+------+----+---------------------------------------+--------------------------
+ fill | -- | FilSegment.setBiophysValues();         | (inline, single-thread)
+ fill | -- | MyoMotor.fillSoaArrays();              | (inline)
+ fill | -- | FilSegment.fillSoaArrays();            | (inline)
+ mesh |  0 | meshFils                               | Mesh.MeshThreads
+ mesh |  1 | meshNodes                              | Mesh.MeshThreads
+ mesh |  2 | meshMotors                             | Mesh.MeshThreads
+ mesh |  3 | meshColl (xlink, node-node, tip-clear) | Mesh.CkMeshThreads
+[gate: every collisionCheckInt steps; default 10]
+ grid | 16 | motorBindGrid3D Fill                   | MotorBindGrid3D.FillThreads
+ motc |  4 | motorBinding (CPU 27-walk OR GPU)      | Mesh.CkMotsThreads | GPUMotorBinding.detectBindings()
+ brwn |  5 | calcRandomForces()                     | Thing.ThingBrownianThreads
+[gate: every brownianApplyInt steps; default 1]
+ xlnk |  6 | FilLink + Arp23 + ActA                 | FilLink.XLinkThreads
+ mblk | 14 | NodeLink (membrane)                    | NodeLink.NodeLinkThreads
+ myo1 |  7 | Myosin jointConstraints                | Myosin.MyosinThreads
+ myo2 |  8 | Chamber keepMyosinOnSurface            | Crucible.ChamberMyoThreads + ChamberMyoDThreads
+ step |  9 | Thing.step()                           | Thing.ThingStepThreads
+ move | 10 | Thing.moveThing()    ← TARGET           | Thing.ThingStepThreads
+ bioc | 11 | Thing.biochemStep()                    | Thing.ThingStepThreads
+ reset| 12 | Thing.resetCounters()                  | Thing.ThingStepThreads
+ mlx  | 14 | NodeLink (membrane, relaxation loop)   | NodeLink.NodeLinkThreads
+ mmv  | 15 | StickyNode.membraneNodesMove() → calls moveThing on subset | StickyNode.MembraneNodeThreads
+[membrane relaxation loop iterates 14→15→14→15 while strain > tolerance]
+ endup| -- | updateCounters, drainParam, etc.       | inline
+```
+
+Key constraints for the kernel:
+
+1. `calcRandomForces` (phase 5) finishes before `step` (9). The Brownian
+   pre-pass (C, D) inserts a small CPU step between 5 and 9 — at the
+   start of phase 9 is the natural place since it follows xlink/joints
+   that may mutate `linkedToCt`.
+
+2. `step` (9) writes `forceSum`/`torqueSum` (accumulating elastic, joint,
+   benchmark forces). `moveThing` (10) reads them. The kernel pack must
+   happen at the top of phase 10 (after step is complete).
+
+3. Between `moveThing` (10) and `biochem` (11), `coord`/`end1`/`end2`/
+   transXTox MUST be up-to-date for biochem reads (e.g. `end2BiochemSim`
+   reads `end2`). The kernel unpack + per-Thing `initialize()` MUST
+   complete before phase 11 dispatches.
+
+4. After `moveThing` (10), phase 14 (`membraneLinksStart`) may re-read
+   positions; same constraint as (3).
+
+5. The benchmark force-application block (lines 765–775) writes
+   `deflFil.midSeg.forceSum` between `step` (9) and `moveThing` (10).
+   The kernel must pick up that addition. This is just another CPU
+   pre-pack mutation of forceSum on one Thing — no kernel design
+   impact.
+
+6. Phase 15 (`membraneMoveStart`) re-invokes `moveThing()` on the
+   subset of non-fixed StickyNodes via `membraneNodesMove()` — but
+   ONLY during the membrane relaxation loop, which is bounded by
+   `maxMembranePasses` and runs only if membrane is configured. This
+   is a per-pass internal loop, not a re-dispatch of the main move
+   phase. Two design options for the kernel here: (a) keep
+   `membraneNodesMove`/its moveThing on CPU (simplest, small N, only
+   active in membrane runs), or (b) make the GPU kernel callable with
+   a subset mask. Recommend (a) for iter2b — the membrane subsystem
+   is configuration-specific and the gliding-assay and boa10 targets
+   don't exercise it.
+
+### F. Brownian cadence
+
+`Thing.brownianApplyInt = (int)(brownianDeltaT / deltaT)` set in
+`Env.java:1041`. For all current parameter files including
+`glidingDense_overnight`, `brownianDeltaT == deltaT == 1e-5`, so
+`brownianApplyInt == 1` — Brownian forces are recomputed **every
+step**. The gate at `BoxOfActin.java:732` evaluates true every step.
+
+Implication for the kernel: `randForces`/`randTorques` SoA arrays are
+EVERY_EXECUTION inputs. There is no FIRST_EXECUTION cadence to
+exploit. (Hypothetically, if a future configuration set
+`brownianDeltaT = 10 * deltaT`, the same `randForces` value would be
+re-applied for 10 consecutive steps; the kernel design must still
+treat them as EVERY_EXECUTION because the values DO change every
+`brownianApplyInt` steps, and the CPU writes them in place. The
+TornadoVM cost saving — re-using the device buffer for unchanged
+data — is not material at iter2b scope.)
+
+Cadence note: the FilSegment branch path reads `motherFil.randForcesInX`/
+`randTorquesInX`, which mother writes in its `calcRandomForces` override
+ONLY if `arpChildCt > 0`. The Brownian pre-pass (C) reads these the
+same step they're written, between phases 5 and 9. No cross-step state.
+
+### G. initialize() audit
+
+`Thing.initialize()` (line 286) is empty `{}`. Overrides:
+
+| Class | initialize() does |
+|---|---|
+| `FilSegment` (386) | zVec.cross(uVec,yVec); zVec.unitVec(); yVec.cross(zVec,uVec); transMat(); uVecR.scale(-1,uVec); length=(monomerCt+1)·actinMonoRadius; end1, end2; xRange/yRange/zRange |
+| `MyoMotor` (142) | zVec.cross; yVec.cross; transMat(); uVecR; end1=coord-getDim/2·uVec; end2=coord+getDim/2·uVec; xRange/yRange/zRange |
+| `MyoRod` (69) | (similar to MyoMotor) |
+| `MyoLever` (66) | (similar) |
+| `MyoMiniFilament` (146) | (similar but with `length` field, not getDim) |
+| `ProteinNode` (194) | zVec.cross; yVec.cross; transMat() (no end1/end2 — node is a sphere) |
+| `Bug` (133) | zVec.cross; yVec.cross; transMat(); end1, end2, rec1, rec2 (capsule endpoints + hemisphere centres) |
+| `HistogramPlus` (49) | unrelated — utility class, not a Thing |
+
+Critical: FilSegment.initialize reads `monomerCt` (dynamic — changes on poly/depoly), and length depends on it. End1/end2 depend on length and orientation.
+
+Running `initialize()` on CPU after GPU unpack: **safe**. The unpack
+writes `coord`/`uVec`/`yVec` Pt3D fields. `initialize()` reads those
+plus per-type dynamic state (monomerCt for FilSegment) — all CPU-resident.
+The Thing.ThingStepThreads fan-out used for moveStart can host the
+initialize call on the same parallel partition. (Or, since initialize
+is short and per-Thing, the kernel can in principle compute end1/end2
+directly from coord/uVec/dim and emit them — but FilSegment's
+`length` depending on monomerCt means a dynamic dim slot would be
+needed, and the kernel won't know whether to use `getDim()` (statics)
+or `length` (FilSegment). Cleaner: keep `initialize()` on CPU after
+unpack as the type-aware reconciliation step.)
+
+### H. Existing SoA arrays
+
+Per Section A search results:
+
+**MyoMotor (boxOfActin/MyoMotor.java:11–20):**
+- `static double[] soaX, soaY, soaZ` — `m.bindTip` position (note: bindTip,
+  NOT `m.coord` — these are subtly different. For moveThing, the kernel
+  needs `coord` instead.)
+- `static double[] soaUX, soaUY, soaUZ` — m.uVec
+- `static double[] soaRodUX, soaRodUY, soaRodUZ` — m.myMyosin.myoRod.uVec
+- `static boolean[] soaOnFil`
+
+**FilSegment (boxOfActin/FilSegment.java:29–39):**
+- `static double[] soaEnd1X/Y/Z`, `soaEnd2X/Y/Z` — fil endpoints
+- `static double[] soaUX/UY/UZ` — fil uVec
+- `static int[] soaFilID`
+- `static boolean[] soaNodeAtEnd2`
+
+These are population-specific (one for motors, one for fil segments) and
+indexed by the per-population array slot (`motorID`, `filArrayPos`).
+They are double[], not TornadoVM FloatArray.
+
+For a unified all-Things kernel, **none of these match the requirement**:
+- They cover only two populations; the kernel needs every Thing.
+- They are `double[]`, not FloatArray.
+- The motor positions are `bindTip` (a derived point on the motor's
+  body-frame end), not `coord`. moveThing needs `coord`.
+- They lack `coord`, `yVec`, `forceSum`, `torqueSum`, `randForces`,
+  `randTorques`, `bTransGam`, `bRotGam`.
+
+A new flat Thing-indexed SoA layout is required. Proposal: a single
+contiguous index range `[0, gpuMoveActiveCt)` populated by a CPU pre-pass
+that walks `theThings[]` and adds eligible Things in order. The slot
+mapping is then `gpuSlot[thing.myThingNumber] = slotIdx`. The pack/unpack
+walks this list, not the full `theThings[]`. This is essentially the
+same pattern as `MyoMotor.fillSoaArrays()`, generalized.
+
+Reusable as starting points: the fillSoaArrays pattern (pack-on-CPU
+into a flat slot range) and the iter2a TaskGraph/transfer-mode scaffolding.
+Everything else is new for iter2b's kernel.
+
+### I. Parameter count
+
+Inventory using the AoS-by-attribute layout (m×3 packed per attribute, as
+in iter2a) — same shape that's worked for motor-binding:
+
+| # | Buffer | Type | Shape | Direction | Transfer mode |
+|---|---|---|---|---|---|
+| 1 | `coord` | FloatArray | m×3 | R+W | EVERY_EXECUTION (uploaded; downloaded for unpack) |
+| 2 | `uVec` | FloatArray | m×3 | R+W | EVERY_EXECUTION |
+| 3 | `yVec` | FloatArray | m×3 | R+W | EVERY_EXECUTION |
+| 4 | `forceSum` | FloatArray | m×3 | R | EVERY_EXECUTION |
+| 5 | `torqueSum` | FloatArray | m×3 | R | EVERY_EXECUTION |
+| 6 | `bTransGam` | FloatArray | m×3 | R | FIRST_EXECUTION + invalidate on `aeta` change |
+| 7 | `bRotGam` | FloatArray | m×3 | R | FIRST_EXECUTION + invalidate on `aeta` change |
+| 8 | `randForces` | FloatArray | m×3 | R | EVERY_EXECUTION (pre-blended for actA/branch) |
+| 9 | `randTorques` | FloatArray | m×3 | R | EVERY_EXECUTION (pre-blended) |
+| 10 | `brownianScales` | FloatArray | m×2 | R | EVERY_EXECUTION (transScale, rotScale) |
+| 11 | `velMask` | FloatArray | m×3 | R | EVERY_EXECUTION (per-axis fixed-frame {0,1} mask for ProteinNode xMove/yMove/zMove + body-frame y mask folded in via bAngVeloc.y zeroing; for most Things all 1.0) |
+| 12 | `params` | FloatArray | small | R | EVERY_EXECUTION (deltaT) |
+| 13 | `counts` | IntArray | small | R | EVERY_EXECUTION (N, step counter) |
+
+That's **13 buffers**, comfortably under the 15-arg cap and matching the
+iter2a kernel's slot budget. Verifications:
+
+- `bForceSum`/`bTorqueSum`/`bVeloc`/`bAngVeloc`/`veloc` are kernel-local
+  temporaries, not buffers.
+- `transXTox`/`transxToX` are re-derived from `uVec` + `yVec` (kernel
+  computes `zVec = cross(uVec, yVec); normalize` inline). No transform-matrix
+  buffer needed.
+- `uVecR` is just `-uVec`, derived inline; not a separate buffer (initialize()
+  re-derives it post-kernel anyway).
+- StickyNode pre-add to forceSum already folds into buffer 4 before pack.
+- `linkedToCt`, `actAOn`, `filAtEnd1/filAtEnd2`, `motherFil`, `arpChildCt`,
+  `bYMove`, `xMove/yMove/zMove`, `isLpSeg` — all consumed by the CPU
+  pre-pass that materialises buffers 8/9/10/11. **None appears in the
+  kernel signature.**
+- `myosinsOff`/`brownianMyoMotionOff`/`brownianFilMotionOff`/`nodeBrownianMotionOff`/
+  `myoMiniFilBrownianMotionOff`/`bugBrownianMotionOff`/`lpActive`/
+  `myoBrownianAttn`/`membraneBrownianScale`/`fillNodeBrownianScale`/
+  `BTransCoeff`/`BRotCoeff`/`xLinkTransAttn`/`xLinkRotAttn`/
+  `actATetherTransAttn`/`actATetherRotAttn` — all consumed by the CPU
+  pre-pass; none in the kernel signature.
+
+Coverage check against §A's physics catalog:
+- FilSegment root + branch: ✓ (pre-pass blends Brownian; kernel sees
+  effective randForces/randTorques + scales)
+- MyoMotor/MyoRod/MyoLever: ✓ (scale = myoBrownianAttn or 0)
+- MyoMiniFilament: ✓ (scale = 1)
+- ProteinNode: ✓ (scale = 1; velMask zeros restricted axes)
+- StickyNode: ✓ (force pre-pass + scale pre-pass; post-call
+  updateStickyPointsInX on CPU)
+- FillNode: ✓ (scale pre-pass)
+- Bug: out (CPU, N=1)
+- AnchorNode/Crucible/Chamber/Thing: out (inert)
+- StaticFilSegment post-eq: out (inert after the time gate)
+
+Missing inputs: none identified.
+
+### J. Float precision risk spots
+
+Without blocking — the ensemble validation will catch numerical issues.
+Spots to watch:
+
+1. **uVecTransInY/uVecTransInZ** = `bAngVeloc.{y,z} * Env.deltaT.getValue()`.
+   At typical conditions `bAngVeloc.y` may be ~10⁻⁴ rad/s, deltaT = 1e-5,
+   so the increment is ~10⁻⁹. The vector `(1, 10⁻⁹, 10⁻⁹)` then gets
+   unit-normalised — the dominant component is 1.0 ± 5×10⁻¹⁹, well below
+   float32 epsilon (1.2×10⁻⁷). This is a known small-rotation
+   approximation; float32 mantissa precision is still adequate because
+   the increments aren't in the cancellation regime. Watch the orientation
+   drift over 200K steps in the validation ensemble.
+
+2. **Position accumulation over many steps.** `coord.inc(deltaT, veloc)`
+   accumulates by ~10⁻¹¹ to 10⁻⁹ µm per step. Float32 holds 7 decimal
+   digits; at coord ~10 µm, the LSB is ~10⁻⁶ µm. Per-step increment is
+   ~3 orders below LSB for slow-moving Things — the increments would
+   underflow without compensation. **For Things that drift faster than
+   ~10⁻⁶ µm/step (motors gliding at ~5 µm/s × 10⁻⁵ s = 5×10⁻⁵ µm/step),
+   float is fine.** For slow-drift Things (interior FilSegments under
+   small forces), each step's contribution may be lost. This is the
+   most plausible float-vs-double divergence spot in the kernel; the
+   ensemble validation will surface it via `glidingVelocity` or
+   `meanBoundMotors` if material.
+
+3. **Near-cancellation in body-frame force transforms.** `bForceSum.XTox(this,
+   forceSum)` is three dot products with `transXTox` rows. If two
+   contributions to `forceSum` are large and near-opposite, the dot product
+   can lose precision. In practice the elastic + crosslinker forces on a
+   single Thing rarely cancel to many digits, so this is unlikely to be
+   material — but it's worth checking via per-step `bForceSum` magnitude
+   distribution in one CPU-vs-GPU debug run.
+
+4. **bTransGam reciprocals.** `bVeloc.div(1e6, bForceSum, bTransGam)` is
+   forceSum / bTransGam scaled by 10⁶. bTransGam can vary by ~3 orders
+   of magnitude across types (motor ~10⁻⁸, bug ~10⁻⁶, anchor 10⁶). The
+   division itself is safe in float32; the result range stays within
+   normal float bounds. No concern.
+
+5. **min(1, bTransGam.y/mother.bTransGam.y)** for branch FilSegments.
+   This ratio is in [0,1]; safe in float. The pre-pass on CPU should
+   do this in double to avoid early loss; the kernel reads the
+   pre-pass float result.
+
+6. **uVec.unitVec()** = `1 / sqrt(x² + y² + z²)`. After the small-angle
+   update, the magnitude is `sqrt(1 + ε²)` where ε ~ 10⁻⁹. Float32
+   `sqrt(1 + ε²)` returns 1.0 exactly (the ε² term is below epsilon),
+   so the normalisation reduces to a no-op. This is mathematically fine
+   but means the slow orthonormalisation drift relies on the CPU-side
+   `initialize()` recomputation of `zVec = cross(uVec, yVec); yVec.cross(zVec,
+   uVec)` — i.e., the post-kernel CPU step is doing the actual
+   re-orthogonalisation. Flag for the validation: monitor `uVec`/`yVec`
+   orthogonality drift over many steps; if it grows, may need a kernel
+   re-orthogonalisation pass.
+
+### Design verdict
+
+**Feasible for iter2b.** The unified kernel covers the standard pattern
+across FilSegment (root + branch via pre-pass), MyoMotor, MyoRod,
+MyoLever, MyoMiniFilament, ProteinNode, StickyNode (pre-pass), and
+FillNode (pre-pass). The kernel signature fits comfortably in 13
+parameters (under the 15 cap). The motherFil cross-entity read is
+collapsible into a CPU pre-pass; StickyNode's spherical-constraint /
+pressure / constriction force additions are likewise a small CPU
+pre-pass. Nothing requires restructuring the physics of any moveThing
+implementation.
+
+Things deferred to CPU (not in the kernel):
+- **Bug** (N=1, friction-from-tips + max-displacement scaling don't
+  fit the branchless pattern, side-effect path bookkeeping).
+- **AnchorNode**, **Crucible**, **Chamber**, **Thing** (all inert).
+- **StaticFilSegment after `simT ≥ likeARealFilTime`** (inert; needs
+  a per-Thing active-bit anyway, since pre-eq it does dispatch).
+- **MyosinFixed** does not need special handling: it inherits
+  Myosin's composite structure; its sub-Things (MyoRod/MyoLever/MyoMotor)
+  go through the standard kernel slots.
+
+Things that need CPU pre-pass (cheap; all O(N) per Thing or smaller):
+1. **FilSegment branch blending.** After `calcRandomForces` ThreadSet
+   completes, walk branch FilSegments and write effective
+   `randForces`/`randTorques` slots.
+2. **FilSegment root actA-on blending.** Same pass: if `actAOn`,
+   swap own `randForces` slot to bug-derived values.
+3. **brownianScales (transScale, rotScale) materialisation.** Walk
+   every active Thing and compute the two scalars per the §C table.
+4. **StickyNode forceSum pre-add.** Walk StickyNodes, add
+   spherical-constraint / pressure / constriction contributions to
+   their `forceSum`.
+5. **StickyNode / FillNode randForces pre-scaling.** Pre-multiply
+   their `randForces`/`randTorques` slot by the per-type scale.
+6. **`velMask` materialisation** for ProteinNode (most are 1.0, but
+   `bYMove`/`xMove`/`yMove`/`zMove` zero specific axes).
+
+Things that run CPU AFTER kernel unpack:
+1. **`initialize()` on every active Thing.** Recomputes
+   `zVec`/`transMat`/`uVecR`/`end1`/`end2`/`length`/`xRange/yRange/zRange`
+   per type. Same fan-out as moveStart.
+2. **`updateStickyPointsInX()` on StickyNodes.** Recomputes
+   body-attached link points in fixed frame.
+
+No showstoppers identified. No moveThing implementation requires
+physics restructuring to fit the design. The float precision risk
+is bounded (slow-drift position accumulation is the most plausible
+divergence) and falls within the ensemble-validation gate as
+specified.
+
+Sequencing recommendation: implement and validate the kernel on a
+gliding-assay-class workload first (zero branches, no membrane, no
+ActA, no xLinks → exercises only the simplest scalar path). Then
+add a boa10-class run to exercise xLink attenuation, then a
+branched-network run for the motherFil pre-pass, then a membrane
+run for StickyNode pre-pass. Each step adds one independent
+pre-pass, so failures localise cleanly.
 
 ## 2026-05-28 — Overnight dense gliding-assay 20×20 µm × 400K motors × 100 filaments × 2.0 s: STOP at smoke-test wall-clock projection
 
