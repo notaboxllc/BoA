@@ -4,6 +4,513 @@ Last updated: 2026-05-28
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-28 — Survey: TornadoVM upgrade plan for BoA's GPU work
+
+Survey only — no installs, no edits to BoA or TornadoVM source, no compile,
+no run. Read-only inspection of `~/Code/TornadoVM/` (the 4.0.1-dev source
+clone and the matching dist install at `~/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/`)
+and the GitHub releases page.
+
+**TL;DR — the upgrade premise is largely wrong, and that's the survey's most
+important finding.** The planner-supplied context said "modern TornadoVM is
+on a unified line, current at v2.2.0 (released late 2025)". That's stale.
+The current jdk21 line is **v4.0.1-jdk21** (released 2026-04-29). BoA's
+existing install is **4.0.1-dev** — the develop-branch tip *ahead of*
+v4.0.1-jdk21, not behind it. The persistOnDevice / consumeFromDevice /
+PERSIST primitives the prompt asked about are already in BoA's installed
+4.0.1-dev. No upgrade is required to unlock iteration 2's persistent
+residency design. What does remain unsolved is the 15-parameter cap (still
+present at HEAD), and there are still planner choices about strict-SoA
+shape and what "persistent" even means for a per-step-mutating buffer.
+Details below.
+
+### 1. Upgrade target version
+
+**Current TornadoVM releases on the jdk21 line** (from the GitHub releases
+page, https://github.com/beehive-lab/TornadoVM/releases):
+
+| version       | date        | notes                                            |
+|---------------|-------------|--------------------------------------------------|
+| v4.0.1-jdk25  | 2026-04-29  | F16 miscompile fixes (Metal/PTX/SPIR-V)          |
+| v4.0.1-jdk21  | 2026-04-29  | F16 fixes, bugfixes; **latest tagged jdk21**     |
+| v4.0.0-jdk25  | 2026-04-02  | Apple Metal backend, SIMD shuffle, CUDA Graphs   |
+| v4.0.0-jdk21  | 2026-04-02  | Apple Metal backend, GPU optimisation features   |
+| v3.0.0-jdk21  | 2026-02-24  | infra + field handling                           |
+| v2.2.0        | 2025-12-17  | SDK compatibility checks, CUDA JIT compiler flags |
+| v2.1.0        | 2025-12-09  | Q8_0 tensor support, FP16 conversion             |
+| v1.1.0        | 2025-03-31  | first "persist data on hardware accelerator"     |
+
+The line split between `-jdk21` and `-jdk25` releases happened at v3.0.0
+(2026-02-24): both JDK lines now ship side by side, same major.minor.patch,
+same feature set. The "old numbering" the prompt referred to (4.0.1-dev-jdk21)
+*is* the current line — `4.0.1-dev` is the develop snapshot ahead of
+v4.0.1-jdk21.
+
+`~/Code/TornadoVM/pom.xml` line 2: `<version>4.0.1-dev</version>`.
+`~/Code/TornadoVM/` git HEAD (84e04c046) is 2026-04-28 with merge commits
+following v4.0.1-jdk21's tag (v4.0.1-jdk21 = commit 8b5c1a339, 2026-04-29
+— the tag is dated one day later because it includes the release-automation
+commits). So our dist is essentially v4.0.1-jdk21-tip-of-develop.
+
+- **JDK 21 support:** yes. v4.0.1-jdk21 is the jdk21 tag.
+- **PTX backend:** yes. SDKMAN identifier `4.0.1-jdk21-ptx` is published
+  (confirmed via https://api.sdkman.io/2/candidates/tornadovm/linux/versions/list).
+- **Multiple build lines:** yes, `-jdk21` vs `-jdk25` are distinct; we want
+  `-jdk21` because aorus runs Java 21.0.10 per CLAUDE.md.
+- **Pre-built binaries:** yes via SDKMAN for `4.0.1-jdk21-ptx`. A direct
+  ZIP download from the GitHub releases page is also documented for
+  `tornadovm-4.0.1-jdk21-opencl-linux-amd64.zip` style names; a PTX
+  release ZIP is not visible on the v4.0.1-jdk21 release page itself, so
+  SDKMAN is the cleanest path. Building from source from the existing
+  `~/Code/TornadoVM` clone is also available (the dist we already have
+  was built that way).
+
+### 2. The parameter cap
+
+**Verified hard cap of 15 parameters in 4.0.1-dev.** The cap is structural,
+not configurable.
+
+`~/Code/TornadoVM/tornado-api/src/main/java/uk/ac/manchester/tornado/api/common/TornadoFunctions.java`
+defines `Task1<T1>` (line 28) through `Task15<T1..T15>` (line 98). No
+`Task16` or higher exists.
+
+`~/Code/TornadoVM/tornado-api/src/main/java/uk/ac/manchester/tornado/api/TaskGraph.java`
+has matching `task(...)` overloads — the highest-arity overload is at
+line 598 (`task(String, Task15<...>, T1..T15)`). No varargs / `Object...` /
+`Object[]` task() form exists.
+
+`~/Code/TornadoVM/tornado-api/src/main/java/uk/ac/manchester/tornado/api/common/TaskPackage.java`
+mirrors the same cap (Task15 createPackage at line 218).
+
+No `MAX_PARAMETERS`, `MAX_TASK_ARGS`, `KERNEL_ARG_LIMIT`, `maxParameters`,
+`maxArgs` constants exist anywhere in tornado-api/src or tornado-runtime/src
+(grep returned zero hits). The cap is enumerated by the number of typed
+functional interfaces.
+
+**Has the cap changed?** `git log --all --oneline -- tornado-api/.../TornadoFunctions.java`
+shows no commit since `bb1bdcc91 "Task with no arguments added in the API"`
+that adds higher arities — it's been Task1..Task15 for the whole modern
+line. The cap is unchanged in v4.0.1-jdk21.
+
+**Iteration 1's actual param count.** `boxOfActin/GPUMotorBinding.java:202-207`
+calls `task("bind", GPUMotorBinding::bindKernel, motPos, motUVec,
+motRodUVec, motOnFil, filEnd1, filEnd2, filNodeAtEnd2, counts, boundSegId,
+alignTol, myoColTolSq)` — **11 arguments** (9 FloatArray/IntArray + 2
+float scalars), comfortably under the 15 cap. The "21 needed" figure from
+the iteration-1 spike notes referred to *strict per-coordinate SoA*
+(separate xPos/yPos/zPos per attribute), which would push the count past
+the cap.
+
+**WIP iter2's param count.** `git show 5792838:boxOfActin/GPUMotorBinding.java`
+adds the broad-phase grid (gridCellOffsets, gridCellContents, gridParams,
+gridDims) and removes the two float scalars (packed into gridParams) — its
+task() call has **13 arguments** (all arrays, all of typed FloatArray/IntArray).
+Still under 15, but with no headroom for adding a new array parameter.
+
+Implication for iteration 2 strict-SoA refactor: if we want
+separate-array-per-axis SoA (xPos, yPos, zPos, xUVec, yUVec, zUVec,
+xRodUVec, yRodUVec, zRodUVec, motOnFil, xE1, yE1, zE1, xE2, yE2, zE2,
+filNodeAtEnd2, counts, boundSegId) = 19 arrays, still over the cap. The
+upgrade does **not** fix this. Options:
+- Pack auxiliary scalars/params into one of the FloatArrays (the WIP
+  iter2 trick — buys 1-2 slots).
+- Use the `TaskGraph.addTask(TaskPackage)` form at TaskGraph.java:82,
+  feeding a hand-built `TaskPackage` — but TaskPackage's `createPackage`
+  factories are also capped at 15 (line 218 of TaskPackage.java).
+- Split the binding kernel into two cooperating kernels (e.g.,
+  per-motor home-cell prep → narrow-phase distance) joined by a
+  consumeFromDevice handoff. This is the cleanest answer and is
+  enabled by the persistent-residency primitives discussed in §4.
+
+### 3. API changes between 4.0.1-dev and the upgrade target
+
+Iteration 1's imports (`boxOfActin/GPUMotorBinding.java:3-9`):
+
+```java
+import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
+import uk.ac.manchester.tornado.api.TaskGraph;
+import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
+import uk.ac.manchester.tornado.api.annotations.Parallel;
+import uk.ac.manchester.tornado.api.enums.DataTransferMode;
+import uk.ac.manchester.tornado.api.types.arrays.FloatArray;
+import uk.ac.manchester.tornado.api.types.arrays.IntArray;
+```
+
+All seven are present at the same package coordinates in 4.0.1-dev source
+(verified by direct file paths under `~/Code/TornadoVM/tornado-api/src/main/java/uk/ac/manchester/tornado/api/`).
+v4.0.1-jdk21 is the same line at a tagged point — nothing renamed, removed,
+or relocated between dev tip and tag.
+
+`DataTransferMode` (4.0.1-dev source quoted in full from
+`tornado-api/.../enums/DataTransferMode.java`):
+
+```java
+public class DataTransferMode {
+    public static final int FIRST_EXECUTION = 0;
+    public static final int EVERY_EXECUTION = 1;
+    public static final int UNDER_DEMAND    = 2;
+}
+```
+
+No `PERSIST` enum value — persistence is a method on TaskGraph, not a
+transfer-mode flag (see §4). The three constants iteration 1 references
+(FIRST_EXECUTION, EVERY_EXECUTION) are present and unchanged.
+
+`TaskGraph` API surface (relevant methods, all in `tornado-api/.../TaskGraph.java`):
+- `transferToDevice(int mode, Object... objects)` — line 683
+- `transferToHost(int mode, Object... objects)` — line 737
+- `task(String, TaskN<...>, T1..TN)` — lines through 598 (cap Task15)
+- `persistOnDevice(Object... objects)` — line 757
+- `consumeFromDevice(String, Object... objects)` — line 701
+- `consumeFromDevice(Object... objects)` — line 707
+- `snapshot() : ImmutableTaskGraph` — line ~768
+
+`TornadoExecutionPlan` API surface (relevant methods, all in
+`tornado-api/.../TornadoExecutionPlan.java`):
+- `TornadoExecutionPlan(ImmutableTaskGraph...)` varargs ctor — line 112
+- `execute()` — line 181
+- `withGraph(int index)` — line 201
+- `withAllGraphs()` — line 216
+- `withPreCompilation()` — line 227
+- `withDevice(TornadoDevice)` — line 238
+- `withConcurrentDevices()` — line 295
+- `freeDeviceMemory()` — line 337
+- `withGridScheduler(GridScheduler)` — line 351
+- `withProfiler(ProfilerMode)` — line 399
+- `withMemoryLimit(String)` — line 425
+
+`@Parallel` annotation unchanged. `FloatArray.get(int)`, `FloatArray.set(int,float)`,
+`IntArray.get(int)`, `IntArray.set(int,int)`, `.getSize()` are all the
+same methods iteration 1 uses.
+
+**Conclusion:** Zero API changes from 4.0.1-dev to v4.0.1-jdk21. The
+"renamed / moved / removed / replaced" categories in the survey prompt
+have no entries.
+
+### 4. The persistent-data feature
+
+**Already present in 4.0.1-dev.** The persistOnDevice/consumeFromDevice
+pair has been part of the API since the v1.1.0 release (March 2025) and
+is in BoA's installed source.
+
+API surface (`~/Code/TornadoVM/tornado-api/src/main/java/uk/ac/manchester/tornado/api/TaskGraph.java:743-760`):
+
+```java
+/**
+ * Tags a set of objects to persist on the device without transferring them
+ * back to the host after execution.
+ * ...
+ */
+@Override
+public TaskGraph persistOnDevice(Object... objects) {
+    taskGraphImpl.transferToHost(DataTransferMode.UNDER_DEMAND, objects);
+    return this;
+}
+```
+
+Note: it's implemented as an alias for `transferToHost(UNDER_DEMAND, ...)`
+under the hood. The semantic is "do not auto-copy back to host, keep
+device-resident". The companion method `consumeFromDevice(String
+uniqueTaskGraphName, Object... objects)` (line 701) on a *later* TaskGraph
+tags those same Java objects as already-resident inputs that should not be
+re-uploaded.
+
+The PERSIST bytecode itself is at
+`~/Code/TornadoVM/tornado-runtime/src/main/java/uk/ac/manchester/tornado/runtime/graph/TornadoVMBytecodes.java:218`
+(`PERSIST((byte) 26)`), emitted by `TornadoVMBytecodeBuilder.java:232` and
+interpreted at `TornadoVMInterpreter.java:382`.
+
+**Canonical pattern** (verified from the in-tree unit test
+`~/Code/TornadoVM/tornado-unittests/src/main/java/uk/ac/manchester/tornado/unittests/api/TestSharedBuffers.java:96-136`):
+
+```java
+TaskGraph tg1 = new TaskGraph("s0")
+    .transferToDevice(DataTransferMode.FIRST_EXECUTION, a, b)
+    .task("t0", TestHello::add, a, b, c)
+    .persistOnDevice(c);
+
+TaskGraph tg2 = new TaskGraph("s1")
+    .consumeFromDevice(tg1.getTaskGraphName(), c)
+    .task("t1", TestHello::add, c, c, c)
+    .transferToHost(DataTransferMode.EVERY_EXECUTION, c);
+
+try (TornadoExecutionPlan plan = new TornadoExecutionPlan(
+        tg1.snapshot(), tg2.snapshot())) {
+    plan.withGraph(0).execute();   // first plan once
+    plan.withGraph(1).execute();   // second plan every step
+    // assert c is the result of both
+}
+```
+
+Real-world example: GPULlama3.java's `LlamaFP16FFNLayers.java` builds one
+TaskGraph per LLM layer; the first transfers all activation buffers with
+`FIRST_EXECUTION`, subsequent layers `consumeFromDevice` those buffers,
+and each layer `persistOnDevice(state.wrapX)` so the residual stream
+remains on-GPU between layers. (Code visible in the file path returned by
+the WebSearch — quoted text in survey notes.)
+
+**Mapping to iteration 2's "motor positions live on the GPU across
+thousands of timesteps" design:** the API supports it cleanly. Two
+TaskGraphs:
+- `tgInit` (run once via `plan.withGraph(0).execute()`): transferToDevice
+  the bulk read-only inputs (segment endpoints if they don't move, grid
+  params if static, etc.) with FIRST_EXECUTION and `.persistOnDevice(...)`
+  them.
+- `tgStep` (run every step via `plan.withGraph(1).execute()`):
+  `.consumeFromDevice("tgInit", ...)` the persisted buffers, then
+  `.transferToDevice(EVERY_EXECUTION, ...)` only the data that actually
+  changed (motor positions after CPU integration, the per-step counter),
+  run the binding kernel, transferToHost the boundSegId result.
+
+**Caveat.** This is *not* a free lunch for iteration 2. Motor positions
+change every step (CPU integration updates them), so they still need
+EVERY_EXECUTION transfer. Persistence only buys you skipping re-upload of
+read-only-during-the-run data. In iteration 1's call, the inputs that
+*could* be persisted (assuming the geometry doesn't change shape mid-run)
+are: filEnd1, filEnd2, filNodeAtEnd2, alignTol, myoColTolSq. That's most
+of the segment-side bandwidth — non-trivial — but not the motor side, which
+is the dominant changing buffer.
+
+To get the *big* win — "positions live on GPU across thousands of
+timesteps" — iteration 2 has to do more than wire persistOnDevice; it has
+to keep motor positions on the GPU between binding kernel calls, which
+means moving CPU integration onto the GPU too, so positions never round-
+trip. That's iteration 4-5 of the GPU strategy, not iteration 2.
+
+So persistence is *available* and *useful* for iteration 2's static
+inputs, but the asymmetry between "static segments" and "changing motors"
+is real and was hidden inside the planner's prompt phrasing.
+
+### 5. Install location and side-by-side feasibility
+
+Current dist is at
+`~/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/` (mtime
+2026-05-03). Sim3D uses this exact path per its build commands.
+
+**Side-by-side via SDKMAN!** is the cleanest path:
+- `sdk install tornadovm 4.0.1-jdk21-ptx` would create
+  `~/.sdkman/candidates/tornadovm/4.0.1-jdk21-ptx/` (SDKMAN is not yet
+  installed locally — `ls ~/.sdkman` returns "No such file or directory"
+  — so this is a precondition step for the upgrade-execution session).
+- SDKMAN auto-sets `TORNADOVM_HOME` on `sdk use`, but does not touch
+  arbitrary other env vars. Sim3D's existing `TORNADOVM_HOME` and `TDIR`
+  exports stay pointed at the `~/Code/TornadoVM/dist/...` path.
+- BoA's CLAUDE.md exports get repointed: either `sdk use tornadovm
+  4.0.1-jdk21-ptx` before running, or set
+  `TORNADOVM_HOME=~/.sdkman/candidates/tornadovm/4.0.1-jdk21-ptx`
+  explicitly in the run line.
+
+**Side-by-side via parallel binary directory** is the alternative:
+- Build (or download) `tornadovm-4.0.1-jdk21-ptx-linux-amd64.zip` (if a
+  direct PTX ZIP exists on the release page; not visible at the v4.0.1-jdk21
+  release page itself, so this may require building from source from the
+  v4.0.1-jdk21 git tag).
+- Install to `~/Code/TornadoVM/dist/tornadovm-4.0.1-jdk21-ptx-linux-amd64/`
+  (sibling of the existing 4.0.1-dev directory).
+- BoA's build commands in CLAUDE.md change the `TDIR=` and `TORNADOVM_HOME=`
+  paths to the new directory; Sim3D's stay unchanged.
+
+Either approach works. SDKMAN is preferred because it gives a stable,
+named install slot and a documented invocation pattern (CLAUDE.md
+mentions "TornadoVM README mentions SDKMAN! support — is that available
+for our target platform?" — yes, `4.0.1-jdk21-ptx` exists in the SDKMAN
+index per https://api.sdkman.io/2/candidates/tornadovm/linux/versions/list).
+
+Required env-var changes after the upgrade are minimal: the BoA run
+commands' `TORNADOVM_HOME` and `TDIR` change to the new install path.
+Everything else (the `@tornado-argfile` reference, the `-cp` template, the
+javac line) stays identical, since `tornado-api-4.0.1-dev.jar` becomes
+`tornado-api-4.0.1.jar` (or whatever the tagged-release jar is named) and
+the classpath glob `libs/*` style doesn't care about specific filenames
+once the `TDIR` path resolves correctly.
+
+### 6. Risk assessment for iteration 1
+
+**Very low — verging on zero.** The reasoning:
+
+- Every import iteration 1 uses (`GPUMotorBinding.java:3-9`) is at the
+  same package coordinates in v4.0.1-jdk21 source as in 4.0.1-dev. None
+  have been moved, renamed, or removed (§3).
+- The `DataTransferMode.FIRST_EXECUTION` and `EVERY_EXECUTION` constants
+  iteration 1 uses (`GPUMotorBinding.java:198, 208`) are stable since at
+  least v1.1.0.
+- The `TaskGraph` build pattern at `GPUMotorBinding.java:197-208` —
+  `new TaskGraph("...").transferToDevice(...).task(...).transferToHost(...)`
+  — is the documented canonical form across all 1.x, 2.x, 3.x, 4.x docs.
+- The `TornadoExecutionPlan(ImmutableTaskGraph...)` constructor pattern
+  at line 211 is stable.
+- The `@Parallel int m` annotation use at line 104 is the canonical kernel
+  parallelism annotation, unchanged.
+- `FloatArray`/`IntArray` `.get(i)`, `.set(i,v)`, `.getSize()` are the
+  same primitives used by every TornadoVM 1.1+ example.
+
+The lines in `GPUMotorBinding.java` most likely to need changes are:
+- **Line 188** (`FloatArray.getSize() / 3` inside `@Parallel int m`
+  loop bound): unchanged in v4.0.1-jdk21. No risk.
+- **Lines 246-247** (`plan.execute()` → assumes `execute()` returns
+  something whose result is unused): `execute()` returns
+  `TornadoExecutionResult` in 4.0.1-dev (line 181 of TornadoExecutionPlan.java).
+  Iteration 1 discards the return value — that compiles forever.
+- **Line 286-291** (`plan.close()` inside try/catch): `TornadoExecutionPlan
+  implements AutoCloseable` (line 66 of TornadoExecutionPlan.java) since
+  at least v1.x. Stable.
+
+Estimated invasiveness of port: **zero lines changed** in
+`boxOfActin/GPUMotorBinding.java`. The file should compile and run against
+v4.0.1-jdk21 unchanged.
+
+The only changes are environmental: the `-cp` classpath path components
+in CLAUDE.md (build and run commands) updated to point at the new jar
+locations. That's a documentation edit, not a Java code edit.
+
+### 7. Sim3D isolation
+
+Sim3D's TornadoVM-using code lives at `~/Code/Sim3D/` and uses
+`~/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/` per its
+CLAUDE.md (which the prompt instructs us to read; I did not modify it).
+The dist install at that path is **not touched** by either an SDKMAN
+install or a parallel-directory install of v4.0.1-jdk21.
+
+**Isolation strategy.** Two env-var groups, scoped per shell or per run
+command:
+- **Sim3D shell / commands**: `TORNADOVM_HOME=~/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx`
+  and the matching `TDIR` (unchanged from today).
+- **BoA shell / commands**: `TORNADOVM_HOME=~/.sdkman/candidates/tornadovm/4.0.1-jdk21-ptx`
+  (or the parallel-directory equivalent) and the matching `TDIR`.
+
+Neither path interferes with the other. The classpath the JVM uses is
+fully derived from `TDIR`/`TORNADOVM_HOME` — there's no global TornadoVM
+state.
+
+**No changes required to Sim3D.** None of the upgrade-execution work
+needs to touch Sim3D's source tree, its CLAUDE.md, or its dist install.
+The flag the survey prompt asked for ("if the upgrade would require any
+change to Sim3D — even a small one — flag it explicitly") is: nothing.
+
+### 8. Recommended upgrade plan
+
+**Recommendation: defer or skip the upgrade.** This is the survey's main
+deliverable.
+
+The planner's prompt framed the upgrade as "iteration 2's persistent-
+residency architecture maps to a first-class supported API rather than
+being a workaround against an older one". That premise is wrong: the
+persistOnDevice/consumeFromDevice/PERSIST API is already first-class in
+BoA's installed 4.0.1-dev. The "upgrade" from 4.0.1-dev to v4.0.1-jdk21
+is essentially a relabel from "develop tip" to "tagged release" — same
+API surface, same parameter cap, same primitives, same JDK requirement.
+
+If the planner still wants to move to the tagged release (for stability,
+provenance, reproducibility — all reasonable reasons), here's the plan:
+
+- **Target version**: TornadoVM v4.0.1-jdk21 (released 2026-04-29).
+- **Install method**: SDKMAN. Identifier `4.0.1-jdk21-ptx`. Preconditions:
+  install SDKMAN itself (`curl -s "https://get.sdkman.io" | bash`), then
+  `sdk install tornadovm 4.0.1-jdk21-ptx`. (Alternative: build the v4.0.1-jdk21
+  git tag from source into a sibling dist directory — slower but more
+  scriptable.)
+- **Install location strategy**: side-by-side. Sim3D's existing 4.0.1-dev
+  install stays untouched. BoA points its `TORNADOVM_HOME`/`TDIR` env
+  vars at the new SDKMAN slot (or parallel dist directory).
+- **Order of operations** for an upgrade-execution session:
+  1. Install SDKMAN (`curl -s "https://get.sdkman.io" | bash`,
+     `source ~/.sdkman/bin/sdkman-init.sh`).
+  2. `sdk install tornadovm 4.0.1-jdk21-ptx`.
+  3. `sdk use tornadovm 4.0.1-jdk21-ptx` (sets `TORNADOVM_HOME`).
+  4. Update BoA CLAUDE.md: replace the
+     `TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"`
+     line with the SDKMAN-provided path, update the `TDIR` to match, and
+     update the example javac/java commands.
+  5. `javac` rebuild BoA per the current CLAUDE.md instructions but with
+     the new `TDIR`. Expect zero source-code changes (per §6).
+  6. Re-run iteration 1's gliding-assay validation: `BoxOfActin -r -gpu
+     -pf ParameterFiles/glidingAssay500_val` (10 seeds, same protocol as
+     the iteration-1 spike). Confirm `bindEvents` / `meanBoundMotors` /
+     `velocity` agree with the CPU baseline within |diff|/cSEM < 2.0.
+  7. Compare wall-clock against iteration 1's recorded numbers (228 s
+     CPU, 251 s GPU). Same hardware, same kernel — should be within ~3%.
+
+- **Estimated session size: small (under an hour).** No source edits, no
+  algorithm work, no validation re-design. The risk is bounded by SDKMAN
+  install glitches and the env-var path swap.
+
+- **Preconditions for the upgrade-execution session:**
+  - Main is clean (per the usual planner convention).
+  - The iteration-1 validation numbers from
+    `RUN_LOGS/2026-05-28_gpu-spike-validation.txt` are treated as the
+    "before" snapshot to compare against — no re-run of the CPU baseline
+    is needed since the CPU path is unchanged by the upgrade.
+  - SDKMAN install requires internet access on aorus and `curl`/`zip`
+    being available in the shell.
+  - Aorus stays on JDK 21.0.10. No JDK swap.
+  - Sim3D is left alone; no need to re-run its benchmarks pre-upgrade
+    since its dist install is unchanged.
+
+**Alternative: skip the upgrade entirely.** Stay on 4.0.1-dev for both
+BoA and Sim3D. The persistent-residency API is available right now.
+Iteration 2 can be implemented against 4.0.1-dev directly. The cost is
+"we are on a develop snapshot, not a tag" — a minor reproducibility hit,
+nothing else.
+
+### 9. Open questions / risks for the planner
+
+Several planner-decision points surfaced during the survey:
+
+1. **The upgrade premise was based on stale version info.** The planner's
+   "current at v2.2.0 (released late 2025)" was wrong by ~5 months and
+   two major versions. BoA's existing 4.0.1-dev install is already the
+   modern API. Decision: is the upgrade still worth doing for
+   reproducibility/provenance reasons, or is it more useful to put that
+   session's budget into iteration 2 implementation against the existing
+   install?
+
+2. **The 15-parameter cap is unchanged across the upgrade.** If iteration
+   2's design requires strict per-coordinate SoA (which would push past
+   the cap), the upgrade does *not* solve that. Two paths remain: pack
+   scalars/params into FloatArrays (the WIP iter2 trick — bought
+   13 → 11 effective slots), or split the kernel into two cooperating
+   tasks joined by `consumeFromDevice` (cleaner, enabled by the
+   persistent-residency API that's already present).
+
+3. **Persistent residency only saves transfer for static-during-the-run
+   data.** Motor positions, which are the heaviest per-step inputs, still
+   need EVERY_EXECUTION transfer because the CPU updates them each step
+   via integration. The "positions live on GPU across thousands of
+   timesteps" framing is aspirational — it requires moving CPU
+   integration onto the GPU too (iteration 4-5), not just wiring
+   persistOnDevice. The iter2-pre-upgrade WIP (commit 5792838) already
+   correctly identified this and used `FIRST_EXECUTION` for static
+   inputs without invoking persistOnDevice. Decision: is iteration 2
+   scoped as (a) "wire persistOnDevice to save the static-input
+   bandwidth", (b) "add broad-phase grid as in the WIP", or (c) both? If
+   (a), the wins are modest. If (b), it's substantially more work and
+   the upgrade doesn't matter.
+
+4. **SDKMAN is preferred but not installed locally.** SDKMAN install is
+   itself a precondition step (~5 minutes). The alternative — building
+   v4.0.1-jdk21 from the git tag into a sibling dist directory — is
+   slower (~10-30 minutes Maven build) but doesn't introduce a new tool
+   into the conventions. Decision: SDKMAN, build-from-source, or neither?
+   CLAUDE.md's current conventions don't mention SDKMAN, so this is a
+   convention change.
+
+5. **No upgrade-execution session is strictly required to start
+   iteration 2.** The persistent-residency primitives are already at
+   `~/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/`. The
+   planner could write the iteration-2 prompt today against 4.0.1-dev
+   and treat any future upgrade as a separate housekeeping task.
+
+6. **The WIP iter2 branch (commit 5792838) is informative but
+   doesn't use persistOnDevice.** It chose a single-graph design with
+   `FIRST_EXECUTION` for static buffers and `EVERY_EXECUTION` for the
+   rest, plus a CPU-built grid uploaded each step. That design works
+   against 4.0.1-dev as-is. Whether iteration 2's *next* attempt should
+   adopt persistOnDevice / two-graph structure or keep the single-graph
+   FIRST_EXECUTION pattern is a design choice independent of the
+   upgrade decision. Worth a separate planner conversation.
+
+---
+
 ## 2026-05-28 — First GPU kernel: motor-binding via TornadoVM (one-plan spike)
 
 First TornadoVM kernel for BoA. Deliberately Sim3D-shaped: one plan, per-step
