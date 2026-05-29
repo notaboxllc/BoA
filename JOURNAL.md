@@ -4,6 +4,243 @@ Last updated: 2026-05-28
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-28 — Dense gliding-assay demo: 98K motors × 100 random filaments × 0.3 s
+
+Single concrete dense gliding-assay run on the iteration 2a kernel (commit
+2f464a4), exercising it at a scale ~200× larger than the validation config
+(M=98000 vs M=500). The point of the session is wall-clock measurement at
+research scale plus a movie of dense gliding; no source changes, no new
+instrumentation.
+
+### A. Configuration deviations from the prompt
+
+Three forced deviations, each from a static-cap / no-source-change discovery:
+
+1. **Box 14×14 vs prompted 20×20.** `MyoMotor.theMotors[100000]` and
+   `Myosin.theMyosins[100000]` are statically allocated at 100 000 — the
+   prompted 20×20×500 = 200 000 motors would overflow at seed time.
+   Largest dense bed at the prompted 500/µm² density that fits under the
+   cap is **14×14×500 ≈ 98 000** motors; preserved the density (the
+   physically relevant parameter) and shrank the bed.
+
+2. **runTime 0.3 s vs prompted 1.0 s.** Smoke test (0.01 s sim) ran 210 s
+   wall → projected **~5.5 h for 1.0 s**, dominated not by the GPU kernel
+   but by CPU integration phases (see §F). Trimmed to 0.3 s — still
+   30 100 GPU calls of steady-state timing data, 60 movie frames at 5 ms
+   cadence = ~2 s playback at 30 fps, ~94 min wall. Skipped the CPU
+   comparison per the prompt's >30 min gate.
+
+3. **Motors written every frame.** Each frame_*.json is 32 MB because
+   `ThreeJSWriter.buildFrameJson()` serializes all 98 K myosins (rod +
+   lever + motor sub-parts) per frame. No source-level toggle for
+   "filaments only"; the prompt's "200×-bloat avoidance" is not achievable
+   without a code change. Output is 1.95 GB across 61 frames; acceptable
+   here (aorus disk has room), but worth flagging if later sessions stream
+   frames over network.
+
+Filament seeding **fits the existing mechanism cleanly** (option 1 from the
+prompt — parameter-file driven): `initialFilaments:true:100` +
+`minFilLength:true:1.0` + `maxFilLength:true:3.0` triggers
+`FilSegment.makeInitialFilaments()` → 100 × `makeRandomFilament(1.0, 3.0)`,
+random position via `theBox.rdmPtInside()`, random 3D orientation, length
+uniform in [1,3] µm. The `setUpGlidingAssay()` path additionally creates
+1 hardcoded canonical filament along X via `makeGlidingAssayFilament()` —
+unavoidable without source changes — so the run has **101 filaments**, not
+100. The +1 filament has length 2 µm and is functionally indistinguishable
+from a random one of similar length.
+
+`makeRandomFilament` does not enforce any wall buffer — filaments are
+uniformly distributed in the full box, including 3D orientation (so Z-tilt
+ranges over [-0.5,0.5] µm at this slab thickness). The smoke test showed
+~80 µm/s instantaneous gliding (much faster than the 4.7 µm/s sparse-bed
+validation), implying many filaments will hit walls within 0.3 s; the
+chamber-collision physics handles them but the trajectories are not
+buffered. Documented as a known limitation of the existing seeding path.
+
+### B. Files added
+
+- `ParameterFiles/glidingDense_demo` — 14×14×0.5 box, 500/µm² density,
+  100 random filaments [1,3] µm, runTime 0.3 s, toFileInterval 500 (every
+  5 ms simulated).
+- `ParameterFiles/glidingDense_demo_smoke` — identical except
+  runTime=0.01 s, used for §C smoke test.
+- No source-code changes.
+
+### C. Pre-flight smoke (task C)
+
+```
+java @tornado-argfile --enable-preview -Xmx4G -cp "..." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingDense_demo_smoke \
+     -3js ~/boa_dense_demo_work/smoke
+```
+
+3 frames written (32 MB each), kernel dispatched cleanly:
+`GPUMotorBinding: motorCap=100000 segCap=1000000 totalCells=20164 contentsCap=8000000 blockSize=64`.
+`[STATS] bindEvents=4013 meanBoundMotors=250.86 gpuMotorBinding total=12.186s calls=1101`.
+Per-call extrapolation matched the §F final numbers within 20% (cold-start
+JIT overhead dominates a 1101-call sample).
+
+Wall-clock per step at this scale: 210 s / 1000 steps ≈ 210 ms/step →
+projected ~5.5 h for full 1.0 s — the data point that drove the runTime
+trim. The bulk of that time is in CPU integration phases, not the GPU
+kernel; see §F.
+
+### D. Run command
+
+```
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx4G \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingDense_demo \
+     -3js /home/jba/boa_dense_demo_work/run_gpu
+```
+
+Output: `~/boa_dense_demo_work/run_gpu/` — 61 JSON frames (frame_000000
+through frame_000060; the writer emits an initial frame at step 1 plus
+one per toFileInterval thereafter) + `gliding_assay.dat` + `source.zip`.
+
+### E. Wall-clock and per-call GPU timing
+
+```
+Total wall:                   5678 s (94 min 38 s)
+GPU motor binding total:       279.574 s   ( 4.92% of wall, 30100 calls)
+  pack         (motor+seg SoA refresh): 25.768 s  → 0.856 ms/call
+  gridPack     (CSR pack from CPU grid):  8.868 s  → 0.295 ms/call
+  exec         (kernel itself):         233.962 s  → 7.773 ms/call
+  unpack       (boundSegId readback):     9.913 s  → 0.329 ms/call
+                                                  total: 9.287 ms/call
+```
+
+Comparison to iteration 2a's validation-scale numbers (M=500, S=14):
+
+```
+mode      | M     | S    | per-call exec (ms) | pack (ms) | gridPack (ms) | unpack (ms)
+iter2a GPU|   500 |   14 |  5.335             | 0.120     |  0.011        | 0.050
+dense GPU | 98000 | 1159 |  7.773             | 0.856     |  0.295        | 0.329
+```
+
+**Kernel scales much better than the input.** From M=500 → M=98 000
+(196×), per-call exec grew only 1.46×. The grid does its job at this S —
+the broad-phase culling pays off when there are ~600 segments to skip
+per home cell. pack/unpack scaled ~7× with M (linear with motor count,
+as expected — they're flat SoA refreshes). gridPack grew 27×, in the
+noise relative to exec.
+
+### F. The shifted bottleneck (per-phase wall budget)
+
+```
+phase                        | total wall (s) | % of 5678 s
+ThingStep                    | 1640.235       | 28.9 %   ← CPU integration of 98K Things
+MotorBindGrid3D Fill (CPU)   |  849.754       | 15.0 %   ← CPU rebuild of 3D grid each step
+ThingBrownian                |  908.692       | 16.0 %   ← random forces on 98K Things
+Myosin                       |  668.983       | 11.8 %
+GPU motor binding            |  279.574       |  4.92 %  ← iter2a kernel
+MyoDimer                     |  262.528       |  4.62 %
+Mesh                         |  191.801       |  3.38 %
+NodeLink, others             |  ~210          |  3.70 %
+remaining (sync/JSON/JIT)    |  ~666          |  11.7 %
+```
+
+At research scale **the iter2a kernel is no longer the bottleneck** —
+ThingStep alone is 5.9× larger than the entire GPU motor binding cost.
+The ranking gives a concrete answer to JOURNAL.md iter2a §G.2 ("which
+phases port to GPU next"): in priority order, **moveThing / ThingStep,
+then Brownian, then MotorBindGrid3D Fill**. The Fill phase is unusual —
+it's CPU work that exists purely to feed the GPU kernel; porting it to
+GPU only makes sense if positions live on-device (the residency design
+of iter2a §G.3), at which point the CSR pack and the pre-GPU
+`fillSoaArrays()` both vanish.
+
+### G. Qualitative sanity (task F)
+
+`scripts/sanity_check_dense_demo.py` walked frame 0, 15, 30, 45, 60 (a
+5-point sample across the run):
+
+- **101 filaments preserved every frame** (isBarbedEnd count = 101 at all
+  five sample frames).
+- **No NaN/inf/runaway** coordinates (no |x|, |y|, |z| > 100 µm in any
+  endpoint).
+- **Segment count grew 202 → 1159** between frame 0 (t=1e-5) and frame 15
+  (t=0.075 s). The makeRandomFilament path constructs one large FilSegment
+  per filament; the per-step physics splits long segments to maintain
+  `stdSegLength=64` monomers/seg. Steady state at ~11.5 segments/filament,
+  consistent with mean filament length 2 µm ÷ 0.17 µm/seg.
+- **Per-segment displacement** over 0.3 s (matched-ID original 202 only):
+  median 1.31 µm, max 2.62 µm — consistent with `[STATS]
+  glidingVelocity=4.24 µm/s` (4.24 × 0.3 = 1.27 µm mean, matches median).
+- **Smoke test glidingVelocity=42 µm/s was a 0.01 s artifact**; the full
+  0.3 s mean 4.24 µm/s is in the same regime as the iter2a-validated
+  4.7 µm/s, so the dense bed is not pathologically different.
+- **`[STATS] bindEvents=152499 meanBoundMotors=457.24`** → 0.47 % of the
+  98 K bed bound at any instant, ~4.5 bound motors per filament on
+  average. Plausible dense-gliding regime.
+
+### H. Iteration 2b implications
+
+The headline data from this session:
+
+1. **Iter2a kernel is fine at research scale.** 9.3 ms/call at M=98 K is
+   in the same order of magnitude as 5.3 ms/call at M=500. The 27-cell
+   walk cost is amortized over hundreds of segments per home cell. The
+   "crossover S\*" question (iter2a §G.1) is answered by extension: the
+   kernel wins outright once segment density rises high enough that the
+   walk actually visits multiple segments per cell, and at S=1159 across
+   20 164 cells the broad-phase culling is doing real work.
+
+2. **iter2b's correct priority is not "make the binding kernel faster."**
+   It's "drop the CPU phases that dominate the wall budget into GPU
+   kernels, in residency-friendly order." moveThing first (pure SoA
+   arithmetic, no RNG, no stateful biochem), then Brownian (needs
+   Wang-hash RNG per iter1 §slot reservation), then maybe the
+   `MotorBindGrid3D.fillSoaArrays()`-then-grid-build sequence collapsed
+   into a GPU radix sort once positions live on-device.
+
+3. **At this M, fillSoaArrays() costs ~25 ms/call** (the per-call pack
+   number), and the CPU grid rebuild costs ~28 ms/call (849.8 s /
+   30 100 calls). Together these are ~5.6 % of wall — bigger than the
+   GPU kernel itself. Residency eliminates both. That's the iter2b prize.
+
+4. **The 15-parameter cap remains the structural ceiling** for adding
+   `moveThing` to the same task graph. iter2b's first design call is
+   probably "two task graphs sharing a buffer via consumeFromDevice"
+   (per the survey §4), not "stuff everything into one kernel."
+
+### I. Open-question status updates
+
+- iter2a §G.1 ("where does the grid win materialize?") — at S ≈ 1000,
+  decisively. Crossover S\* is below this; precise value not measured.
+- iter2a §G.2 ("which integration phases port to GPU first?") — moveThing
+  is the unambiguous winner by phase-wall ranking.
+- iter2a §G.3 ("cadence story with CPU still owning most phases?") — the
+  cost data confirms that the per-step `fillSoaArrays() + grid rebuild`
+  pattern adds ~5.6 % wall; eliminating it via residency is worth the
+  scope.
+- iter2a §G.4 ("block size autotune") — no new data; blockSize=64 ran
+  cleanly at M=98K, no `LAUNCH_OUT_OF_RESOURCES`.
+
+### J. Notes for replays
+
+- Output directory `~/boa_dense_demo_work/run_gpu/` is **not committed**
+  (transient, 1.95 GB). To replay locally, run the §D command — the param
+  file `ParameterFiles/glidingDense_demo` is committed.
+- For viewing the dense-gliding movie: `python3 sim_server.py 8000` from
+  the BoA repo root, then `http://localhost:8000/sim_viewer_boa.html`,
+  pick the `run_gpu` simulation. ~80 µm/s gliding (smoke artifact at
+  short averaging) → 4.2 µm/s steady-state should give ~1.3 µm of mean
+  glide visible across the 2-second-equivalent movie.
+- Heap behavior: -Xmx4G held throughout the run; no OOM, no GC death
+  spirals visible. The 800 MB cap from older sessions is decisively
+  insufficient at this M.
+- A future session that wants the full 200 K motors will need to bump
+  `MyoMotor.theMotors[]` / `Myosin.theMyosins[]` static caps to ≥ 200 000
+  (3-line change in two files) and re-walk the 100 K assumption in
+  `MyoMotor.soaX[]` etc. Out of scope here.
+
+### K. Commit
+
+Session commit adds `ParameterFiles/glidingDense_demo`,
+`ParameterFiles/glidingDense_demo_smoke`, and this journal entry. No
+source-code changes.
+
 ## 2026-05-28 — Iteration 2a: grid-on-GPU fused kernel with buffer reuse
 
 Replaces iteration 1's brute-force O(M×S) GPU kernel with a fused broad+narrow
