@@ -181,6 +181,55 @@ public class MotorBindGrid3D {
     }
 
     // -----------------------------------------------------------------------
+    // CSR packer for GPU upload (iteration 2a)
+    //
+    // Walks the per-cell filCells arrays in linear cellId order and packs them
+    // into the standard "compressed sparse" layout:
+    //   gridCellOffsets : length totalCells+1; offsets[N] = start of cell N's
+    //                     contents, offsets[totalCells] = total content length.
+    //   gridCellContents: flat array of segment IDs.
+    //
+    // Only filament cells are packed — motors are the parallelism axis on GPU,
+    // they look up their own cell + 26 neighbours and read out segment IDs.
+    //
+    // Linear cell ID: cellId = ix + iy*nXBins + iz*nXBins*nYBins. Caller must
+    // size offsets >= totalCells+1 and contents >= sum-of-active-counts.
+    // Returns the actually-used contents length.
+    // -----------------------------------------------------------------------
+
+    public int totalCellCount() { return nXBins * nYBins * nZBins; }
+
+    public int packForGPU(uk.ac.manchester.tornado.api.types.arrays.IntArray gridCellOffsets,
+                          uk.ac.manchester.tornado.api.types.arrays.IntArray gridCellContents) {
+        int writePos = 0;
+        int contentsCap = gridCellContents.getSize();
+        int ts = lastWriteTime;
+        int nXY = nXBins * nYBins;
+        for (int iz = 0; iz < nZBins; iz++) {
+            int izOff = iz * nXY;
+            for (int iy = 0; iy < nYBins; iy++) {
+                int iyOff = iy * nXBins;
+                for (int ix = 0; ix < nXBins; ix++) {
+                    int cellId = ix + iyOff + izOff;
+                    gridCellOffsets.set(cellId, writePos);
+                    if (filTimeStamps[ix][iy][iz] == ts) {
+                        int ct = filActiveCts[ix][iy][iz];
+                        int[] cell = filCells[ix][iy][iz];
+                        for (int k = 0; k < ct; k++) {
+                            if (writePos < contentsCap) {
+                                gridCellContents.set(writePos, cell[k]);
+                            }
+                            writePos++;
+                        }
+                    }
+                }
+            }
+        }
+        gridCellOffsets.set(totalCellCount(), Math.min(writePos, contentsCap));
+        return writePos;
+    }
+
+    // -----------------------------------------------------------------------
     // Motor query — called from CkMotsThreads.execute()
     // -----------------------------------------------------------------------
 

@@ -714,13 +714,14 @@ public class BoxOfActin {
 
 				// Motor domain - filament collisions... check every time-step
 				motorsAndFilsColTimer.start();
+				// Iteration 2a: CPU FillThreads runs in BOTH paths — the GPU kernel
+				// reads the CPU-built grid via the CSR pack inside detectBindings().
+				// CPU 27-neighbour query (motCollStart/Stop) only runs on the CPU path.
+				startAllThreadSets(Env.motorBindGrid3DStart);
+				waitOnAllThreadSets(Env.motorBindGrid3DStop);
 				if (Env.useGPU) {
-					// GPU one-plan spike: brute-force motor × segment fine-check kernel.
-					// CPU grid fill is skipped — the GPU brute-forces over all segments.
 					GPUMotorBinding.detectBindings();
 				} else {
-					startAllThreadSets(Env.motorBindGrid3DStart);
-					waitOnAllThreadSets(Env.motorBindGrid3DStop);
 					startAllThreadSets(Env.motCollStart);
 					waitOnAllThreadSets(Env.motCollStop);
 				}
@@ -1190,12 +1191,25 @@ public class BoxOfActin {
 		}
 		if (Env.useGPU && GPUMotorBinding.getCallCount() > 0) {
 			int    calls = GPUMotorBinding.getCallCount();
-			double tot   = GPUMotorBinding.getTotalNanos()  / 1.0e9;
-			double pk    = GPUMotorBinding.getPackNanos()   / 1.0e9;
-			double ex    = GPUMotorBinding.getExecNanos()   / 1.0e9;
-			double un    = GPUMotorBinding.getUnpackNanos() / 1.0e9;
-			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
-				tot, calls, pk, ex, un);
+			double tot   = GPUMotorBinding.getTotalNanos()    / 1.0e9;
+			double pk    = GPUMotorBinding.getPackNanos()     / 1.0e9;
+			double gp    = GPUMotorBinding.getGridPackNanos() / 1.0e9;
+			double ex    = GPUMotorBinding.getExecNanos()     / 1.0e9;
+			double un    = GPUMotorBinding.getUnpackNanos()   / 1.0e9;
+			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs gridPack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk, gp, ex, un);
+		}
+		// [STATS] glidingVelocity: mean per-filament longWindowSpeedXY at end of run.
+		// Used by ensemble validation scripts to extract a single per-run velocity.
+		if (GlidingAssayEvaluator.getInstance() != null) {
+			double vSum = 0; int vCount = 0;
+			for (java.util.Map.Entry<Integer, ?> e : GlidingAssayEvaluator.getInstance().filStatesEntrySet()) {
+				double v = GlidingAssayEvaluator.getInstance().getLongWindowSpeedXY((Integer) e.getKey());
+				vSum += v; vCount++;
+			}
+			if (vCount > 0) {
+				System.out.printf("[STATS] glidingVelocity=%.4f%n", vSum / vCount);
+			}
 		}
 		reportAllThreadSetTimes();
 		

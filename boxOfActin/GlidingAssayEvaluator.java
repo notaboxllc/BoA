@@ -44,6 +44,13 @@ public class GlidingAssayEvaluator {
 
     public static GlidingAssayEvaluator getInstance() { return instance; }
 
+    public java.util.Set<? extends Map.Entry<Integer, ?>> filStatesEntrySet() { return filStates.entrySet(); }
+
+    public double getLongWindowSpeedXY(int fid) {
+        FilamentState s = filStates.get(fid);
+        return s == null ? 0.0 : s.longWindowSpeedXY;
+    }
+
     public static void create() {
         instance = new GlidingAssayEvaluator();
     }

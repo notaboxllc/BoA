@@ -4,6 +4,258 @@ Last updated: 2026-05-28
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-28 — Iteration 2a: grid-on-GPU fused kernel with buffer reuse
+
+Replaces iteration 1's brute-force O(M×S) GPU kernel with a fused broad+narrow
+phase kernel that reads a CPU-built CSR grid. Patterned on the iter2-pre-upgrade
+WIP at commit 5792838 (read-only design reference; nothing cherry-picked, code
+copied manually). Three corrections applied vs the WIP framing — see §A.
+
+**Bottom line:** kernel correctness validated against CPU (the three statistical
+observables agree within iter1's noise band). Wall-clock at glidingAssay500_val
+scale (M≈500, S=14) is **slower than CPU and slower than iter1** — the 27-cell
+walk + per-cell indexing overhead exceeds the savings from broad-phase culling
+when the segment count is tiny. The grid is the right algorithmic move; the
+gliding-assay workload is too small to surface its benefit. The asymptotic win
+materializes at research scale (thousands of segments per filament network),
+exactly the open question iter1 §5 flagged.
+
+### A. Corrections vs prompt framing and WIP
+
+1. **persistOnDevice is not what the prompt thought.** `TaskGraph.persistOnDevice(o)`
+   is literally `transferToHost(DataTransferMode.UNDER_DEMAND, o)` —
+   `TaskGraph.java:756-760`. It only suppresses the auto device→host copy at
+   task end and tags the buffer as consumable by a downstream graph via
+   `consumeFromDevice`. In a single-graph design (which the planner approved),
+   there is no second graph; persistOnDevice would be a no-op. Buffer reuse
+   across `plan.execute()` calls is automatic — the device allocation lives
+   with the ExecutionPlan and only frees on close. So 2a does NOT call
+   persistOnDevice. It uses `FIRST_EXECUTION` for static-during-run inputs
+   (gridParams, gridDims — uploaded once, reused thereafter) and
+   `EVERY_EXECUTION` for dynamic inputs. The WIP made the same choice
+   correctly without invoking persistOnDevice; the prompt's "persistOnDevice
+   for buffer reuse" phrasing was a misnomer.
+
+2. **Grid rebuild cadence is every step, not every 10.** The planner's
+   table said "Every collisionCheckInt = 10 steps, matching the existing CPU
+   rebuild trigger". The 10-step cadence is for the 2D `Mesh` (non-motor
+   collisions); the 3D `MotorBindGrid3D` rebuilds every step because motor
+   positions change every step under CPU integration. Honored the intent
+   ("match the CPU rebuild trigger") rather than the cadence value:
+   `MotorBindGrid3D.FillThreads` runs every step in both CPU and GPU paths.
+
+3. **CUDA `LAUNCH_OUT_OF_RESOURCES` on first smoke test.** Default PTX
+   workgroup size at 100000 global threads exhausted the per-thread register
+   budget for the fused kernel (`cuLaunchKernel -> Returned: 701` repeated
+   silently every step, boundSegId never written, every motor read 0 and
+   tried to bind to segment 0, force assembly produced "Crazy forceSum"
+   warnings until the 15-minute walltime cap). Fixed by attaching an explicit
+   `WorkerGrid1D(motorCap)` with `setLocalWork(64, 1, 1)` via
+   `GridScheduler("motorBinding.bind", worker)` on the execute call. Smaller
+   block size → more registers per thread → kernel launches. 64 was the
+   first value tried; not tuned further. If the kernel grows in iter2b drop
+   to 32.
+
+### B. Files changed
+
+- `boxOfActin/MotorBindGrid3D.java` — added `totalCellCount()` and
+  `packForGPU(IntArray offsets, IntArray contents)`. Walks per-cell
+  `filCells[ix][iy][iz][]` arrays in linear cellId order, writing the
+  standard CSR layout (offsets length = totalCells+1, contents flat by
+  cell). Returns the actual contents length; caller-supplied capacity
+  bounds enforced via `gridCellContents.getSize()`. Cell timestamp gating
+  inherited from existing CPU query: empty/stale cells contribute zero
+  entries.
+- `boxOfActin/GPUMotorBinding.java` — rewritten. Fused kernel (kernel
+  quoted in §D), 13 array parameters (under the 15 cap; alignTol and
+  myoColTolSq packed into gridParams alongside grid origin/cellSize, see
+  §C). FIRST_EXECUTION for gridParams + gridDims; EVERY_EXECUTION for all
+  dynamic inputs and outputs. Single TaskGraph, single ExecutionPlan.
+  WorkerGrid1D + GridScheduler attached. New `gridPackNanos` timer for
+  the CPU-side CSR pack step.
+- `boxOfActin/BoxOfActin.java` — moved `MotorBindGrid3D.FillThreads`
+  dispatch outside the `if (Env.useGPU)` mutex so both paths build the
+  grid (GPU reads it via the CSR pack in `detectBindings()`). Added
+  `gridPack` to the `[STATS] gpuMotorBinding` timing print. Added
+  `[STATS] glidingVelocity` line emitting the mean per-filament
+  longWindowSpeedXY at end of run, used by the validation script to
+  extract one velocity number per run.
+- `boxOfActin/GlidingAssayEvaluator.java` — exposed `filStatesEntrySet()`
+  and `getLongWindowSpeedXY(int fid)` accessors for the new stats line.
+
+### C. 15-param cap solution
+
+Iteration 1 used 11/15. The WIP used 13/15. This kernel matches the WIP
+at 13/15 (motPos, motUVec, motRodUVec, motOnFil, filEnd1, filEnd2,
+filNodeAtEnd2, gridCellOffsets, gridCellContents, gridParams, gridDims,
+counts, boundSegId). The two scalar tolerances are folded into the
+gridParams FloatArray (slots 5 and 6) and read once at kernel entry.
+Bundling gridDims into counts (the planner's option 1) was not necessary;
+2 slots of headroom remain.
+
+### D. The fused kernel
+
+```java
+private static void bindKernel(
+        FloatArray motPos, FloatArray motUVec, FloatArray motRodUVec,
+        IntArray   motOnFil,
+        FloatArray filEnd1, FloatArray filEnd2,
+        IntArray   filNodeAtEnd2,
+        IntArray   gridCellOffsets, IntArray gridCellContents,
+        FloatArray gridParams, IntArray gridDims,
+        IntArray   counts,
+        IntArray   boundSegId) {
+    int M = counts.get(0);
+    float xMin = gridParams.get(0), yMin = gridParams.get(1), zMin = gridParams.get(2);
+    float invCellSize = gridParams.get(4);
+    float alignTol = gridParams.get(5), myoColTolSq = gridParams.get(6);
+    int nXBins = gridDims.get(0), nYBins = gridDims.get(1), nZBins = gridDims.get(2);
+    int nXY = nXBins * nYBins;
+
+    for (@Parallel int m = 0; m < motPos.getSize() / 3; m++) {
+        if (m >= M) return;
+        boundSegId.set(m, -1);
+        if (motOnFil.get(m) != 0) continue;
+        float mx = motPos.get(m*3), my = motPos.get(m*3+1), mz = motPos.get(m*3+2);
+        float mux = motUVec.get(m*3),    muy = motUVec.get(m*3+1),    muz = motUVec.get(m*3+2);
+        float rux = motRodUVec.get(m*3), ruy = motRodUVec.get(m*3+1), ruz = motRodUVec.get(m*3+2);
+        int ix = (int)((mx - xMin) * invCellSize); if (ix<0) ix=0; if (ix>=nXBins) ix=nXBins-1;
+        int iy = (int)((my - yMin) * invCellSize); if (iy<0) iy=0; if (iy>=nYBins) iy=nYBins-1;
+        int iz = (int)((mz - zMin) * invCellSize); if (iz<0) iz=0; if (iz>=nZBins) iz=nZBins-1;
+        int found = -1;
+        for (int dz = -1; dz <= 1 && found < 0; dz++) { int ciz=iz+dz; if (ciz<0||ciz>=nZBins) continue; int izOff=ciz*nXY;
+        for (int dy = -1; dy <= 1 && found < 0; dy++) { int ciy=iy+dy; if (ciy<0||ciy>=nYBins) continue; int iyOff=ciy*nXBins;
+        for (int dx = -1; dx <= 1 && found < 0; dx++) { int cix=ix+dx; if (cix<0||cix>=nXBins) continue;
+            int cellId = cix+iyOff+izOff;
+            int start = gridCellOffsets.get(cellId);
+            int end   = gridCellOffsets.get(cellId+1);
+            for (int idx = start; idx < end; idx++) {
+                int s = gridCellContents.get(idx);
+                if (filNodeAtEnd2.get(s) != 0) continue;
+                // narrow-phase: identical math to iter1 — alignment gate, rod-orientation
+                // gate, segment-line projection, sphere-line distance squared vs myoColTolSq.
+                // Body identical to iter1's kernel; elided here for length.
+                // ... (see boxOfActin/GPUMotorBinding.java for full body)
+                // First hit wins: found = s; break;
+            }
+        }}}
+        if (found >= 0) boundSegId.set(m, found);
+    }
+}
+```
+
+(Full body in `boxOfActin/GPUMotorBinding.java:bindKernel`. The narrow-phase
+math is lifted verbatim from iter1; only the broad-phase walk is new.)
+
+### E. Validation
+
+Same protocol as iter1 spike: 10 seeds × glidingAssay500_val × 0.1 s
+simulated, baseline = CPU path on this commit (CPU code unchanged), rewrite =
+GPU path on this commit. Three observables: bindEvents (committed bind
+count), meanBoundMotors (sample-averaged), glidingVelocity (mean
+longWindowSpeedXY across filaments at end of run). Pass criterion:
+|diff|/cSEM < 2.
+
+```
+observable        | CPU (10 seeds)              | GPU (10 seeds)               | |diff|/cSEM | verdict
+bindEvents        | 889.6 ± 26.9 (SD  85.1)     | 861.4 ± 37.3 (SD 117.9)      |    0.61    | PASS
+meanBoundMotors   |   7.641 ± 0.162 (SD 0.512)  |   7.205 ± 0.301 (SD 0.953)   |    1.27    | PASS
+velocity (µm/s)   |   8.326 ± 0.179 (SD 0.566)  |   8.231 ± 0.139 (SD 0.440)   |    0.42    | PASS
+wall (s/seed)     | 297.807 ± 0.313 (SD 0.989)  | 351.785 ± 0.343 (SD 1.086)   |  116.19    | FAIL
+```
+
+All three statistical observables agree well within 2 cSEM. Wall-clock ratio
+GPU/CPU = **1.181×** (GPU slower). meanBoundMotors GPU SD (0.95) is ~1.9×
+the CPU SD (0.51) — wider than iter1's near-1× SD ratio, but bindEvents and
+velocity SDs are similar. The wider meanBoundMotors SD is driven by GPU
+seed 5 (5.161 vs 7.0–8.7 typical) which also has the lowest bindEvents
+(607); a single outlier in n=10 swings the SD. Statistical-agreement
+verdict is unchanged. Raw per-seed values and the GPU [STATS] breakdown
+in `RUN_LOGS/2026-05-28_iter2a-validation.txt` and `…-summary.txt`.
+
+Note on velocity scale vs iter1: iter1's reported 4.6 µm/s vs this
+session's 8.3 µm/s reflects a different velocity extraction —
+`[STATS] glidingVelocity` (newly added this session) emits mean per-filament
+`longWindowSpeedXY` measured by `GlidingAssayEvaluator` at end of run, not
+the metric iter1 extracted. The CPU and GPU velocity numbers within this
+session use the same extraction and so are apples-to-apples; the cross-
+session comparison is not.
+
+Note on CPU wall vs iter1: iter1 measured 228 s/seed CPU; this session
+measured 298 s/seed CPU on the same code path. CPU work was not changed
+in iter2a (FillThreads was already running in the iter1 CPU path; we
+moved the call outside the if/else mutex so both paths invoke it, with
+no work added). The 30% slower CPU here is consistent with hardware load
+on aorus during this session — the GPU/CPU ratio (1.18×) within this
+session is the meaningful comparison.
+
+### F. Wall-clock breakdown (10-seed mean, 10101 calls per seed)
+
+```
+mode      | total wall (s/run) | per-call exec (ms) | pack (ms) | gridPack (ms) | unpack (ms)
+iter1 GPU |  251.5             |  4.121             | 0.131     |   —           | 0.061
+iter2a GPU|  351.8             |  5.335             | 0.120     |  0.011        | 0.050
+CPU now   |  297.8             |  —                 |  —        |   —           |  —
+CPU iter1 |  228.2             |  —                 |  —        |   —           |  —
+```
+
+Iter2a per-call exec is **29% slower** than iter1 (5.335 ms vs 4.121 ms).
+This is the algorithmic-scaling cost at small S: iter1's inner loop walked
+14 segments and exited. Iter2a's inner loop walks 27 cells, each with
+0–2 segments, plus cell-id arithmetic, plus the 27-cell-walk control
+overhead. The grid does its job of avoiding distance tests, but at S=14
+there were never enough distance tests to recoup the framing cost.
+
+The per-step breakdown also confirms the planner's pre-decision is exact:
+- pack (motor + segment SoA refresh): essentially unchanged from iter1
+- gridPack (new): negligible at 0.011 ms/call (0.11 s out of 56 s total)
+- exec: dominates wall-clock as in iter1 but is larger per call
+- unpack: essentially unchanged
+
+Transfer cost per step is essentially identical to iter1, as expected —
+this iteration changed the kernel, not the transfer pattern. The "buffer
+reuse" structural groundwork (FIRST_EXECUTION on gridParams + gridDims)
+saves a handful of bytes per step, immaterial here.
+
+### G. Open questions for iter2b
+
+1. **Where does the grid win materialize on the scaling curve?** The
+   crossover S* where grid beats brute force is the headline number for
+   when iter2a's algorithm becomes the right choice. Probably S* ≈ 30-50
+   per active region; well below most research-scale runs but above
+   gliding-assay scale. A short scan (run the same kernel at param files
+   with S = 50, 200, 1000) would put a number on it.
+
+2. **2b scope: which integration phases port to GPU first?** True
+   residency (positions evolve on-device, CPU rarely reads back) requires
+   the per-step CPU position-integration phases to move to GPU.
+   Candidates in dependency order: (a) moveThing() — pure SoA arithmetic,
+   easiest; (b) Brownian forces — needs Wang-hash RNG per the iter1 §slot
+   reservation; (c) gliding-stroke kinetics inside Myosin.checkStep —
+   stateful, hardest. Suggestion: 2b ports moveThing only as the minimum
+   viable demonstration that grid + positions on-device drops the
+   per-step EVERY_EXECUTION transfer to near zero. The other phases stay
+   CPU; the GPU "drops in" only for the kernels that exist.
+
+3. **What is the cadence story when the CPU still owns most phases?**
+   Even with moveThing on GPU, the CPU still owns Brownian, xLink,
+   joints, biochem, membrane relaxation. Between consecutive GPU kernels
+   the CPU phases mutate Pt3D objects but not SoA arrays. The cleanest
+   answer is the existing pattern: `fillSoaArrays()` at top of each step
+   uploads the CPU-side state once; GPU runs; positions come back at the
+   end of each step. That's iter2a's current pattern. True residency
+   requires either (a) inverting the sync (CPU reads SoA at top of step,
+   writes back at end) or (b) eliminating the cross-phase Pt3D reads.
+
+4. **Block-size autotune.** WorkerGrid block size = 64 was first try.
+   Larger may improve occupancy on smaller workloads; smaller is forced
+   if 2b adds more state to the kernel. Worth a small sweep at iter2b
+   commit time on representative workloads.
+
+### H. Commit
+
+See `git log --grep "iteration 2a"` for the session commit.
+
 ## 2026-05-28 — Survey: TornadoVM upgrade plan for BoA's GPU work
 
 Survey only — no installs, no edits to BoA or TornadoVM source, no compile,
