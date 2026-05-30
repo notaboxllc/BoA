@@ -4,6 +4,135 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Parallel MotorBindGrid3D fill
+
+Survey §A2 / §D3: the per-step rebuild of `MotorBindGrid3D` ran on a
+single worker (`FillThreads(super(1, ...))`) and cost ~27-28 ms/step at
+M=98K — 15% of dense CPU wall. The per-cell `synchronized` blocks in
+`addFilToCell` / `addMotorToCell` already serialize same-cell writes, so
+the change is purely a partition + thread-count bump.
+
+### Change
+
+`boxOfActin/MotorBindGrid3D.java`:
+
+- `FillThreads` constructor: `super(1, ...)` → `super(Env.numMeshThreads, ...)` (16 workers).
+- Two `int[Env.numMeshThreads+1]` partition arrays (`filJobDiv`,
+  `motorJobDiv`) sized at construction.
+- `divideAndConquer` computes both partitions and lifts the
+  `lastWriteTime = Env.counter` stamp out of `addFilToCell` to a single
+  pre-spawn write. The timestamp pattern is itself the lazy clear — no
+  explicit grid clear pass is required.
+- `execute(threadId)` loops over `[filJobDiv[t], filJobDiv[t+1])` then
+  `[motorJobDiv[t], motorJobDiv[t+1])`. Filaments and motors fill
+  independent cell maps, so no barrier between them.
+- Dropped the redundant `lastWriteTime = ts` write inside `addFilToCell`
+  (now set once in `divideAndConquer`).
+
+The Pt3D references read in `execute` (`fs.end1`, `fs.end2`,
+`m.bindTip`) are stable across the step (set in the previous
+`moveThing`), and `fillSoaArrays()` at `BoxOfActin.java:695-696` runs
+inline on the main thread before the fill ThreadSet dispatches — both
+preconditions hold.
+
+### Validation — smoke (glidingAssay500_val, 1 seed) — PASS
+
+```
+                       cpuopt baseline mean ± 2 SD     this seed
+bindEvents         :        861 ± 240                  843     PASS
+meanBoundMotors    :       7.37 ± 1.52                7.662    PASS
+glidingVelocity    :       8.39 ± 1.44                7.966    PASS
+```
+
+Source: `RUN_LOGS/2026-05-30_gridfill_smoke.txt`. All three observables
+within the 10-seed cpuopt baseline mean ± 2 SD. No physics drift
+expected: the parallelized fill produces the same cell contents (same
+{filSeg, motor} sets per cell) and the same CSR pack to GPU — only the
+write order within a cell differs, which is invisible to both the CPU
+27-cell query and the GPU broad-phase walk.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, S~1101)
+
+CPU path (16 workers, i9-9900K → aorus). Sources:
+`RUN_LOGS/2026-05-30_gridfill_dense_cpu_{before,after}.txt`.
+
+```
+phase                      before (s)   after (s)   delta
+---------------------------------------------------------
+MotorBindGrid3D Fill         29.502       4.150    -7.1×  (~25 ms/step → ~3.8 ms/step)
+ThingStep                    54.602      55.021    +0.8 %
+ThingBrownian                31.140      31.646    +1.6 %
+Myosin (joints)              22.876      23.410    +2.3 %
+MyoDimer                      9.513       8.961    -5.8 %
+Mesh                          7.168       6.931    -3.3 %
+Ck Mots                       5.215       5.640    +8.1 %
+NodeLink                      1.553       1.520    -2.1 %
+others (each <1s)             ≈           ≈         noise
+---------------------------------------------------------
+wall (min per sim-sec)         287         252    -12 %
+observables                  bindEvents 3951 → 3983; meanBoundMotors 252.1 → 250.5;
+                             glidingVelocity 43.22 → 40.88  (single-seed; within noise)
+```
+
+Fill went from 29.5 s → 4.2 s — a **7.1× speedup**, exceeding the survey
+estimate (4-5×). The 12% net wall improvement is the budgeted 10%. Other
+phases shift inside noise (single seed). The Ck Mots +8% is likely the
+per-cell write-order change putting cell contents in a less
+cache-friendly order for the query side; not pursued further this
+session.
+
+GPU path. Sources: `RUN_LOGS/2026-05-30_gridfill_dense_gpu_{before,after}.txt`.
+
+```
+phase                      before (s)   after (s)   delta
+---------------------------------------------------------
+MotorBindGrid3D Fill         30.300       4.306    -7.0×
+gpuMotorBinding total        13.239      13.261    +0.2 %  (gridPack 0.309 → 0.294)
+gpuMoveThing total           43.775      44.700    +2.1 %
+ThingStep                    24.654      25.464    +3.3 %
+Myosin (joints)              23.005      23.574    +2.5 %
+MyoDimer                      9.989       9.510    -4.8 %
+Mesh                          6.777       6.929    +2.2 %
+---------------------------------------------------------
+observables                  bindEvents 4165 → 4051; meanBoundMotors 249.0 → 257.6;
+                             glidingVelocity 42.02 → 42.58  (single-seed; within noise)
+```
+
+GPU `gridPack` (CSR upload from the now-parallel-built grid) is
+unchanged at ~300 µs/run total — confirming the parallelized fill
+produces the same CSR layout the kernel expects. The GPU was never
+gated by the fill (motor binding kernel runs after fill completes), so
+the GPU-path wall improvement is the same ~25 ms/step.
+
+### Synchronization overhead
+
+The 7× speedup with 16 threads (sublinear, 44% parallel efficiency)
+suggests the per-cell `synchronized` monitor + memory-barrier cost is
+becoming a meaningful fraction at this thread count, but is not yet
+dominant. Cells average ~2-3 entries each at M=98K so contention is low
+in expectation; the residual cost is the lock-acquire-overhead floor.
+
+Future option, not pursued: replace per-cell `Object` monitors with
+`AtomicInteger` cell counters and lock-free CAS append (or a
+count-then-scatter CSR build). Either would push toward ideal speedup
+but the present 7× already meets the survey budget; deferred until the
+4D `int[nX][nY][nZ][BIN_DEPTH]` is converted to flat CSR (separate
+session, larger refactor that affects both fill and query).
+
+### Files touched
+
+`boxOfActin/MotorBindGrid3D.java` only (FillThreads inner class +
+removed one redundant write in `addFilToCell`).
+
+### Open / not done
+
+- 4D-array → CSR conversion (survey §B2, ~528 MB at boa10 scale) —
+  separate session.
+- 27-cell query walk indirection reduction (survey §E2) — separate
+  session.
+- Per-thread force/torque accumulators (survey §D2) — independent of
+  this work.
+
 ## 2026-05-30 — CPU micro-optimizations: batch 1
 
 Five independent mechanical changes from `deepPerformanceSurvey01.md`

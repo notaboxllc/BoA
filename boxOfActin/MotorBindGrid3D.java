@@ -110,7 +110,6 @@ public class MotorBindGrid3D {
 
     void addFilToCell(int cx, int cy, int cz, int filSegIdx) {
         int ts = Env.counter;
-        lastWriteTime = ts;
         synchronized (filCellSync[cx][cy][cz]) {
             if (filTimeStamps[cx][cy][cz] != ts) {
                 filTimeStamps[cx][cy][cz] = ts;
@@ -261,20 +260,36 @@ public class MotorBindGrid3D {
     }
 
     // -----------------------------------------------------------------------
-    // FillThreads inner class — single-threaded fill of the 3D grid
+    // FillThreads inner class — parallel fill of the 3D grid
+    //
+    // Filaments and motors are independent (separate cell maps), so both can
+    // be partitioned across the same worker set. Per-cell synchronized blocks
+    // in addFilToCell / addMotorToCell handle concurrent inserts to the same
+    // cell. lastWriteTime is set once before spawn(); the timestamp pattern
+    // serves as lazy "clear" — no explicit grid clear is required.
     // -----------------------------------------------------------------------
 
     static class FillThreads extends ThreadSet {
 
+        final int[] filJobDiv   = new int[Env.numMeshThreads + 1];
+        final int[] motorJobDiv = new int[Env.numMeshThreads + 1];
+
         FillThreads() {
-            super(1, "MotorBindGrid3D Fill");
+            super(Env.numMeshThreads, "MotorBindGrid3D Fill");
         }
 
         @Override
         public void divideAndConquer(int jobId) {
             if (jobId == Env.motorBindGrid3DStart) {
-                jobDiv[0] = 0;
-                jobDiv[1] = 1;
+                // Stamp the step once so motorFilCollisions sees a stable
+                // lastWriteTime even if zero cells get written this step.
+                lastWriteTime = Env.counter;
+                int filCt   = FilSegment.filSegmentCt;
+                int motorCt = MyoMotor.motorCt;
+                for (int i = 0; i <= numThreads; i++) {
+                    filJobDiv[i]   = i * filCt   / numThreads;
+                    motorJobDiv[i] = i * motorCt / numThreads;
+                }
                 spawn();
             }
         }
@@ -289,11 +304,15 @@ public class MotorBindGrid3D {
         @Override
         public void execute(int threadId) {
             MotorBindGrid3D grid = INSTANCE;
-            for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+            int filStart   = filJobDiv[threadId];
+            int filStop    = filJobDiv[threadId + 1];
+            int motorStart = motorJobDiv[threadId];
+            int motorStop  = motorJobDiv[threadId + 1];
+            for (int i = filStart; i < filStop; i++) {
                 FilSegment fs = FilSegment.theFilSegments[i];
                 grid.fillFilSeg(fs.filArrayPos, fs.end1, fs.end2);
             }
-            for (int i = 0; i < MyoMotor.motorCt; i++) {
+            for (int i = motorStart; i < motorStop; i++) {
                 MyoMotor m = MyoMotor.theMotors[i];
                 grid.fillMotor(m.myMotorNumber, m.bindTip);
             }
