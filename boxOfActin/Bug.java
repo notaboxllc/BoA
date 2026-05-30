@@ -175,12 +175,13 @@ public class Bug extends Crucible {
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
 		
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) { return; }
-		if (!torqueSum.checkPt3D()) { return; }
-		
+		if (!isForceSumFinite()) { return; }
+		if (!isTorqueSumFinite()) { return; }
+
 		// Work in coordinates aligned with the bug... transform forces and torques into body-fixed axis....
-		bForceSum.XTox(this, forceSum);
-		bTorqueSum.XTox(this, torqueSum);
+		int sBase = myThingNumber * 3;
+		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
+		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
 		
 		if (!Env.bugBrownianMotionOff) {
 			// add random forces, given in body-fixed frame

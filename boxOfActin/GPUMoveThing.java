@@ -557,6 +557,8 @@ public class GPUMoveThing {
         Thing[] theThings  = Thing.theThings;
         int[]   indices    = gpuThingIndices;
         int[]   rules      = brownianRule;
+        float[] soaForce   = Thing.soaForceSum;
+        float[] soaTorque  = Thing.soaTorqueSum;
         float   bTransCoef = sBTransCoeff;
         float   bRotCoef   = sBRotCoeff;
         float   xLnT       = sXLinkTAttn;
@@ -566,9 +568,11 @@ public class GPUMoveThing {
         boolean bMyoOff    = sBrownianMyoOff;
 
         for (int slot = slotStart; slot < slotEnd; slot++) {
-            Thing t = theThings[indices[slot]];
+            int thingIdx = indices[slot];
+            Thing t = theThings[thingIdx];
             int i3 = slot * 3;
             int i2 = slot * 2;
+            int s3 = thingIdx * 3;
             int rule = rules[slot];
 
             // FilSegment coord can change between steps via biochemStep
@@ -586,12 +590,16 @@ public class GPUMoveThing {
                 yVec.set(i3 + 1,  (float) t.yVec.y);
                 yVec.set(i3 + 2,  (float) t.yVec.z);
             }
-            forceSum.set(i3,     (float) t.forceSum.x);
-            forceSum.set(i3 + 1, (float) t.forceSum.y);
-            forceSum.set(i3 + 2, (float) t.forceSum.z);
-            torqueSum.set(i3,     (float) t.torqueSum.x);
-            torqueSum.set(i3 + 1, (float) t.torqueSum.y);
-            torqueSum.set(i3 + 2, (float) t.torqueSum.z);
+            // SoA pack: forces/torques are already float in the canonical
+            // soaForceSum/soaTorqueSum arrays, so the pack is a float→float
+            // copy from a contiguous backing array — no Pt3D pointer chase,
+            // no double→float narrowing here (gather did it).
+            forceSum.set(i3,     soaForce[s3]);
+            forceSum.set(i3 + 1, soaForce[s3 + 1]);
+            forceSum.set(i3 + 2, soaForce[s3 + 2]);
+            torqueSum.set(i3,     soaTorque[s3]);
+            torqueSum.set(i3 + 1, soaTorque[s3 + 1]);
+            torqueSum.set(i3 + 2, soaTorque[s3 + 2]);
             bTransGam.set(i3,     (float) t.bTransGam.x);
             bTransGam.set(i3 + 1, (float) t.bTransGam.y);
             bTransGam.set(i3 + 2, (float) t.bTransGam.z);

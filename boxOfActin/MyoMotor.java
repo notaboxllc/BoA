@@ -267,20 +267,19 @@ public class MyoMotor extends Thing {
 		double dt = Env.deltaT.getValue();
 
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) {
+		if (!isForceSumFinite()) {
 			talkln ("Crazy forceSum in " + this);
-			forceSum.zero();
-			forceSum.inc(randForces);
+			setForceSumToRandForces();
 		}
-		if (!torqueSum.checkPt3D()) {
+		if (!isTorqueSumFinite()) {
 			talkln ("Crazy torqueSum in " + this);
-			torqueSum.zero();
-			torqueSum.inc(randTorques);
+			setTorqueSumToRandTorques();
 		}
 
 		// Work in coordinates aligned with the rod... transform forces and torques into body-fixed axis....
-		bForceSum.XTox(this, forceSum);
-		bTorqueSum.XTox(this, torqueSum);
+		int sBase = myThingNumber * 3;
+		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
+		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
 
 		// add brownian force and torque... these are zero except at every chosen time-step
 		if (!Env.brownianMyoMotionOff) {

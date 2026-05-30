@@ -492,8 +492,9 @@ public class FilSegment extends Thing {
 		double dt = Env.deltaT.getValue();
 
 		// Work in coordinates aligned with the rod... transform forces and torques into body-fixed axis....
-		bForceSum.XTox(this, forceSum);
-		bTorqueSum.XTox(this, torqueSum);
+		int sBase = myThingNumber * 3;
+		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
+		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
 
 		// add brownian force and torque... these are zero except at every chosen time-step
 		if (!Env.brownianFilMotionOff && !brownianOff) {

@@ -205,15 +205,16 @@ public class ProteinNode extends Thing {
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
 		
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) { return; }
-		if (!torqueSum.checkPt3D()) { return; }
-		
+		if (!isForceSumFinite()) { return; }
+		if (!isTorqueSumFinite()) { return; }
+
 		// add constant force for testing
 		//if (Env.simulationTime < 0.6) { forceSum.add(constantF);}
-		
+
 		// Work in coordinates aligned with the node... transform forces and torques into body-fixed axis....
-		bForceSum.XTox(this, forceSum);
-		bTorqueSum.XTox(this, torqueSum);
+		int sBase = myThingNumber * 3;
+		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
+		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
 		
 		if (!Env.nodeBrownianMotionOff) {
 			// add random forces, given in body-fixed frame
@@ -265,8 +266,8 @@ public class ProteinNode extends Thing {
 			//if (didCollide()) { bZMove = false; } // restrict body-fixed y-direction motion for nodes that have just collided, i.e. these membrane nodes readjust in plane of membrane only
 			moveThing();
 			bZMove = true;  // reset or big trouble!
-			forceSum.zero();  // reset forces only, not collisionCt
-			torqueSum.zero();
+			zeroForceSumSlot();   // reset forces only, not collisionCt
+			zeroTorqueSumSlot();
 		}
 	}
 	
@@ -293,7 +294,7 @@ public class ProteinNode extends Thing {
 	
 	public static void zeroAllForceSums () {
 		for (int i=0; i<nodeCt; i++) {
-			theNodes[i].forceSum.zero();
+			theNodes[i].zeroForceSumSlot();
 			theNodes[i].bTorqueSum.zero();
 		}
 	}

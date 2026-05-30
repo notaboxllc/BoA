@@ -52,24 +52,34 @@ public class Thing extends Object {
 	Pt3D bRotDiff = new Pt3D();		// body-fixed rotational diffusion coefficients
 	Pt3D randForces = new Pt3D();		// random translational forces (Fx,Fy,Fz)
 	Pt3D randTorques = new Pt3D();	// random rotational torques (Tx,Ty,Tz)
-	Pt3D forceSum = new Pt3D(); 		// fixed-frame force sums... FX, FY, FZ
-	Pt3D torqueSum = new Pt3D();		// Euler axes torque sums
+	// Canonical force/torque storage is the static soaForceSum/soaTorqueSum
+	// float[] arrays below, indexed by myThingNumber*3+{0,1,2}. The Pt3D fields
+	// were removed when the SoA conversion landed; readers go through the
+	// static helpers (getForceSumX/Y/Z, zeroForceSumSlot, etc.) or read the
+	// soaForceSum/soaTorqueSum arrays directly.
 	Pt3D bForceSum = new Pt3D();		// body-fixed force sum
 	Pt3D bTorqueSum = new Pt3D();		// body-fixed torque sum
 	Pt3D bFricForceSum = new Pt3D();	// friction forces are implemented, and stay, in the body-fixed frame
 	Pt3D bFricTorqueSum = new Pt3D();
-	
+
 	// Per-thread force/torque accumulators. Worker threads write to a private slot
 	// indexed by [threadId][thingNumber*3 + axis]; gatherThreadAccumulators() sums
-	// them into forceSum/torqueSum once per step before moveThing. tlsThreadId is
-	// set in ThreadSpawn.run() at thread startup; the main thread leaves it at -1
-	// and writes directly to forceSum/torqueSum (no contention between phases).
+	// them (narrowed to float) into soaForceSum/soaTorqueSum once per step before
+	// moveThing. tlsThreadId is set in ThreadSpawn.run() at thread startup; the
+	// main thread leaves it at -1 and writes directly to soaForceSum/soaTorqueSum
+	// (no contention between phases).
 	// Must be initialised BEFORE the ThreadSet pools below, since ThreadSpawn.run()
 	// reads tlsThreadId on its first scheduling.
 	static final ThreadLocal<int[]> tlsThreadId = ThreadLocal.withInitial(() -> new int[]{-1});
 	static final int accumThreadCt = Env.allThreadCt;
 	static double[][] taForce  = new double[accumThreadCt][0];
 	static double[][] taTorque = new double[accumThreadCt][0];
+	// Canonical SoA force/torque storage. Layout: [fx0,fy0,fz0, fx1,fy1,fz1, ...]
+	// indexed by myThingNumber*3+axis. Matches the GPU FloatArray layout in
+	// GPUMoveThing so the per-step pack can read this array contiguously. The
+	// gather pass narrows the per-thread double accumulators into these floats.
+	static float[] soaForceSum  = new float[0];
+	static float[] soaTorqueSum = new float[0];
 	// Sparse gather bookkeeping: each worker thread records the indices it actually
 	// wrote to (deduped via dirtyFlags). gatherThreadAccumulators() walks only those
 	// entries instead of sweeping every Thing × every thread.
@@ -280,8 +290,6 @@ public class Thing extends Object {
 		bRotDiff = null;
 		randForces = null;
 		randTorques = null;
-		forceSum = null;
-		torqueSum = null;
 		bForceSum = null;
 		bTorqueSum = null;
 		bFricForceSum = null;
@@ -323,14 +331,14 @@ public class Thing extends Object {
 	
 	public void incForceSum (Pt3D forceToAdd) {
 		final int tid = tlsThreadId.get()[0];
+		final int idx = myThingNumber;
+		final int base = idx * 3;
 		if (tid < 0) {
-			forceSum.x += forceToAdd.x;
-			forceSum.y += forceToAdd.y;
-			forceSum.z += forceToAdd.z;
+			soaForceSum[base]     += (float) forceToAdd.x;
+			soaForceSum[base + 1] += (float) forceToAdd.y;
+			soaForceSum[base + 2] += (float) forceToAdd.z;
 		} else {
-			final int idx = myThingNumber;
 			final double[] f = taForce[tid];
-			final int base = idx * 3;
 			f[base]     += forceToAdd.x;
 			f[base + 1] += forceToAdd.y;
 			f[base + 2] += forceToAdd.z;
@@ -352,14 +360,18 @@ public class Thing extends Object {
 		final double ty = rz*fx - rx*fz;
 		final double tz = rx*fy - ry*fx;
 		final int tid = tlsThreadId.get()[0];
+		final int idx = myThingNumber;
+		final int base = idx * 3;
 		if (tid < 0) {
-			forceSum.x += fx;   forceSum.y += fy;   forceSum.z += fz;
-			torqueSum.x += tx;  torqueSum.y += ty;  torqueSum.z += tz;
+			soaForceSum[base]      += (float) fx;
+			soaForceSum[base + 1]  += (float) fy;
+			soaForceSum[base + 2]  += (float) fz;
+			soaTorqueSum[base]     += (float) tx;
+			soaTorqueSum[base + 1] += (float) ty;
+			soaTorqueSum[base + 2] += (float) tz;
 		} else {
-			final int idx = myThingNumber;
 			final double[] f = taForce[tid];
 			final double[] q = taTorque[tid];
-			final int base = idx * 3;
 			f[base]     += fx; f[base + 1] += fy; f[base + 2] += fz;
 			q[base]     += tx; q[base + 1] += ty; q[base + 2] += tz;
 			final boolean[] flags = dirtyFlags[tid];
@@ -372,14 +384,14 @@ public class Thing extends Object {
 
 	public void incTorqueSum (Pt3D torqueToAdd) {
 		final int tid = tlsThreadId.get()[0];
+		final int idx = myThingNumber;
+		final int base = idx * 3;
 		if (tid < 0) {
-			torqueSum.x += torqueToAdd.x;
-			torqueSum.y += torqueToAdd.y;
-			torqueSum.z += torqueToAdd.z;
+			soaTorqueSum[base]     += (float) torqueToAdd.x;
+			soaTorqueSum[base + 1] += (float) torqueToAdd.y;
+			soaTorqueSum[base + 2] += (float) torqueToAdd.z;
 		} else {
-			final int idx = myThingNumber;
 			final double[] q = taTorque[tid];
-			final int base = idx * 3;
 			q[base]     += torqueToAdd.x;
 			q[base + 1] += torqueToAdd.y;
 			q[base + 2] += torqueToAdd.z;
@@ -391,9 +403,78 @@ public class Thing extends Object {
 		}
 	}
 
-	// Lazy-grow the per-thread accumulators. Called at the top of doLoop().
-	// dirtyIndices/dirtyFlags grow with taForce/taTorque so workers can never
-	// overflow (no thread can dirty more distinct slots than the Thing count).
+	// ---- SoA force/torque accessors ----------------------------------------
+	// Canonical storage is soaForceSum/soaTorqueSum. These helpers keep the
+	// existing call sites (NaN checks, "Crazy forceSum" recovery, benchmark
+	// prints, membrane internalPressure increments) terse.
+
+	public float getForceSumX()  { return soaForceSum[myThingNumber * 3];     }
+	public float getForceSumY()  { return soaForceSum[myThingNumber * 3 + 1]; }
+	public float getForceSumZ()  { return soaForceSum[myThingNumber * 3 + 2]; }
+	public float getTorqueSumX() { return soaTorqueSum[myThingNumber * 3];     }
+	public float getTorqueSumY() { return soaTorqueSum[myThingNumber * 3 + 1]; }
+	public float getTorqueSumZ() { return soaTorqueSum[myThingNumber * 3 + 2]; }
+
+	public boolean isForceSumFinite() {
+		final int b = myThingNumber * 3;
+		return !(Float.isNaN(soaForceSum[b]) | Float.isNaN(soaForceSum[b+1]) | Float.isNaN(soaForceSum[b+2]));
+	}
+
+	public boolean isTorqueSumFinite() {
+		final int b = myThingNumber * 3;
+		return !(Float.isNaN(soaTorqueSum[b]) | Float.isNaN(soaTorqueSum[b+1]) | Float.isNaN(soaTorqueSum[b+2]));
+	}
+
+	public void zeroForceSumSlot() {
+		final int b = myThingNumber * 3;
+		soaForceSum[b] = 0f; soaForceSum[b+1] = 0f; soaForceSum[b+2] = 0f;
+	}
+
+	public void zeroTorqueSumSlot() {
+		final int b = myThingNumber * 3;
+		soaTorqueSum[b] = 0f; soaTorqueSum[b+1] = 0f; soaTorqueSum[b+2] = 0f;
+	}
+
+	// Replaces "forceSum.zero(); forceSum.inc(randForces);" pattern used by
+	// Myo*/MyoMiniFilament/MyoMotor "Crazy forceSum" recovery paths.
+	public void setForceSumToRandForces() {
+		final int b = myThingNumber * 3;
+		soaForceSum[b]     = (float) randForces.x;
+		soaForceSum[b + 1] = (float) randForces.y;
+		soaForceSum[b + 2] = (float) randForces.z;
+	}
+
+	public void setTorqueSumToRandTorques() {
+		final int b = myThingNumber * 3;
+		soaTorqueSum[b]     = (float) randTorques.x;
+		soaTorqueSum[b + 1] = (float) randTorques.y;
+		soaTorqueSum[b + 2] = (float) randTorques.z;
+	}
+
+	// Direct slot increment used by post-gather writers (StickyNode.internalPressure
+	// etc.) — must NOT go through taForce because gather has already run for this
+	// pass and the next gather wouldn't pick up the contribution until too late.
+	public void incForceSumSlot(double fx, double fy, double fz) {
+		final int b = myThingNumber * 3;
+		soaForceSum[b]     += (float) fx;
+		soaForceSum[b + 1] += (float) fy;
+		soaForceSum[b + 2] += (float) fz;
+	}
+
+	// Bulk zero called at the start of each step before any force-producing
+	// phase. One memset over the active slot range — microseconds at any scale.
+	public static void clearSoaForcesTorques(int upTo) {
+		final int n = upTo * 3;
+		if (n <= 0) return;
+		java.util.Arrays.fill(soaForceSum,  0, n, 0f);
+		java.util.Arrays.fill(soaTorqueSum, 0, n, 0f);
+	}
+
+	// Lazy-grow the per-thread accumulators and the canonical SoA arrays.
+	// Called at the top of doLoop(). dirtyIndices/dirtyFlags grow with
+	// taForce/taTorque so workers can never overflow (no thread can dirty
+	// more distinct slots than the Thing count). soaForceSum/soaTorqueSum
+	// grow in lockstep so myThingNumber*3 indexing is always valid.
 	public static void ensureAccumCapacity (int needed) {
 		if (needed <= taCapacity) return;
 		int newCap = Math.max(needed + (needed >> 2) + 64, 1024);  // 25% headroom
@@ -403,19 +484,31 @@ public class Thing extends Object {
 			dirtyIndices[t] = new int[newCap];
 			dirtyFlags[t]   = new boolean[newCap];
 		}
+		// Reallocate the canonical SoA arrays; preserve current contents so
+		// growth mid-step doesn't drop accumulated force from earlier phases.
+		float[] newForce  = new float[newCap * 3];
+		float[] newTorque = new float[newCap * 3];
+		if (soaForceSum.length > 0) {
+			System.arraycopy(soaForceSum,  0, newForce,  0, soaForceSum.length);
+			System.arraycopy(soaTorqueSum, 0, newTorque, 0, soaTorqueSum.length);
+		}
+		soaForceSum  = newForce;
+		soaTorqueSum = newTorque;
 		taCapacity = newCap;
 	}
 
-	// Sparse gather: walk each worker thread's dirty list, adding its
-	// thread-local contributions to thing.forceSum/torqueSum, then zero the
-	// touched slots and clear the dirty flag. Cost is O(sum of dirty counts),
-	// not O(thingCt × threadCt) — typically a few thousand entries vs the
-	// hundreds of millions of slots the full sweep used to touch.
+	// Sparse gather: walk each worker thread's dirty list, narrow the double
+	// per-thread contributions to float and add into soaForceSum/soaTorqueSum,
+	// then zero the touched slots and clear the dirty flag. Cost is O(sum of
+	// dirty counts), not O(thingCt × threadCt) — typically a few thousand
+	// entries vs the hundreds of millions of slots the full sweep used to touch.
 	//
 	// Called single-threaded from the main loop; no contention because we
-	// process one source thread at a time and writes target distinct fields.
+	// process one source thread at a time and writes target distinct slots.
 	public static void gatherThreadAccumulators () {
 		final int tCt = accumThreadCt;
+		final float[] outF = soaForceSum;
+		final float[] outT = soaTorqueSum;
 		int total = 0, maxT = 0;
 		for (int t = 0; t < tCt; t++) {
 			final int count = dirtyCounts[t];
@@ -431,12 +524,12 @@ public class Thing extends Object {
 				final int base = idx * 3;
 				Thing thing = theThings[idx];
 				if (thing != null && !thing.removeMe) {
-					thing.forceSum.x  += forces[base];
-					thing.forceSum.y  += forces[base + 1];
-					thing.forceSum.z  += forces[base + 2];
-					thing.torqueSum.x += torques[base];
-					thing.torqueSum.y += torques[base + 1];
-					thing.torqueSum.z += torques[base + 2];
+					outF[base]     += (float) forces[base];
+					outF[base + 1] += (float) forces[base + 1];
+					outF[base + 2] += (float) forces[base + 2];
+					outT[base]     += (float) torques[base];
+					outT[base + 1] += (float) torques[base + 1];
+					outT[base + 2] += (float) torques[base + 2];
 				}
 				forces[base] = 0; forces[base + 1] = 0; forces[base + 2] = 0;
 				torques[base] = 0; torques[base + 1] = 0; torques[base + 2] = 0;
@@ -530,8 +623,8 @@ public class Thing extends Object {
 	}
 	
 	public void resetCounters() {
-		forceSum.zero();
-		torqueSum.zero();
+		// SoA force/torque slots are zeroed in bulk at the start of each step
+		// via Thing.clearSoaForcesTorques(thingCt); no per-Thing zero needed.
 		bFricForceSum.zero();
 		bFricTorqueSum.zero();
 		//randForces.zero();		// these must be set to zero now that brownian forces aren't applied every time-step
@@ -550,8 +643,22 @@ public class Thing extends Object {
 	
 	public static void removeThing (Thing byeThing) {
 		int swapId = byeThing.myThingNumber;
-		theThings[swapId] = theThings[thingCt-1];
+		int lastId = thingCt - 1;
+		theThings[swapId] = theThings[lastId];
 		theThings[swapId].myThingNumber = swapId;
+		// Compact the canonical SoA force/torque slots: copy the last slot's
+		// data into the dead slot. Forces are zeroed each step so this is not
+		// strictly required for correctness, but maintains the invariant that
+		// active slots are contiguous with valid data.
+		if (swapId != lastId && soaForceSum.length >= (lastId + 1) * 3) {
+			int dst = swapId * 3, src = lastId * 3;
+			soaForceSum[dst]     = soaForceSum[src];
+			soaForceSum[dst + 1] = soaForceSum[src + 1];
+			soaForceSum[dst + 2] = soaForceSum[src + 2];
+			soaTorqueSum[dst]     = soaTorqueSum[src];
+			soaTorqueSum[dst + 1] = soaTorqueSum[src + 1];
+			soaTorqueSum[dst + 2] = soaTorqueSum[src + 2];
+		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();
 		thingCt--;

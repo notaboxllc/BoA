@@ -275,13 +275,16 @@ public class StickyNode extends ProteinNode {
 	public void internalPressure () {
 		Pt3D outVec = Pt3D.UnitVec(coord,centerOfSphere);
 		outVec.scale(Env.outwardCellForce.getValue());
-		forceSum.add(outVec);
+		// Direct slot increment: this runs inside moveThing on the membraneMove
+		// worker pass AFTER gatherThreadAccumulators(), so we cannot route this
+		// add through taForce (it would not be gathered until the next pass).
+		incForceSumSlot(outVec.x, outVec.y, outVec.z);
 	}
-	
+
 	public void fakeConstrictingRing () {
 		Pt3D inVec = Pt3D.UnitVec(centerOfSphere,coord);
 		inVec.scale(1e-20);
-		forceSum.add(inVec);
+		incForceSumSlot(inVec.x, inVec.y, inVec.z);
 	}
 	
 	public void addSphericalConstraintForce () {

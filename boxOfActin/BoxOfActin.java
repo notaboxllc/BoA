@@ -695,6 +695,10 @@ public class BoxOfActin {
 				// Per-thread force/torque accumulators need at least thingCt slots.
 				// Grown lazily with 25% headroom; reallocates only when thingCt outpaces capacity.
 				Thing.ensureAccumCapacity(Thing.thingCt);
+				// Zero the canonical SoA force/torque slots for the active Things.
+				// This replaces the per-Thing forceSum.zero()/torqueSum.zero() that
+				// used to live in resetCounters — one memset over thingCt*3 floats.
+				Thing.clearSoaForcesTorques(Thing.thingCt);
 				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
 				MyoMotor.fillSoaArrays();
 				FilSegment.fillSoaArrays();
@@ -769,9 +773,10 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.stepStop);
 				stepTimer.stopInc();
 
-				// Sum each thread's force/torque slots into thing.forceSum/torqueSum,
-				// then zero the slots. Must run after every phase that calls incForceSum
-				// (xLink, membrane, joints1/2, step) and before moveThing/GPU pack.
+				// Sum each thread's force/torque slots (double) into the canonical SoA
+				// arrays (float) and zero the per-thread slots. Must run after every
+				// phase that calls incForceSum (xLink, membrane, joints1/2, step) and
+				// before moveThing/GPU pack.
 				gatherTimer.start();
 				startAllThreadSets(Env.gatherForcesStart);
 				waitOnAllThreadSets(Env.gatherForcesStop);
@@ -784,7 +789,8 @@ public class BoxOfActin {
 				// Round 3 diagnostic: trace force application path
 				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
 					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f) veloc.y=%.4e%n",
-						benchStepCount, deflFil.midSeg.forceSum.x, deflFil.midSeg.forceSum.y, deflFil.midSeg.forceSum.z,
+						benchStepCount,
+						deflFil.midSeg.getForceSumX(), deflFil.midSeg.getForceSumY(), deflFil.midSeg.getForceSumZ(),
 						deflFil.midSeg.coord.x, deflFil.midSeg.coord.y, deflFil.midSeg.coord.z,
 						deflFil.midSeg.veloc.y);
 				}
@@ -1439,8 +1445,8 @@ public class BoxOfActin {
 			s.uVec.setVals(1, 0, 0);
 			s.yVec.setVals(0, 1, 0);
 			s.initialize();
-			s.forceSum.zero();
-			s.torqueSum.zero();
+			s.zeroForceSumSlot();
+			s.zeroTorqueSumSlot();
 		}
 	}
 

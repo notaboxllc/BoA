@@ -4,6 +4,239 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — SoA canonical forceSum/torqueSum + memcpy pack
+
+Follow-up to the sparse-gather entry. The remaining cost in the gather
+inner loop was the per-Thing `forceSum`/`torqueSum` Pt3D pointer chase:
+fetch `theThings[idx]`, follow the Pt3D reference, write three doubles.
+This entry converts the canonical force/torque storage from per-Thing
+`Pt3D` fields to static `float[]` arrays matching the GPU FloatArray
+layout (m*3 interleaved), so the gather narrows directly into floats
+and the GPU pack becomes a float→float read out of a contiguous backing
+array. The Pt3D `forceSum`/`torqueSum` fields are gone — `Thing` now
+owns no force-sum state of its own.
+
+### Architecture
+
+**Canonical storage** (Thing.java):
+```java
+static float[] soaForceSum;   // [fx0,fy0,fz0, fx1,fy1,fz1, ...]
+static float[] soaTorqueSum;
+```
+Indexed by `myThingNumber * 3 + {0,1,2}`. Grown in `ensureAccumCapacity`
+in lockstep with `taForce`/`taTorque` (25 % headroom, contents preserved
+on growth via `System.arraycopy`).
+
+**Per-thread accumulators stay `double[][]`.** Workers still write
+`taForce[tid][idx*3+axis]` in double precision — narrowing to float
+happens once in the gather, not on every `incForceSum` call. This
+preserves the catastrophic-cancellation safety the accumulator
+infrastructure exists for.
+
+**Data flow per step:**
+1. `Thing.clearSoaForcesTorques(thingCt)` — one `Arrays.fill` over
+   `thingCt * 3` floats at start of step.
+2. Force phases → `taForce[tid][...]` (double, per-thread, dirty list).
+3. `gatherThreadAccumulators` walks each thread's dirty list, narrows
+   `(float)` and adds into `soaForceSum`/`soaTorqueSum`.
+4. Main-thread writes (benchmark pin force, post-gather membrane
+   `internalPressure`) go directly to `soa*[base]` via
+   `incForceSumSlot(...)` or the `tid<0` branch of `incForceSum`.
+5. CPU `moveThing` reads `soaForceSum`/`soaTorqueSum`.
+6. GPU pack copies `soaForceSum`/`soaTorqueSum` slot-by-slot into the
+   FloatArray (tight float→float loop, no Pt3D pointer chase).
+
+### Bulk-copy approach used: tight loop (Approach 2)
+
+TornadoVM's `FloatArray.getSegment()` does return a backing
+`MemorySegment` (no header), so a true `MemorySegment.copy(srcArr, ...,
+dstSeg, ...)` is possible — but the slot→thing index mapping is
+generally **non-contiguous** (`classifyThings` packs only GPU-eligible
+Things into slots). A bulk memcpy would require detecting contiguous
+runs of `gpuThingIndices` first.
+
+`GPUMoveThing.packRange` therefore uses Approach 2: a tight per-slot
+loop that reads three floats out of `Thing.soaForceSum[thingIdx*3+a]`
+and writes them via `forceSum.set(slot*3+a, ...)`. JIT-vectorisable on
+the read side; the FloatArray writes are still per-element. The win
+vs the pre-SoA code path is the elimination of the
+`theThings[idx].forceSum.x` pointer chase — three pointer hops per
+write are replaced by a single array indexed read.
+
+Future optimisation noted but **not implemented this session:** if
+`classifyThings` produces mostly contiguous slot→thing runs at gliding
+scale, a run-detection pass on `gpuThingIndices` plus per-run
+`MemorySegment.copy` would push the pack time toward zero. Worth
+revisiting if pack time stays a measurable fraction of GPU step time.
+
+### Files changed
+
+- `boxOfActin/Thing.java` — added `soaForceSum`/`soaTorqueSum` arrays,
+  helper methods (`getForceSumX/Y/Z`, `isForceSumFinite`,
+  `zeroForceSumSlot`, `setForceSumToRandForces`, `incForceSumSlot`,
+  `clearSoaForcesTorques`); updated `incForceSum`/`incTorqueSum`
+  (`tid<0` paths write to soa); updated `gatherThreadAccumulators`
+  (narrow double → float into soa); updated `ensureAccumCapacity`
+  (allocate + preserve soa on growth); updated `resetCounters` (no
+  longer zeros forceSum/torqueSum); updated `removeThing` (swap soa
+  slots on compaction); removed `Pt3D forceSum`/`Pt3D torqueSum`
+  declarations and the `sepaku` references.
+- `boxOfActin/Pt3D.java` — added `XToxFromFloats(Thing, float[], int)`
+  helper for body-frame transform of soa-resident forces.
+- `boxOfActin/BoxOfActin.java` — `doLoop` calls
+  `Thing.clearSoaForcesTorques` at the top of each step; benchmark
+  diagnostic print uses `getForceSumX/Y/Z`; benchmark chain reset uses
+  `zeroForceSumSlot`/`zeroTorqueSumSlot`.
+- `boxOfActin/GPUMoveThing.java` — `packRange` reads from
+  `Thing.soaForceSum`/`Thing.soaTorqueSum` arrays instead of Pt3D
+  pointer chase.
+- `boxOfActin/FilSegment.java`, `MyoMotor.java`, `MyoRod.java`,
+  `MyoLever.java`, `MyoMiniFilament.java`, `ProteinNode.java`,
+  `Bug.java` — `moveThing` readers use `XToxFromFloats(this,
+  soaForceSum, sBase)` and `isForceSumFinite()`/`setForceSumToRandForces()`
+  for the NaN-recovery paths.
+- `boxOfActin/StickyNode.java` — `internalPressure`/`fakeConstrictingRing`
+  switched from `forceSum.add(vec)` to `incForceSumSlot(x,y,z)` so the
+  membrane-move-pass increment lands in the soa slot directly (this
+  pass runs AFTER the membrane-relaxation gather, so a routed
+  `incForceSum` would not be visible until the next gather call).
+
+### Smoke validation — glidingAssay500_val — PASS
+
+```
+                    baseline mean ± 2 SD     CPU (SoA)         GPU (SoA)
+bindEvents       :       861 ± 240               808 PASS        972 PASS
+meanBoundMotors  :      7.37 ± 1.52            7.176 PASS      8.084 PASS
+glidingVelocity  :      8.39 ± 1.44           7.8516 PASS     8.7893 PASS
+```
+
+Sources: `RUN_LOGS/2026-05-30_soaforce_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_soaforce_smoke_gpu.txt`.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, thingCt≈588K, ~1000 steps)
+
+CPU path. Source: `RUN_LOGS/2026-05-30_soaforce_dense_cpu.txt`.
+
+```
+phase                pre-accum   dense-sweep   sparse   SoA(this)
+------------------------------------------------------------------
+ThingStep Threads        55.02      112.81    100.88      62.45
+ThingBrownian            31.65       30.22     29.54      31.56
+Myosin (joints)          23.41       17.83     17.47      19.32
+MyoDimer                  8.96        7.84      8.46       8.58
+Mesh                      6.93        7.34      6.42       6.68
+Ck Mots                   5.64        5.18      5.06       5.33
+MotorBindGrid3D Fill      4.15        3.63      3.56       3.87
+NodeLink                  1.52        1.68      1.45       1.56
+------------------------------------------------------------------
+wall (min per sim-sec)    252         329       306        257
+[STATS]      bindEvents       3983 → 3652 → 3687 → 3633
+             meanBoundMotors  250.5 → 234.1 → 244.5 → 226.7
+             glidingVelocity  40.88 → 42.36 → 44.48 → 40.58
+```
+
+GPU path. Source: `RUN_LOGS/2026-05-30_soaforce_dense_gpu.txt`.
+
+```
+phase                pre-accum    sparse    SoA(this)
+-------------------------------------------------------
+ThingStep Threads        25.46     72.61      32.26
+gpuMoveThing total       44.70     41.36      40.39
+gpuMotorBinding total    13.26     12.68      13.05
+Myosin (joints)          23.57     17.54      18.33
+MyoDimer                  9.51      9.21       9.78
+Mesh                      6.93      6.62       6.70
+MotorBindGrid3D Fill      4.31      3.66       3.93
+-------------------------------------------------------
+wall (min per sim-sec)    --        302        239
+gpuMoveThing breakdown   pack=10.86s, exec=10.51s, unpack=19.98s   (sparse)
+                         pack=9.20s,  exec=10.68s, unpack=20.51s   (this)
+```
+
+### Result: full win
+
+CPU dense **wall drops 306 → 257 min/sim-sec** (-16 %), within 2 % of
+the pre-accumulator baseline of 252. ThingStep drops 100.9 → 62.4 s
+(-38 %); the gather, which is dispatched on `ThingStepThreads` via
+`gatherForcesStart`, no longer pays the per-Thing Pt3D pointer-chase
+cost — `theThings[idx].forceSum.x += ...` is replaced by
+`soaForceSum[base] += (float)...` (one indexed array write).
+
+GPU dense **wall drops 302 → 239 min/sim-sec** (-21 %). ThingStep
+drops 72.6 → 32.3 s (-56 %) for the same reason — the gather is the
+big-win site. `gpuMoveThing pack` drops only ~15 % (10.86 → 9.20 s);
+the pack was already amortised across 16 workers and FloatArray
+writes are still per-element. The MemorySegment-copy optimisation is
+where additional pack-time savings would come from.
+
+All observables are within ensemble noise. The CPU `bindEvents`
+trended slightly low (3633 vs 3983 pre-accum) but still within the ±2
+SD band; this is single-seed sampling, not a regression.
+
+### Why the gather got so much faster
+
+The sparse-gather inner loop was:
+```java
+Thing thing = theThings[idx];                      // 1 array read
+if (thing != null && !thing.removeMe) {            // 2 field reads
+    thing.forceSum.x  += forces[base];             // pointer chase: thing.forceSum, then .x
+    thing.forceSum.y  += forces[base + 1];         // 6 doubles total
+    thing.forceSum.z  += forces[base + 2];
+    thing.torqueSum.x += torques[base];
+    thing.torqueSum.y += torques[base + 1];
+    thing.torqueSum.z += torques[base + 2];
+}
+```
+Per dirty entry that's a Thing fetch, two reference dereferences, six
+field writes through indirect addresses, and six `+=` on doubles —
+all touching memory that may not be cache-resident at scale.
+
+The SoA version:
+```java
+outF[base]     += (float) forces[base];            // contiguous float[] write
+outF[base + 1] += (float) forces[base + 1];
+outF[base + 2] += (float) forces[base + 2];
+outT[base]     += (float) torques[base];
+outT[base + 1] += (float) torques[base + 1];
+outT[base + 2] += (float) torques[base + 2];
+```
+No Thing fetch, no reference chase, no null/removeMe guard (zeroed soa
+plus the worker dirty-list invariant make the guards redundant), three
+float widenings instead of six double reads of pointer-chased fields.
+The hot loop is now a simple array→array reduction. The JIT can
+vectorise it; the prior version could not because of the indirect
+addressing.
+
+### Memory overhead
+
+At M=98K, taCapacity ≈ 735K with 25 % headroom: `soaForceSum` =
+735K × 3 × 4 B = **~8.4 MB**, same for `soaTorqueSum` = **~16.8 MB**
+total. Trivial vs the 564 MB `taForce`/`taTorque` accumulators that
+already exist.
+
+### Open / deferred
+
+- **MemorySegment bulk-copy in GPU pack** — left as the next pack
+  optimisation. Detect contiguous runs of `gpuThingIndices` once per
+  classify and dispatch one `MemorySegment.copy` per run. Estimated:
+  pack 9.2 s → ~1 s at dense scale.
+- **coord / uVec / yVec SoA conversion** — the next step of the
+  SoA-canonical refactor per deepPerformanceSurvey §L. Those are read
+  by mesh/grid binning, motor binding, joint forces, and the GPU pack;
+  doing the same conversion would let the GPU pack drop its remaining
+  per-step coord/uVec/yVec writes for FilSegment slots. This is a
+  larger change because coord is written in many call sites (the
+  Pt3D-`inc`/Pt3D-`copy` set is bigger than forceSum's), so it needs
+  the same kind of accessor-bridge layer.
+- **NaN-recovery code in MyoLever/MyoMotor/MyoRod/MyoMiniFilament** —
+  the "Crazy forceSum/torqueSum" guards now narrow doubles into
+  floats; if a force phase produces a very large but finite double
+  that overflows the float range, the soa slot will silently become
+  `Infinity` and the NaN guard won't catch it. At gliding scale this
+  has not been observed, but the dense Listeria + membrane simulation
+  may need a finite-range check rather than just `Float.isNaN`. Flag
+  for future revisit if the guards start tripping in a scale-up run.
+
 ## 2026-05-30 — Sparse gather for per-thread accumulators
 
 Follow-up to the morning's per-thread accumulator work. The accumulator

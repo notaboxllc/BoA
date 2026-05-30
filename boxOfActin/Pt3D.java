@@ -481,6 +481,17 @@ public class Pt3D {
 		this.z = m[6]*px + m[7]*py + m[8]*pz;
 	}
 
+	// SoA bridge: same as XTox(Thing, Pt3D) but reads the input vector from
+	// a float[] starting at `base`. Used by moveThing readers after the SoA
+	// canonical force/torque storage conversion (Thing.soaForceSum/soaTorqueSum).
+	public void XToxFromFloats (Thing p, float[] arr, int base) {
+		double [] m = p.transXTox;
+		double px = arr[base], py = arr[base + 1], pz = arr[base + 2];
+		this.x = m[0]*px + m[1]*py + m[2]*pz;
+		this.y = m[3]*px + m[4]*py + m[5]*pz;
+		this.z = m[6]*px + m[7]*py + m[8]*pz;
+	}
+
 	public void XTox (Thing p) {
 		double [] m = p.transXTox;
 		double px = this.x, py = this.y, pz = this.z;

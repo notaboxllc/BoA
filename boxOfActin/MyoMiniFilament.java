@@ -173,8 +173,8 @@ public class MyoMiniFilament extends Thing {
 			coordBefore    = new Pt3D(coord.x,      coord.y,      coord.z);
 			end1Before     = new Pt3D(end1.x,       end1.y,       end1.z);
 			end2Before     = new Pt3D(end2.x,       end2.y,       end2.z);
-			forceSumSnap   = new Pt3D(forceSum.x,   forceSum.y,   forceSum.z);
-			torqueSumSnap  = new Pt3D(torqueSum.x,  torqueSum.y,  torqueSum.z);
+			forceSumSnap   = new Pt3D(getForceSumX(),  getForceSumY(),  getForceSumZ());
+			torqueSumSnap  = new Pt3D(getTorqueSumX(), getTorqueSumY(), getTorqueSumZ());
 			randForcesSnap = new Pt3D(randForces.x, randForces.y, randForces.z);
 			randTorquesSnap= new Pt3D(randTorques.x,randTorques.y,randTorques.z);
 			bTransGamSnap  = new Pt3D(bTransGam.x,  bTransGam.y,  bTransGam.z);
@@ -184,20 +184,19 @@ public class MyoMiniFilament extends Thing {
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
 
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) {
+		if (!isForceSumFinite()) {
 			talkln ("Crazy forceSum in " + this);
-			forceSum.zero();
-			forceSum.inc(randForces);
+			setForceSumToRandForces();
 		}
-		if (!torqueSum.checkPt3D()) {
+		if (!isTorqueSumFinite()) {
 			talkln ("Crazy torqueSum in " + this);
-			torqueSum.zero();
-			torqueSum.inc(randTorques);
+			setTorqueSumToRandTorques();
 		}
 
 		// Work in coordinates aligned with the minifilament... transform forces and torques into body-fixed axis....
-		bForceSum.XTox(this, forceSum);
-		bTorqueSum.XTox(this, torqueSum);
+		int sBase = myThingNumber * 3;
+		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
+		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
 		if (!Env.myoMiniFilBrownianMotionOff) {
 			// add random forces, given in body-fixed frame
 			bForceSum.inc(randForces);
