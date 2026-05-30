@@ -1,0 +1,26 @@
+Iter2d 10-seed ensemble validation summary
+==========================================
+Param file: ParameterFiles/glidingAssay500_val (M=500, ~10101 steps)
+Date:       2026-05-29
+Protocol:   10 CPU seeds + 10 GPU seeds, same -seed N values.
+            CPU rows reused from iter2c (CPU code unchanged from iter2c).
+
+Observable comparison (cSEM gate < 2.0)
+---------------------------------------
+                     CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     886.60 ± 37.32 (118.01)         0.50  PASS
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       7.41 ±  0.20 (  0.62)         0.31  PASS
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       8.32 ±  0.19 (  0.59)         0.46  PASS
+wall (s/seed)    :    275.10 ±  1.46 (  4.63)     356.30 ±  1.59 (  5.03)       37.54  (diagnostic only)
+
+All three physics observables PASS the |diff|/cSEM < 2.0 gate.
+GPU wall 356.3 s/seed vs CPU 275.1 s/seed = 1.30x slower (vs iter2c 1.63x — 20% better).
+
+GPU per-seed [STATS] gpuMoveThing (averages across 10 seeds × 10101 calls)
+-------------------------------------------------------------------------
+              total       pack        exec       unpack
+mean/seed     61.24 s    13.73 s    18.48 s    29.04 s
+ms / call      6.06 ms    1.36 ms    1.83 ms    2.87 ms
+
+Compare iter2c (ms/call): total 14.83  pack 6.61  exec 1.81  unpack 6.42
+Deltas vs iter2c:         total -59%   pack -79%  exec +1%   unpack -55%

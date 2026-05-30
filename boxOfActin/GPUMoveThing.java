@@ -12,26 +12,26 @@ import uk.ac.manchester.tornado.api.types.arrays.FloatArray;
 import uk.ac.manchester.tornado.api.types.arrays.IntArray;
 
 /**
- * GPU-accelerated Thing.moveThing() via TornadoVM — iteration 2c.
+ * GPU-accelerated Thing.moveThing() via TornadoVM — iteration 2d.
  *
- * Iter2c changes vs iter2b:
- *   - Brownian random forces are generated inside the kernel via Wang hash
- *     + Box-Muller, eliminating the per-step randForces/randTorques upload.
- *     Each kernel thread produces 6 N(0,1) Gaussians from 6 sequential
- *     Wang hashes; the per-axis force magnitude is g * sqrt(2*kT/dt) *
- *     sqrt(bTransGam[axis]) and the torque magnitude is the analogous
- *     bRotGam variant, matching the CPU calcRandomForces() statistical
- *     distribution.
- *   - Pre-built `gpuThingIndices[]` selected once per topology event:
- *     pack/unpack walks a tight slot range instead of doing instanceof on
- *     every Thing every step. Per-slot Brownian rules (FIL vs MYO vs LEVER)
- *     are cached in a small int array so the per-step pack can compute
- *     transScale/rotScale without re-running the eligibility decision.
- *   - bTransGam and bRotGam moved to FIRST_EXECUTION transfer mode and
- *     filled at plan-build time. Invalidated (plan rebuilt) on aeta
- *     mutation via invalidatePlan().
- *   - Kernel parameter count: 11 FloatArrays + 1 IntArray = 12 buffers
- *     (was 13 in iter2b; randForces/randTorques dropped).
+ * Iter2d changes vs iter2c:
+ *   - Parallel pack and unpack on a persistent N_WORKERS daemon-thread pool
+ *     (default N = Math.min(16, availableProcessors)). Each worker handles a
+ *     contiguous slot range; FloatArray.set/get on disjoint indices is safe
+ *     because the underlying MemorySegment writes a single 4-byte word per
+ *     index with no shared metadata.
+ *   - coord/uVec/yVec are not re-packed for myosin slots on steps that don't
+ *     follow a classify (topology) event. Between unpack(N) and pack(N+1),
+ *     CPU phases never write to a GPU-handled MyoMotor/MyoRod/MyoLever's
+ *     coord/uVec/yVec — those fields are touched only by moveThing(), which
+ *     is the kernel itself. The previous step's FloatArray contents are
+ *     already the correct CPU-visible state. FilSegment slots still re-pack
+ *     coord/uVec/yVec every step because biochemStep poly/depoly can call
+ *     coord.inc(), and the gliding-assay FilSegment count is small enough
+ *     that the per-slot Pt3D-read cost is negligible.
+ *   - On the first call after classifyThings() (or after plan rebuild), the
+ *     pack runs in "full" mode and writes coord/uVec/yVec for every slot.
+ *     Subsequent steady-state calls run in "resident" mode.
  *
  * Scope (gliding-assay first pass): MyoMotor, MyoRod, MyoLever, and root
  * (motherFil == null) FilSegment instances. Ineligible Things (Bug,
@@ -67,10 +67,10 @@ public class GPUMoveThing {
     private static FloatArray yVec;           // slotCap * 3
     private static FloatArray forceSum;       // slotCap * 3
     private static FloatArray torqueSum;      // slotCap * 3
-    private static FloatArray bTransGam;      // slotCap * 3  (FIRST_EXECUTION)
-    private static FloatArray bRotGam;        // slotCap * 3  (FIRST_EXECUTION)
+    private static FloatArray bTransGam;      // slotCap * 3
+    private static FloatArray bRotGam;        // slotCap * 3
     private static FloatArray brownianScales; // slotCap * 2 (transScale, rotScale)
-    private static FloatArray velMask;        // slotCap * 3 (per-axis fixed-frame {0,1}); FIRST_EXECUTION
+    private static FloatArray velMask;        // slotCap * 3 (per-axis fixed-frame {0,1})
 
     // ----- small inputs -----
     private static FloatArray params;         // [0]=deltaT, [1]=brownianForceMag = sqrt(2*kT/dt)
@@ -83,6 +83,10 @@ public class GPUMoveThing {
     private static int     cpuFallbackCt = 0;
     private static int     lastThingCt   = -1;
     private static boolean topologyDirty = true;
+    /** Set true whenever classifyThings remaps slot->thing or new capacity is
+     *  allocated; the next packPerStep must write coord/uVec/yVec for every
+     *  slot. Cleared at the end of packPerStep. */
+    private static boolean coordsDirty   = true;
 
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
@@ -105,6 +109,33 @@ public class GPUMoveThing {
     private static long totalNanos  = 0;
     private static int  callCount   = 0;
 
+    // ---------------- Worker pool (iter2d) -------------------------------
+    // Persistent daemon threads share the simulation's existing Env.allThreadCt
+    // budget but stay parked between dispatches. Each dispatch (pack or
+    // unpack) divides slotCount into contiguous chunks; workers and the
+    // calling thread coordinate via two synchronized rendezvous points
+    // (start signal + completion count).
+    private static final int N_WORKERS = Math.max(1,
+            Math.min(Env.allThreadCt, Runtime.getRuntime().availableProcessors()));
+    private static final int OP_PACK_FULL     = 0;
+    private static final int OP_PACK_RESIDENT = 1;
+    private static final int OP_UNPACK        = 2;
+    private static Thread[] workers;
+    private static final Object phaseLock = new Object();
+    private static int     currentPhase   = 0;   // bumped by master per dispatch
+    private static int     workersDone    = 0;
+    private static int     workOp         = 0;
+    private static int     workSlotCount  = 0;
+    private static int     workChunkSize  = 0;
+    // Pre-fetched scalar constants for the pack path (re-read each dispatch).
+    private static float   sBTransCoeff;
+    private static float   sBRotCoeff;
+    private static float   sXLinkTAttn;
+    private static float   sXLinkRAttn;
+    private static float   sMyoBrownian;
+    private static boolean sBrownianFilOff;
+    private static boolean sBrownianMyoOff;
+
     // -------------------------------------------------------------------------
     // Wang hash — 32-bit integer mixer used as the per-thread RNG seed.
     // Same-class private static so TornadoVM's PTX compiler inlines it into
@@ -121,22 +152,7 @@ public class GPUMoveThing {
 
     // -------------------------------------------------------------------------
     // GPU kernel — branchless per-Thing integration step with inline
-    // Wang-hash Brownian RNG.
-    //
-    // Each thread:
-    //   1. Loads coord, uVec, yVec from SoA.
-    //   2. Re-derives zVec = unit(cross(uVec, yVec)).
-    //   3. Loads forceSum / torqueSum (fixed frame).
-    //   4. Transforms to body frame: bF = [uVec; yVec; zVec] * F (rows).
-    //   5. Generates 6 N(0,1) Gaussians via Wang hash + Box-Muller.
-    //   6. Adds Brownian: bF += tScale * brownianForceMag * sqrt(bTransGam) * g.
-    //   7. Overdamped Langevin: bVeloc = 1e6 * bF / bTransGam,
-    //      bAngVeloc = bT / bRotGam.
-    //   8. Transforms bVeloc -> fixed frame veloc via transpose.
-    //   9. Applies axis velMask (no-op when all 1.0 for in-scope types).
-    //  10. Updates coord += dt * veloc.
-    //  11. Small-angle uVec/yVec updates via bAngVeloc-driven body-frame
-    //      increments, transformed back to fixed frame, normalised.
+    // Wang-hash Brownian RNG. (Unchanged from iter2c.)
     // -------------------------------------------------------------------------
     private static void moveThingKernel(
             FloatArray coord,
@@ -187,8 +203,7 @@ public class GPUMoveThing {
             float ty = torqueSum.get(i3 + 1);
             float tz = torqueSum.get(i3 + 2);
 
-            // Fixed -> body: bF = transXTox * F where transXTox rows are
-            // {uVec, yVec, zVec}. Matches Pt3D.XTox + Thing.transMat().
+            // Fixed -> body
             float bfx = ux * fx + uy * fy + uz * fz;
             float bfy = yx * fx + yy * fy + yz * fz;
             float bfz = zx * fx + zy * fy + zz * fz;
@@ -197,10 +212,6 @@ public class GPUMoveThing {
             float btz = zx * tx + zy * ty + zz * tz;
 
             // ----- Brownian via Wang hash + Box-Muller --------------------
-            // 6 hashes from a single base seed, mixed with KERNEL_ID-flavoured
-            // golden-ratio constants. 3 Box-Muller pairs, taking both cos and
-            // sin (so each pair yields 2 independent N(0,1) variates). Pair
-            // 1 -> {g_fx, g_tx}, pair 2 -> {g_fy, g_ty}, pair 3 -> {g_fz, g_tz}.
             int base = (m * 1000003) ^ (stepCount * 999983) ^ (runSeed * 7919);
             int h1 = wangHash(base);
             int h2 = wangHash(base ^ 0x9e3779b9);
@@ -209,8 +220,6 @@ public class GPUMoveThing {
             int h5 = wangHash(base ^ 0x517cc1b7);
             int h6 = wangHash(base ^ 0x1f0a7ed5);
 
-            // Map to (0, 1] uniform; clamp u1/u3/u5 away from zero to avoid
-            // log(0) -> -inf in Box-Muller.
             float u1 = Math.max(1.0e-7f, (h1 >>> 1) / 2147483647.0f);
             float u2 = (h2 >>> 1) / 2147483647.0f;
             float u3 = Math.max(1.0e-7f, (h3 >>> 1) / 2147483647.0f);
@@ -233,10 +242,6 @@ public class GPUMoveThing {
             float gfz = r3 * (float) Math.cos(theta3);
             float gtz = r3 * (float) Math.sin(theta3);
 
-            // CPU calcRandomForces() statistical equivalent:
-            //   randForces.x = g * sqrt(2*kT/dt) * sqrt(bTransGam.x)
-            //   randTorques.x = g * sqrt(2*kT/dt) * sqrt(bRotGam.x)
-            // (Derived from Marsaglia polar + Einstein's bTransDiff=kT/bTransGam.)
             float btgX = bTransGam.get(i3);
             float btgY = bTransGam.get(i3 + 1);
             float btgZ = bTransGam.get(i3 + 2);
@@ -262,14 +267,11 @@ public class GPUMoveThing {
             float bwy = bty / brgY;
             float bwz = btz / brgZ;
 
-            // Body -> fixed: veloc = transxToX * bVeloc where transxToX
-            // is the transpose of [uVec; yVec; zVec] (rows -> columns).
+            // Body -> fixed.
             float vx = ux * bvx + yx * bvy + zx * bvz;
             float vy = uy * bvx + yy * bvy + zy * bvz;
             float vz = uz * bvx + yz * bvy + zz * bvz;
 
-            // Axis velocity mask — fixed-frame zeroing (ProteinNode xMove /
-            // yMove / zMove). All 1.0 for in-scope gliding-assay types.
             vx *= velMask.get(i3);
             vy *= velMask.get(i3 + 1);
             vz *= velMask.get(i3 + 2);
@@ -278,7 +280,7 @@ public class GPUMoveThing {
             coord.set(i3 + 1, cy + dt * vy);
             coord.set(i3 + 2, cz + dt * vz);
 
-            // Small-angle orientation update — see FilSegment.java:548 etc.
+            // Small-angle orientation update.
             float uTransInZ = -bwy * dt;
             float uTransInY =  bwz * dt;
             float nuX = ux + yx * uTransInY + zx * uTransInZ;
@@ -289,7 +291,6 @@ public class GPUMoveThing {
             uVec.set(i3 + 1, nuY * nuInv);
             uVec.set(i3 + 2, nuZ * nuInv);
 
-            // yVec (body-frame increment) = (-uTransInY, 1, bAngVeloc.x*dt).
             float yTransInX = -uTransInY;
             float yTransInZ =  bwx * dt;
             float nyX = ux * yTransInX + yx + zx * yTransInZ;
@@ -304,11 +305,6 @@ public class GPUMoveThing {
 
     // -------------------------------------------------------------------------
     // Lazy allocation + plan build.
-    //
-    // bTransGam, bRotGam, velMask are FIRST_EXECUTION — uploaded on first
-    // execute() after plan build and never re-uploaded. classifyThings()
-    // fills them with current per-slot values; aeta mutation hooks must
-    // call invalidatePlan() to force a rebuild and re-upload.
     // -------------------------------------------------------------------------
     private static void allocateAndBuildPlan(int newCap) {
         slotCap = newCap;
@@ -330,19 +326,12 @@ public class GPUMoveThing {
         brownianRule    = new int[slotCap];
         cpuFallback     = new Thing[Math.max(64, slotCap)];
 
-        // TaskGraph: everything EVERY_EXECUTION. coord/uVec/yVec must be
-        // downloaded each step (kernel writes the updated pose).
-        //
-        // Drag tensors (bTransGam/bRotGam) and velMask were promoted to
-        // FIRST_EXECUTION in an early iter2c attempt to save ~2.4 MB/call
-        // upload at M=98K, but the gliding-assay population grows by ~1
-        // Thing/step during the early-run ramp-up. New slots above the
-        // first-call slotCount inherit device-side zeros for FIRST_EXECUTION
-        // buffers, and zero bRotGam makes bAngVeloc=inf -> coord=NaN. Plan
-        // rebuild every time slotCount grows would amortise back into upload
-        // cost. Keeping EVERY_EXECUTION here is the safe baseline; revisit
-        // if a steady-population workload (no growth after init) ever
-        // becomes the perf target.
+        // Everything EVERY_EXECUTION; the per-call upload of coord/uVec/yVec
+        // is required because the kernel updates them in place and the
+        // device-side state must match the FloatArray after each Java-side
+        // change. coord pack-write skipping (iter2d) avoids the FloatArray
+        // re-write on the Java side; the upload itself remains a single
+        // bulk DMA and is not the bottleneck.
         TaskGraph tg = new TaskGraph("moveThing")
             .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               coord, uVec, yVec,
@@ -369,9 +358,10 @@ public class GPUMoveThing {
 
         // Force classify on next call so the new buffers get filled.
         topologyDirty = true;
+        coordsDirty   = true;
 
-        System.out.printf("GPUMoveThing: slotCap=%d blockSize=%d runSeed=%d%n",
-                          slotCap, MOVE_KERNEL_BLOCK_SIZE, runSeed);
+        System.out.printf("GPUMoveThing: slotCap=%d blockSize=%d runSeed=%d nWorkers=%d%n",
+                          slotCap, MOVE_KERNEL_BLOCK_SIZE, runSeed, N_WORKERS);
     }
 
     private static void closePlan() {
@@ -389,24 +379,12 @@ public class GPUMoveThing {
     public static void invalidatePlan() {
         closePlan();
         topologyDirty = true;
+        coordsDirty   = true;
     }
 
     // -------------------------------------------------------------------------
-    // Classify Things into GPU vs CPU fallback. Called when topology changes
-    // (Thing count differs from last classify, plan rebuild, or explicit
-    // invalidation). Walks theThings[] once with instanceof; produces:
-    //   - gpuThingIndices[]: stable per-slot mapping for the next step run
-    //   - brownianRule[]:    per-slot RULE_FIL/MYO/LEVER for tight pack
-    //   - cpuFallback[]:     Things that need CPU moveThing() each step
-    //   - bTransGam/bRotGam/velMask FloatArrays filled (FIRST_EXECUTION)
-    //   - Thing.gpuHandled flag set/cleared (consumed by ThingBrownianThreads
-    //     to skip CPU randForces generation for GPU Things)
-    //
-    // Eligibility rules (same as iter2b):
-    //   - MyoMotor, MyoRod, MyoLever  : eligible unless myosinsOff
-    //   - FilSegment (motherFil null) : eligible unless actAOn or
-    //                                   (isLpSeg && !lpActive)
-    //   - everything else             : fallback to CPU moveThing()
+    // Classify Things into GPU vs CPU fallback. (Unchanged from iter2c except
+    // for marking coordsDirty.)
     // -------------------------------------------------------------------------
     private static void classifyThings() {
         int n  = 0;
@@ -416,8 +394,6 @@ public class GPUMoveThing {
         double lpActiveV   = Env.lpActive.getValue();
         boolean myosinsOff = Env.myosinsOff;
 
-        // Reset gpuHandled for every Thing (the gpuHandled bit gates CPU
-        // calcRandomForces skipping; reclassification must clear stale bits).
         for (int i = 0; i < tc; i++) {
             Thing t = Thing.theThings[i];
             if (t != null) t.gpuHandled = false;
@@ -431,10 +407,6 @@ public class GPUMoveThing {
 
             if (t instanceof FilSegment) {
                 FilSegment f = (FilSegment) t;
-                // Out-of-scope FilSegment cases fall back to CPU:
-                //   - branch (motherFil != null): needs motherFil pre-pass
-                //   - actA-bound: needs lmBug randForces swap
-                //   - isLpSeg suspended: trivially no-op on CPU too
                 if (f.motherFil != null || f.actAOn
                         || (f.isLpSeg && lpActiveV == 0)) {
                     if (cn < cpuFallback.length) cpuFallback[cn++] = t;
@@ -454,16 +426,11 @@ public class GPUMoveThing {
                 }
                 rule = RULE_LEVER;
             } else {
-                // Bug, Chamber, Crucible, AnchorNode, ProteinNode,
-                // MyoMiniFilament, StickyNode, FillNode, etc.
                 if (cn < cpuFallback.length) cpuFallback[cn++] = t;
                 continue;
             }
 
             if (n >= slotCap) {
-                // Capacity exhausted — push to fallback. The plan rebuild on
-                // the next call (triggered by thingCt > slotCap) will widen
-                // the index.
                 if (cn < cpuFallback.length) cpuFallback[cn++] = t;
                 continue;
             }
@@ -473,13 +440,9 @@ public class GPUMoveThing {
             t.gpuHandled       = true;
 
             int i3 = n * 3;
-            bTransGam.set(i3,     (float) t.bTransGam.x);
-            bTransGam.set(i3 + 1, (float) t.bTransGam.y);
-            bTransGam.set(i3 + 2, (float) t.bTransGam.z);
-            bRotGam.set(i3,       (float) t.bRotGam.x);
-            bRotGam.set(i3 + 1,   (float) t.bRotGam.y);
-            bRotGam.set(i3 + 2,   (float) t.bRotGam.z);
-            // velMask is all 1.0 for the in-scope types — set unconditionally.
+            // velMask is all 1.0 for the in-scope types — fill it once at
+            // classify time (drag tensors are repacked every step by the
+            // per-step pack).
             velMask.set(i3,     1.0f);
             velMask.set(i3 + 1, 1.0f);
             velMask.set(i3 + 2, 1.0f);
@@ -491,6 +454,9 @@ public class GPUMoveThing {
         cpuFallbackCt = cn;
         lastThingCt   = tc;
         topologyDirty = false;
+        // Slot->Thing mapping may have shifted; the next pack must rewrite
+        // coord/uVec/yVec for every slot.
+        coordsDirty   = true;
     }
 
     /** Public entry — called by BoxOfActin at the top of each step before
@@ -510,54 +476,122 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // Per-step pack: tight loop over gpuThingIndices. Writes coord, uVec,
-    // yVec, forceSum, torqueSum, and recomputes brownianScales from the
-    // cached rule + current linkedToCt / filAtEnd flags. Does NOT touch
-    // bTransGam/bRotGam/velMask (filled at classify time, FIRST_EXECUTION
-    // semantics).
+    // Parallel pack / unpack worker loop.
     // -------------------------------------------------------------------------
-    private static void packPerStep() {
-        // Scales fetched once, broadcast across all FilSegments.
-        double bTransCoeffV  = Env.BTransCoeff.getValue();
-        double bRotCoeffV    = Env.BRotCoeff.getValue();
-        double xLinkTAttnV   = Env.xLinkTransAttn.getValue();
-        double xLinkRAttnV   = Env.xLinkRotAttn.getValue();
-        double myoBrownianV  = Env.myoBrownianAttn.getValue();
-        boolean brownianFilOff = Env.brownianFilMotionOff;
-        boolean brownianMyoOff = Env.brownianMyoMotionOff;
+    private static void ensureWorkers() {
+        if (workers != null) return;
+        workers = new Thread[N_WORKERS];
+        for (int w = 0; w < N_WORKERS; w++) {
+            final int id = w;
+            Thread t = new Thread(() -> workerLoop(id),
+                                  "GPUMoveThing-worker-" + w);
+            t.setDaemon(true);
+            workers[w] = t;
+            t.start();
+        }
+    }
 
-        Thing[] theThings = Thing.theThings;
-        int[] indices = gpuThingIndices;
-        int[] rules   = brownianRule;
-        int sc = slotCount;
+    private static void workerLoop(int id) {
+        int lastPhase = 0;
+        while (true) {
+            int op, sc, chunk;
+            synchronized (phaseLock) {
+                while (currentPhase == lastPhase) {
+                    try { phaseLock.wait(); }
+                    catch (InterruptedException e) { return; }
+                }
+                lastPhase = currentPhase;
+                op    = workOp;
+                sc    = workSlotCount;
+                chunk = workChunkSize;
+            }
+            int start = id * chunk;
+            int end   = Math.min(start + chunk, sc);
+            if (start < end) {
+                switch (op) {
+                    case OP_PACK_FULL:     packRange(start, end, true);  break;
+                    case OP_PACK_RESIDENT: packRange(start, end, false); break;
+                    case OP_UNPACK:        unpackRange(start, end);      break;
+                    default: /* no-op */ break;
+                }
+            }
+            synchronized (phaseLock) {
+                workersDone++;
+                phaseLock.notifyAll();
+            }
+        }
+    }
 
-        for (int slot = 0; slot < sc; slot++) {
+    private static void dispatchAndWait(int op, int sc) {
+        ensureWorkers();
+        int chunk = (sc + N_WORKERS - 1) / N_WORKERS;
+        if (chunk < 1) chunk = 1;
+        synchronized (phaseLock) {
+            workOp        = op;
+            workSlotCount = sc;
+            workChunkSize = chunk;
+            workersDone   = 0;
+            currentPhase++;
+            phaseLock.notifyAll();
+        }
+        synchronized (phaseLock) {
+            while (workersDone < N_WORKERS) {
+                try { phaseLock.wait(); }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Pack a contiguous slot range. Called from each worker. The packCoords
+    // parameter selects between full pack (writes coord/uVec/yVec for every
+    // slot) and resident pack (writes coord/uVec/yVec only for FilSegment
+    // slots, which can be perturbed by biochemStep poly/depoly between
+    // steps; myosin slots inherit the kernel's previous-step output via the
+    // unchanged FloatArray).
+    // -------------------------------------------------------------------------
+    private static void packRange(int slotStart, int slotEnd, boolean packCoords) {
+        Thing[] theThings  = Thing.theThings;
+        int[]   indices    = gpuThingIndices;
+        int[]   rules      = brownianRule;
+        float   bTransCoef = sBTransCoeff;
+        float   bRotCoef   = sBRotCoeff;
+        float   xLnT       = sXLinkTAttn;
+        float   xLnR       = sXLinkRAttn;
+        float   myoBr      = sMyoBrownian;
+        boolean bFilOff    = sBrownianFilOff;
+        boolean bMyoOff    = sBrownianMyoOff;
+
+        for (int slot = slotStart; slot < slotEnd; slot++) {
             Thing t = theThings[indices[slot]];
             int i3 = slot * 3;
             int i2 = slot * 2;
+            int rule = rules[slot];
 
-            // Sequential field reads — Pt3D fields are public doubles.
-            coord.set(i3,     (float) t.coord.x);
-            coord.set(i3 + 1, (float) t.coord.y);
-            coord.set(i3 + 2, (float) t.coord.z);
-            uVec.set(i3,      (float) t.uVec.x);
-            uVec.set(i3 + 1,  (float) t.uVec.y);
-            uVec.set(i3 + 2,  (float) t.uVec.z);
-            yVec.set(i3,      (float) t.yVec.x);
-            yVec.set(i3 + 1,  (float) t.yVec.y);
-            yVec.set(i3 + 2,  (float) t.yVec.z);
+            // FilSegment coord can change between steps via biochemStep
+            // poly/depoly; always re-pack to stay coherent. Myosin types
+            // only mutate coord inside moveThing (the kernel), so the
+            // FloatArray already matches the Pt3D state on steady steps.
+            if (packCoords || rule == RULE_FIL) {
+                coord.set(i3,     (float) t.coord.x);
+                coord.set(i3 + 1, (float) t.coord.y);
+                coord.set(i3 + 2, (float) t.coord.z);
+                uVec.set(i3,      (float) t.uVec.x);
+                uVec.set(i3 + 1,  (float) t.uVec.y);
+                uVec.set(i3 + 2,  (float) t.uVec.z);
+                yVec.set(i3,      (float) t.yVec.x);
+                yVec.set(i3 + 1,  (float) t.yVec.y);
+                yVec.set(i3 + 2,  (float) t.yVec.z);
+            }
             forceSum.set(i3,     (float) t.forceSum.x);
             forceSum.set(i3 + 1, (float) t.forceSum.y);
             forceSum.set(i3 + 2, (float) t.forceSum.z);
             torqueSum.set(i3,     (float) t.torqueSum.x);
             torqueSum.set(i3 + 1, (float) t.torqueSum.y);
             torqueSum.set(i3 + 2, (float) t.torqueSum.z);
-            // Drag tensors re-packed every step: a FilSegment's bTransGam
-            // depends on its length and would otherwise go stale between
-            // classifyThings calls if calculateProperties() were invoked on
-            // a length change. Gliding-assay configs don't exercise this
-            // path but it costs only six FloatArray writes per slot and
-            // keeps the kernel correct for general workloads.
             bTransGam.set(i3,     (float) t.bTransGam.x);
             bTransGam.set(i3 + 1, (float) t.bTransGam.y);
             bTransGam.set(i3 + 2, (float) t.bTransGam.z);
@@ -566,30 +600,23 @@ public class GPUMoveThing {
             bRotGam.set(i3 + 2,   (float) t.bRotGam.z);
 
             float tScale, rScale;
-            int rule = rules[slot];
             if (rule == RULE_FIL) {
                 FilSegment f = (FilSegment) t;
-                if (brownianFilOff || f.brownianOff) {
+                if (bFilOff || f.brownianOff) {
                     tScale = 0f; rScale = 0f;
                 } else {
-                    double ts = bTransCoeffV;
-                    double rs = bRotCoeffV;
+                    float ts = bTransCoef;
+                    float rs = bRotCoef;
                     if (f.linkedToCt > 0) {
-                        ts = ts / (1.0 + xLinkTAttnV * f.linkedToCt);
-                        rs = rs / (1.0 + xLinkRAttnV * f.linkedToCt);
+                        ts = ts / (1.0f + xLnT * f.linkedToCt);
+                        rs = rs / (1.0f + xLnR * f.linkedToCt);
                     }
-                    tScale = (float) ts;
-                    // Rotational Brownian only applies when at least one end
-                    // is free (CPU FilSegment.java:516).
-                    rScale = (f.filAtEnd1 && f.filAtEnd2) ? 0f : (float) rs;
+                    tScale = ts;
+                    rScale = (f.filAtEnd1 && f.filAtEnd2) ? 0f : rs;
                 }
             } else if (rule == RULE_MYO) {
-                if (brownianMyoOff) {
-                    tScale = 0f; rScale = 0f;
-                } else {
-                    tScale = (float) myoBrownianV;
-                    rScale = (float) myoBrownianV;
-                }
+                if (bMyoOff) { tScale = 0f; rScale = 0f; }
+                else         { tScale = myoBr; rScale = myoBr; }
             } else {  // RULE_LEVER
                 tScale = 0f;
                 rScale = 0f;
@@ -599,16 +626,10 @@ public class GPUMoveThing {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Per-step unpack: write coord/uVec/yVec back to Thing fields and call
-    // initialize() to refresh derived geometry (zVec, transMat, uVecR,
-    // end1/end2, length, xyzRange).
-    // -------------------------------------------------------------------------
-    private static void unpackAndInitialize() {
+    private static void unpackRange(int slotStart, int slotEnd) {
         Thing[] theThings = Thing.theThings;
-        int[] indices = gpuThingIndices;
-        int sc = slotCount;
-        for (int slot = 0; slot < sc; slot++) {
+        int[]   indices   = gpuThingIndices;
+        for (int slot = slotStart; slot < slotEnd; slot++) {
             Thing t = theThings[indices[slot]];
             int i3 = slot * 3;
             t.coord.x = coord.get(i3);
@@ -630,19 +651,29 @@ public class GPUMoveThing {
     public static void moveThings() {
         long t0 = System.nanoTime();
 
-        // Defensive: if no classify yet (caller forgot onStepStart) or plan
-        // got invalidated, do it now.
         if (plan == null || topologyDirty || Thing.thingCt != lastThingCt) {
             onStepStart();
         }
 
+        // Snapshot scalar params once per call so the worker pack can read
+        // primitive fields without touching the Env Parameter machinery
+        // (which involves a HashMap.get).
+        sBTransCoeff   = (float) Env.BTransCoeff.getValue();
+        sBRotCoeff     = (float) Env.BRotCoeff.getValue();
+        sXLinkTAttn    = (float) Env.xLinkTransAttn.getValue();
+        sXLinkRAttn    = (float) Env.xLinkRotAttn.getValue();
+        sMyoBrownian   = (float) Env.myoBrownianAttn.getValue();
+        sBrownianFilOff = Env.brownianFilMotionOff;
+        sBrownianMyoOff = Env.brownianMyoMotionOff;
+
         long packStart = System.nanoTime();
-        packPerStep();
+        int sc = slotCount;
+        if (sc > 0) {
+            int op = coordsDirty ? OP_PACK_FULL : OP_PACK_RESIDENT;
+            dispatchAndWait(op, sc);
+            coordsDirty = false;
+        }
         params.set(0, (float) Env.deltaT.getValue());
-        // brownianForceMag = sqrt(2 * kT / dt). kT in J; bTransGam already
-        // carries the SI units the simulation uses. The full Langevin chain
-        // pre-multiplies tScale (BTransCoeff / xLinkAttn) and post-multiplies
-        // sqrt(bTransGam.axis) per-axis inside the kernel.
         double kT = Env.Boltz * Env.tempK;
         double dt = Env.deltaT.getValue();
         params.set(1, (float) Math.sqrt(2.0 * kT / dt));
@@ -656,7 +687,9 @@ public class GPUMoveThing {
         }
         long execEnd = System.nanoTime();
 
-        unpackAndInitialize();
+        if (sc > 0) {
+            dispatchAndWait(OP_UNPACK, sc);
+        }
         for (int i = 0; i < cpuFallbackCt; i++) {
             cpuFallback[i].moveThing();
         }
@@ -681,6 +714,7 @@ public class GPUMoveThing {
     public static int getSlotCount()     { return slotCount;     }
     public static int getCpuFallbackCt() { return cpuFallbackCt; }
     public static int getSlotCap()       { return slotCap;       }
+    public static int getNumWorkers()    { return N_WORKERS;     }
 
     /** Reset the plan (arrays survive); mirrors GPUMotorBinding.reset(). */
     public static void reset() {
@@ -689,5 +723,6 @@ public class GPUMoveThing {
         callCount = 0;
         stepCounter = 0;
         topologyDirty = true;
+        coordsDirty   = true;
     }
 }

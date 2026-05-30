@@ -4,6 +4,184 @@ Last updated: 2026-05-29
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-29 — Iter2d: parallel pack/unpack + device residency
+
+Targeted iter2c's pack=56ms + unpack=55ms per-call cost at M=98K, which
+was leaving the GPU 1.45× slower than CPU despite the kernel itself
+finishing in 9.5 ms. Two structural changes:
+
+1. **Parallel pack and unpack** on a persistent 16-worker daemon-thread
+   pool inside `GPUMoveThing`. Each worker handles a contiguous slot
+   range; FloatArray.set/get on disjoint indices is safe because the
+   underlying `MemorySegment` writes a single 4-byte word per index
+   with no shared metadata or header munging.
+
+2. **coord/uVec/yVec pack-skip for myosin slots** on steady steps.
+   Between unpack(N) and pack(N+1), the only CPU phase that mutates
+   the pose of a GPU-handled Thing is `FilSegment.biochemStep()` (via
+   poly/depoly's `coord.inc()`). For MyoMotor/MyoRod/MyoLever, the
+   `coord`/`uVec`/`yVec` fields are touched only by `moveThing()`,
+   which is the kernel itself, so the FloatArray from the previous
+   step is already the correct CPU-visible state. The per-step pack
+   now skips writing those nine floats per myosin slot.
+
+A `coordsDirty` flag forces a full pack on the first call after any
+classifyThings() (slot remap), plan rebuild, or `invalidatePlan()`.
+FilSegment slots always re-pack coord/uVec/yVec — gliding-assay
+filament counts are tiny relative to motor count, so the per-slot
+cost is negligible while keeping biochem-driven coord changes
+coherent.
+
+### A. Worker pool design
+
+`N_WORKERS = min(Env.allThreadCt, availableProcessors)` — 16 on aorus.
+Persistent daemon `Thread`s; coordination via a single `Object`
+monitor (`phaseLock`). Master bumps `currentPhase` and `notifyAll()`
+to release the workers; each worker holds the lock briefly to read
+the slot range, exits to do its chunk, re-enters the lock to
+increment `workersDone` and `notifyAll()`. Master waits on the same
+lock until `workersDone == N_WORKERS`. Two synchronized passes per
+dispatch — at ms-scale work granularity the wait/notify overhead is
+sub-microsecond, well below the savings.
+
+The JMM happens-before for the scalar pack params (`sBTransCoeff`,
+`sBRotCoeff`, etc., snapshotted once per call before dispatch) is
+established via the master's unlock → worker's lock acquire pair
+when the workers wake from `wait()`. No volatile needed.
+
+### B. Pack rule by slot type
+
+After `classifyThings()` marks the slot `RULE_FIL` / `RULE_MYO` /
+`RULE_LEVER`, the per-step pack:
+
+| rule       | coord/uVec/yVec writes  | force/torque/drag/scales writes |
+|------------|-------------------------|---------------------------------|
+| RULE_FIL   | always                  | always                          |
+| RULE_MYO   | only on coordsDirty step | always                          |
+| RULE_LEVER | only on coordsDirty step | always                          |
+
+In the gliding-dense smoke (M≈98K), ~99% of slots are myosin, so
+~99% of slots skip the 9 coord writes after the first call following
+each topology change.
+
+### C. Validation — 10 seeds × glidingAssay500_val — PASS
+
+Protocol: 10 CPU + 10 GPU seeds × 0.1 s (10 001 steps). CPU rows
+reused from iter2c (CPU code unchanged from iter2c; same -seed N is
+deterministic). Source data in
+`RUN_LOGS/2026-05-29_iter2d-validation.txt`; summary in
+`RUN_LOGS/2026-05-29_iter2d-validation-summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     886.60 ± 37.32 (118.01)         0.50  PASS
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       7.41 ±  0.20 (  0.62)         0.31  PASS
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       8.32 ±  0.19 (  0.59)         0.46  PASS
+wall (s/seed)    :    275.10 ±  1.46 (  4.63)     356.30 ±  1.59 (  5.03)       37.54  (diagnostic only)
+```
+
+All three physics observables pass the |diff|/cSEM < 2.0 gate. GPU
+ensemble means are within 0.5σ of CPU; the parallel unpack +
+`initialize()` introduces no observable race or physics drift.
+
+GPU wall 356.3 s/seed vs CPU 275.1 s/seed = **1.30× slower** (vs
+iter2c 1.63×). 21 % wall reduction at validation scale. The remaining
+0.30× gap at M=500 is dominated by per-call kernel-launch + 11-buffer
+upload overhead, which doesn't amortize at low slot counts.
+
+### D. Dense crossover — M=98K, S~1001 (glidingDense_demo_smoke) — PASS
+
+Source logs: `RUN_LOGS/2026-05-29_iter2d-dense-{cpu,gpu}.log`.
+
+```
+phase                          CPU dense (s)   GPU dense (s)
+---------------------------------------------------------------
+ThingStep (step+bio+resetCt)        55.9            23.4
+Brownian (calcRandomForces)         30.4             2.9   ← kernel Wang-hash
+Myosin (joints)                     22.2            21.6
+MotorBindGrid3D Fill                28.9            30.3
+Mesh                                 6.7             6.5
+MyoDimer                             9.7            10.2
+Ck Mots (CPU motor-binding)          5.1             0.0
+GPUMotorBinding total                ---            12.8   (1101 calls)
+GPUMoveThing total                   ---            44.6   (1101 calls)
+---------------------------------------------------------------
+WALL                               190             184
+                                                 (0.97×;  GPU 3 % faster — CROSSOVER)
+```
+
+iter2c at the same scale was CPU 188 s vs GPU 273 s (1.45× slower).
+iter2d brings the GPU under the CPU wall — the goal of the iter2b/2c/
+2d series.
+
+### E. Per-call `gpuMoveThing` breakdown
+
+Validation scale (M=500, 10-seed averages × 10101 calls):
+
+```
+            iter2d (ms)   iter2c (ms)   delta
+total          6.06         14.85       -59.2 %
+pack           1.36          6.62       -79.5 %
+exec           1.83          1.81        +1.1 %
+unpack         2.87          6.43       -55.4 %
+```
+
+Dense scale (M=98K, single seed × 1101 calls):
+
+```
+            iter2d (ms)   iter2c (ms)   delta
+total         40.5         121.0        -66.5 %
+pack           9.8          56.1        -82.5 %
+exec           9.5           9.5         +0.0 %
+unpack        21.2          55.5        -61.8 %
+```
+
+Pack falls 80 % (parallel + per-slot myosin coord-skip). Unpack
+falls 60 % (parallel — the per-slot `initialize()` is fixed-work and
+doesn't parallelize as cleanly as the FloatArray reads). Exec is
+unchanged (kernel byte-for-byte the same as iter2c).
+
+### F. Findings worth keeping
+
+- `FloatArray.set/get` on disjoint indices is safe under concurrent
+  access. Underlying `MemorySegment` writes one word per index; the
+  base/header fields are only written in the constructor.
+- The "device residency" framing in the task brief was unnecessary
+  in practice. The savings come entirely from the Java-side `.set()`
+  call count, not from changing the device transfer mode. Keeping
+  EVERY_EXECUTION for the FloatArrays and just skipping the Java
+  writes works: the device still uploads what's already in the
+  FloatArray, which is exactly the kernel's output from the previous
+  step (for myosin slots; FilSegment slots get a fresh Pt3D read).
+  Net effect: same as residency, with no plan-rebuild or
+  invalidation logic needed.
+- The `Phaser`/`CyclicBarrier`/`ForkJoinPool` JDK options were
+  rejected in favour of a one-monitor hand-rolled barrier. The work
+  granularity (sub-millisecond per worker per dispatch at validation
+  scale, a few ms at dense) makes the simpler dispatch path easier
+  to reason about and lets the workers' wait/notify edge serve
+  double-duty as the JMM happens-before for the snapshot scalars.
+
+### G. Open items
+
+- The 1.30× validation-scale wall gap is now a fixed-overhead
+  problem (per-call launch + 11-buffer upload). Two levers left:
+  (a) batch multiple kernel calls into one TornadoVM execute() —
+  not natively supported, would need a multi-step kernel; (b) reduce
+  buffer count further by collapsing forceSum/torqueSum/brownianScales
+  into a single packed buffer (saves DMA setup but adds kernel index
+  math). Neither is worth doing until a target workload needs sub-ms
+  per-call.
+- `cpuFallback[]` is empty for gliding-assay but is walked serially
+  for any Bug / branch / ProteinNode / etc. Real-world Listeria runs
+  with thousands of branches would re-introduce serial CPU work
+  here; parallelising the fallback dispatch is straightforward (same
+  worker pool, new OP code) when needed.
+- The previously deferred items (motherFil branch pre-pass,
+  StickyNode forceSum pre-add, ProteinNode velMask, MyoMiniFilament
+  / ProteinNode pack rules) remain deferred — none material at
+  gliding-assay scope, and crossover removed the urgency.
+
 ## 2026-05-29 — Iter2c: Wang hash Brownian on GPU + pack optimization
 
 Two changes targeting iter2b-polish's 1.61× GPU slowdown at M=98K, where

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Iter2d dense timing comparison: one CPU seed + one GPU seed on
+# glidingDense_demo_smoke (M=98K motors, 14x14x0.5 µm bed, 100 random fils,
+# 1001 steps). Reports the per-phase breakdown so iter2d gains over iter2c's
+# 1.45x slower can be quantified.
+
+set -u
+
+ROOT="$HOME/Code/BoA"
+cd "$ROOT"
+
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+PF="ParameterFiles/glidingDense_demo_smoke"
+
+CPU_LOG="RUN_LOGS/2026-05-29_iter2d-dense-cpu.log"
+GPU_LOG="RUN_LOGS/2026-05-29_iter2d-dense-gpu.log"
+
+echo "Iter2d dense smoke (M=98K, S~1001): CPU + GPU" >> .last_run_status
+date >> .last_run_status
+
+# CPU run
+echo "--- CPU run ---" >> .last_run_status
+t0=$(date +%s)
+java --enable-preview -Xmx4G \
+     -cp "libs/*:." \
+     BoxOfActin -r -pf "$PF" -seed 1 > "$CPU_LOG" 2>&1
+t1=$(date +%s)
+echo "CPU wall: $((t1-t0)) s" >> .last_run_status
+
+# GPU run
+echo "--- GPU run ---" >> .last_run_status
+t0=$(date +%s)
+java @"$TORNADOVM_HOME/tornado-argfile" --enable-preview -Xmx4G \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf "$PF" -seed 1 > "$GPU_LOG" 2>&1
+t1=$(date +%s)
+echo "GPU wall: $((t1-t0)) s" >> .last_run_status
+
+echo "Iter2d dense comparison done" >> .last_run_status
+date >> .last_run_status
