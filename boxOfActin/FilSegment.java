@@ -39,14 +39,34 @@ public class FilSegment extends Thing {
 	static boolean[] soaNodeAtEnd2 = new boolean[1000000];
 
 	static void fillSoaArrays() {
+		// Read per-segment pose from the canonical SoA pose arrays
+		// (Thing.soaCoord / soaUVec) instead of chasing the per-segment Pt3D
+		// references. end1 / end2 are derived from coord ± (length/2)*uVec —
+		// same formula that FilSegment.initialize() uses. Computing them here
+		// avoids a stale-end risk if the segment length changed between
+		// initialize() calls.
+		final float[] soaCoordArr = Thing.soaCoord;
+		final float[] soaUVecArr  = Thing.soaUVec;
 		for (int i = 0; i < filSegmentCt; i++) {
 			FilSegment fs = theFilSegments[i];
-			soaEnd1X[i] = fs.end1.x;  soaEnd1Y[i] = fs.end1.y;  soaEnd1Z[i] = fs.end1.z;
-			soaEnd2X[i] = fs.end2.x;  soaEnd2Y[i] = fs.end2.y;  soaEnd2Z[i] = fs.end2.z;
+			final int b = fs.myThingNumber * 3;
+			final double cx = soaCoordArr[b];
+			final double cy = soaCoordArr[b + 1];
+			final double cz = soaCoordArr[b + 2];
+			final double ux = soaUVecArr[b];
+			final double uy = soaUVecArr[b + 1];
+			final double uz = soaUVecArr[b + 2];
+			final double half = 0.5 * fs.length;
+			soaEnd1X[i] = cx - half * ux;
+			soaEnd1Y[i] = cy - half * uy;
+			soaEnd1Z[i] = cz - half * uz;
+			soaEnd2X[i] = cx + half * ux;
+			soaEnd2Y[i] = cy + half * uy;
+			soaEnd2Z[i] = cz + half * uz;
 			soaFilID[i] = fs.filID;
-			soaUX[i]    = fs.uVec.x;
-			soaUY[i]    = fs.uVec.y;
-			soaUZ[i]    = fs.uVec.z;
+			soaUX[i]    = ux;
+			soaUY[i]    = uy;
+			soaUZ[i]    = uz;
 			soaNodeAtEnd2[i] = fs.nodeAtEnd2;
 		}
 	}
@@ -214,6 +234,7 @@ public class FilSegment extends Thing {
 			addFilSegment(this);
 			setFilamentID(this, filID);
 			calculateProperties();
+			pushPoseToSoa();   // bridge: subclass set uVec/yVec; flush before initialize() reads SoA
 			initialize();
 			makeInitialMonomers();
 			theBox.takeMonomer(monomerCt);
@@ -230,6 +251,7 @@ public class FilSegment extends Thing {
 			addFilSegment(this);
 			setFilamentID(this, filID);
 			calculateProperties();
+			pushPoseToSoa();   // bridge: subclass set uVec/yVec; flush before initialize() reads SoA
 			initialize();
 			makeInitialMonomers();
 			if (!fromFile) {
@@ -250,6 +272,7 @@ public class FilSegment extends Thing {
 			globalNodeAtEnd1 = splitFromFil.globalNodeAtEnd1;
 			globalNodeAtEnd2 = splitFromFil.globalNodeAtEnd2;
 			calculateProperties();
+			pushPoseToSoa();
 			initialize();
 			setEnd1Links(splitFromFil, true);
 			if (splitFromFil.filAtEnd2) {
@@ -384,6 +407,10 @@ public class FilSegment extends Thing {
 	}
 	
 	public void initialize () {
+		// SoA bridge: canonical pose lives in soaCoord/soaUVec/soaYVec.
+		// Pull into Pt3D so the derived-field math below (and downstream
+		// CPU readers) sees the latest values from moveThing or GPU unpack.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
@@ -398,7 +425,7 @@ public class FilSegment extends Thing {
 		// refind the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -length/2, uVec);
 		end2.add(coord, length/2, uVec);
-		
+
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);
 		yRange = Math.abs(coord.y-end2.y);
@@ -419,10 +446,12 @@ public class FilSegment extends Thing {
 		coord.inc(dist,vec);
 		end1.inc(dist,vec);
 		end2.inc(dist,vec);
+		pushCoordToSoa();
 	}
-	
+
 	public void translateCoord (double dist, Pt3D vec) {
 		coord.inc(dist,vec);
+		pushCoordToSoa();
 	}
 	
 	public void step () {
@@ -466,12 +495,13 @@ public class FilSegment extends Thing {
 		
 		if (lengthChanged) {
 			calculateProperties(); 	// calculate new drag coefficients, etc if length has changed
+			pushCoordToSoa();		// poly/depoly mutated Pt3D coord via coord.inc; flush before initialize() reads SoA
 			initialize();			// calculate transformation matrices, etc given the new coordinates
 		}
 
 
 		if (monomerCt >= 2*Env.stdSegLength.getIntValue()) {
-			splitSegment(this);
+			splitSegment(this);		// setFirstHalf pushes coord internally; the new FilSegment ctor handles its own pose
 			calculateProperties();	// again if split
 			initialize();
 		}
@@ -561,10 +591,11 @@ public class FilSegment extends Thing {
 		yVec.xToX(this);
 		yVec.unitVec();
 
+		pushPoseToSoa();   // canonical SoA flush: Pt3D scratch -> soaCoord/soaUVec/soaYVec
 		initialize();
 
 	}
-	
+
 	public void calcRandomForces () {  // override Thing.calRandomForces to account for sync'd brownian motion and to avoid wasting calculation of independent values
 		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		if (motherFil == null) {
@@ -607,6 +638,7 @@ public class FilSegment extends Thing {
 			}
 		}
 		if (joinTo != null) {
+			joinTo.pushCoordToSoa();   // joinSegs* mutated stayFil.coord via coord.inc; flush before initialize() reads SoA
 			joinTo.initialize();
 			joinTo.calculateProperties();
 		}
@@ -756,6 +788,7 @@ public class FilSegment extends Thing {
 		length = (monomerCt+1)*Env.actinMonoRadius;
 		coord.add(end1,0.5*length,uVec);
 		end2.add(end1, length, uVec);
+		pushCoordToSoa();   // splitSegment caller will calculateProperties + initialize() next
 	}
 	
 	public void transferArpChildren (FilSegment targetFil) {

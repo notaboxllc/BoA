@@ -45,13 +45,13 @@ public class StaticFilSegment extends FilSegment {
 	}
 	
 	public void biochemStep () {
-		
+
 		if (monomerCt >= 2*staticFilSegLength) {
-			splitSegment();
+			splitSegment();			// setFirstHalf pushes pose internally
 			calculateProperties();	// again if split
 			initialize();
-		}	
-		
+		}
+
 	}
 	
 	public void splitSegment () {

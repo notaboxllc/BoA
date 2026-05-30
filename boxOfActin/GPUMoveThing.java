@@ -559,6 +559,12 @@ public class GPUMoveThing {
         int[]   rules      = brownianRule;
         float[] soaForce   = Thing.soaForceSum;
         float[] soaTorque  = Thing.soaTorqueSum;
+        // Canonical SoA pose: coord/uVec/yVec are already float arrays matching
+        // the GPU FloatArray layout. The pack is a float→float copy from a
+        // contiguous backing array; no Pt3D pointer chase, no narrowing.
+        float[] soaCoordArr = Thing.soaCoord;
+        float[] soaUVecArr  = Thing.soaUVec;
+        float[] soaYVecArr  = Thing.soaYVec;
         float   bTransCoef = sBTransCoeff;
         float   bRotCoef   = sBRotCoeff;
         float   xLnT       = sXLinkTAttn;
@@ -578,28 +584,28 @@ public class GPUMoveThing {
             // FilSegment coord can change between steps via biochemStep
             // poly/depoly; always re-pack to stay coherent. Myosin types
             // only mutate coord inside moveThing (the kernel), so the
-            // FloatArray already matches the Pt3D state on steady steps.
+            // FloatArray already matches the SoA state on steady steps.
             if (packCoords || rule == RULE_FIL) {
-                coord.set(i3,     (float) t.coord.x);
-                coord.set(i3 + 1, (float) t.coord.y);
-                coord.set(i3 + 2, (float) t.coord.z);
-                uVec.set(i3,      (float) t.uVec.x);
-                uVec.set(i3 + 1,  (float) t.uVec.y);
-                uVec.set(i3 + 2,  (float) t.uVec.z);
-                yVec.set(i3,      (float) t.yVec.x);
-                yVec.set(i3 + 1,  (float) t.yVec.y);
-                yVec.set(i3 + 2,  (float) t.yVec.z);
+                coord.set(i3,     soaCoordArr[s3]);
+                coord.set(i3 + 1, soaCoordArr[s3 + 1]);
+                coord.set(i3 + 2, soaCoordArr[s3 + 2]);
+                uVec.set(i3,      soaUVecArr[s3]);
+                uVec.set(i3 + 1,  soaUVecArr[s3 + 1]);
+                uVec.set(i3 + 2,  soaUVecArr[s3 + 2]);
+                yVec.set(i3,      soaYVecArr[s3]);
+                yVec.set(i3 + 1,  soaYVecArr[s3 + 1]);
+                yVec.set(i3 + 2,  soaYVecArr[s3 + 2]);
             }
-            // SoA pack: forces/torques are already float in the canonical
-            // soaForceSum/soaTorqueSum arrays, so the pack is a float→float
-            // copy from a contiguous backing array — no Pt3D pointer chase,
-            // no double→float narrowing here (gather did it).
+            // Forces/torques are already float in the canonical
+            // soaForceSum/soaTorqueSum arrays.
             forceSum.set(i3,     soaForce[s3]);
             forceSum.set(i3 + 1, soaForce[s3 + 1]);
             forceSum.set(i3 + 2, soaForce[s3 + 2]);
             torqueSum.set(i3,     soaTorque[s3]);
             torqueSum.set(i3 + 1, soaTorque[s3 + 1]);
             torqueSum.set(i3 + 2, soaTorque[s3 + 2]);
+            // Drag tensors are still in Pt3D (read-mostly, change only on
+            // calculateProperties — no SoA storage yet).
             bTransGam.set(i3,     (float) t.bTransGam.x);
             bTransGam.set(i3 + 1, (float) t.bTransGam.y);
             bTransGam.set(i3 + 2, (float) t.bTransGam.z);
@@ -637,18 +643,27 @@ public class GPUMoveThing {
     private static void unpackRange(int slotStart, int slotEnd) {
         Thing[] theThings = Thing.theThings;
         int[]   indices   = gpuThingIndices;
+        float[] soaCoordArr = Thing.soaCoord;
+        float[] soaUVecArr  = Thing.soaUVec;
+        float[] soaYVecArr  = Thing.soaYVec;
         for (int slot = slotStart; slot < slotEnd; slot++) {
-            Thing t = theThings[indices[slot]];
+            int thingIdx = indices[slot];
+            Thing t = theThings[thingIdx];
             int i3 = slot * 3;
-            t.coord.x = coord.get(i3);
-            t.coord.y = coord.get(i3 + 1);
-            t.coord.z = coord.get(i3 + 2);
-            t.uVec.x  = uVec.get(i3);
-            t.uVec.y  = uVec.get(i3 + 1);
-            t.uVec.z  = uVec.get(i3 + 2);
-            t.yVec.x  = yVec.get(i3);
-            t.yVec.y  = yVec.get(i3 + 1);
-            t.yVec.z  = yVec.get(i3 + 2);
+            int s3 = thingIdx * 3;
+            // Write kernel output into the canonical SoA pose arrays
+            // (contiguous float[] writes, no Pt3D pointer chase).
+            // initialize() then copies SoA → Pt3D bridge + computes the
+            // derived fields (zVec, transXTox/transxToX, end1/end2).
+            soaCoordArr[s3]     = coord.get(i3);
+            soaCoordArr[s3 + 1] = coord.get(i3 + 1);
+            soaCoordArr[s3 + 2] = coord.get(i3 + 2);
+            soaUVecArr[s3]      = uVec.get(i3);
+            soaUVecArr[s3 + 1]  = uVec.get(i3 + 1);
+            soaUVecArr[s3 + 2]  = uVec.get(i3 + 2);
+            soaYVecArr[s3]      = yVec.get(i3);
+            soaYVecArr[s3 + 1]  = yVec.get(i3 + 1);
+            soaYVecArr[s3 + 2]  = yVec.get(i3 + 2);
             t.initialize();
         }
     }

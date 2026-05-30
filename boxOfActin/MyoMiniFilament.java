@@ -65,20 +65,22 @@ public class MyoMiniFilament extends Thing {
 		super(initCoord);
 		addMiniFil(this);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
-		
+
 		makeMyosinHeads();
 		makeMyosinDimers();
 	}
-	
+
 	public MyoMiniFilament (Pt3D initCoord, Pt3D initUVec) {
 		super(initCoord);
 		addMiniFil(this);
-		
+
 		uVec.copy(initUVec);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
-		
+
 		makeMyosinHeads();
 		makeMyosinDimers();
 	}
@@ -123,6 +125,7 @@ public class MyoMiniFilament extends Thing {
 		uVec.copy(setUVec);
 		length = dim;
 		radius = rad;
+		pushPoseToSoa();
 		initialize();
 	}
 	
@@ -144,6 +147,8 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void initialize () {
+		// SoA bridge: pull canonical pose into Pt3D fields.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
@@ -152,11 +157,11 @@ public class MyoMiniFilament extends Thing {
 		transMat ();
 		// define opposite to uVec direction, used frequently
 		uVecR.scale(-1,uVec);
-		
+
 		// re-find the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -0.5*length, uVec);
 		end2.add(coord, 0.5*length, uVec);
-		
+
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);
 		yRange = Math.abs(coord.y-end2.y);
@@ -230,6 +235,7 @@ public class MyoMiniFilament extends Thing {
 		yVec.xToX(this);
 		yVec.unitVec();
 
+		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 
 		// TELEPORT_DIAG — check displacement; emit full state dump if threshold exceeded

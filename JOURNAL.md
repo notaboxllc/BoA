@@ -4,6 +4,284 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — SoA canonical coord/uVec/yVec
+
+Follow-up to the `soaForceSum`/`soaTorqueSum` entry. Same pattern, applied
+to the pose fields. `Thing.coord` / `uVec` / `yVec` Pt3D objects remain as
+a CPU-reader bridge (hundreds of call sites read `thing.coord.x` etc.),
+but the canonical storage is now three static `float[]` arrays matching
+the GPU FloatArray layout `[x0,y0,z0, x1,y1,z1, ...]`. CPU `moveThing()`
+flushes the Pt3D scratch to SoA before calling `initialize()`; the GPU
+unpack writes SoA directly (contiguous float→float) and `initialize()`
+mirrors SoA → Pt3D bridge before computing derived fields.
+
+### Architecture
+
+**Canonical storage** (Thing.java):
+```java
+static float[] soaCoord = new float[0];   // [x0,y0,z0, x1,y1,z1, ...]
+static float[] soaUVec  = new float[0];
+static float[] soaYVec  = new float[0];
+```
+Indexed by `myThingNumber*3+axis`. Grown in `ensureAccumCapacity`
+alongside `soaForceSum`/`soaTorqueSum`; contents preserved via
+`System.arraycopy` on growth.
+
+**Bridge helpers** on `Thing`:
+- `pushPoseToSoa()` / `pushCoordToSoa()` / `pushUVecToSoa()` /
+  `pushYVecToSoa()` — flush Pt3D → SoA (called at every site that
+  mutates `coord`/`uVec`/`yVec` Pt3D and is followed by a downstream
+  reader of SoA — initialize(), GPU pack, fillSoaArrays).
+- `loadPoseFromSoa()` — pull SoA back into Pt3D. Called at the top of
+  every subclass `initialize()` so derived-field math (zVec, transXTox,
+  end1/end2, etc.) sees the latest pose from either GPU unpack or CPU
+  moveThing.
+
+**Data flow per step (GPU path, after this change):**
+```
+GPU kernel writes coord/uVec/yVec to device FloatArray
+  → unpack workers: FloatArray.get(slot*3+a) → soaCoord/soaUVec/soaYVec
+    (contiguous float[] writes, no Pt3D pointer chase)
+  → t.initialize(): loadPoseFromSoa() copies SoA → Pt3D bridge, then
+    derived fields (zVec, transXTox, end1, end2) computed from Pt3D
+  → CPU phases read Pt3D bridge (unchanged for now)
+  → GPU pack (next step): reads soaCoord/soaUVec/soaYVec directly
+    (contiguous float→float copy into FloatArray; the iter2d coord-skip
+    optimisation still applies — myosin slots skip the pack write on
+    steady steps)
+```
+
+**CPU-only path:**
+```
+moveThing computes new pose in Pt3D scratch
+  → pushPoseToSoa() flushes Pt3D → soaCoord/soaUVec/soaYVec
+  → initialize(): loadPoseFromSoa() copies SoA → Pt3D (no-op, same
+    values), then derived fields
+  → CPU phases read Pt3D bridge
+```
+
+### Capacity growth coupled to addThing
+
+`ensureAccumCapacity(needed)` now also sizes `soaCoord`/`soaUVec`/`soaYVec`
+and is invoked from `addThing` (`if (thingCt > taCapacity)
+ensureAccumCapacity(thingCt)`). Pre-doLoop construction can therefore
+push pose without out-of-bounds: the base `Thing(initCoord)` constructor
+runs `addThing(this)` then `pushPoseToSoa()` with default uVec/yVec, and
+each subclass constructor flushes again after setting its real
+uVec/yVec, immediately before its own `initialize()` call. Method is
+`synchronized` for safety with concurrent constructor calls; uncontended
+fast path.
+
+### Compaction on removal
+
+`Thing.removeThing` swaps the pose slots alongside the force/torque
+slots. The active pose data must move with the surviving Thing because
+its `myThingNumber` was just reassigned.
+
+### fillSoaArrays simplified, not eliminated
+
+`MyoMotor.fillSoaArrays()` and `FilSegment.fillSoaArrays()` now read
+from the canonical `Thing.soaCoord`/`soaUVec` instead of chasing the
+per-Thing Pt3D references. Derived endpoints (`end1`/`end2`/`bindTip`)
+are recomputed inline from `coord ± half*uVec` — same formula
+`initialize()` uses — so the per-population per-step arrays stay valid
+without depending on `Pt3D end1`/`end2` having been refreshed by the
+last `initialize()`.
+
+Full elimination is deferred: `MotorBindGrid3D` fill and
+`GPUMotorBinding` still index per-population (`soaX[motorId]`,
+`soaEnd1X[filId]`), so a follow-up would either teach those phases to
+index by `myThingNumber` against the unified `soaCoord`, or build a
+per-population `populationSlot -> myThingNumber` map and resolve in the
+grid kernel.
+
+### Files changed
+
+- `boxOfActin/Thing.java` — added `soaCoord`/`soaUVec`/`soaYVec` static
+  float[] arrays, `pushPoseToSoa`/`pushCoord/UVec/YVecToSoa` and
+  `loadPoseFromSoa` helpers, extended `ensureAccumCapacity` to grow
+  pose arrays with `arraycopy` preservation, made it `synchronized`,
+  pushed pose in `Thing(initCoord)` constructor after `addThing`,
+  `addThing` triggers `ensureAccumCapacity(thingCt)` for SoA capacity,
+  `removeThing` swaps pose slots.
+- `boxOfActin/GPUMoveThing.java` — `packRange` reads pose from
+  `Thing.soaCoord`/`soaUVec`/`soaYVec` (contiguous float[] vs Pt3D
+  pointer chase); `unpackRange` writes kernel output to the canonical
+  SoA arrays before invoking `t.initialize()` (which bridges to Pt3D).
+- `boxOfActin/FilSegment.java` — `initialize()` calls
+  `loadPoseFromSoa()` first; `moveThing()` ends with `pushPoseToSoa()`
+  before `initialize()`; constructors `pushPoseToSoa()` after setting
+  uVec/yVec, before `initialize()`; `biochemStep` lengthChanged path
+  pushes coord (poly/depoly mutated it via `coord.inc`); `setFirstHalf`
+  pushes coord after the split; `joinSegments` pushes the surviving
+  segment's coord before its `initialize`; `translate`/`translateCoord`
+  push coord; `fillSoaArrays` reads canonical SoA pose and computes
+  end1/end2 inline.
+- `boxOfActin/MyoMotor.java`, `MyoRod.java`, `MyoLever.java`,
+  `MyoMiniFilament.java`, `ProteinNode.java`, `FillNode.java`, `Bug.java`
+  — same per-class pattern (initialize loads SoA → Pt3D; moveThing
+  pushes Pt3D → SoA before initialize; constructors push after setting
+  uVec/yVec; `set(setCoord, setUVec, ...)` mutators push so callers'
+  follow-up `initialize()` reads fresh SoA).
+- `boxOfActin/StaticFilSegment.java` — splitSegment relies on the
+  base-class `setFirstHalf` push.
+- `boxOfActin/MyoMotor.java::fillSoaArrays` and
+  `FilSegment.java::fillSoaArrays` — simplified to read from canonical
+  SoA + inline endpoint compute.
+- `boxOfActin/BoxOfActin.java` — `applyBenchmarkPins` and
+  `resetBenchmarkChain` push pose after mutating Pt3D directly, before
+  the explicit `initialize()` calls.
+
+### Smoke validation — glidingAssay500_val — PASS
+
+```
+                    baseline mean ± 2 SD     CPU (this)        GPU (this)
+bindEvents       :       861 ± 240             1028 PASS         703 PASS
+meanBoundMotors  :      7.37 ± 1.52            8.271 PASS      6.469 PASS
+glidingVelocity  :      8.39 ± 1.44           8.3375 PASS     7.6293 PASS
+```
+
+Logs: `RUN_LOGS/2026-05-30_soacoord_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_soacoord_smoke_gpu.txt`.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, thingCt≈588K, ~1000 steps)
+
+CPU path. Source: `RUN_LOGS/2026-05-30_soacoord_dense_cpu.txt`.
+
+```
+phase                soaforce    coord(this)
+-------------------------------------------------
+ThingStep Threads        62.45      63.53
+ThingBrownian            31.56      31.39
+Myosin (joints)          19.32      18.95
+MyoDimer                  8.58       8.62
+Mesh                      6.68       6.79
+Ck Mots                   5.33       5.27
+MotorBindGrid3D Fill      3.87       3.85
+NodeLink                  1.56       1.52
+-------------------------------------------------
+wall (min per sim-sec)   257        258      (~0.4 % slower; noise)
+[STATS]      bindEvents       3633 → 3359
+             meanBoundMotors  226.7 → 204.2
+             glidingVelocity  40.58 → 39.06
+```
+
+GPU path. Source: `RUN_LOGS/2026-05-30_soacoord_dense_gpu.txt`.
+
+```
+phase                soaforce    coord(this)
+-------------------------------------------------
+ThingStep Threads        32.26      32.56
+gpuMoveThing total       40.39      41.55
+gpuMotorBinding total    13.05      13.11
+Myosin (joints)          18.33      18.27
+MyoDimer                  9.78       9.32
+Mesh                      6.70       6.76
+MotorBindGrid3D Fill      3.93       3.87
+-------------------------------------------------
+wall (min per sim-sec)   239        241      (~0.8 % slower; noise)
+gpuMoveThing breakdown   pack=9.20s,  exec=10.68s, unpack=20.51s   (soaforce)
+                         pack=9.01s,  exec=10.71s, unpack=21.82s   (this)
+```
+
+### Result: no win, no loss; foundation in place
+
+Wall is flat at dense scale (CPU +0.4 %, GPU +0.8 %, both within run-to-run
+noise). The hot inner loops of pack/unpack/fillSoaArrays now read/write
+contiguous `float[]` instead of chasing Pt3D references, but the
+visible savings are small because:
+
+- **Pack** was already cheap (9.2 s / 1101 calls = 8.4 ms/call), and
+  the bottleneck on this side is the per-element `FloatArray.set()`
+  call — that didn't change. Bulk `MemorySegment.copy` for contiguous
+  slot runs (deferred in the soaforce entry) is the lever that would
+  actually push pack to ~1 s.
+- **Unpack** workers spend most of their time inside `t.initialize()`
+  (transMat, end1/end2 computation) rather than the read from
+  FloatArray. The contiguous-float SoA write is faster than the
+  scattered Pt3D writes, but initialize() dominates.
+- **fillSoaArrays** runs ~1100 times in a 1100-step run and touches
+  ~98K motors + 100 fil segments. The Pt3D pointer chase it replaced
+  was a single field read per slot, not a deep chain — modest absolute
+  savings.
+
+The foundation matters more than the immediate wall delta. With
+`soaCoord`/`soaUVec`/`soaYVec` now canonical:
+
+- Future CPU readers (mesh fill, motor binding, joint forces, etc.) can
+  be converted file-by-file to read from `Thing.soaCoord[idx*3]` instead
+  of `thing.coord.x`, dropping the Pt3D field eventually.
+- `MotorBindGrid3D.fillCells` can read from the unified SoA via
+  `myThingNumber`, eliminating the per-population `MyoMotor.soaX/Y/Z`
+  intermediates and the `fillSoaArrays` step entirely.
+- A contiguous-run `MemorySegment.copy` in `GPUMoveThing.packRange` is
+  now a straight `MemorySegment.copy(MemorySegment.ofArray(soaCoord),
+  startThingIdx*3*4L, fa.getSegment(), startSlot*3*4L, runLen*3*4L)`
+  — no boxing or chase. Same for unpack.
+
+### Observables stayed in range
+
+CPU dense `bindEvents=3359` (baseline soaforce 3633, dense-sweep 3687,
+sparse 3633, pre-accum 3983) — within the established range.
+`meanBoundMotors=204` (baseline 226), `glidingVelocity=39.06` (baseline
+40.58). All within the single-seed run-to-run variance pattern.
+
+GPU dense observables similarly within range.
+
+### Memory overhead
+
+At M=98K with taCapacity ≈ 735K (25 % headroom): three additional
+float arrays at 735K × 3 × 4 B = **~8.8 MB each = ~26.5 MB total**.
+Trivial vs the 564 MB per-thread `taForce`/`taTorque`. Same growth
+discipline as the existing soa force arrays.
+
+### Bug fixed during integration
+
+Initial draft pushed pose only at the end of `moveThing()`. That broke
+construction-time `initialize()` (called from subclass constructors
+after the subclass set uVec/yVec) — `loadPoseFromSoa` would have read
+default uVec=(1,0,0). Fix: each subclass constructor now flushes
+explicitly after setting uVec/yVec, before its `initialize()` call.
+Same fix applied to `MyoMotor.set` / `MyoRod.set` / `MyoLever.set` /
+`MyoMiniFilament.set` which mutate pose directly; the `Myosin.setMotor`
+chain now satisfies the contract that `pushPoseToSoa()` precedes any
+`initialize()`.
+
+The `splitSegment` and `joinSegments` paths similarly mutate
+`coord.add(end1, ...)` / `coord.inc(...)` without going through
+moveThing; `setFirstHalf` and `joinSegments` were updated to push coord
+before the caller's `initialize()`. `FilSegment.biochemStep`'s
+`lengthChanged` branch (which runs after poly/depoly's `coord.inc`)
+pushes coord too. `BoxOfActin.applyBenchmarkPins` and
+`resetBenchmarkChain` (benchmark mode, mutates Pt3D directly) flush
+before `initialize()`.
+
+### Open / deferred
+
+- **MemorySegment bulk-copy for pack/unpack** — still the biggest
+  remaining pack-side optimisation. Detection of contiguous
+  `gpuThingIndices` runs would let pack be a per-run `MemorySegment.copy`
+  on `soaCoord`/`soaUVec`/`soaYVec` directly.
+- **Eliminate `fillSoaArrays` by reading unified SoA in
+  `MotorBindGrid3D.fill` and the motor-binding kernel.** Requires
+  storing the unified `myThingNumber` (or the FilSegment/MyoMotor's
+  thingIdx) in the grid cell entries instead of the per-population
+  filID/motorID. The motor-binding kernel currently indexes
+  `FilSegment.soaUX[filId]` etc; updating it to `Thing.soaUVec[idx*3]`
+  is straightforward but touches both the CPU and GPU paths.
+- **Convert CPU readers to SoA.** `mesh fill`, `joint forces`, `link
+  forces` all chase Pt3D today. One file at a time. The bridge keeps
+  this from being a blocker.
+- **Pt3D `coord`/`uVec`/`yVec` removal.** Final cleanup, after all CPU
+  readers are converted. Until then the bridge is mandatory.
+- **Float precision drift.** Each step now narrows pose to float in
+  the CPU-only path too (was double everywhere before). Validation
+  observables are unchanged at gliding-assay scale; the GPU path was
+  already on float. If a long-duration deflection or LP benchmark
+  picks up drift, the fix would be to keep the canonical at double
+  and pay the narrow at pack time — but the current numbers don't
+  motivate that.
+
 ## 2026-05-30 — SoA canonical forceSum/torqueSum + memcpy pack
 
 Follow-up to the sparse-gather entry. The remaining cost in the gather

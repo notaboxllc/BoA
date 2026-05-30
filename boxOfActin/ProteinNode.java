@@ -74,11 +74,12 @@ public class ProteinNode extends Thing {
 		super(initCoord);
 		addNode(this);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		makeMyosinSinglets();
 		makeMyosinDimers();
 	}
-	
+
 	public ProteinNode (Pt3D initCoord, Pt3D initUVec, Pt3D initZVec, boolean fromQKFile) {
 		super(initCoord);
 		uVec.copy(initUVec); // uVec and zVec may not yet be truly orthogonal
@@ -89,30 +90,33 @@ public class ProteinNode extends Thing {
 		uVec.unitVec();  // since yVec is random direction must normalize this result
 		addNode(this);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		makeMyosinSinglets();
 		makeMyosinDimers();
 	}
-	
+
 	public ProteinNode (Pt3D initCoord, Pt3D hemisphereNormal) {  // this constructor specifies a hemisphere for myosins
 		super(initCoord);
 		addNode(this);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		makeMyosinSinglets(hemisphereNormal);
 		makeMyosinDimers(hemisphereNormal);
 	}
-	
+
 	public ProteinNode (Pt3D initCoord, double radius) {  // this constructor specifies a radius
 		super(initCoord);
 		addNode(this);
 		this.radius = radius;
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
-		
+
 		makeMyosinSinglets();
 		makeMyosinDimers();
-		
+
 	}
 	
 	static class ProteinNodeThreads extends ThreadSet {
@@ -193,6 +197,8 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void initialize () {
+		// SoA bridge: pull canonical pose into Pt3D fields.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
@@ -251,13 +257,14 @@ public class ProteinNode extends Thing {
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
 		
-		// for yVec 
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
 		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
+
+		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 	}
 	

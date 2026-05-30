@@ -20,19 +20,37 @@ public class MyoMotor extends Thing {
 	static double[]  soaRodUZ = new double[500000];
 
 	static void fillSoaArrays() {
+		// Read per-motor pose from the canonical SoA pose arrays
+		// (Thing.soaCoord / soaUVec) instead of chasing the per-motor Pt3D
+		// references. bindTip is the motor's end2 — the kernel/grid wants the
+		// motor head tip, not the centre, so we reconstruct end2 from coord
+		// and uVec the same way MyoMotor.initialize() does:
+		//     end2 = coord + 0.5 * motorLength * uVec
+		// Cheaper than re-running initialize(); the value is needed only here.
+		final float[] soaCoordArr = Thing.soaCoord;
+		final float[] soaUVecArr  = Thing.soaUVec;
+		final double  halfLen     = 0.5 * Env.myoMotorLength.getValue();
 		for (int i = 0; i < motorCt; i++) {
 			MyoMotor m = theMotors[i];
-			soaX[i]     = m.bindTip.x;
-			soaY[i]     = m.bindTip.y;
-			soaZ[i]     = m.bindTip.z;
+			final int b = m.myThingNumber * 3;
+			final double cx = soaCoordArr[b];
+			final double cy = soaCoordArr[b + 1];
+			final double cz = soaCoordArr[b + 2];
+			final double ux = soaUVecArr[b];
+			final double uy = soaUVecArr[b + 1];
+			final double uz = soaUVecArr[b + 2];
+			soaX[i]     = cx + halfLen * ux;
+			soaY[i]     = cy + halfLen * uy;
+			soaZ[i]     = cz + halfLen * uz;
 			soaOnFil[i] = m.onFil;
-			soaUX[i]    = m.uVec.x;
-			soaUY[i]    = m.uVec.y;
-			soaUZ[i]    = m.uVec.z;
-			MyoRod rod  = m.myMyosin.myoRod;
-			soaRodUX[i] = rod.uVec.x;
-			soaRodUY[i] = rod.uVec.y;
-			soaRodUZ[i] = rod.uVec.z;
+			soaUX[i]    = ux;
+			soaUY[i]    = uy;
+			soaUZ[i]    = uz;
+			// MyoRod pose: read from the rod's canonical SoA slot.
+			final int rb = m.myMyosin.myoRod.myThingNumber * 3;
+			soaRodUX[i] = soaUVecArr[rb];
+			soaRodUY[i] = soaUVecArr[rb + 1];
+			soaRodUZ[i] = soaUVecArr[rb + 2];
 		}
 	}
 
@@ -83,24 +101,26 @@ public class MyoMotor extends Thing {
 	
 	public MyoMotor(Pt3D initCoord) {
 		super(initCoord);
-		
+
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		addMyoMotor(this);
-		
+
 		// set binding points
 		bindTip = end2;
 		makeMyoFilLinks();
 	}
-	
+
 	public MyoMotor(Pt3D initCoord, Pt3D initUVec) {
 		super(initCoord);
-		
+
 		uVec.copy(initUVec);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		addMyoMotor(this);
-		
+
 		// set binding points
 		bindTip = end2;
 		makeMyoFilLinks();
@@ -119,6 +139,8 @@ public class MyoMotor extends Thing {
 		uVec.copy(setUVec);
 		Env.myoMotorLength.setValue(dim);
 		nucleotideState = nucState;
+		// SoA bridge: caller often follows with initialize(); make sure SoA is fresh.
+		pushPoseToSoa();
 	}
 	
 	public void calculateProperties () {
@@ -140,6 +162,8 @@ public class MyoMotor extends Thing {
 	}
 	
 	public void initialize () {
+		// SoA bridge: pull canonical pose into Pt3D fields.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
@@ -148,11 +172,11 @@ public class MyoMotor extends Thing {
 		transMat ();
 		// define opposite to uVec direction, used frequently
 		uVecR.scale(-1,uVec);
-		
+
 		// re-find the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -0.5*getDim(), uVec);
 		end2.add(coord, 0.5*getDim(), uVec);
-		
+
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);
 		yRange = Math.abs(coord.y-end2.y);
@@ -316,6 +340,7 @@ public class MyoMotor extends Thing {
 		yVec.xToX(this);
 		yVec.unitVec();
 
+		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 
 	}

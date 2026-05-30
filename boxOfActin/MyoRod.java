@@ -19,19 +19,21 @@ public class MyoRod extends Thing {
 
 	public MyoRod(Pt3D initCoord) {
 		super(initCoord);
-		
+
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
-		
+
 	}
-	
+
 	public MyoRod(Pt3D initCoord, Pt3D initUVec) {
 		super(initCoord);
-		
+
 		uVec.copy(initUVec);
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
-		
+
 	}
 	
 	public void sepaku () {
@@ -46,6 +48,7 @@ public class MyoRod extends Thing {
 		uVec.copy(setUVec);
 		Env.myoRodLength.setValue(dim);
 		rodInvisible = invis;
+		pushPoseToSoa();
 	}
 	
 	public void calculateProperties () {
@@ -67,6 +70,8 @@ public class MyoRod extends Thing {
 	}
 	
 	public void initialize () {
+		// SoA bridge: pull canonical pose into Pt3D fields.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
@@ -75,11 +80,11 @@ public class MyoRod extends Thing {
 		transMat ();
 		// define opposite to uVec direction, used frequently
 		uVecR.scale(-1,uVec);
-		
+
 		// re-find the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -getDim()/2, uVec);
 		end2.add(coord, getDim()/2, uVec);
-		
+
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);
 		yRange = Math.abs(coord.y-end2.y);
@@ -136,15 +141,16 @@ public class MyoRod extends Thing {
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
 		
-		// for yVec 
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
 		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
+
+		pushPoseToSoa();   // canonical SoA flush
 		initialize();
-		
+
 	}
 	
 	public double getDim() {

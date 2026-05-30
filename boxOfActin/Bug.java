@@ -96,6 +96,7 @@ public class Bug extends Crucible {
 		length = len;
 		radius = rad;
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 	}
 	
@@ -131,13 +132,15 @@ public class Bug extends Crucible {
 	}
 	
 	public void initialize () {
+		// SoA bridge: pull canonical pose into Pt3D fields.
+		loadPoseFromSoa();
 		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
 		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
 		zVec.cross(uVec, yVec);
 		yVec.cross(zVec, uVec);
 		// find the transformation matrices at this time step
 		transMat ();
-				
+
 		// find the cap end points and cap hemisphere centers
 		end1.add(coord, -length/2, uVec);
 		end2.add(coord, length/2, uVec);
@@ -228,16 +231,17 @@ public class Bug extends Crucible {
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
 		
-		// for yVec 
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
 		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
+
 		// update path coordinate
 		pathCoord.inc(Env.deltaT.getValue(), bVeloc); // path coordinates are just path velocity * deltaT
-		
+
+		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 	}
 	

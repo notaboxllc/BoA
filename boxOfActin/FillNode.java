@@ -15,6 +15,7 @@ public class FillNode extends ProteinNode {
 		super(initCoord,false);
 		this.radius = radius;
 		calculateProperties();
+		pushPoseToSoa();
 		initialize();
 		fillNodeCt++;
 	}

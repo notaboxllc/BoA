@@ -80,6 +80,16 @@ public class Thing extends Object {
 	// gather pass narrows the per-thread double accumulators into these floats.
 	static float[] soaForceSum  = new float[0];
 	static float[] soaTorqueSum = new float[0];
+	// Canonical SoA pose storage (coord/uVec/yVec). Same layout as soaForceSum;
+	// matches the GPU coord/uVec/yVec FloatArrays so the per-step pack/unpack
+	// can read and write tightly. The Pt3D coord/uVec/yVec fields are kept
+	// as a CPU-reader bridge — initialize() copies SoA → Pt3D each call.
+	// Writers (moveThing, constructors, translate, biochem coord.inc, ...)
+	// flush Pt3D → SoA via pushPoseToSoa()/pushCoord/pushUVec/pushYVec before
+	// initialize() runs.
+	static float[] soaCoord = new float[0];
+	static float[] soaUVec  = new float[0];
+	static float[] soaYVec  = new float[0];
 	// Sparse gather bookkeeping: each worker thread records the indices it actually
 	// wrote to (deduped via dirtyFlags). gatherThreadAccumulators() walks only those
 	// entries instead of sweeping every Thing × every thread.
@@ -137,6 +147,10 @@ public class Thing extends Object {
 		instanceRegistry.put(this.thingInstanceId, this);
 		this.coord.copy(initCoord);
 		addThing(this);
+		// Seed the canonical SoA pose with the initial coord and the default
+		// uVec/yVec (1,0,0)/(0,1,0). Subclass constructors that overwrite
+		// uVec/yVec must call pushPoseToSoa() before their initialize() call.
+		pushPoseToSoa();
 	}
 	
 	public static class RetObj {
@@ -471,11 +485,14 @@ public class Thing extends Object {
 	}
 
 	// Lazy-grow the per-thread accumulators and the canonical SoA arrays.
-	// Called at the top of doLoop(). dirtyIndices/dirtyFlags grow with
+	// Called at the top of doLoop() AND from addThing() so initial
+	// construction (which runs before doLoop) has capacity to receive
+	// pushPoseToSoa() calls. dirtyIndices/dirtyFlags grow with
 	// taForce/taTorque so workers can never overflow (no thread can dirty
 	// more distinct slots than the Thing count). soaForceSum/soaTorqueSum
-	// grow in lockstep so myThingNumber*3 indexing is always valid.
-	public static void ensureAccumCapacity (int needed) {
+	// and soaCoord/soaUVec/soaYVec grow in lockstep so myThingNumber*3
+	// indexing is always valid.
+	public static synchronized void ensureAccumCapacity (int needed) {
 		if (needed <= taCapacity) return;
 		int newCap = Math.max(needed + (needed >> 2) + 64, 1024);  // 25% headroom
 		for (int t = 0; t < accumThreadCt; t++) {
@@ -485,16 +502,81 @@ public class Thing extends Object {
 			dirtyFlags[t]   = new boolean[newCap];
 		}
 		// Reallocate the canonical SoA arrays; preserve current contents so
-		// growth mid-step doesn't drop accumulated force from earlier phases.
+		// growth mid-step doesn't drop accumulated force from earlier phases
+		// or pose data already pushed by constructors.
 		float[] newForce  = new float[newCap * 3];
 		float[] newTorque = new float[newCap * 3];
+		float[] newCoord  = new float[newCap * 3];
+		float[] newUVec   = new float[newCap * 3];
+		float[] newYVec   = new float[newCap * 3];
 		if (soaForceSum.length > 0) {
 			System.arraycopy(soaForceSum,  0, newForce,  0, soaForceSum.length);
 			System.arraycopy(soaTorqueSum, 0, newTorque, 0, soaTorqueSum.length);
 		}
+		if (soaCoord.length > 0) {
+			System.arraycopy(soaCoord, 0, newCoord, 0, soaCoord.length);
+			System.arraycopy(soaUVec,  0, newUVec,  0, soaUVec.length);
+			System.arraycopy(soaYVec,  0, newYVec,  0, soaYVec.length);
+		}
 		soaForceSum  = newForce;
 		soaTorqueSum = newTorque;
+		soaCoord     = newCoord;
+		soaUVec      = newUVec;
+		soaYVec      = newYVec;
 		taCapacity = newCap;
+	}
+
+	// ---- SoA pose bridge -------------------------------------------------
+	// Canonical pose lives in soaCoord/soaUVec/soaYVec. Pt3D coord/uVec/yVec
+	// are a CPU-reader bridge maintained in sync via loadPoseFromSoa() inside
+	// initialize(). Writers (moveThing end, constructors, translate, biochem
+	// coord.inc, splitSegment/join, benchmark pin reset) call pushPoseToSoa()
+	// (or the per-component helpers) BEFORE initialize() so initialize sees
+	// the new pose. The bridge is read-only for downstream CPU phases until
+	// the SoA-canonical refactor converts them one by one.
+
+	public void pushCoordToSoa() {
+		final int b = myThingNumber * 3;
+		soaCoord[b]   = (float) coord.x;
+		soaCoord[b+1] = (float) coord.y;
+		soaCoord[b+2] = (float) coord.z;
+	}
+
+	public void pushUVecToSoa() {
+		final int b = myThingNumber * 3;
+		soaUVec[b]   = (float) uVec.x;
+		soaUVec[b+1] = (float) uVec.y;
+		soaUVec[b+2] = (float) uVec.z;
+	}
+
+	public void pushYVecToSoa() {
+		final int b = myThingNumber * 3;
+		soaYVec[b]   = (float) yVec.x;
+		soaYVec[b+1] = (float) yVec.y;
+		soaYVec[b+2] = (float) yVec.z;
+	}
+
+	public void pushPoseToSoa() {
+		final int b = myThingNumber * 3;
+		soaCoord[b]   = (float) coord.x;
+		soaCoord[b+1] = (float) coord.y;
+		soaCoord[b+2] = (float) coord.z;
+		soaUVec[b]    = (float) uVec.x;
+		soaUVec[b+1]  = (float) uVec.y;
+		soaUVec[b+2]  = (float) uVec.z;
+		soaYVec[b]    = (float) yVec.x;
+		soaYVec[b+1]  = (float) yVec.y;
+		soaYVec[b+2]  = (float) yVec.z;
+	}
+
+	// Read canonical SoA pose back into Pt3D bridge fields. Called from
+	// initialize() so downstream Pt3D readers see the SoA values that the
+	// GPU kernel wrote (via unpack) or that CPU moveThing flushed.
+	public void loadPoseFromSoa() {
+		final int b = myThingNumber * 3;
+		coord.x = soaCoord[b];   coord.y = soaCoord[b+1]; coord.z = soaCoord[b+2];
+		uVec.x  = soaUVec[b];    uVec.y  = soaUVec[b+1];  uVec.z  = soaUVec[b+2];
+		yVec.x  = soaYVec[b];    yVec.y  = soaYVec[b+1];  yVec.z  = soaYVec[b+2];
 	}
 
 	// Sparse gather: walk each worker thread's dirty list, narrow the double
@@ -639,17 +721,24 @@ public class Thing extends Object {
 		theThings[thingCt] = newThing;
 		theThings[thingCt].myThingNumber = thingCt;
 		thingCt++;
+		// Ensure the canonical SoA arrays can hold this slot. Constructors
+		// run BEFORE doLoop's per-step ensureAccumCapacity, so push to SoA
+		// from a constructor would otherwise hit a not-yet-allocated array.
+		// Growth is amortised (25 % headroom inside ensureAccumCapacity).
+		if (thingCt > taCapacity) {
+			ensureAccumCapacity(thingCt);
+		}
 	}
-	
+
 	public static void removeThing (Thing byeThing) {
 		int swapId = byeThing.myThingNumber;
 		int lastId = thingCt - 1;
 		theThings[swapId] = theThings[lastId];
 		theThings[swapId].myThingNumber = swapId;
-		// Compact the canonical SoA force/torque slots: copy the last slot's
-		// data into the dead slot. Forces are zeroed each step so this is not
-		// strictly required for correctness, but maintains the invariant that
-		// active slots are contiguous with valid data.
+		// Compact the canonical SoA force/torque slots AND pose slots:
+		// copy the last slot's data into the dead slot. Forces are zeroed
+		// each step so the force swap is cosmetic, but pose data MUST move
+		// with the surviving Thing — its myThingNumber just changed.
 		if (swapId != lastId && soaForceSum.length >= (lastId + 1) * 3) {
 			int dst = swapId * 3, src = lastId * 3;
 			soaForceSum[dst]     = soaForceSum[src];
@@ -658,6 +747,15 @@ public class Thing extends Object {
 			soaTorqueSum[dst]     = soaTorqueSum[src];
 			soaTorqueSum[dst + 1] = soaTorqueSum[src + 1];
 			soaTorqueSum[dst + 2] = soaTorqueSum[src + 2];
+			soaCoord[dst]     = soaCoord[src];
+			soaCoord[dst + 1] = soaCoord[src + 1];
+			soaCoord[dst + 2] = soaCoord[src + 2];
+			soaUVec[dst]      = soaUVec[src];
+			soaUVec[dst + 1]  = soaUVec[src + 1];
+			soaUVec[dst + 2]  = soaUVec[src + 2];
+			soaYVec[dst]      = soaYVec[src];
+			soaYVec[dst + 1]  = soaYVec[src + 1];
+			soaYVec[dst + 2]  = soaYVec[src + 2];
 		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();

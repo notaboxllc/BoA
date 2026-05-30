@@ -1272,10 +1272,12 @@ public class BoxOfActin {
 		deflFil.firstSeg.coord.x += deflFil.anchor1.x - deflFil.firstSeg.end1.x;
 		deflFil.firstSeg.coord.y += deflFil.anchor1.y - deflFil.firstSeg.end1.y;
 		deflFil.firstSeg.coord.z += deflFil.anchor1.z - deflFil.firstSeg.end1.z;
+		deflFil.firstSeg.pushCoordToSoa();   // SoA bridge: caller mutated Pt3D coord; flush before initialize() reads SoA
 		deflFil.firstSeg.initialize();
 		deflFil.lastSeg.coord.x += deflFil.anchor2.x - deflFil.lastSeg.end2.x;
 		deflFil.lastSeg.coord.y += deflFil.anchor2.y - deflFil.lastSeg.end2.y;
 		deflFil.lastSeg.coord.z += deflFil.anchor2.z - deflFil.lastSeg.end2.z;
+		deflFil.lastSeg.pushCoordToSoa();
 		deflFil.lastSeg.initialize();
 	}
 
@@ -1444,6 +1446,7 @@ public class BoxOfActin {
 			s.coord.setVals(deflFil.initCoords[i].x, deflFil.initCoords[i].y, deflFil.initCoords[i].z);
 			s.uVec.setVals(1, 0, 0);
 			s.yVec.setVals(0, 1, 0);
+			s.pushPoseToSoa();           // SoA bridge: caller mutated Pt3D directly; flush before initialize() reads SoA
 			s.initialize();
 			s.zeroForceSumSlot();
 			s.zeroTorqueSumSlot();
