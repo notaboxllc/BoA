@@ -4,6 +4,219 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Per-thread force/torque accumulators
+
+Survey §D2 / §F6 / §C1 / Top10#1: replace the per-Thing
+`synchronized(forceSync)` / `synchronized(torqueSync)` writes in
+`incForceSum` / `incTorqueSum` with per-thread accumulator arrays
+gathered once per step. Aim: kill the lock acquisitions that JOURNAL
+2026-05-27 identified as a non-determinism source and (per the survey)
+a 10–20 % wall budget. Outcome: the correctness story holds (no
+locks, deterministic gather order); the wall story did not — the
+gather pass costs more than the locks saved at the scales tested.
+Code is shipped as-is and will be revisited; the perf cost is
+characterized below.
+
+### Design
+
+Two static double[][] arrays in `Thing.java`:
+- `taForce[threadId][thingNumber*3 + axis]`
+- `taTorque[threadId][thingNumber*3 + axis]`
+
+Sized `[Env.allThreadCt=16][thingCt*3]`, grown lazily by 25 % each
+time `thingCt` outpaces capacity.
+
+`ThreadLocal<int[]> tlsThreadId` holds the worker's 0-based id; set
+once in `ThreadSet.ThreadSpawn.run()` at thread startup. Default
+value `-1` for the main TimeLoop thread.
+
+`incForceSum(Pt3D)` / `incForceSum(Pt3D,Pt3D)` / `incTorqueSum(Pt3D)`:
+read `tlsThreadId`, then either write to the thread's private slot
+(workers) or directly to `forceSum`/`torqueSum` (main thread, no
+contention). The 2-arg overload computes `r × F` inline with scalar
+doubles (no `Pt3D rForce` / `tempTorq` allocations — survey §C1
+collateral win).
+
+`gatherThreadAccumulatorsRange(lo,hi)`: sums each thread's slot into
+`forceSum`/`torqueSum` and zeros the slots in one pass (touch each
+cache line once for read+zero). Dispatched as `Env.gatherForcesStart`
+on `ThingStepThreads` (reuses the existing 16-worker pool).
+
+### Where the gather runs in `doLoop`
+
+After all force-producing phases (`xLinkStart`, `membraneLinksStart`,
+`myoJoints1Start`, `myoJoints2Start`, `stepStart`), before the
+benchmark midpoint-force injection and `moveStart`/GPU pack. The
+membrane relaxation loop also gathers between `membraneLinksStart`
+and `membraneMoveStart` so each pass's `NodeLink` writes land in
+`forceSum` before the move reads it.
+
+### Files changed
+
+`boxOfActin/Thing.java` (accumulator infrastructure, new
+`incForceSum/incTorqueSum`, gather), `boxOfActin/ThreadSet.java`
+(set `tlsThreadId` in `ThreadSpawn.run()`),
+`boxOfActin/FilSegment.java` (removed local override; inherits the
+new path), `boxOfActin/Env.java` (added `gatherForcesStart/Stop=17`),
+`boxOfActin/BoxOfActin.java` (gather call in `doLoop`, `gatherTimer`
+RunTimer, membrane-loop gather).
+
+Call sites converted: ~130 `incForceSum`/`incTorqueSum` invocations
+across 15 files (FilSegment: 48, MyosinDimer: 20, MyoMiniFilament:
+14, ProteinNode: 13, Myosin: 12, MyoFilLink: 8, others 1-4 each).
+No call-site code change needed — the conversion is in the Thing
+superclass methods. The two `synchronized`-block overrides in
+`Thing.java` and `FilSegment.java` were removed; the `forceSync`
+and `torqueSync` Object fields are gone.
+
+### Validation — glidingAssay500_val (1 seed) — PASS
+
+```
+                     baseline mean ± 2 SD     this seed (CPU)    this seed (GPU)
+bindEvents       :       861 ± 240               789 PASS           997 PASS
+meanBoundMotors  :      7.37 ± 1.52             7.088 PASS         8.142 PASS
+glidingVelocity  :      8.39 ± 1.44             8.630 PASS         8.660 PASS
+```
+
+Both CPU and GPU runs fall inside the 10-seed cpuopt baseline mean
+± 2 SD on all three observables. No mid-run NaN or "Crazy torque"
+spam. Source logs: `RUN_LOGS/2026-05-30_threadforce_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_threadforce_smoke_gpu.txt`.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, S~1101) — REGRESSION
+
+CPU path. Sources: `RUN_LOGS/2026-05-30_threadforce_dense_cpu.txt`
+(first run, no `gatherTimer`), `RUN_LOGS/2026-05-30_threadforce_dense_cpu2.txt`
+(second run, with `gatherTimer`). The baseline column is the
+2026-05-30 parallel-gridfill result (`gridfill_dense_cpu_after.txt`),
+which was the most recent main-tip CPU dense baseline.
+
+```
+phase                          baseline (s)   this (s)    delta
+---------------------------------------------------------------------
+ThingStep Threads (incl gather)    55.02      112.81     +57.8s
+ThingBrownian                      31.65       30.22      -1.4s
+Myosin (joints)                    23.41       17.83      -5.6s
+MyoDimer                            8.96        7.84      -1.1s
+Mesh                                6.93        7.34      +0.4s
+Ck Mots                             5.64        5.18      -0.5s
+MotorBindGrid3D Fill                4.15        3.63      -0.5s
+NodeLink                            1.52        1.68      +0.2s
+---------------------------------------------------------------------
+wall (min per sim-sec)              252         329       +30 %
+observables                bindEvents 3983→3652, meanBoundMotors 250.5→234, glidingVelocity 40.88→42.36
+                           (single seed; all within ensemble noise)
+```
+
+GPU path. Source: `RUN_LOGS/2026-05-30_threadforce_dense_gpu.txt`.
+
+```
+phase                          baseline (s)   this (s)    delta
+---------------------------------------------------------------------
+ThingStep Threads (incl gather)    25.46       80.07      +54.6s
+gpuMoveThing total                 44.70       42.84       -1.9s
+gpuMotorBinding total              13.26       12.99       -0.3s
+Myosin (joints)                    23.57       17.31       -6.3s
+MyoDimer                            9.51        8.71       -0.8s
+Mesh                                6.93        6.82       -0.1s
+MotorBindGrid3D Fill                4.31        3.78       -0.5s
+---------------------------------------------------------------------
+observables                bindEvents 4051→4090, meanBoundMotors 257.6→251.5, glidingVelocity 42.58→42.23
+                           (all within ensemble noise)
+```
+
+The joints phases (Myosin, MyoDimer) shrink ~5-6 s each — that's
+exactly what the survey predicted for those phases (no lock
+acquisitions, fewer Pt3D allocations in the 2-arg `incForceSum`).
+**But ThingStep Threads grows by ~55 s on both CPU and GPU paths,
+and the net wall regresses ~30 % at dense scale.** The ThingStep
+delta is the gather pass running inside the same `ThingStepThreads`
+pool; the per-ThreadSet barrier timer counts it. Root cause:
+gather is bandwidth-bound and touches every Thing × every thread.
+At thingCt ≈ 588K × 16 threads × 6 doubles × 8 bytes (read+zero) =
+~880 MB read+written per gather pass. At ~30 GB/s sustained that
+is ~29 ms/step or ~29 s for 1000 steps — matching the observed
+ThingStep delta minus the ~25 s savings from the rest of the
+ThingStep work (which itself got slightly cheaper without the
+synchronized blocks).
+
+The validation-scale CPU wall is ~64 min/sim-sec vs baseline ~50,
+so the regression is present at small N too — gather scales with
+thingCt regardless of bind count.
+
+### Determinism check
+
+Two CPU runs with `-seed 42` (`BoxOfActin.java:352` sets
+`Env.mtRNG`). Source logs:
+`RUN_LOGS/2026-05-30_threadforce_det_run1.txt`,
+`RUN_LOGS/2026-05-30_threadforce_det_run2.txt`. Compared the
+[STATS] lines:
+
+```
+                     run1       run2
+bindEvents         :  959        657
+meanBoundMotors    : 7.713      6.077
+glidingVelocity    : 8.598      7.163
+```
+
+**Runs DIVERGE.** So the force-accumulation gather (which IS
+deterministic — fixed-order sum) is not the only non-determinism
+source. The remaining contributor is documented in survey §B7 and
+§G2: `Thing.myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));`
+(Thing.java:75). `Math.random()` is seeded per-JVM from
+`seedUniquifier ^ nanoTime()` — different between processes
+regardless of `-seed 42`. Per-Thing PRNG state therefore diverges
+from Thing 1's construction, which propagates through Brownian
+forces and biochem decisions for the whole run.
+
+`Env.mtRNG.setSeed(seed)` only seeds the global MT used by
+`Pt3D.RandomUnitVec`, `ProteinNode.biochemStep`, etc. — a small
+fraction of total RNG draws compared with the per-Thing PRNGs.
+
+So the force-accumulation race fix is a strict improvement (no
+new race in the gather), but full bit-identical reproducibility
+needs the per-Thing PRNG seed to be derived from a fixed source
+(e.g. `myPRNG = new MersenneTwisterFast(Env.mtRNG.nextLong())`
+during Thing construction, or Wang-hash from `myThingNumber` and
+the global seed). Not done in this session; flagged for a future
+RNG-cleanup pass.
+
+### Memory overhead
+
+- M=98K motors (dense_demo_smoke), thingCt ≈ 588K, capacity 735K
+  (1.25× headroom): 16 threads × 735K × 3 doubles × 8 bytes × 2
+  arrays (force+torque) = **564 MB**.
+- M=400K motors (extrapolated, ~4× linear), thingCt ≈ 2.4M,
+  capacity ≈ 3M: **~2.3 GB**.
+
+The dense run uses `-Xmx4G` which fits 564 MB; the overnight
+M=400K run uses `-Xmx20G` which fits 2.3 GB but leaves less room
+for everything else. If we keep this approach, the accumulators
+should be sparse (track per-thread which Things were touched) or
+restricted to Things that actually receive cross-Thread writes.
+
+### Status & open work
+
+- Correctness: PASS. Observables within noise on CPU + GPU smoke
+  and dense.
+- Determinism (forceSum gather order): now deterministic. Whole-sim
+  determinism: still false due to per-Thing PRNG seed source (out
+  of scope).
+- Performance: regression of ~30 % at dense scale on both CPU and
+  GPU paths. The gather is the cost. Possible follow-ups:
+  - Sparse accumulators (track {threadId, thingIdx} pairs written
+    each phase, gather only those).
+  - Restrict accumulator path to Things that have multiple writer
+    threads in expectation (FilSegments mainly; motors/levers/rods
+    are mostly single-writer per phase).
+  - Single dense-sweep gather with SIMD intrinsics — but Java
+    bottlenecks on the array-of-arrays pointer chase.
+
+Survey §F6 (symmetric force pairs = 2× lock acquisitions) is also
+satisfied: each `incForceSum(F, P)` now does both force AND torque
+in one fused method (`r × F` inline, scalar), avoiding the second
+synchronized-block acquire the old code paid.
+
 ## 2026-05-30 — Parallel MotorBindGrid3D fill
 
 Survey §A2 / §D3: the per-step rebuild of `MotorBindGrid3D` ran on a

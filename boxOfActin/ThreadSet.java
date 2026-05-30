@@ -34,6 +34,7 @@ public class ThreadSet {
 		}
 		
 		public void run() {
+			Thing.tlsThreadId.get()[0] = threadId;
 			mySet.done();
 			while (true) {
 				mySet.execute(threadId);

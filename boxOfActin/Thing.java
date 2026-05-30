@@ -59,14 +59,25 @@ public class Thing extends Object {
 	Pt3D bFricForceSum = new Pt3D();	// friction forces are implemented, and stay, in the body-fixed frame
 	Pt3D bFricTorqueSum = new Pt3D();
 	
+	// Per-thread force/torque accumulators. Worker threads write to a private slot
+	// indexed by [threadId][thingNumber*3 + axis]; gatherThreadAccumulators() sums
+	// them into forceSum/torqueSum once per step before moveThing. tlsThreadId is
+	// set in ThreadSpawn.run() at thread startup; the main thread leaves it at -1
+	// and writes directly to forceSum/torqueSum (no contention between phases).
+	// Must be initialised BEFORE the ThreadSet pools below, since ThreadSpawn.run()
+	// reads tlsThreadId on its first scheduling.
+	static final ThreadLocal<int[]> tlsThreadId = ThreadLocal.withInitial(() -> new int[]{-1});
+	static final int accumThreadCt = Env.allThreadCt;
+	static double[][] taForce  = new double[accumThreadCt][0];
+	static double[][] taTorque = new double[accumThreadCt][0];
+	static int taCapacity = 0;
+
 	// multithreading
 	static ThingStepThreads stepThreads = new ThingStepThreads();
 	static ThingBrownianThreads brownianThreads = new ThingBrownianThreads();
 	//RanMT myPRNG = new RanMT((long)(Long.MAX_VALUE*Math.random()));
 	MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
 	CollisionEvent cE = new CollisionEvent();		// try to reuse when possible
-	Object forceSync = new Object();  // for synchronizing addition of forces
-	Object torqueSync = new Object(); // ditto for torques
 	
 	// averaging of forces for stability
 	//ValueTracker bForceTrack = new ValueTracker(Env.forcesToTrack,ValueTracker.PT3D_TYPE);
@@ -133,47 +144,33 @@ public class Thing extends Object {
 		ThingStepThreads () {
 			super (Env.numThingStepThreads, "ThingStep Threads");
 		}
-	
+
 		public void divideAndConquer (int jobId) {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.stepStart:
-					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
-					}
-					spawn(); break;
 				case Env.moveStart:
-					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
-					}
-					spawn(); break;
 				case Env.biochemStart:
-					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
-					}
-					spawn(); break;
 				case Env.resetCtStart:
+				case Env.gatherForcesStart:
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.stepStop:
-					gather(); break;
 				case Env.moveStop:
-					gather(); break;
 				case Env.biochemStop:
-					gather(); break;
 				case Env.resetCtStop:
+				case Env.gatherForcesStop:
 					gather(); break;
 			}
 		}
-		
+
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.stepStart:
@@ -197,6 +194,9 @@ public class Thing extends Object {
 					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
 						if (!theThings[i].removeMe) { theThings[i].resetCounters(); }
 					}
+					break;
+				case Env.gatherForcesStart:
+					gatherThreadAccumulatorsRange(jobDiv[threadId], jobDiv[threadId+1]);
 					break;
 			}
 		}
@@ -275,8 +275,6 @@ public class Thing extends Object {
 		bFricTorqueSum = null;
 		myPRNG = null;
 		cE = null;
-		forceSync = null;
-		torqueSync = null;
 		
 		//bForceTrack = null;
 		//bTorqueTrack = null;
@@ -311,22 +309,88 @@ public class Thing extends Object {
 	}
 	
 	public void incForceSum (Pt3D forceToAdd) {
-		synchronized (forceSync) {
-			forceSum.inc(forceToAdd);
+		final int tid = tlsThreadId.get()[0];
+		if (tid < 0) {
+			forceSum.x += forceToAdd.x;
+			forceSum.y += forceToAdd.y;
+			forceSum.z += forceToAdd.z;
+		} else {
+			final double[] f = taForce[tid];
+			final int base = myThingNumber * 3;
+			f[base]     += forceToAdd.x;
+			f[base + 1] += forceToAdd.y;
+			f[base + 2] += forceToAdd.z;
 		}
 	}
-	
-	public synchronized void incForceSum (Pt3D forceToAdd, Pt3D forcePoint) {
-		incForceSum(forceToAdd);
-		rForce.sub(forcePoint,coord);
-		rForce.scale(1e-6);	// units (from �m to m)
-		tempTorq.cross(rForce, forceToAdd);
-		incTorqueSum(tempTorq);
+
+	public void incForceSum (Pt3D forceToAdd, Pt3D forcePoint) {
+		// r = (forcePoint - coord) * 1e-6 (µm → m), torque = r × force, fused write.
+		final double rx = (forcePoint.x - coord.x) * 1e-6;
+		final double ry = (forcePoint.y - coord.y) * 1e-6;
+		final double rz = (forcePoint.z - coord.z) * 1e-6;
+		final double fx = forceToAdd.x, fy = forceToAdd.y, fz = forceToAdd.z;
+		final double tx = ry*fz - rz*fy;
+		final double ty = rz*fx - rx*fz;
+		final double tz = rx*fy - ry*fx;
+		final int tid = tlsThreadId.get()[0];
+		if (tid < 0) {
+			forceSum.x += fx;   forceSum.y += fy;   forceSum.z += fz;
+			torqueSum.x += tx;  torqueSum.y += ty;  torqueSum.z += tz;
+		} else {
+			final double[] f = taForce[tid];
+			final double[] q = taTorque[tid];
+			final int base = myThingNumber * 3;
+			f[base]     += fx; f[base + 1] += fy; f[base + 2] += fz;
+			q[base]     += tx; q[base + 1] += ty; q[base + 2] += tz;
+		}
 	}
-	
+
 	public void incTorqueSum (Pt3D torqueToAdd) {
-		synchronized (torqueSync) {
-			torqueSum.inc(torqueToAdd);
+		final int tid = tlsThreadId.get()[0];
+		if (tid < 0) {
+			torqueSum.x += torqueToAdd.x;
+			torqueSum.y += torqueToAdd.y;
+			torqueSum.z += torqueToAdd.z;
+		} else {
+			final double[] q = taTorque[tid];
+			final int base = myThingNumber * 3;
+			q[base]     += torqueToAdd.x;
+			q[base + 1] += torqueToAdd.y;
+			q[base + 2] += torqueToAdd.z;
+		}
+	}
+
+	// Lazy-grow the per-thread accumulators. Called at the top of doLoop().
+	public static void ensureAccumCapacity (int needed) {
+		if (needed <= taCapacity) return;
+		int newCap = Math.max(needed + (needed >> 2) + 64, 1024);  // 25% headroom
+		for (int t = 0; t < accumThreadCt; t++) {
+			taForce[t]  = new double[newCap * 3];
+			taTorque[t] = new double[newCap * 3];
+		}
+		taCapacity = newCap;
+	}
+
+	// Sum each thread's force/torque slot into thing.forceSum/torqueSum and zero
+	// the slots in one pass (touch each cache line once for read+zero). Single
+	// Thing-strided loop; parallelized via ThingStepThreads (gatherForcesStart).
+	public static void gatherThreadAccumulatorsRange (int lo, int hi) {
+		final int tCt = accumThreadCt;
+		for (int i = lo; i < hi; i++) {
+			Thing t = theThings[i];
+			if (t == null || t.removeMe) continue;
+			double fx = 0, fy = 0, fz = 0, tx = 0, ty = 0, tz = 0;
+			final int base = i * 3;
+			for (int th = 0; th < tCt; th++) {
+				final double[] f = taForce[th];
+				final double[] q = taTorque[th];
+				fx += f[base];   fy += f[base+1]; fz += f[base+2];
+				tx += q[base];   ty += q[base+1]; tz += q[base+2];
+				f[base] = 0; f[base+1] = 0; f[base+2] = 0;
+				q[base] = 0; q[base+1] = 0; q[base+2] = 0;
+			}
+			t.forceSum.x += fx; t.forceSum.y += fy; t.forceSum.z += fz;
+			t.torqueSum.x += tx; t.torqueSum.y += ty; t.torqueSum.z += tz;
 		}
 	}
 	

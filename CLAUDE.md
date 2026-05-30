@@ -115,6 +115,9 @@ Both `-3js` and `-3jsLive` can be given together. Frame JSON is generated once a
 
 The QK (quickstate) save/resume flags (`-qk`, `-qkN`, `-ic`) were removed in Phase 3 along with the QK serialization code in `FileOps.java`.
 
+### Messages in interface
+Progress messages and status reports should be prefixed with [HH:MM] timestamps via $(date +%H:%M).
+
 ### Viewing Three.js output
 
 **File-based (existing):** In the directory containing the `-3js` output folder:

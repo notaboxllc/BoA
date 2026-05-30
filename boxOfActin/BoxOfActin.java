@@ -24,6 +24,7 @@ public class BoxOfActin {
 	static RunTimer brownianTimer = new RunTimer("BrownianMotion");
 	static RunTimer xLinkTimer = new RunTimer("CrossLinksArpsActAs");
 	static RunTimer stepTimer = new RunTimer("Step");
+	static RunTimer gatherTimer = new RunTimer("GatherForces");
 	static RunTimer moveTimer = new RunTimer("Move");
 	static RunTimer biochemTimer = new RunTimer("Biochem");
 	static RunTimer cleanupTimer1 = new RunTimer("Cleanups1");
@@ -32,7 +33,7 @@ public class BoxOfActin {
 	static RunTimer cleanupTimer4 = new RunTimer("Cleanups4");
 
 
-	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,moveTimer,biochemTimer,cleanupTimer1};
+	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,gatherTimer,moveTimer,biochemTimer,cleanupTimer1};
 
 	
 	// counters for doLoop()
@@ -691,6 +692,9 @@ public class BoxOfActin {
 
 				// set biophysical values needed for this next time step
 				FilSegment.setBiophysValues();
+				// Per-thread force/torque accumulators need at least thingCt slots.
+				// Grown lazily with 25% headroom; reallocates only when thingCt outpaces capacity.
+				Thing.ensureAccumCapacity(Thing.thingCt);
 				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
 				MyoMotor.fillSoaArrays();
 				FilSegment.fillSoaArrays();
@@ -765,6 +769,14 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.stepStop);
 				stepTimer.stopInc();
 
+				// Sum each thread's force/torque slots into thing.forceSum/torqueSum,
+				// then zero the slots. Must run after every phase that calls incForceSum
+				// (xLink, membrane, joints1/2, step) and before moveThing/GPU pack.
+				gatherTimer.start();
+				startAllThreadSets(Env.gatherForcesStart);
+				waitOnAllThreadSets(Env.gatherForcesStop);
+				gatherTimer.stopInc();
+
 				// F1 benchmark: apply transverse force to midpoint segment before integration
 				if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
 					deflFil.midSeg.incForceSum(deflFil.transForce);
@@ -819,6 +831,10 @@ public class BoxOfActin {
 					startAllThreadSets(Env.membraneLinksStart);
 					waitOnAllThreadSets(Env.membraneLinksStop);
 					//System.out.println("max membrane strain = " + NodeLink.maxStrain);
+
+					// Gather thread-local forces from membraneLinks before membraneMove reads forceSum.
+					startAllThreadSets(Env.gatherForcesStart);
+					waitOnAllThreadSets(Env.gatherForcesStop);
 
 					startAllThreadSets(Env.membraneMoveStart);
 					waitOnAllThreadSets(Env.membraneMoveStop);

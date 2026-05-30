@@ -103,6 +103,8 @@ public class Env {
 	static final int membraneMoveStop = 15;
 	static final int motorBindGrid3DStart = 16;
 	static final int motorBindGrid3DStop  = 16;
+	static final int gatherForcesStart = 17;
+	static final int gatherForcesStop  = 17;
 
 	// **** Times and Counters
 	static private final double deltaT_init = 1e-4; // seconds

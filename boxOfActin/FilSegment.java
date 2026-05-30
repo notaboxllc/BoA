@@ -2791,25 +2791,7 @@ public class FilSegment extends Thing {
 		return false;
 	}
 	
-	public void incForceSum (Pt3D forceToAdd) {
-		synchronized (forceSync) {
-			forceSum.inc(forceToAdd);
-		}
-	}
-	
-	public void incForceSum (Pt3D forceToAdd, Pt3D forcePoint) {
-		incForceSum(forceToAdd);
-		rForce.sub(forcePoint,coord);
-		rForce.scale(1e-6);	// units (from �m to m)
-		tempTorq.cross(rForce, forceToAdd);
-		incTorqueSum(tempTorq);
-	}
-	
-	public void incTorqueSum (Pt3D torqueToAdd) {
-		synchronized (torqueSync) {
-			torqueSum.inc(torqueToAdd);
-		}
-	}
+	// incForceSum/incTorqueSum inherited from Thing — per-thread accumulator path.
 	
 	public void incEnd1AxialForce (double incF) {
 		end1AxialF += incF;

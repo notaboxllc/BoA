@@ -1,0 +1,77 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay500_val...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=84004 blockSize=64 runSeed=536228732 nWorkers=16
+GPUMotorBinding: motorCap=500000 segCap=1000000 totalCells=3124 contentsCap=3124000 blockSize=64
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/threadforce_smoke_gpu
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/threadforce_smoke_gpu
+ThreeJSWriter: archived 1 source files to source.zip
+Sim. time=00.01....~77.23 minutes computation to simulate 1 sec, run finished in ~00.12 hours
+Sim. time=00.02....~72.82 minutes computation to simulate 1 sec, run finished in ~00.10 hours
+Sim. time=00.03....~72.05 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+Sim. time=00.04....~72.04 minutes computation to simulate 1 sec, run finished in ~00.07 hours
+Sim. time=00.05....~71.88 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.06....~72.00 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.07....~72.82 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.08....~72.55 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.09....~72.53 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~72.59 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=997
+[STATS] meanBoundMotors=8.142
+[STATS] gpuMotorBinding total=75.323s calls=10101 pack=1.235s gridPack=0.108s exec=73.403s unpack=0.508s
+[STATS] gpuMoveThing total=62.542s calls=10101 pack=16.727s exec=19.039s unpack=26.772s
+[STATS] glidingVelocity=8.6604
+ThingStep Threads took 111.871000 seconds.
+ThingBrownian Threads took 9.931000 seconds.
+Myosin Threads took 26.392000 seconds.
+MyoDimer Threads took 14.943000 seconds.
+Protein Node Threads took 4.396000 seconds.
+MyoMiniFil Threads took 4.308000 seconds.
+Chamber Myo Threads took 4.306000 seconds.
+Chamber MyoDimer Threads took 4.271000 seconds.
+Mesh Threads took 27.283000 seconds.
+Ck Mesh Threads took 8.010000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 4.584000 seconds.
+Arp23 Threads took 4.585000 seconds.
+NodeLink Threads took 12.759000 seconds.
+Membrane Node Threads took 8.551000 seconds.
+ActA Threads took 7.630000 seconds.
+MotorBindGrid3D Fill took 8.252000 seconds.
+Finished closing JSON plots!
