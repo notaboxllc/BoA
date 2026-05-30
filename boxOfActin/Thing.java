@@ -70,7 +70,17 @@ public class Thing extends Object {
 	static final int accumThreadCt = Env.allThreadCt;
 	static double[][] taForce  = new double[accumThreadCt][0];
 	static double[][] taTorque = new double[accumThreadCt][0];
+	// Sparse gather bookkeeping: each worker thread records the indices it actually
+	// wrote to (deduped via dirtyFlags). gatherThreadAccumulators() walks only those
+	// entries instead of sweeping every Thing × every thread.
+	static int[][]     dirtyIndices = new int[accumThreadCt][0];
+	static boolean[][] dirtyFlags   = new boolean[accumThreadCt][0];
+	static int[]       dirtyCounts  = new int[accumThreadCt];
 	static int taCapacity = 0;
+	// Diagnostic counters: cumulative sparse-gather stats, printed every 1000 calls.
+	static long gatherTotalEntriesAllTime = 0;
+	static int  gatherMaxEntriesAllTime   = 0;
+	static int  gatherCallCount           = 0;
 
 	// multithreading
 	static ThingStepThreads stepThreads = new ThingStepThreads();
@@ -196,7 +206,10 @@ public class Thing extends Object {
 					}
 					break;
 				case Env.gatherForcesStart:
-					gatherThreadAccumulatorsRange(jobDiv[threadId], jobDiv[threadId+1]);
+					// Sparse gather: cheap enough to run single-threaded (Solution A
+					// from the design doc). Other workers no-op; the start/wait
+					// barrier still timestamps the phase via gatherTimer.
+					if (threadId == 0) { gatherThreadAccumulators(); }
 					break;
 			}
 		}
@@ -315,11 +328,17 @@ public class Thing extends Object {
 			forceSum.y += forceToAdd.y;
 			forceSum.z += forceToAdd.z;
 		} else {
+			final int idx = myThingNumber;
 			final double[] f = taForce[tid];
-			final int base = myThingNumber * 3;
+			final int base = idx * 3;
 			f[base]     += forceToAdd.x;
 			f[base + 1] += forceToAdd.y;
 			f[base + 2] += forceToAdd.z;
+			final boolean[] flags = dirtyFlags[tid];
+			if (!flags[idx]) {
+				flags[idx] = true;
+				dirtyIndices[tid][dirtyCounts[tid]++] = idx;
+			}
 		}
 	}
 
@@ -337,11 +356,17 @@ public class Thing extends Object {
 			forceSum.x += fx;   forceSum.y += fy;   forceSum.z += fz;
 			torqueSum.x += tx;  torqueSum.y += ty;  torqueSum.z += tz;
 		} else {
+			final int idx = myThingNumber;
 			final double[] f = taForce[tid];
 			final double[] q = taTorque[tid];
-			final int base = myThingNumber * 3;
+			final int base = idx * 3;
 			f[base]     += fx; f[base + 1] += fy; f[base + 2] += fz;
 			q[base]     += tx; q[base + 1] += ty; q[base + 2] += tz;
+			final boolean[] flags = dirtyFlags[tid];
+			if (!flags[idx]) {
+				flags[idx] = true;
+				dirtyIndices[tid][dirtyCounts[tid]++] = idx;
+			}
 		}
 	}
 
@@ -352,45 +377,81 @@ public class Thing extends Object {
 			torqueSum.y += torqueToAdd.y;
 			torqueSum.z += torqueToAdd.z;
 		} else {
+			final int idx = myThingNumber;
 			final double[] q = taTorque[tid];
-			final int base = myThingNumber * 3;
+			final int base = idx * 3;
 			q[base]     += torqueToAdd.x;
 			q[base + 1] += torqueToAdd.y;
 			q[base + 2] += torqueToAdd.z;
+			final boolean[] flags = dirtyFlags[tid];
+			if (!flags[idx]) {
+				flags[idx] = true;
+				dirtyIndices[tid][dirtyCounts[tid]++] = idx;
+			}
 		}
 	}
 
 	// Lazy-grow the per-thread accumulators. Called at the top of doLoop().
+	// dirtyIndices/dirtyFlags grow with taForce/taTorque so workers can never
+	// overflow (no thread can dirty more distinct slots than the Thing count).
 	public static void ensureAccumCapacity (int needed) {
 		if (needed <= taCapacity) return;
 		int newCap = Math.max(needed + (needed >> 2) + 64, 1024);  // 25% headroom
 		for (int t = 0; t < accumThreadCt; t++) {
-			taForce[t]  = new double[newCap * 3];
-			taTorque[t] = new double[newCap * 3];
+			taForce[t]      = new double[newCap * 3];
+			taTorque[t]     = new double[newCap * 3];
+			dirtyIndices[t] = new int[newCap];
+			dirtyFlags[t]   = new boolean[newCap];
 		}
 		taCapacity = newCap;
 	}
 
-	// Sum each thread's force/torque slot into thing.forceSum/torqueSum and zero
-	// the slots in one pass (touch each cache line once for read+zero). Single
-	// Thing-strided loop; parallelized via ThingStepThreads (gatherForcesStart).
-	public static void gatherThreadAccumulatorsRange (int lo, int hi) {
+	// Sparse gather: walk each worker thread's dirty list, adding its
+	// thread-local contributions to thing.forceSum/torqueSum, then zero the
+	// touched slots and clear the dirty flag. Cost is O(sum of dirty counts),
+	// not O(thingCt × threadCt) — typically a few thousand entries vs the
+	// hundreds of millions of slots the full sweep used to touch.
+	//
+	// Called single-threaded from the main loop; no contention because we
+	// process one source thread at a time and writes target distinct fields.
+	public static void gatherThreadAccumulators () {
 		final int tCt = accumThreadCt;
-		for (int i = lo; i < hi; i++) {
-			Thing t = theThings[i];
-			if (t == null || t.removeMe) continue;
-			double fx = 0, fy = 0, fz = 0, tx = 0, ty = 0, tz = 0;
-			final int base = i * 3;
-			for (int th = 0; th < tCt; th++) {
-				final double[] f = taForce[th];
-				final double[] q = taTorque[th];
-				fx += f[base];   fy += f[base+1]; fz += f[base+2];
-				tx += q[base];   ty += q[base+1]; tz += q[base+2];
-				f[base] = 0; f[base+1] = 0; f[base+2] = 0;
-				q[base] = 0; q[base+1] = 0; q[base+2] = 0;
+		int total = 0, maxT = 0;
+		for (int t = 0; t < tCt; t++) {
+			final int count = dirtyCounts[t];
+			if (count > maxT) maxT = count;
+			total += count;
+			if (count == 0) continue;
+			final int[] indices    = dirtyIndices[t];
+			final double[] forces  = taForce[t];
+			final double[] torques = taTorque[t];
+			final boolean[] flags  = dirtyFlags[t];
+			for (int d = 0; d < count; d++) {
+				final int idx = indices[d];
+				final int base = idx * 3;
+				Thing thing = theThings[idx];
+				if (thing != null && !thing.removeMe) {
+					thing.forceSum.x  += forces[base];
+					thing.forceSum.y  += forces[base + 1];
+					thing.forceSum.z  += forces[base + 2];
+					thing.torqueSum.x += torques[base];
+					thing.torqueSum.y += torques[base + 1];
+					thing.torqueSum.z += torques[base + 2];
+				}
+				forces[base] = 0; forces[base + 1] = 0; forces[base + 2] = 0;
+				torques[base] = 0; torques[base + 1] = 0; torques[base + 2] = 0;
+				flags[idx] = false;
 			}
-			t.forceSum.x += fx; t.forceSum.y += fy; t.forceSum.z += fz;
-			t.torqueSum.x += tx; t.torqueSum.y += ty; t.torqueSum.z += tz;
+			dirtyCounts[t] = 0;
+		}
+		gatherCallCount++;
+		gatherTotalEntriesAllTime += total;
+		if (maxT > gatherMaxEntriesAllTime) gatherMaxEntriesAllTime = maxT;
+		if (gatherCallCount % 1000 == 0) {
+			System.out.printf("[GATHER] call=%d totalDirty=%d maxThread=%d cumAvg=%.1f cumMaxPerThread=%d%n",
+				gatherCallCount, total, maxT,
+				(double)gatherTotalEntriesAllTime / gatherCallCount,
+				gatherMaxEntriesAllTime);
 		}
 	}
 	

@@ -4,6 +4,233 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Sparse gather for per-thread accumulators
+
+Follow-up to the morning's per-thread accumulator work. The accumulator
+infrastructure was correct but the gather was a full sweep over every
+Thing × every thread per step — ~880 MB/step bandwidth at M=98K, ~29 ms
+× multiple calls per step. Most of that touched zeros. This entry adds
+dirty tracking so the gather sums only slots actually written, not the
+588K × 16 grid.
+
+### Design — Solution A (single-threaded sparse gather)
+
+Three new static arrays in `Thing.java` alongside `taForce`/`taTorque`:
+
+- `int[][] dirtyIndices[threadId]` — list of thingIndices that this
+  thread wrote to in the current force phase.
+- `int[]  dirtyCounts[threadId]`   — count of entries in each thread's list.
+- `boolean[][] dirtyFlags[threadId]` — dedup guard so the same
+  thingIndex is added at most once per thread per gather window
+  (filaments commonly receive forces from multiple crosslinks routed
+  through the same worker).
+
+All three grow in lockstep with `taForce`/`taTorque` inside
+`ensureAccumCapacity` — capacity equals thingCt headroom, so a worker
+can never overflow its `dirtyIndices` array (it cannot dirty more
+distinct slots than total Thing count).
+
+`incForceSum` / `incTorqueSum` worker path adds three lines after the
+slot write:
+
+```java
+final boolean[] flags = dirtyFlags[tid];
+if (!flags[idx]) {
+    flags[idx] = true;
+    dirtyIndices[tid][dirtyCounts[tid]++] = idx;
+}
+```
+
+Main-thread writes (tid == −1) still target `forceSum`/`torqueSum`
+directly — no dirty tracking needed for the benchmark-pin path.
+
+`gatherThreadAccumulators()` walks each thread's dirty list, adds the
+slot to the Thing's forceSum/torqueSum, zeros the slot, clears the
+flag, then resets the per-thread count. The ThreadSet dispatch
+(`Env.gatherForcesStart` on `ThingStepThreads`) stays in place but
+only thread 0 invokes the gather — the other 15 wait on the barrier.
+
+Solution B (parallel gather partitioned by Thing index) was considered
+but deferred per the design doc's "Start with A, escalate if it
+exceeds 5 ms/step" guidance. The 5 ms target was missed (see below)
+and Solution B is the documented next step.
+
+### Memory overhead
+
+At M=98K, capacity ≈ 735K with 25 % headroom: dirtyIndices = 16 × 735K
+× 4 B = **47 MB**, dirtyFlags = 16 × 735K × 1 B = **11.8 MB**. Total
+**~59 MB**, trivial vs the 564 MB taForce/taTorque accumulators
+already in place.
+
+### Files changed
+
+`boxOfActin/Thing.java` only. No call-site changes (all incForceSum /
+incTorqueSum callers route through the superclass methods, which is
+where dirty tracking is added). The ThreadSet dispatch shape and the
+two `startAllThreadSets(gatherForcesStart)` calls in
+`BoxOfActin.doLoop` (main loop + membrane relaxation) are unchanged.
+
+### Smoke validation — glidingAssay500_val (CPU + GPU) — PASS
+
+```
+                     baseline mean ± 2 SD     CPU (this)        GPU (this)
+bindEvents       :       861 ± 240               712 PASS         920 PASS
+meanBoundMotors  :      7.37 ± 1.52             5.916 PASS       7.797 PASS
+glidingVelocity  :      8.39 ± 1.44            7.6745 PASS       7.9034 PASS
+```
+
+Sources: `RUN_LOGS/2026-05-30_sparse_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_sparse_smoke_gpu.txt`.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, S~1101)
+
+CPU path. Sequential single-runs (concurrent CPU + GPU runs created
+CPU contention on aorus and were re-run sequentially; concurrent
+results archived in `*_concurrent.txt`). Source:
+`RUN_LOGS/2026-05-30_sparse_dense_cpu.txt`.
+
+```
+phase                       pre-accum    dense-sweep    sparse(this)
+--------------------------------------------------------------------
+ThingStep Threads               55.02       112.81         100.88
+ThingBrownian                   31.65        30.22          29.54
+Myosin (joints)                 23.41        17.83          17.47
+MyoDimer                         8.96         7.84           8.46
+Mesh                             6.93         7.34           6.42
+Ck Mots                          5.64         5.18           5.06
+MotorBindGrid3D Fill             4.15         3.63           3.56
+NodeLink                         1.52         1.68           1.45
+--------------------------------------------------------------------
+wall (min per sim-sec)            252         329            306
+[STATS]                  bindEvents       3983 → 3652 → 3687
+                         meanBoundMotors  250.5 → 234.1 → 244.5
+                         glidingVelocity  40.88 → 42.36 → 44.48
+```
+
+Observables single-seed; all within ensemble noise.
+
+GPU path. Source: `RUN_LOGS/2026-05-30_sparse_dense_gpu.txt`.
+
+```
+phase                       pre-accum    dense-sweep    sparse(this)
+--------------------------------------------------------------------
+ThingStep Threads               25.46        80.07          72.61
+gpuMoveThing total              44.70        42.84          41.36
+gpuMotorBinding total           13.26        12.99          12.68
+Myosin (joints)                 23.57        17.31          17.54
+MyoDimer                         9.51         8.71           9.21
+Mesh                             6.93         6.82           6.62
+MotorBindGrid3D Fill             4.31         3.78           3.66
+--------------------------------------------------------------------
+[STATS]                  bindEvents       4051 → 4090 → 3663
+                         meanBoundMotors  257.6 → 251.5 → 233.9
+                         glidingVelocity  42.58 → 42.23 → 43.40
+```
+
+**Result: partial win.** Sparse vs dense-sweep saves ~12 s ThingStep
+on CPU (-11 %) and ~7.5 s on GPU (-9 %); wall drops 329 → 306 min/sim-sec
+on CPU (-7 %). But the pre-accumulator baseline (252 min/sim-sec on
+CPU) is *not* recovered. The joints savings the dense-sweep entry
+predicted (~5–6 s) is preserved on both paths.
+
+### Why not all the way back to pre-accumulator?
+
+Two costs remain after sparse gather:
+
+1. **Per-write dirty-tracking overhead in `incForceSum`/`incTorqueSum`.**
+   Every worker write now does an extra `if (!flags[idx])` branch,
+   flag set, and index append. At ~1 M inc-calls/step the overhead is
+   small in absolute terms but it touches every parallel force phase.
+
+2. **Single-threaded gather cost.** With 16 worker source threads but
+   only one gather worker, the gather is bandwidth + pointer-chase
+   bound at ~150K dirty entries per call (see stats below). Estimated
+   ~10–30 ms per call × multiple calls per step → ~20–40 s for the
+   1000-step smoke. The dense-sweep was bandwidth-bound but
+   parallelized 16-way, putting it close to memory bandwidth ceiling
+   (~30 GB/s ÷ 16 = ~2 GB/s per thread, finishing each pass in ~2 ms).
+
+The dense-sweep's per-thread work was thingCt × 6 doubles ÷ 16 = 36K
+slot touches per thread per call. Solution A single-thread does 147K
+slot touches per call — about 4× more work per call than each
+dense-sweep worker. To beat dense-sweep cleanly, the sparse gather
+needs to be parallelized too (Solution B).
+
+### Dirty list statistics
+
+At M=98K gliding-dense smoke (thingCt ≈ 588K, 1000 main-loop steps +
+membrane relaxation passes ≈ 2000 gather calls):
+
+```
+cumAvg per call:           ~147,706 total dirty entries (across 16 threads)
+cumMaxPerThread per call:   ~19,628 entries (single worst-case thread)
+implied per-thread mean:     ~9,200 entries
+implied call bandwidth:      ~14 MB per gather call
+                             (6 doubles read + 6 doubles zero per entry)
+implied total per step:      ~30–60 MB (depending on membrane pass count)
+```
+
+For comparison, dense-sweep was ~880 MB/step at the same scale. So
+sparse gather *does* cut bandwidth ~15–30×; the win just doesn't fully
+manifest in wall time because the gather went from parallel to serial
+at the same time the bandwidth dropped.
+
+At gliding-assay (M=500, thingCt ≈ 1300) the cumAvg per call is
+~21,000 — meaning small-thingCt regimes are not "sparse" at all (most
+Things are dirty every step). At those scales the dense sweep is
+actually competitive with sparse.
+
+### Crossover analysis
+
+For Solution A (single-thread sparse) to beat dense-sweep on wall:
+
+```
+sparse_work × 1 worker  <  dense_work / 16 workers
+total_dirty × per_entry_cost  <  thingCt × 16 × 6 doubles × 16 B / 16
+total_dirty                   <  thingCt × 16 × 96 B / (16 × per_entry_cost_in_B)
+```
+
+Roughly, sparse wins single-threaded when `total_dirty < thingCt`.
+At dense scale total_dirty = 147K, thingCt = 588K → 0.25, so sparse
+single-thread does beat dense-sweep on raw bandwidth, but the
+single-thread serialization and per-entry pointer chase eat most of
+the win.
+
+For Solution B (sparse parallelized across 16 workers, partitioned by
+Thing index): sparse_work / 16 < dense_work / 16 reduces to
+total_dirty < thingCt × 16 = 9.4 M — trivially true (147K ≪ 9.4 M).
+Expected ~4× wall improvement over Solution A → ThingStep dropping
+back toward (or below) the pre-accumulator baseline.
+
+### Status & open work
+
+- Correctness: PASS (observables within noise on CPU + GPU smoke and
+  dense).
+- Performance:
+  - vs dense-sweep: ~7 % wall improvement at dense scale (the budgeted
+    direction).
+  - vs pre-accumulator: still ~21 % wall regression at dense scale.
+- Memory: +59 MB at M=98K, +236 MB at M=400K (linear in thingCt × 16).
+- Open: **Solution B (parallel sparse gather partitioned by Thing
+  index)** — partition the dirty entries across gather workers by
+  `thingIdx % numThreads`, so each gather worker owns a Thing-index
+  slice across all 16 source threads. Requires sorting / binning the
+  dirty entries by thingIdx, or a count-then-scatter pass. Estimated
+  ~4× speedup over Solution A → should bring ThingStep back to the
+  pre-accumulator baseline or below.
+- Open: per-Thing PRNG seed source (out of scope here; flagged in
+  morning entry).
+
+### Diagnostic counters
+
+`Thing.gatherThreadAccumulators` prints `[GATHER] call=N totalDirty=X
+maxThread=Y cumAvg=Z cumMaxPerThread=W` every 1000 calls. cumAvg
+tracks the running mean of totalDirty across all calls;
+cumMaxPerThread is the largest single-thread dirty count seen so far.
+Useful for spot-checking the sparse regime in a new workload — if
+cumAvg approaches thingCt × 16 the sparse path stops being sparse and
+the dense sweep would be competitive again.
+
 ## 2026-05-30 — Per-thread force/torque accumulators
 
 Survey §D2 / §F6 / §C1 / Top10#1: replace the per-Thing
