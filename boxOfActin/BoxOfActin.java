@@ -694,6 +694,10 @@ public class BoxOfActin {
 				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
 				MyoMotor.fillSoaArrays();
 				FilSegment.fillSoaArrays();
+				// iter2c: classify Things for the GPU moveThing kernel before the
+				// Brownian phase, so calcRandomForces() can skip GPU-handled Things.
+				// No-op on topology-stable steps after the first call.
+				if (Env.useGPU) { GPUMoveThing.onStepStart(); }
 				 // Meshed Collisions
 				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
 					 collisionMeshTimer.start();
@@ -1459,6 +1463,9 @@ public class BoxOfActin {
 				for (int i = 0; i < FilSegment.filSegmentCt; i++) {
 					FilSegment.theFilSegments[i].calculateProperties();
 				}
+				// iter2c: bTransGam/bRotGam buffers are FIRST_EXECUTION on the GPU plan.
+				// Drag refresh invalidates them, forcing a plan rebuild + re-upload.
+				if (Env.useGPU) { GPUMoveThing.invalidatePlan(); }
 				if (Env.benchmarkFilament && deflFil.midSeg != null && deflFil.segs != null) {
 					double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 					double zetaPerp = deflFil.midSeg.bTransGam.y;

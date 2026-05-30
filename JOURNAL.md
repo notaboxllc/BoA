@@ -4,6 +4,211 @@ Last updated: 2026-05-29
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-29 — Iter2c: Wang hash Brownian on GPU + pack optimization
+
+Two changes targeting iter2b-polish's 1.61× GPU slowdown at M=98K, where
+pack=75ms + unpack=55ms per call dominated the kernel cycle:
+
+1. **Brownian RNG inline in kernel.** Each thread generates 6 N(0,1)
+   Gaussians via Wang hash (3 hashes feeding 3 Box-Muller pairs with both
+   cos and sin retained). The kernel signature drops `randForces` /
+   `randTorques` FloatArray params; CPU `calcRandomForces()` skips Things
+   flagged `gpuHandled` by the per-step `classifyThings()` pre-pass.
+
+2. **Pre-built `gpuThingIndices[]`** indexed by slot. The hot pack/unpack
+   loops walk a flat int array instead of running `instanceof` and
+   eligibility logic on every Thing every step. Per-slot
+   `brownianRule[]` (FIL / MYO / LEVER) lets `packPerStep` recompute
+   per-Thing trans/rot scales without `instanceof`.
+
+`bTransGam` / `bRotGam` / `velMask` initially moved to FIRST_EXECUTION but
+reverted after observing `slotCount` grows by ~1 / step during the gliding-
+assay early ramp-up (motors are added incrementally up to the target
+density). New slot indices inherit device-side zeros from the first-
+execution upload → `bRotGam=0` makes `bAngVeloc=inf` → coord NaN at step 1.
+EVERY_EXECUTION restored as the safe baseline; see the "device-zero NaN"
+incident below.
+
+### A. Wang hash + Box-Muller derivation
+
+CPU `Thing.calcRandomForces()` uses Marsaglia polar:
+
+```
+randForces.x = (1/dt) * v1.x * sqrt(bTransDiff.x * facterm.x) * bTransGam.x
+            where facterm = -4*dt*log(rsq)/rsq, rsq = v1²+v2² in unit circle,
+            bTransDiff.x = kT / bTransGam.x  (Einstein)
+```
+
+Marsaglia identity `v * sqrt(-2*log(rsq)/rsq) ~ N(0,1)` collapses this to:
+
+```
+randForces.x = g * sqrt(2*kT*bTransGam.x / dt),  g ~ N(0,1)
+```
+
+The kernel pre-computes `brownianForceMag = sqrt(2*kT/dt)` (one float in
+`params`) and adds:
+
+```
+bfx += tScale * brownianForceMag * sqrt(bTransGam.x) * gfx
+btx += rScale * brownianForceMag * sqrt(bRotGam.x)   * gtx
+```
+
+Statistically equivalent to CPU `randForces`. Individual seed
+trajectories diverge from CPU (different RNGs, different Gaussian
+sequences) but ensemble mean / variance must match — which is the
+validation gate.
+
+Seed mixing: `base = (m * 1000003) ^ (stepCount * 999983) ^ (runSeed *
+7919)`, then six independent Wang hashes via golden-ratio salts
+(0x9e3779b9, 0x85ebca6b, 0xc2b2ae35, 0x517cc1b7, 0x1f0a7ed5). `runSeed`
+is sampled from `Env.mtRNG.nextInt()` at class load; `-seed N` reseeds
+mtRNG before GPUMoveThing initialises, so each user seed produces a
+distinct GPU Gaussian stream.
+
+### B. Pre-built slot index
+
+`GPUMoveThing.classifyThings()` runs on:
+- First call (after `allocateAndBuildPlan`)
+- `Thing.thingCt != lastThingCt` (population growth or shrinkage)
+- `invalidatePlan()` (aeta change)
+
+It walks `theThings[]` once, decides eligibility, writes:
+- `gpuThingIndices[slot] = thing index`
+- `brownianRule[slot] = RULE_FIL / RULE_MYO / RULE_LEVER`
+- `Thing.gpuHandled = true` (consumed by `ThingBrownianThreads.execute`
+  to skip CPU `calcRandomForces()`)
+
+`packPerStep()` loops over `gpuThingIndices`, does no `instanceof` per
+slot. The per-rule branch in scale computation is a small switch on a
+cached int (predictable jump), not a chain of `instanceof` tests.
+
+For gliding-assay scope: classify re-runs every step during the motor
+ramp-up phase (population growing by 1/step), then locks once population
+saturates. iter2c's win is in the post-ramp steady state.
+
+### C. ThingBrownianThreads change
+
+`Thing.java:227-243` adds a `Env.useGPU` branch: for each Thing,
+`calcRandomForces()` is skipped when `t.gpuHandled` is true. Non-GPU
+runs are unaffected (`useGPU == false` falls into the original
+unchanged code path). For mixed populations (Bug, branch FilSegments),
+the CPU path still runs for those Things — they fall into the GPUMoveThing
+`cpuFallback[]` list and are handled by the same kernel-pack-skipping
+logic.
+
+### D. Device-zero NaN incident
+
+First attempt set `bTransGam` / `bRotGam` / `velMask` to FIRST_EXECUTION
+to save ~2.4 MB/call upload at M=98K. NaN appeared at step=1, slot=42001
+of a FilSegment. Mechanism: classifyThings on step 0 filled FloatArray
+slots [0, slotCount_0). On step 0, FIRST_EXECUTION uploaded the whole
+buffer. On step 1, motor population grew to slotCount_1 = slotCount_0+1;
+classifyThings filled the new slot, but FIRST_EXECUTION skipped re-
+upload. Device-side slot[slotCount_0] still held zero. Kernel computed
+`bvx = 1e6 * bfx / 0 = inf`, `coord += dt * inf = NaN`. NaN propagated
+to all downstream torque / cross-product paths in subsequent steps.
+
+Fix: revert to EVERY_EXECUTION. The drag re-pack lives in
+`packPerStep()`, matching iter2b's pattern. Plan rebuild on grow handles
+capacity changes. Future work for truly steady populations could
+re-enable FIRST_EXECUTION + plan rebuild on every topology event, but
+the ramp-up frequency in gliding-assay makes that net-negative here.
+
+### E. Validation — 10 seeds × glidingAssay500_val — PASS
+
+Protocol: 10 CPU + 10 GPU seeds × 0.1 s (10 001 steps). Source data in
+`RUN_LOGS/2026-05-29_iter2c-validation.txt`; summary in
+`RUN_LOGS/2026-05-29_iter2c-validation-summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     860.10 ± 36.24 (114.60)         0.06  PASS
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       7.44 ±  0.25 (  0.78)         0.35  PASS
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       8.08 ±  0.12 (  0.38)         0.74  PASS
+wall (s/seed)    :    275.10 ±  1.46 (  4.63)     449.30 ±  0.65 (  2.06)       108.73  (diagnostic only)
+```
+
+All three physics observables pass the |diff|/cSEM < 2.0 gate. The Wang-
+hash Brownian sequence differs per-seed from CPU's MersenneTwister, but
+the ensemble statistics match within noise — the fluctuation-dissipation
+calibration is preserved.
+
+GPU wall 449.3 s/seed vs CPU 275.1 s/seed: **1.63× slower** (vs iter2b's
+1.82×). 12 % wall reduction at validation scale from iter2c's two levers.
+
+### F. Dense timing — M=98K, S~1001 (glidingDense_demo_smoke)
+
+CPU + GPU single-seed run, source logs `RUN_LOGS/2026-05-29_iter2c-dense-{cpu,gpu}.log`:
+
+```
+phase                          CPU dense (s)   GPU dense (s)
+---------------------------------------------------------------
+ThingStep (step+bio+resetCt)        55.1            23.2
+Brownian (calcRandomForces)         29.5             3.0   ← iter2c: only CPU-fallback Things
+Myosin (joints)                     21.6            21.7
+MotorBindGrid3D Fill                29.2            28.2
+Mesh                                 6.6             6.6
+MyoDimer                             8.5             8.5
+Ck Mots (CPU motor-binding)          5.0             0.0
+GPUMotorBinding total                ---            12.8   (1101 calls)
+GPUMoveThing total                   ---           133.3   (1101 calls)
+---------------------------------------------------------------
+WALL                               188             273
+                                                 (1.45× slower; iter2b was 1.61×)
+```
+
+Brownian phase falls from 29.5 s → 3.0 s on GPU (the residual 3 s
+handles Bug and any CPU-fallback Things). Net wall reduction at M=98K:
+330 → 273 s (-17 % vs iter2b's GPU). Still 1.45× slower than CPU;
+unpack remains the dominant per-call cost at this scale.
+
+### G. Updated `[STATS] gpuMoveThing` per-call breakdown
+
+Validation scale (M=500, 10-seed avg):
+
+```
+            iter2c (ms)   iter2b (ms)   delta
+total          14.85         17.83      -16.7 %
+pack            6.62          9.10      -27.3 %
+exec            1.81          2.03      -10.9 %
+unpack          6.43          6.69       -3.9 %
+```
+
+Dense scale (M=98K, single seed):
+
+```
+            iter2c (ms)   iter2b (ms)   delta
+total         121.0         141.0       -14.2 %
+pack           56.1          74.6       -24.8 %
+exec            9.5          11.2       -15.2 %
+unpack         55.5          55.1       +0.7 %
+```
+
+Pack falls 25 % (no randForces/randTorques upload, no `instanceof` in
+the hot loop, drag tensors still EVERY_EXECUTION but written tightly).
+Exec falls 15 % — the kernel does *more* work (Box-Muller + 6 sqrt +
+6 trig), but the dropped buffer count (13 → 11) reduces per-launch
+device-side bookkeeping, and the eliminated upload dominates.
+
+Unpack is now the bottleneck: each slot pays for three Pt3D writes and
+a per-type `initialize()` call. iter2d (device residency for
+coord/uVec/yVec) would eliminate this entirely.
+
+### H. Open items
+
+- **iter2d (residency)**: Keep `coord`/`uVec`/`yVec` resident on the device
+  across steps. CPU phases that need them (Brownian on fallback Things,
+  mesh fill, motorbind grid pack) would need to read FloatArray instead of
+  Pt3D — touches every phase. Largest remaining lever once iter2c lands.
+- **FIRST_EXECUTION for drag, with plan rebuild on topology event.** Only
+  pays off if the population stays steady for many steps. For boa10 / Arp-
+  branched runs where FilSegment splits trigger drag changes, the rebuild
+  cost may exceed the upload savings. Defer until a stable-population
+  workload becomes the perf target.
+- Out-of-scope follow-ons from the iter2b survey (motherFil branch pre-
+  pass, StickyNode forceSum pre-add, ProteinNode velMask) remain
+  deferred — gliding-assay scope doesn't exercise them.
+
 ## 2026-05-29 — Iter2b-polish + dense timing
 
 Two-part follow-on to the morning's iter2b implementation: kill the

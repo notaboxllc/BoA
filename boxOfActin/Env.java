@@ -210,7 +210,7 @@ public class Env {
 	static boolean orderedCentered = false;
 
 	static private final int drawInterval_init = 100;
-	static private final int toFileInterval_init = 100;
+	static private final int toFileInterval_init = 1000;
 	static private final double jpegQuality_init = 1.0;
 	static private final int remoteReportInterval_init = (int) 1e4; // time-steps
 	static final boolean timeStampJPEGs = true; // write time and other info on
@@ -296,7 +296,7 @@ public class Env {
 			" LP benchmark active", 1.0, "", Parameter.BOOLEAN).setMutableAtRuntime();
 	
 	// LP benchmark filament length
-	static final double testLpFilLength = 21; // (microns) length of the test filament used for observing effective Lp in simulation
+	static final double testLpFilLength = 48; // (microns) length of the test filament used for observing effective Lp in simulation
 	
 	// **** Graphics Sizes Etc ****
 	static private final int frameWidth_init = 800;

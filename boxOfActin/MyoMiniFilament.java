@@ -13,7 +13,7 @@ import java.lang.Math.*;
 
 
 public class MyoMiniFilament extends Thing {
-	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [5000];	// array holding all protein nodes
+	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [10000];	// array holding all protein nodes
 	static int myoMiniFilCt = 0; //
 	int myMyoMiniNumber;
 	static double length = 0.180;	// �m

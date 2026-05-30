@@ -1,23 +1,23 @@
 package boxOfActin;
 
 public class MyoMotor extends Thing {
-	static MyoMotor [] theMotors = new MyoMotor[100000];
+	static MyoMotor [] theMotors = new MyoMotor[500000];
 	static int motorCt = 0;
 	int myMotorNumber;
 
 	// SoA arrays for GPU-ready motor-binding path
 	// Step 1a: motor head position + bound-state flag
 	// Step 1b: motor head orientation (uVec) + rod orientation (myMyosin.myoRod.uVec) — fine-check inputs
-	static double[]  soaX     = new double[100000];
-	static double[]  soaY     = new double[100000];
-	static double[]  soaZ     = new double[100000];
-	static boolean[] soaOnFil = new boolean[100000];
-	static double[]  soaUX    = new double[100000];
-	static double[]  soaUY    = new double[100000];
-	static double[]  soaUZ    = new double[100000];
-	static double[]  soaRodUX = new double[100000];
-	static double[]  soaRodUY = new double[100000];
-	static double[]  soaRodUZ = new double[100000];
+	static double[]  soaX     = new double[500000];
+	static double[]  soaY     = new double[500000];
+	static double[]  soaZ     = new double[500000];
+	static boolean[] soaOnFil = new boolean[500000];
+	static double[]  soaUX    = new double[500000];
+	static double[]  soaUY    = new double[500000];
+	static double[]  soaUZ    = new double[500000];
+	static double[]  soaRodUX = new double[500000];
+	static double[]  soaRodUY = new double[500000];
+	static double[]  soaRodUZ = new double[500000];
 
 	static void fillSoaArrays() {
 		for (int i = 0; i < motorCt; i++) {

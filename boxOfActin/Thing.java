@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Thing extends Object {
 	
-	static Thing [] theThings = new Thing [1000000];	// array of all things
+	static Thing [] theThings = new Thing [2000000];	// array of all things
 	static int thingCt = 0;								// how many things
 	static Crucible theBox;								// only one bug/box
 	static Bug lmBug;				// only one listeria
@@ -29,6 +29,8 @@ public class Thing extends Object {
 	final int createdAtStep;              // Env.counter at construction, for age reporting
 	int myThingNumber;					// identifies where in "theThings" this Thing is; reassigned on swap-cleanup
 	boolean removeMe = false;			// if true this Thing will be eliminated
+	boolean gpuHandled = false;			// iter2c: set by GPUMoveThing.classifyThings(); when true and Env.useGPU,
+										// CPU calcRandomForces() skips this Thing (kernel generates Brownian inline)
 	Pt3D coord = new Pt3D();			// the x,y,and z position of the Thing
 	static Pt3D maxPos = Env.worldDimension;	// maximum x position this Thing can occupy
 	double [][] transXTox = new double [3][3];	// transformation matrix from fixed to body-fixed frame
@@ -225,8 +227,19 @@ public class Thing extends Object {
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.bForcesStart:
-					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-						if (!theThings[i].removeMe) { theThings[i].calcRandomForces(); }
+					if (Env.useGPU) {
+						// iter2c: GPU kernel generates Brownian inline via Wang hash.
+						// Skip CPU calcRandomForces for Things flagged by
+						// GPUMoveThing.classifyThings() — only CPU-fallback Things
+						// (Bug, branch FilSegments, etc.) still need it.
+						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+							Thing t = theThings[i];
+							if (!t.removeMe && !t.gpuHandled) { t.calcRandomForces(); }
+						}
+					} else {
+						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+							if (!theThings[i].removeMe) { theThings[i].calcRandomForces(); }
+						}
 					}
 					break;
 			}
