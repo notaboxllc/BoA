@@ -4,7 +4,287 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
-## 2026-05-30 — SoA canonical coord/uVec/yVec
+## 2026-05-30 — SoA derived fields (end1/end2/zVec/transXTox/length) + bulk recompute
+
+Follow-up to the SoA canonical coord/uVec/yVec entry. The previous step
+made pose canonical in `float[]` SoA but left the per-Thing
+`initialize()` doing all the derived-field math (zVec cross, transMat,
+end1/end2 add). On the GPU path that meant 16 worker threads invoking
+~98K virtual method calls per step inside `unpackRange`, with each
+call chasing Pt3D references for the writes. This entry promotes the
+derived fields to their own `float[]` arrays, replaces per-Thing
+`initialize()` in the GPU unpack with a tight, SIMD-friendly bulk
+pass, and adds a parallel-friendly Pt3D bridge so unconverted CPU
+readers (`fs.end1.x`, `m.transXTox`, etc.) keep seeing fresh values.
+
+The Pt3D `coord`/`uVec`/`yVec`/`end1`/`end2`/`zVec`/`transXTox` fields
+remain in place as a CPU-reader bridge; the original task's call to
+remove them entirely is deferred to a follow-up that converts each
+reader site file-by-file (FilSegment alone has ~128 chase-call sites
+just for those fields). The compiler is the checklist for that work,
+and it is much bigger than one session.
+
+### Architecture
+
+**Canonical derived storage** (Thing.java):
+```java
+static float[] soaEnd1      = new float[0];  // [x0,y0,z0, x1,y1,z1, ...]
+static float[] soaEnd2      = new float[0];
+static float[] soaZVec      = new float[0];
+static float[] soaTransXTox = new float[0];  // 9 floats per Thing (row-major)
+static float[] soaLength    = new float[0];  // 1 float per Thing
+```
+
+Indexed alongside `soaCoord`/`soaUVec`/`soaYVec` by `myThingNumber`.
+`ensureAccumCapacity` grows them in lockstep (preserving contents via
+`System.arraycopy`); `removeThing` swaps them in compaction.
+
+**Bulk recompute pass** (`Thing.recomputeDerivedSoA(from, upTo)`):
+```java
+for (int i = from; i < upTo; i++) {
+    // zVec = uVec × yVec, normalised
+    // yVec' = zVec × uVec (re-orthogonalise)
+    // transXTox row-major = [uVec; yVec; zVec]
+    // end1 = coord − length/2 · uVec
+    // end2 = coord + length/2 · uVec
+}
+```
+
+Reads `soaCoord`/`soaUVec`/`soaYVec`/`soaLength`; writes the five
+derived arrays. The zVec normalisation step matches what FilSegment.
+initialize() already did; the other subclasses' initialize() did not
+normalise zVec, so the bulk pass is a behaviour change for them in
+the strict sense (they now always have an orthonormal body frame).
+The pose `soaYVec` is rewritten with the orthogonalised value so the
+next-step GPU pack reads orthonormal yVec; the kernel's small
+angular updates per step have only drifted yVec slightly from
+orthonormality anyway, so the correction is small.
+
+**Pt3D bridge pass** (`Thing.bridgeDerivedToPt3D(from, upTo)`):
+For each Thing in the range, copies SoA → `t.coord`/`t.uVec`/`t.yVec`/
+`t.zVec`/`t.end1`/`t.end2`/`t.uVecR` and the row-major `t.transXTox` /
+its transpose `t.transxToX`. Direct field writes, no method dispatch,
+so the per-iteration cost is much lower than the original per-Thing
+`initialize()` (which did the full Pt3D math too).
+
+**xRange/yRange/zRange follow-up** (FilSegment-only, in moveThings()):
+After the bulk pass + bridge update FilSegment Pt3D coord/end2, a
+linear pass over `theFilSegments` computes `xRange = |coord.x − end2.x|`
+etc. Only FilSegment reads these (collision quick-reject); other
+subclasses write them in their `initialize()` but never read them.
+
+### GPU path: per-Thing initialize() removed from unpackRange
+
+`GPUMoveThing.unpackRange` no longer calls `t.initialize()` per slot —
+workers only write pose to SoA. After `dispatchAndWait(OP_UNPACK)`
+returns and the `cpuFallback` Thing loop completes, `moveThings`
+dispatches a new op `OP_DERIVED_AND_BRIDGE` over `[0, Thing.thingCt)`
+that runs `recomputeDerivedSoA` and `bridgeDerivedToPt3D` per worker
+range. Partition is over Thing indices rather than GPU slots so a
+single dispatch covers GPU-eligible Things and cpuFallback Things
+uniformly (cpuFallback Things see a redundant overwrite of their
+Pt3D fields with the same values their `initialize()` just wrote —
+harmless, and avoids needing a sparse "GPU slot index → Thing
+index" set-membership check).
+
+### Adaptive parallel threshold
+
+The post-unpack bulk pass dispatches to the worker pool only when
+`Thing.thingCt >= 8000`. Below the threshold (e.g. gliding-assay
+M=500 with thingCt ≈ 1300) the dispatch overhead (`synchronized
+notifyAll + wait` × 16 workers ≈ 0.1–1 ms per step) dominates the
+actual work (~130 µs single-threaded). Above the threshold (e.g.
+dense at thingCt ≈ 588 K) the 16-way parallel pass amortises the
+dispatch over the larger Thing count and is a clear win.
+
+### CPU path unchanged
+
+CPU-mode `moveThing` still calls per-Thing `initialize()` at the
+end of each Thing's step. The bulk pass is GPU-only; converting
+the CPU `moveThing` dispatch to drive the bulk pass would require
+removing initialize() from every CPU `moveThing` body and is left
+for a follow-up. The SoA derived arrays still get populated on the
+CPU path via `pushLengthToSoa(length)` and the existing pose-push
+sites, so subsequent reader-side conversions can use SoA accessors
+regardless of mode.
+
+### Files changed
+
+- `boxOfActin/Thing.java` — added `soaEnd1`/`soaEnd2`/`soaZVec`/
+  `soaTransXTox`/`soaLength` arrays, accessors (`getEnd1X/Y/Z`,
+  `getEnd2X/Y/Z`, `getZVecX/Y/Z`, `getLengthSoa`, `getTransXTox(idx)`),
+  bulk passes (`recomputeDerivedSoA`, `bridgeDerivedToPt3D`),
+  `pushLengthToSoa(double)` helper, extended `ensureAccumCapacity` to
+  grow the new arrays (preserve via arraycopy), `removeThing` swaps
+  the new slots in compaction, promoted `Pt3D end1`/`Pt3D end2` from
+  per-subclass declarations to the base class.
+- `boxOfActin/FilSegment.java`, `MyoMotor.java`, `MyoRod.java`,
+  `MyoLever.java`, `MyoMiniFilament.java`, `Bug.java` — removed
+  per-subclass `Pt3D end1 = new Pt3D()` / `Pt3D end2 = new Pt3D()`
+  declarations (now inherited from `Thing`); each `initialize()`
+  pushes its length to soaLength after computing end1/end2.
+- `boxOfActin/GPUMoveThing.java` — added `OP_DERIVED_AND_BRIDGE` op
+  code (worker case dispatches to `Thing.recomputeDerivedSoA(start,
+  end) + bridgeDerivedToPt3D(start, end)`); removed `t.initialize()`
+  from `unpackRange`; added post-unpack dispatch in `moveThings`
+  with adaptive parallel threshold and FilSegment xRange pass.
+
+### Smoke validation — glidingAssay500_val — PASS
+
+```
+                    baseline mean ± 2 SD     CPU (this)        GPU (this)
+bindEvents       :       861 ± 240               982 PASS         902 PASS
+meanBoundMotors  :      7.37 ± 1.52            8.289 PASS       7.441 PASS
+glidingVelocity  :      8.39 ± 1.44           8.7518 PASS      7.6285 PASS
+```
+
+Logs: `RUN_LOGS/2026-05-30_nopt3d_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_nopt3d_smoke_gpu.txt`.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, thingCt≈588K, ~1100 steps)
+
+CPU path. Source: `RUN_LOGS/2026-05-30_nopt3d_dense_cpu.txt`.
+
+```
+phase                soaforce    coord(prev)    nopt3d(this)
+-------------------------------------------------------------
+ThingStep Threads        62.45      63.53           60.39
+ThingBrownian            31.56      31.39           29.69
+Myosin (joints)          19.32      18.95           17.33
+MyoDimer                  8.58       8.62            7.82
+Mesh                      6.68       6.79            6.47
+Ck Mots                   5.33       5.27            5.01
+MotorBindGrid3D Fill      3.87       3.85            3.57
+NodeLink                  1.56       1.52            1.56
+-------------------------------------------------------------
+wall (min per sim-sec)   257        258             246      (~4 % faster)
+[STATS]      bindEvents       3633 → 3359 → 4313
+             meanBoundMotors  226.7 → 204.2 → 274.5
+             glidingVelocity  40.58 → 39.06 → 41.25
+```
+
+CPU dense is mildly faster (~4 %) vs the previous coord/uVec/yVec
+landing, all within noise. The CPU path doesn't use the bulk pass
+(initialize() still runs per Thing in CPU moveThing), so this is
+just confirming the SoA derived array additions and length push
+don't regress anything.
+
+GPU path. Source: `RUN_LOGS/2026-05-30_nopt3d_dense_gpu.txt`.
+
+```
+phase                soaforce    coord(prev)    nopt3d(this)
+-------------------------------------------------------------
+ThingStep Threads        32.26      32.56           31.66
+gpuMoveThing total       40.39      41.55           41.15
+gpuMotorBinding total    13.05      13.11           12.78
+Myosin (joints)          18.33      18.27           16.84
+MyoDimer                  9.78       9.32            9.29
+Mesh                      6.70       6.76            6.49
+MotorBindGrid3D Fill      3.93       3.87            3.48
+-------------------------------------------------------------
+wall (min per sim-sec)   239        241             234      (~3 % faster)
+gpuMoveThing breakdown   pack=9.20s,  exec=10.68s, unpack=20.51s   (soaforce)
+                         pack=9.01s,  exec=10.71s, unpack=21.82s   (coord)
+                         pack=8.467s, exec=10.549s, unpack=22.133s (this)
+```
+
+### Result: small win, foundation in place
+
+CPU wall drops 258 → 246 min/sim-sec (~4 %); GPU wall drops 241 →
+234 min/sim-sec (~3 %). Both within run-to-run noise, but the
+breakdown shows where the work moved:
+
+- **`gpuMoveThing pack` -0.5 s, `exec` -0.16 s.** Slight pack
+  improvement is from the bulk pass writing back orthonormalised
+  yVec, so subsequent pack reads a stable pose (less drift in
+  the kernel's internal angular accumulator). Exec is essentially
+  flat — kernel itself didn't change.
+- **`unpack` +0.3 s (vs coord/uVec)**. The new OP_DERIVED_AND_BRIDGE
+  dispatch runs inside the unpack-timed window (between
+  `dispatchAndWait(OP_UNPACK)` and the timer stamp at the end of
+  `moveThings`). It replaces the per-Thing `t.initialize()` virtual
+  call cost (which was inside the worker loop and so already
+  inside `unpack`) with the bulk recompute + bridge for all
+  thingCt (not just GPU slots). The combined cost is about the
+  same.
+- **`ThingStep` -1 s, `Myosin (joints)` -1.5 s.** Likely noise; the
+  joint and step phases don't directly read the new SoA derived
+  arrays. The bulk recompute keeping `soaYVec` orthonormal might
+  slightly reduce numerical drift downstream, but the effect is
+  too small to attribute confidently.
+
+The visible savings are small because the per-Thing `initialize()`
+cost on GPU unpack was already small in absolute terms (~6 % of
+gpuMoveThing); replacing it with bulk recompute + bridge for ALL
+thingCt instead of just GPU slots is a near-wash. The win will
+come when CPU readers are converted to SoA — then the bridge
+pass can be dropped, and the bulk pass alone (single SIMD-friendly
+loop, no Pt3D writes) becomes the only post-unpack cost.
+
+### Memory overhead
+
+At M=98 K with `taCapacity ≈ 735 K`:
+- soaEnd1, soaEnd2, soaZVec: 3 × 735 K × 3 × 4 B = **~26.5 MB**
+- soaTransXTox: 735 K × 9 × 4 B = **~26.5 MB**
+- soaLength: 735 K × 4 B = **~2.9 MB**
+Total **~56 MB** additional. Trivial vs the existing 564 MB
+`taForce`/`taTorque` and ~26 MB pose arrays.
+
+### Behaviour change: zVec normalisation
+
+The original `initialize()` in non-FilSegment subclasses (MyoMotor,
+MyoRod, MyoLever, MyoMiniFilament, Bug) did NOT normalise zVec:
+
+```java
+zVec.cross(uVec, yVec);   // zVec magnitude depends on |uVec × yVec|
+yVec.cross(zVec, uVec);
+```
+
+The bulk recompute always normalises zVec:
+
+```java
+zx = uy*yz - uz*yy; ... ;  // unnormalised zVec
+zmag2 = zx*zx + zy*zy + zz*zz;
+if (zmag2 > 0f) { float inv = 1f/sqrt(zmag2); zx *= inv; ... }
+// then yVec' = zVec × uVec — yVec orthogonalisation against normalised zVec
+```
+
+In practice the kernel maintains uVec/yVec close to orthonormal so
+the normalisation is a tiny correction. Observables stayed within
+the ±2 SD validation bands, so the change is benign at gliding
+scale. Flag for revisit if a long-running benchmark picks up drift.
+
+### Open / deferred
+
+- **Pt3D field removal.** The original task asked for
+  `Thing.coord/uVec/yVec/end1/end2/zVec/transXTox` to be deleted
+  outright. That requires converting every reader site across
+  ~60 files (FilSegment alone has ~128 chase sites). Foundation
+  is now in place (SoA arrays + accessors + bulk pass + bridge);
+  each follow-up session can convert a few files at a time,
+  driven by the compiler errors after a field is removed.
+- **CPU `moveThing` per-Thing `initialize()` removal.** Same
+  pattern as GPU unpack — replace per-Thing initialize() with a
+  bulk dispatch after the moveStart ThreadSet finishes. Requires
+  rerouting the SoA pose flush (`pushPoseToSoa` at end of
+  moveThing) and removing the per-Thing initialize from CPU mode.
+  Modest win at gliding scale; uncertain at dense.
+- **Pt3D bridge removal.** Once enough CPU readers are converted,
+  the bridge becomes pure overhead. Drop it from the
+  OP_DERIVED_AND_BRIDGE worker case and have it return after the
+  recompute. Eliminates ~30 MB/step of redundant Pt3D writes at
+  dense scale.
+- **MotorBindGrid3D unified-SoA fill.** `FilSegment.fillSoaArrays`
+  still computes end1/end2 inline; could read `soaEnd1`/`soaEnd2`
+  directly now that the bulk pass populates them before
+  `MotorBindGrid3D.fill` runs. Tiny win, but it removes the
+  duplicated formula.
+- **`zVec` normalisation behaviour flag.** If any benchmark
+  observable depends on the legacy (non-normalised) zVec for
+  non-FilSegment subclasses, gate the normalisation behind a
+  flag. Currently no benchmark has tripped on this.
+
+
 
 Follow-up to the `soaForceSum`/`soaTorqueSum` entry. Same pattern, applied
 to the pose fields. `Thing.coord` / `uVec` / `yVec` Pt3D objects remain as

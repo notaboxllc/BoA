@@ -117,9 +117,22 @@ public class GPUMoveThing {
     // (start signal + completion count).
     private static final int N_WORKERS = Math.max(1,
             Math.min(Env.allThreadCt, Runtime.getRuntime().availableProcessors()));
-    private static final int OP_PACK_FULL     = 0;
-    private static final int OP_PACK_RESIDENT = 1;
-    private static final int OP_UNPACK        = 2;
+    private static final int OP_PACK_FULL          = 0;
+    private static final int OP_PACK_RESIDENT      = 1;
+    private static final int OP_UNPACK             = 2;
+    // Bulk SoA derived recompute + Pt3D bridge over a contiguous Thing-index
+    // range. Replaces the per-Thing t.initialize() call that used to run
+    // inside unpackRange — the bulk pass amortises method dispatch and runs
+    // a SIMD-friendly tight loop over the canonical SoA arrays. The bridge
+    // step keeps unconverted CPU readers (Pt3D.end1.x etc.) seeing the
+    // freshly-computed derived state.
+    private static final int OP_DERIVED_AND_BRIDGE = 3;
+    // Threshold below which the post-unpack bulk recompute + Pt3D bridge
+    // runs inline on the main thread rather than dispatching to the worker
+    // pool. Picked so gliding-assay-scale runs (Thing.thingCt ≈ 1300) avoid
+    // ~10 ms / step dispatch overhead while dense runs (≈ 588 K) still see
+    // the 16-way parallel speedup.
+    private static final int DERIVED_BRIDGE_PARALLEL_THRESHOLD = 8000;
     private static Thread[] workers;
     private static final Object phaseLock = new Object();
     private static int     currentPhase   = 0;   // bumped by master per dispatch
@@ -512,6 +525,10 @@ public class GPUMoveThing {
                     case OP_PACK_FULL:     packRange(start, end, true);  break;
                     case OP_PACK_RESIDENT: packRange(start, end, false); break;
                     case OP_UNPACK:        unpackRange(start, end);      break;
+                    case OP_DERIVED_AND_BRIDGE:
+                        Thing.recomputeDerivedSoA(start, end);
+                        Thing.bridgeDerivedToPt3D(start, end);
+                        break;
                     default: /* no-op */ break;
                 }
             }
@@ -641,20 +658,21 @@ public class GPUMoveThing {
     }
 
     private static void unpackRange(int slotStart, int slotEnd) {
-        Thing[] theThings = Thing.theThings;
         int[]   indices   = gpuThingIndices;
         float[] soaCoordArr = Thing.soaCoord;
         float[] soaUVecArr  = Thing.soaUVec;
         float[] soaYVecArr  = Thing.soaYVec;
         for (int slot = slotStart; slot < slotEnd; slot++) {
             int thingIdx = indices[slot];
-            Thing t = theThings[thingIdx];
             int i3 = slot * 3;
             int s3 = thingIdx * 3;
             // Write kernel output into the canonical SoA pose arrays
-            // (contiguous float[] writes, no Pt3D pointer chase).
-            // initialize() then copies SoA → Pt3D bridge + computes the
-            // derived fields (zVec, transXTox/transxToX, end1/end2).
+            // (contiguous float[] writes, no Pt3D pointer chase). Derived
+            // fields (zVec/transXTox/end1/end2) and the Pt3D bridge run
+            // in a separate parallel pass (OP_DERIVED_AND_BRIDGE) after
+            // every worker has finished pose unpacks AND the cpuFallback
+            // moveThing loop has pushed its pose to SoA, so the bulk
+            // recompute sees a globally-consistent SoA pose snapshot.
             soaCoordArr[s3]     = coord.get(i3);
             soaCoordArr[s3 + 1] = coord.get(i3 + 1);
             soaCoordArr[s3 + 2] = coord.get(i3 + 2);
@@ -664,7 +682,6 @@ public class GPUMoveThing {
             soaYVecArr[s3]      = yVec.get(i3);
             soaYVecArr[s3 + 1]  = yVec.get(i3 + 1);
             soaYVecArr[s3 + 2]  = yVec.get(i3 + 2);
-            t.initialize();
         }
     }
 
@@ -715,6 +732,45 @@ public class GPUMoveThing {
         }
         for (int i = 0; i < cpuFallbackCt; i++) {
             cpuFallback[i].moveThing();
+        }
+        // SoA derived recompute + Pt3D bridge: now that every Thing has a
+        // fresh SoA pose (GPU workers wrote it for kernel slots; cpuFallback
+        // moveThing pushed it via pushPoseToSoa), the bulk pass can read the
+        // canonical pose, compute zVec/transXTox/end1/end2 into SoA derived
+        // arrays, and copy the result back into the Pt3D bridge fields that
+        // unconverted CPU readers chase. Parallelised across the same worker
+        // pool that just ran OP_UNPACK; partition is over Thing indices
+        // [0, thingCt) rather than GPU slots. cpuFallback Things see a
+        // redundant overwrite of their Pt3D with the same values they
+        // computed inside initialize() — harmless, and avoids needing a
+        // sparse "GPU slot index → Thing index" set membership check.
+        int tc = Thing.thingCt;
+        if (tc > 0) {
+            // Skip the worker dispatch for small thingCt — at gliding-assay
+            // scale (~1300 Things) the per-step dispatch overhead (~0.1–1 ms
+            // for synchronized notifyAll + wait across 16 workers) dwarfs the
+            // actual bulk-pass work (~130 µs single-threaded). Threshold
+            // chosen well below the dense-scale Thing count (~588 K) so the
+            // dense path keeps the parallel speedup.
+            if (tc < DERIVED_BRIDGE_PARALLEL_THRESHOLD) {
+                Thing.recomputeDerivedSoA(0, tc);
+                Thing.bridgeDerivedToPt3D(0, tc);
+            } else {
+                dispatchAndWait(OP_DERIVED_AND_BRIDGE, tc);
+            }
+            // FilSegment xRange/yRange/zRange — only FilSegments read these
+            // (collision quick-reject in mightFilsCollide). Other subclasses
+            // write them in initialize() but never read them, so skipping the
+            // update for them is safe. Cheap pass — one iter per FilSegment.
+            int filCt = FilSegment.filSegmentCt;
+            FilSegment[] fils = FilSegment.theFilSegments;
+            for (int i = 0; i < filCt; i++) {
+                FilSegment fs = fils[i];
+                if (fs == null || fs.removeMe) continue;
+                fs.xRange = Math.abs(fs.coord.x - fs.end2.x);
+                fs.yRange = Math.abs(fs.coord.y - fs.end2.y);
+                fs.zRange = Math.abs(fs.coord.z - fs.end2.z);
+            }
         }
         long unpackEnd = System.nanoTime();
 

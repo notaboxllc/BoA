@@ -98,8 +98,10 @@ public class FilSegment extends Thing {
 	static final double [] openY = new double [1000];
 	static int openYCt = 0;
 	
-	Pt3D end1 = new Pt3D();
-	Pt3D end2 = new Pt3D();
+	// end1/end2 live on Thing now; bridgeDerivedToPt3D writes them after
+	// every GPU step. CPU readers (collision, links, mesh, output, etc.)
+	// still chase fs.end1.x — that works because the bridge has populated
+	// the inherited Pt3D fields.
 	// Pt3Ds for plasmid force calculations
 	Pt3D F = new Pt3D();
 	Pt3D Fopp = new Pt3D();
@@ -422,6 +424,7 @@ public class FilSegment extends Thing {
 		uVecR.scale(-1,uVec);
 		// length may have changed due to poly/depoly/split
 		length=(monomerCt+1)*Env.actinMonoRadius;
+		pushLengthToSoa(length);   // keep SoA derived bulk pass in sync with poly/depoly/split
 		// refind the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -length/2, uVec);
 		end2.add(coord, length/2, uVec);

@@ -41,6 +41,13 @@ public class Thing extends Object {
 	Pt3D uVecR = new Pt3D(-1,0,0);		// opposite direction of uVec
 	Pt3D yVec = new Pt3D(0,1,0);		// the first transvers vector for this body... in y direction
 	Pt3D zVec = new Pt3D(0,0,1);		// the second tranverse vector.. in z direction
+	// Body-axis endpoints (coord ± length/2 · uVec). Promoted from per-subclass
+	// declarations so bridgeDerivedToPt3D can write them uniformly. Point-like
+	// Things (ProteinNode/StickyNode/FillNode/Crucible/AnchorNode) have length=0
+	// and leave end1==end2==coord, which is harmless — those subclasses don't
+	// read end1/end2.
+	Pt3D end1 = new Pt3D();
+	Pt3D end2 = new Pt3D();
 	Pt3D veloc = new Pt3D();			// the fixed frame translational velocity values Xdot, Ydot, Zdot
 	Pt3D angVeloc = new Pt3D();		// the angular velocities psidot, thetadot, phidot
 	Pt3D bVeloc = new Pt3D(); 		// the body-fixed frame velocities xdot, ydot, zdot
@@ -90,6 +97,19 @@ public class Thing extends Object {
 	static float[] soaCoord = new float[0];
 	static float[] soaUVec  = new float[0];
 	static float[] soaYVec  = new float[0];
+	// SoA derived-field storage. Populated by recomputeDerivedSoA() from the
+	// canonical coord/uVec/yVec arrays + soaLength; mirrored back into Pt3D
+	// end1/end2/zVec and transXTox/transxToX by bridgeDerivedToPt3D() so
+	// CPU readers keep working. soaLength is one float per Thing (slot
+	// index = myThingNumber); the per-Thing `length` value lives in the
+	// FilSegment.length field or the static `length` in MyoMiniFilament/Bug
+	// and is pushed via pushLengthToSoa() at construction (or whenever the
+	// length changes for a FilSegment — poly/depoly/split).
+	static float[] soaEnd1      = new float[0];   // [x0,y0,z0, x1,y1,z1, ...]
+	static float[] soaEnd2      = new float[0];
+	static float[] soaZVec      = new float[0];
+	static float[] soaTransXTox = new float[0];   // 9 floats per Thing: row-major 3×3 fixed→body
+	static float[] soaLength    = new float[0];   // 1 float per Thing
 	// Sparse gather bookkeeping: each worker thread records the indices it actually
 	// wrote to (deduped via dirtyFlags). gatherThreadAccumulators() walks only those
 	// entries instead of sweeping every Thing × every thread.
@@ -509,6 +529,11 @@ public class Thing extends Object {
 		float[] newCoord  = new float[newCap * 3];
 		float[] newUVec   = new float[newCap * 3];
 		float[] newYVec   = new float[newCap * 3];
+		float[] newEnd1   = new float[newCap * 3];
+		float[] newEnd2   = new float[newCap * 3];
+		float[] newZVec   = new float[newCap * 3];
+		float[] newTransXTox = new float[newCap * 9];
+		float[] newLength = new float[newCap];
 		if (soaForceSum.length > 0) {
 			System.arraycopy(soaForceSum,  0, newForce,  0, soaForceSum.length);
 			System.arraycopy(soaTorqueSum, 0, newTorque, 0, soaTorqueSum.length);
@@ -518,11 +543,27 @@ public class Thing extends Object {
 			System.arraycopy(soaUVec,  0, newUVec,  0, soaUVec.length);
 			System.arraycopy(soaYVec,  0, newYVec,  0, soaYVec.length);
 		}
+		if (soaEnd1.length > 0) {
+			System.arraycopy(soaEnd1, 0, newEnd1, 0, soaEnd1.length);
+			System.arraycopy(soaEnd2, 0, newEnd2, 0, soaEnd2.length);
+			System.arraycopy(soaZVec, 0, newZVec, 0, soaZVec.length);
+		}
+		if (soaTransXTox.length > 0) {
+			System.arraycopy(soaTransXTox, 0, newTransXTox, 0, soaTransXTox.length);
+		}
+		if (soaLength.length > 0) {
+			System.arraycopy(soaLength, 0, newLength, 0, soaLength.length);
+		}
 		soaForceSum  = newForce;
 		soaTorqueSum = newTorque;
 		soaCoord     = newCoord;
 		soaUVec      = newUVec;
 		soaYVec      = newYVec;
+		soaEnd1      = newEnd1;
+		soaEnd2      = newEnd2;
+		soaZVec      = newZVec;
+		soaTransXTox = newTransXTox;
+		soaLength    = newLength;
 		taCapacity = newCap;
 	}
 
@@ -577,6 +618,139 @@ public class Thing extends Object {
 		coord.x = soaCoord[b];   coord.y = soaCoord[b+1]; coord.z = soaCoord[b+2];
 		uVec.x  = soaUVec[b];    uVec.y  = soaUVec[b+1];  uVec.z  = soaUVec[b+2];
 		yVec.x  = soaYVec[b];    yVec.y  = soaYVec[b+1];  yVec.z  = soaYVec[b+2];
+	}
+
+	// Push the per-Thing length into the SoA length array. Called from
+	// subclass constructors after the natural length is known and any time
+	// the length changes (FilSegment poly/depoly/split). Other Things with
+	// length 0 (ProteinNode/StickyNode) leave the slot at 0; their end1/end2
+	// will equal coord, which is harmless since those readers never look.
+	public void pushLengthToSoa(double len) {
+		soaLength[myThingNumber] = (float) len;
+	}
+
+	// ---- SoA derived-field accessors ----------------------------------------
+
+	public float getEnd1X() { return soaEnd1[myThingNumber * 3];     }
+	public float getEnd1Y() { return soaEnd1[myThingNumber * 3 + 1]; }
+	public float getEnd1Z() { return soaEnd1[myThingNumber * 3 + 2]; }
+	public float getEnd2X() { return soaEnd2[myThingNumber * 3];     }
+	public float getEnd2Y() { return soaEnd2[myThingNumber * 3 + 1]; }
+	public float getEnd2Z() { return soaEnd2[myThingNumber * 3 + 2]; }
+	public float getZVecX() { return soaZVec[myThingNumber * 3];     }
+	public float getZVecY() { return soaZVec[myThingNumber * 3 + 1]; }
+	public float getZVecZ() { return soaZVec[myThingNumber * 3 + 2]; }
+	public float getLengthSoa() { return soaLength[myThingNumber]; }
+	// transXTox row-major; idx in [0,9). transxToX is the transpose
+	// (orthonormal matrix), reachable via getTransXToxT(idx) or by swapping
+	// (row,col) → (col,row).
+	public float getTransXTox(int idx) { return soaTransXTox[myThingNumber * 9 + idx]; }
+
+	// Bulk pass: recompute derived SoA arrays (end1, end2, zVec, transXTox)
+	// from the canonical coord/uVec/yVec/length arrays. Tight loop, SIMD-
+	// friendly, no Thing object touches. Called once after the GPU unpack
+	// (and after any code that mutates pose in bulk) instead of per-Thing
+	// initialize(). yVec is re-orthogonalised against the new zVec to keep
+	// the body frame orthonormal (mirrors the per-Thing zVec.cross / yVec.cross
+	// dance in subclass initialize() bodies).
+	public static void recomputeDerivedSoA(int from, int upTo) {
+		final float[] coordArr = soaCoord;
+		final float[] uVecArr  = soaUVec;
+		final float[] yVecArr  = soaYVec;
+		final float[] zVecArr  = soaZVec;
+		final float[] end1Arr  = soaEnd1;
+		final float[] end2Arr  = soaEnd2;
+		final float[] mArr     = soaTransXTox;
+		final float[] lenArr   = soaLength;
+		for (int i = from; i < upTo; i++) {
+			final int b3 = i * 3;
+			final int b9 = i * 9;
+			float ux = uVecArr[b3], uy = uVecArr[b3+1], uz = uVecArr[b3+2];
+			float yx = yVecArr[b3], yy = yVecArr[b3+1], yz = yVecArr[b3+2];
+			// zVec = uVec × yVec (right-handed body frame).
+			float zx = uy*yz - uz*yy;
+			float zy = uz*yx - ux*yz;
+			float zz = ux*yy - uy*yx;
+			// FilSegment uniquely normalises zVec before re-orthogonalising
+			// yVec (initial yVec is random direction in some constructors).
+			// Other subclasses skip the normalise step; we always normalise
+			// here so the matrix stays orthonormal even when yVec drifted
+			// from orthogonality during integration. Cost: 3 muls + 1 sqrt.
+			float zmag2 = zx*zx + zy*zy + zz*zz;
+			if (zmag2 > 0f) {
+				float inv = (float) (1.0 / Math.sqrt(zmag2));
+				zx *= inv; zy *= inv; zz *= inv;
+			}
+			zVecArr[b3] = zx; zVecArr[b3+1] = zy; zVecArr[b3+2] = zz;
+			// yVec' = zVec × uVec (restores orthogonality).
+			yx = zy*uz - zz*uy;
+			yy = zz*ux - zx*uz;
+			yz = zx*uy - zy*ux;
+			yVecArr[b3] = yx; yVecArr[b3+1] = yy; yVecArr[b3+2] = yz;
+			// transXTox row-major = [uVec; yVec; zVec].
+			mArr[b9]   = ux; mArr[b9+1] = uy; mArr[b9+2] = uz;
+			mArr[b9+3] = yx; mArr[b9+4] = yy; mArr[b9+5] = yz;
+			mArr[b9+6] = zx; mArr[b9+7] = zy; mArr[b9+8] = zz;
+			// end1/end2 = coord ∓ length/2 · uVec.
+			float cx = coordArr[b3], cy = coordArr[b3+1], cz = coordArr[b3+2];
+			float halfLen = lenArr[i] * 0.5f;
+			end1Arr[b3]   = cx - halfLen * ux;
+			end1Arr[b3+1] = cy - halfLen * uy;
+			end1Arr[b3+2] = cz - halfLen * uz;
+			end2Arr[b3]   = cx + halfLen * ux;
+			end2Arr[b3+1] = cy + halfLen * uy;
+			end2Arr[b3+2] = cz + halfLen * uz;
+		}
+	}
+
+	public static void recomputeDerivedSoA(int upTo) {
+		recomputeDerivedSoA(0, upTo);
+	}
+
+	// Bridge: pull derived SoA fields back into per-Thing Pt3D / transXTox
+	// state so unconverted CPU readers (which still chase Pt3D.end1.x etc.)
+	// see the values the bulk recompute just wrote. Per-Thing loop, but the
+	// body is direct field writes — no method dispatch, no Pt3D math.
+	// Called after recomputeDerivedSoA in the GPU unpack path. For CPU
+	// moveThing, the existing per-Thing initialize() handles bridge sync
+	// since the bulk pass and bridge run together in lock-step.
+	public static void bridgeDerivedToPt3D(int from, int upTo) {
+		final float[] coordArr = soaCoord;
+		final float[] uVecArr  = soaUVec;
+		final float[] yVecArr  = soaYVec;
+		final float[] zVecArr  = soaZVec;
+		final float[] end1Arr  = soaEnd1;
+		final float[] end2Arr  = soaEnd2;
+		final float[] mArr     = soaTransXTox;
+		final Thing[] arr      = theThings;
+		for (int i = from; i < upTo; i++) {
+			Thing t = arr[i];
+			if (t == null || t.removeMe) continue;
+			final int b3 = i * 3;
+			final int b9 = i * 9;
+			t.coord.x = coordArr[b3]; t.coord.y = coordArr[b3+1]; t.coord.z = coordArr[b3+2];
+			t.uVec.x  = uVecArr[b3];  t.uVec.y  = uVecArr[b3+1];  t.uVec.z  = uVecArr[b3+2];
+			t.yVec.x  = yVecArr[b3];  t.yVec.y  = yVecArr[b3+1];  t.yVec.z  = yVecArr[b3+2];
+			t.zVec.x  = zVecArr[b3];  t.zVec.y  = zVecArr[b3+1];  t.zVec.z  = zVecArr[b3+2];
+			t.end1.x  = end1Arr[b3];  t.end1.y  = end1Arr[b3+1];  t.end1.z  = end1Arr[b3+2];
+			t.end2.x  = end2Arr[b3];  t.end2.y  = end2Arr[b3+1];  t.end2.z  = end2Arr[b3+2];
+			t.uVecR.x = -t.uVec.x;    t.uVecR.y = -t.uVec.y;      t.uVecR.z = -t.uVec.z;
+			final double[] m = t.transXTox;
+			final double[] mt = t.transxToX;
+			float m0 = mArr[b9],   m1 = mArr[b9+1], m2 = mArr[b9+2];
+			float m3 = mArr[b9+3], m4 = mArr[b9+4], m5 = mArr[b9+5];
+			float m6 = mArr[b9+6], m7 = mArr[b9+7], m8 = mArr[b9+8];
+			m[0] = m0; m[1] = m1; m[2] = m2;
+			m[3] = m3; m[4] = m4; m[5] = m5;
+			m[6] = m6; m[7] = m7; m[8] = m8;
+			mt[0] = m0; mt[1] = m3; mt[2] = m6;
+			mt[3] = m1; mt[4] = m4; mt[5] = m7;
+			mt[6] = m2; mt[7] = m5; mt[8] = m8;
+		}
+	}
+
+	public static void bridgeDerivedToPt3D(int upTo) {
+		bridgeDerivedToPt3D(0, upTo);
 	}
 
 	// Sparse gather: walk each worker thread's dirty list, narrow the double
@@ -756,6 +930,30 @@ public class Thing extends Object {
 			soaYVec[dst]      = soaYVec[src];
 			soaYVec[dst + 1]  = soaYVec[src + 1];
 			soaYVec[dst + 2]  = soaYVec[src + 2];
+			// Derived SoA: end1/end2/zVec/length/transXTox. These are
+			// recomputed each step from coord/uVec/yVec/length so the
+			// swap is mostly cosmetic, but moving them with the surviving
+			// Thing keeps stale-read paths from seeing inconsistent state.
+			soaEnd1[dst]     = soaEnd1[src];
+			soaEnd1[dst + 1] = soaEnd1[src + 1];
+			soaEnd1[dst + 2] = soaEnd1[src + 2];
+			soaEnd2[dst]     = soaEnd2[src];
+			soaEnd2[dst + 1] = soaEnd2[src + 1];
+			soaEnd2[dst + 2] = soaEnd2[src + 2];
+			soaZVec[dst]     = soaZVec[src];
+			soaZVec[dst + 1] = soaZVec[src + 1];
+			soaZVec[dst + 2] = soaZVec[src + 2];
+			soaLength[swapId] = soaLength[lastId];
+			int dst9 = swapId * 9, src9 = lastId * 9;
+			soaTransXTox[dst9]   = soaTransXTox[src9];
+			soaTransXTox[dst9+1] = soaTransXTox[src9+1];
+			soaTransXTox[dst9+2] = soaTransXTox[src9+2];
+			soaTransXTox[dst9+3] = soaTransXTox[src9+3];
+			soaTransXTox[dst9+4] = soaTransXTox[src9+4];
+			soaTransXTox[dst9+5] = soaTransXTox[src9+5];
+			soaTransXTox[dst9+6] = soaTransXTox[src9+6];
+			soaTransXTox[dst9+7] = soaTransXTox[src9+7];
+			soaTransXTox[dst9+8] = soaTransXTox[src9+8];
 		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();

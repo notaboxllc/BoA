@@ -21,8 +21,8 @@ public class MyoMiniFilament extends Thing {
 	static double headZone = 0.05; // �m  distribution of myosins about each end of filament
 	private int boundFilaments = 0;			// counter for number of bound actin filaments
 	
-	Pt3D end1 = new Pt3D();	// the free-end	
-	Pt3D end2 = new Pt3D();	// attached to head
+	// end1 (free end) / end2 (attached to head) live on Thing now;
+	// bridgeDerivedToPt3D writes them after every GPU step.
 	
 	// empirical fit for viscous drags
 	static final double aParallel = -0.20;  // approx to constant in damping for parallel motion
@@ -161,6 +161,7 @@ public class MyoMiniFilament extends Thing {
 		// re-find the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -0.5*length, uVec);
 		end2.add(coord, 0.5*length, uVec);
+		pushLengthToSoa(length);   // keep SoA derived bulk pass in sync
 
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);

@@ -4,8 +4,8 @@ public class MyoRod extends Thing {
 	static double radius = 0.003; // microns
 	Myosin myMyosin;
 	
-	Pt3D end1 = new Pt3D();	// the free-end	
-	Pt3D end2 = new Pt3D();	// attached to head
+	// end1 (free end) / end2 (attached to head) live on Thing now;
+	// bridgeDerivedToPt3D writes them after every GPU step.
 	
 	// empirical fit for viscous drags
 	static final double aParallel = -0.20;  // approx to constant in damping for parallel motion
@@ -84,6 +84,7 @@ public class MyoRod extends Thing {
 		// re-find the end points of the rod to make sure they meet length criteria
 		end1.add(coord, -getDim()/2, uVec);
 		end2.add(coord, getDim()/2, uVec);
+		pushLengthToSoa(getDim());   // keep SoA derived bulk pass in sync
 
 		// for collision detection
 		xRange = Math.abs(coord.x-end2.x);

@@ -32,8 +32,8 @@ public class Bug extends Crucible {
 	static float initialTrans = 0.6f;	// initial transparency
 	static float initialEmit = 0.1f;	// initial emmissive color
 	
-	Pt3D end1 = new Pt3D();						// location of cap1 tip
-	Pt3D end2 = new Pt3D(); 					// location of cap2 tip
+	// end1 (cap1 tip) / end2 (cap2 tip) live on Thing now;
+	// bridgeDerivedToPt3D writes them after every GPU step.
 	Pt3D rec1 = new Pt3D();						// location of cap1 center
 	Pt3D rec2 = new Pt3D();						// location of cap2 center
 	
@@ -146,6 +146,7 @@ public class Bug extends Crucible {
 		end2.add(coord, length/2, uVec);
 		rec1.add(coord, -(length/2 - radius), uVec);
 		rec2.add(coord, length/2 - radius, uVec);
+		pushLengthToSoa(length);   // keep SoA derived bulk pass in sync
 	}
 	
 	public void step () {
