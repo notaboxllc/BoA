@@ -774,8 +774,21 @@ public class BoxOfActin {
 				}
 
 				moveTimer.start();
-				startAllThreadSets(Env.moveStart);
-				waitOnAllThreadSets(Env.moveStop);
+				if (Env.useGPU) {
+					// Iteration 2b: unified Thing.moveThing() kernel. The GPU path
+					// packs eligible Things (MyoMotor/MyoRod/MyoLever/root FilSegment
+					// in this first pass), runs the branchless integration kernel,
+					// unpacks coord/uVec/yVec, and runs initialize() on the affected
+					// Things. Ineligible Things (Bug, ProteinNode, MyoMiniFilament,
+					// branches, ActA-bound segments, etc.) fall back to CPU
+					// moveThing() inside GPUMoveThing.moveThings(). Crucible/Chamber/
+					// AnchorNode have empty moveThing overrides and the fallback
+					// dispatch is a no-op for them.
+					GPUMoveThing.moveThings();
+				} else {
+					startAllThreadSets(Env.moveStart);
+					waitOnAllThreadSets(Env.moveStop);
+				}
 				moveTimer.stopInc();
 
 				// F1 benchmark: restore pinned endpoints after integration
@@ -1198,6 +1211,15 @@ public class BoxOfActin {
 			double un    = GPUMotorBinding.getUnpackNanos()   / 1.0e9;
 			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs gridPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk, gp, ex, un);
+		}
+		if (Env.useGPU && GPUMoveThing.getCallCount() > 0) {
+			int    calls = GPUMoveThing.getCallCount();
+			double tot   = GPUMoveThing.getTotalNanos()  / 1.0e9;
+			double pk    = GPUMoveThing.getPackNanos()   / 1.0e9;
+			double ex    = GPUMoveThing.getExecNanos()   / 1.0e9;
+			double un    = GPUMoveThing.getUnpackNanos() / 1.0e9;
+			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk, ex, un);
 		}
 		// [STATS] glidingVelocity: mean per-filament longWindowSpeedXY at end of run.
 		// Used by ensemble validation scripts to extract a single per-run velocity.

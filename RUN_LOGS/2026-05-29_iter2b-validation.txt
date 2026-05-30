@@ -1,0 +1,45 @@
+mode seed bindEvents meanBoundMotors glidingVelocity wall_sec
+cpu  1 727 7.206 8.3802 279
+cpu  2 984 7.585 8.7808 276
+cpu  3 815 6.634 8.6650 277
+cpu  4 1182 9.016 8.7448 281
+cpu  5 989 8.106 8.7106 276
+cpu  6 837 7.288 8.7870 277
+cpu  7 998 7.726 7.6906 289
+cpu  8 874 7.867 8.7271 286
+cpu  9 711 6.875 8.1297 281
+cpu 10 864 7.213 8.6574 280
+gpu  1 880 7.701 9.1977 513
+gpu  2 1021 7.976 8.4497 511
+gpu  3 779 7.056 8.1344 511
+gpu  4 763 6.466 8.6076 507
+gpu  5 1004 7.868 8.9628 515
+gpu  6 1054 8.334 8.9640 512
+gpu  7 921 7.644 8.7202 512
+gpu  8 1057 8.459 8.2238 506
+gpu  9 807 6.816 8.9202 509
+gpu 10 746 6.834 8.3014 511
+
+GPU per-seed moveThing timing:
+seed 1  [STATS] gpuMoveThing total=181.551s calls=10101 pack=92.257s exec=20.535s unpack=68.701s
+seed 2  [STATS] gpuMoveThing total=178.379s calls=10101 pack=91.817s exec=20.634s unpack=65.870s
+seed 3  [STATS] gpuMoveThing total=180.603s calls=10101 pack=92.060s exec=20.455s unpack=68.038s
+seed 4  [STATS] gpuMoveThing total=179.384s calls=10101 pack=91.454s exec=20.447s unpack=67.431s
+seed 5  [STATS] gpuMoveThing total=182.528s calls=10101 pack=92.707s exec=20.763s unpack=69.007s
+seed 6  [STATS] gpuMoveThing total=181.372s calls=10101 pack=92.345s exec=20.654s unpack=68.311s
+seed 7  [STATS] gpuMoveThing total=181.727s calls=10101 pack=92.395s exec=20.577s unpack=68.698s
+seed 8  [STATS] gpuMoveThing total=178.411s calls=10101 pack=91.329s exec=20.430s unpack=66.601s
+seed 9  [STATS] gpuMoveThing total=176.946s calls=10101 pack=91.461s exec=20.439s unpack=64.997s
+seed 10  [STATS] gpuMoveThing total=180.118s calls=10101 pack=91.760s exec=20.387s unpack=67.921s
+
+GPU per-seed motorBinding timing:
+seed 1  [STATS] gpuMotorBinding total=74.811s calls=10101 pack=1.208s gridPack=0.106s exec=72.296s unpack=0.504s
+seed 2  [STATS] gpuMotorBinding total=75.215s calls=10101 pack=1.212s gridPack=0.107s exec=72.728s unpack=0.503s
+seed 3  [STATS] gpuMotorBinding total=74.414s calls=10101 pack=1.214s gridPack=0.110s exec=71.943s unpack=0.503s
+seed 4  [STATS] gpuMotorBinding total=74.880s calls=10101 pack=1.206s gridPack=0.107s exec=72.445s unpack=0.506s
+seed 5  [STATS] gpuMotorBinding total=74.822s calls=10101 pack=1.217s gridPack=0.110s exec=72.345s unpack=0.505s
+seed 6  [STATS] gpuMotorBinding total=75.181s calls=10101 pack=1.216s gridPack=0.107s exec=72.719s unpack=0.504s
+seed 7  [STATS] gpuMotorBinding total=74.428s calls=10101 pack=1.205s gridPack=0.106s exec=72.026s unpack=0.505s
+seed 8  [STATS] gpuMotorBinding total=74.759s calls=10101 pack=1.205s gridPack=0.104s exec=72.309s unpack=0.505s
+seed 9  [STATS] gpuMotorBinding total=74.350s calls=10101 pack=1.209s gridPack=0.110s exec=71.910s unpack=0.515s
+seed 10  [STATS] gpuMotorBinding total=74.676s calls=10101 pack=1.207s gridPack=0.106s exec=72.216s unpack=0.502s
