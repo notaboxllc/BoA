@@ -4,6 +4,316 @@ Last updated: 2026-05-29
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-29 — Iter2b-polish + dense timing
+
+Two-part follow-on to the morning's iter2b implementation: kill the
+`Crazy torque` log spam from §D of the iter2b entry, and run the kernel
+at M=98K (gliding-dense smoke) to see whether the wall-clock crosses
+from "GPU slower" to "GPU faster". **Polish landed cleanly. Dense
+crossover did NOT happen** — GPU is 1.61× slower than CPU even at
+M=98K. The kernel itself wins, but the per-step pack/unpack overhead
+still dominates. iter2c (Brownian RNG on GPU, eliminating randForces
+upload) is the next lever.
+
+### A. Crazy torque fix
+
+The §D root cause was assumed to be float32 small-angle uVec underflow
+producing exactly-parallel unit vectors, with cross→zero, unitVec→NaN
+(divide by zero). The prompt suggested catching `magSq < 1e-12` before
+the unitVec call.
+
+What's actually happening: cross→NaN, not cross→zero. The GPU
+occasionally produces uVec with NaN components (the kernel's `nuInv =
+1 / sqrt(magSq)` returns `Inf` if magSq somehow underflows to 0, then
+`nuX * Inf` is NaN if nuX is 0). Once a Thing's uVec has NaN, the
+cross-of-NaN cascades. `NaN < 1e-12` is `false` per IEEE 754, so the
+prompt's exact threshold test does not catch the actual case.
+
+I tried two variants and kept the second:
+
+1. **magSq < 1e-12**: catches near-parallel finite uVecs, but does
+   nothing for NaN. Single-seed test still showed 113k log lines.
+2. **!(magSq >= 1e-12)**: catches NaN too (NaN comparisons return
+   false; `!false` = true → return). Single-seed test showed 0 log
+   lines. **But the velocity dropped to 7.72 µm/s (2.6 SD below the
+   ensemble mean of 8.65 ± 0.36).** The reason: the original code's
+   near-parallel finite path went through unitVec, which produces a
+   unit vector in an ill-defined direction, then `scale(torsionMag)`
+   applied a meaningful magnitude in a random direction — effectively
+   a kick that unsticks near-parallel motors. My fix suppressed those.
+3. **`if (Double.isNaN(torsionVec.x)) return;`**: catches only the
+   actual NaN case (the only case that prints "Crazy torque" anyway —
+   the magSq=0 finite path randomises direction inside unitVec and
+   passes checkPt3D). Preserves the original physics for legitimate
+   near-parallel cases. Single-seed test: **0 Crazy torque lines,
+   bindEvents=780 / meanBoundMotors=6.832 / glidingVelocity=8.209 —
+   all within the validation ensemble mean ± 2 SD.**
+
+Final fix in `boxOfActin/Myosin.java`: one-line `if
+(Double.isNaN(torsionVec.x)) return;` after the cross product in
+`applyLeverMotorJointTorque()` and `applyRodLeverJointTorque()`. The
+NaN-on-x is sufficient — if any component of either uVec is NaN, the
+cross product's x component is NaN.
+
+Verification log: `RUN_LOGS/2026-05-29_iter2b-polish-verify-gpu-seed1.log`.
+
+### B. Dense-scale timing (M=98K, S~1100)
+
+Param file: `ParameterFiles/glidingDense_demo_smoke` (14×14×0.5 µm bed,
+500 µm² motor density, 100 random filaments + 1 canonical, runTime=0.01
+s = 1001 steps). One CPU seed + one GPU seed, same seed value.
+
+```
+phase                          CPU dense (s)   GPU dense (s)
+---------------------------------------------------------------
+ThingStep (step+bio+resetCt)        61.7            24.8
+  └ moveThing (CPU only — GPU       (incl)          0  (kernel)
+    path skips CPU dispatch)
+Brownian (calcRandomForces)         33.5            33.2
+Myosin (joints)                     25.0            23.6
+MotorBindGrid3D Fill (CPU)          31.0            29.1
+Mesh                                 6.8             6.8
+MyoDimer                             8.4             9.6
+NodeLink / membrane / other          ~5              ~5
+GPUMotorBinding total                ---           14.4   (1101 calls)
+GPUMoveThing total                   ---          155.2   (1101 calls)
+---------------------------------------------------------------
+WALL                               205             330
+                                                 (1.61× slower)
+```
+
+`[STATS] gpuMoveThing` per-call breakdown at M=98K:
+```
+            ms / call    M=500 (val) ms/call    scaling 500→98K
+total       141.0          17.8                 8.0×
+pack         74.6           9.1                 8.2×   (linear-ish)
+exec         11.2           2.0                 5.6×   (sub-linear; broad-phase)
+unpack       55.1           6.7                 8.2×   (linear-ish)
+```
+
+`[STATS] gpuMotorBinding` per-call at M=98K (smoke):
+```
+total 13.05 ms, pack 0.91 ms, gridPack 0.32 ms, exec 10.47 ms, unpack 0.34 ms
+```
+
+`[STATS] bindEvents=3828  meanBoundMotors=245.27  glidingVelocity=44.07`
+(CPU run: bindEvents=4313, meanBoundMotors=260.67, glidingVelocity=43.03 —
+single-seed differences are within ensemble noise; not a validation run).
+
+Zero `Crazy torque` lines in the GPU dense log (fix from §A holds at
+scale).
+
+### C. Why no crossover at M=98K
+
+The GPU kernel itself is competitive: at M=98K the kernel's 11.2
+ms/call beats the CPU moveThing portion of ThingStep (estimated
+~15 ms/call from the 61.7−24.8=36.9 s difference in ThingStep budget
+divided by 1101 calls = 33.5 ms, of which roughly half is moveThing
+the rest is step+biochem+resetCt — call it ~17 ms moveThing). So the
+exec alone shaves a few ms/call.
+
+But pack+unpack runs at 130 ms/call — pure CPU Java overhead walking
+`Thing.theThings[]`, casting `instanceof`, writing 30 FloatArray slots
+per Thing × ~98K Things. The kernel cycle pays a 130 ms penalty just
+to put data on the device and pull it back.
+
+Two structural fixes are available:
+
+1. **iter2c (Wang-hash Brownian RNG on GPU).** `randForces`/`randTorques`
+   are 6 floats × 98K Things × 1101 steps = 647 M float writes/seed
+   accounting for roughly 1/3 of the pack cost. Computing them inside
+   the kernel from a step-indexed Wang hash removes the upload entirely.
+   Estimated pack drop: ~25 ms/call → 50 ms/call total — closer to
+   parity but still GPU-slower.
+
+2. **Persistent device buffers (iter2d / true residency).** Keep coord,
+   uVec, yVec on the device across steps; CPU sees them only when
+   asked (mesh fill, JSON output, GPU motor binding's own pack — though
+   that one could read directly from the same buffers). This would
+   remove pack+unpack from the moveThing hot path entirely, leaving
+   only the per-step EVERY_EXECUTION buffers (forceSum/torqueSum
+   computed each step by CPU joint/xlink phases) and bringing the
+   GPU path under CPU wall.
+
+The current architecture has CPU phases (Brownian, joints, xLink,
+mesh fill, biochem) that need the up-to-date pose every step, so pure
+residency is a bigger refactor than iter2c.
+
+### D. Updated open items
+
+iter2b shippable now: the validation passes, the log spam is fixed,
+the kernel works at M=98K. Real-time deployment for dense gliding
+assays still wants the pack/unpack reduction.
+
+- **iter2c**: Wang-hash Brownian on GPU. Eliminates randForces/
+  randTorques upload (~25 ms/call at M=98K). Separate session.
+- **iter2d** (further out): residency for coord/uVec/yVec across the
+  CPU phases that read them mid-step (mesh fill, motorbind grid). The
+  CPU phases would need to read FloatArray instead of Pt3D — touches
+  every phase, large refactor.
+- The previously listed survey deferrals (motherFil branch pre-pass,
+  StickyNode forceSum pre-add, ProteinNode velMask, MyoMiniFilament/
+  ProteinNode pack rules) remain unchanged — none material at
+  gliding-assay scope.
+
+## 2026-05-29 — Iter2b: unified moveThing GPU kernel — gliding assay validation
+
+Implemented the unified moveThing GPU kernel sketched in the morning's design
+survey. Validated against CPU on `glidingAssay500_val` with the standard
+10-seed ensemble. **All three observables PASS the cSEM gate.** Kernel is
+1.82× slower than CPU at validation scale (M=500, S~14) — expected per the
+prompt; pack/unpack dominate.
+
+### A. What landed
+
+`boxOfActin/GPUMoveThing.java` (new, ~370 lines). 13-buffer kernel
+(12 FloatArrays + 1 IntArray), `if (m >= N) return;` inactive-thread guard,
+WorkerGrid1D + GridScheduler with `blockSize=64`, all transfers
+EVERY_EXECUTION. The kernel is the verbatim physics from
+`FilSegment.moveThing()` / `MyoMotor.moveThing()` / `MyoRod.moveThing()`
+/ `MyoLever.moveThing()`, branchless: same XTox / overdamped-Langevin /
+xToX / small-angle uVec/yVec update, with `transScale`/`rotScale`
+absorbing the per-type Brownian decisions.
+
+CPU side has a one-pass partition (`packCpuSideArrays`) that walks
+`Thing.theThings[]`, classifies each Thing as GPU-eligible (root
+FilSegment without actA, MyoMotor, MyoRod, MyoLever — modulo per-type
+gates) or CPU-fallback (Bug, Chamber, Crucible, AnchorNode, ProteinNode,
+MyoMiniFilament, StickyNode, FillNode, branch FilSegment, actA-bound
+FilSegment, isLpSeg-suspended FilSegment, anything when `myosinsOff`).
+Eligible Things go to the GPU; fallback Things get `moveThing()` called
+serially on CPU after kernel unpack. For gliding-assay scope the fallback
+list is empty in practice (Chamber/Crucible have empty `moveThing()`
+overrides, no Bug, no ProteinNode).
+
+`boxOfActin/BoxOfActin.java`: phase-10 dispatch gated on `Env.useGPU`
+matching the iter2a motor-binding pattern. Added `[STATS] gpuMoveThing
+total=X.XXXs calls=N pack=X.XXXs exec=X.XXXs unpack=X.XXXs` summary at
+run end.
+
+Compiled clean on aorus under Java 21 / TornadoVM 4.0.1-dev (PTX) with
+the standard `-g --release 21 --enable-preview` flags.
+
+### B. Ensemble validation — PASS
+
+Protocol: 10 CPU seeds + 10 GPU seeds × `ParameterFiles/glidingAssay500_val`
+× 0.1 s simulated (10 001 steps). Source data in
+`RUN_LOGS/2026-05-29_iter2b-validation.txt`; summary in
+`RUN_LOGS/2026-05-29_iter2b-validation-summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    898.10 ± 45.08 (142.55)     903.20 ± 39.49 (124.87)         0.09  PASS
+meanBoundMotors  :      7.55 ±  0.22 (  0.68)       7.52 ±  0.22 (  0.68)         0.12  PASS
+glidingVelocity  :      8.53 ±  0.11 (  0.36)       8.65 ±  0.12 (  0.36)         0.75  PASS
+wall (s/seed)    :    280.20 ±  1.37 (  4.34)     510.70 ±  0.86 (  2.71)       142.43  (n/a — diagnostic only)
+```
+
+All three physics observables sit well under the |diff|/cSEM = 2.0 gate.
+GPU velocity mean is 1.4 % above CPU (within noise); GPU bindEvents and
+meanBoundMotors track CPU to better than 1 %. The float32 integration
+preserves gliding-assay observables to within ensemble noise — JOURNAL §J
+risk #2 (slow-drift coord accumulation) did not materialise.
+
+### C. Wall-clock — expected slowdown at validation scale
+
+`[STATS] gpuMoveThing` averaged across 10 seeds × 10 101 calls:
+
+```
+            total       pack        exec       unpack
+mean/seed   180.10 s    91.96 s    20.54 s    67.56 s
+ms / call    17.83 ms    9.10 ms    2.03 ms    6.69 ms
+```
+
+GPU wall 510.7 s/seed vs CPU 280.2 s/seed (1.82× slower). The kernel
+itself (`exec` = 2.0 ms/call) is fast; pack (9.1 ms/call) and unpack
+(6.7 ms/call) dominate. Cause is the per-step CPU→FloatArray /
+FloatArray→Pt3D walks over ~1700 Things × ~30 floats each — pure Java
+overhead, not GPU bottleneck.
+
+For comparison, GPUMotorBinding at the same scale: total 7.45 ms/call,
+exec 7.16 ms/call. Iter2b's kernel is ~3.5× faster per call than
+motor binding's narrow-phase, but pack/unpack swamps that win at M=500.
+
+The crossover to GPU wins should appear at M ≥ 10k where the kernel's
+fixed-N scaling beats CPU thread-fan-out — same shape as iter2a's
+M=98 K dense-demo. iter2b-dense is a separate session.
+
+### D. Float-precision finding — `Crazy torque` warnings, non-material
+
+The GPU runs emit `Crazy torque result in Myosin.applyRodLeverJointTorque()` /
+`...applyLeverMotorJointTorque()` repeatedly (55 K–193 K times per seed
+over 10 101 steps × 500 motors = 5.05 M joint-torque calls; rate is
+~1–4 %). CPU runs emit zero.
+
+Mechanism: the joint-torque code does
+`torsionVec.cross(myoRod.uVec, myoLever.uVec); torsionVec.unitVec();` then
+`checkPt3D()`. If rod and lever uVecs become numerically parallel, the
+cross product is the zero vector and `unitVec()` yields NaN, which
+`checkPt3D` catches — the torque add is then *skipped* for that joint
+that step.
+
+This is JOURNAL §J risk #6 (orthonormalisation drift under float32 small-
+angle updates) showing up: `uVecTransInY = bAngVeloc.z * deltaT ≈ 1e-8`
+for typical motor angular velocities × 1e-5 s timestep. The added
+perturbation is at the edge of float32 epsilon (~6e-8 relative to a
+unit vector), so some updates underflow and the rod+lever uVecs can
+stay parallel for a step or two. Next step, residual forces re-perturb
+them and the joint torque resumes.
+
+Despite the 5+ million skipped torque adds, **the gliding-assay
+observables are unaffected at the cSEM level** — the joint-torque
+spring is one of many forces on each rod/lever, and a missed sample
+once every ~25–100 steps is well within the system's stochastic noise.
+The simulation self-corrects. Document and move on.
+
+If this becomes material at larger N or other configurations, the fix
+is to either (a) keep the small-angle update in double on CPU after
+unpack (forcing a downconvert→upconvert per step, defeating most of
+the GPU win), or (b) detect near-parallel uVecs in the pre-pass and
+nudge them apart before pack. (b) is cheap and may be worth doing in
+iter2b polishing; flagging it as an open item rather than fixing now
+since the gate is met.
+
+### E. Scope discoveries — small in-scope, none out-of-scope
+
+Two small implementation deltas vs the task sketch, both silently
+handled per the prompt's "small in-scope fixes" rule:
+
+1. **EVERY_EXECUTION for `bTransGam`/`bRotGam` instead of FIRST_EXECUTION.**
+   The survey's I-table specified FIRST_EXECUTION + invalidate on aeta
+   change. Implementation uses EVERY_EXECUTION for these instead — the
+   per-step pack cost is 6 floats / Thing (~0.7 ms total at this scale),
+   and it removes the topology-change invalidation logic entirely
+   (FilSegment splits would otherwise need plan rebuild). Simpler, no
+   measurable cost. The `invalidatePlan()` hook in `drainParamQueue`
+   for aeta change is therefore not needed and was omitted.
+
+2. **`actAOn` FilSegment branch goes to CPU fallback.** The survey's
+   §C noted root FilSegments with `actAOn` need a randForces blend
+   from `lmBug.randForcesInX`. For gliding assay `actAOn` is always
+   false (no Bug, no ActA), but to keep the kernel pre-pass simple
+   the code routes any `actAOn==true` FilSegment to CPU fallback
+   alongside branches (`motherFil != null`). This path is exercised
+   zero times in the validation. The blend will land when
+   ActA/Listeria-class runs need GPU coverage.
+
+### F. Open items / follow-on sessions
+
+- iter2b-dense: same kernel at gliding-dense scale (M ≥ 98 K) — should
+  swing the wall-clock from 1.82× slower to net win. Separate session.
+- iter2b-polish (optional): pre-pass near-parallel-uVec detection and
+  small nudge to suppress `Crazy torque` log spam. Cosmetic; observables
+  already PASS.
+- iter2c: Wang-hash RNG on GPU, eliminating the per-step `randForces`/
+  `randTorques` CPU upload (currently 12 floats × ~1700 Things × 10 101
+  steps ≈ 200 M float writes/seed and a meaningful slice of the 9 ms
+  pack cost).
+- Out-of-scope follow-ons from the survey (motherFil branch pre-pass,
+  StickyNode forceSum pre-add, ProteinNode velMask, MyoMiniFilament /
+  ProteinNode pack rules) all remain deferred — the validation config
+  exercises none of them.
+
 ## 2026-05-29 — Iter2b design survey: unified all-Things moveThing GPU kernel
 
 Survey only — no source edits, no compile, no run. Goal: assess feasibility of

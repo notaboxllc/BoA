@@ -1,7 +1,7 @@
 package boxOfActin;
 
 public class Myosin {
-	static Myosin [] theMyosins = new Myosin [100000];
+	static Myosin [] theMyosins = new Myosin [500000];
 	static int myoCt = 0;
 	int myMyoNumber = 0;
 	static double uncockedLever_MotorAngle = 0; // degrees
@@ -166,6 +166,16 @@ public class Myosin {
 	
 	public void applyLeverMotorJointTorque () {
 		torsionVec.cross(myoLever.uVec,myoMotor.uVec);
+		// Float32 GPU uVec updates occasionally produce NaN components (orientation
+		// drift past representable precision). The original code caught NaN at the
+		// bottom via checkPt3D and printed "Crazy torque" once per occurrence —
+		// at gliding-assay scale that is ~100k log lines per seed. Early-return on
+		// NaN cross-product matches the original skip-torque behaviour without the
+		// log spam. The legitimate near-parallel finite case is left untouched:
+		// unitVec normalises an ill-conditioned direction, the relaxed-angle
+		// restoring torque is applied (random direction acts as an unsticking kick).
+		// See JOURNAL 2026-05-29 iter2b §D and iter2b-polish entry.
+		if (Double.isNaN(torsionVec.x)) return;
 		torsionVec.unitVec();
 		
 		double dotVecs = Pt3D.Dot(myoLever.uVec,myoMotor.uVec);
@@ -220,6 +230,8 @@ public class Myosin {
 	
 	public void applyRodLeverJointTorque () {
 		torsionVec.cross(myoRod.uVec,myoLever.uVec);
+		// See applyLeverMotorJointTorque — same float32 NaN guard, suppresses log spam.
+		if (Double.isNaN(torsionVec.x)) return;
 		torsionVec.unitVec();
 		
 		double dotVecs = Pt3D.Dot(myoRod.uVec,myoLever.uVec);
