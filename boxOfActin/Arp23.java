@@ -232,7 +232,8 @@ public class Arp23 {
 		torsionVec.unitVec();
 		dotVecs = Pt3D.Dot(curDUVec,daughterFil.uVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		angTween = Math.acos(dotVecs);
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		angTween = Pt3D.fastAcos(dotVecs);
 	
 		
 		double curTorqueMag = Env.arpTorqSpring.getValue()*angTween;

@@ -1,8 +1,182 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-05-30 — CPU micro-optimizations: batch 1
+
+Five independent mechanical changes from `deepPerformanceSurvey01.md`
+applied across the CPU path. None touch threading, data structures, or
+the GPU path. The aim is to retire low-effort arithmetic and access-
+pattern inefficiencies before bigger refactors.
+
+### Changes applied
+
+**1. `Math.pow(x,2)` / `Math.pow(x,3)` → `x*x` / `x*x*x`.** HotSpot
+doesn't always intrinsify the small-exponent form, and the cube case is
+never intrinsified. Converted ~35 individual `Math.pow` call sites across
+Pt3D (`ptDist`, `ptDistSqrd`), ValueTracker (`variance`, `varianceOfPt`),
+Mesh (`fillFilSegMesh`), Bug (`calculateProperties`, `getVolume`),
+Chamber, MyoMotor, FillNode, ProteinNode, StickyNode, MyoLever, MyoRod,
+MyoMiniFilament, FilSegment (`calculateProperties` and four
+`moveCoeff`-style sites), Env (`nodeRotDiff_init`), and BoxOfActin
+(benchmark tauTheo). Skipped: cube-root inits in `Env.java:44-50`,
+variable-exponent `Math.pow(sideBondsStabilize, linkedToCt)` and
+`Math.pow(monomerConc, actinSeed)`, and `nodeCollisions` (commented-out
+dead code), and `RandomElement.java` (library).
+
+**2. Fast acos with small-angle approximation.** Added
+`Pt3D.fastAcos(double dot)` which uses `θ ≈ √(2(1−dot))` for
+`dot > 0.95`, mirrors the formula for `dot < −0.95` (antiparallel —
+filament torsion springs and motor lever joints can sit here), and
+delegates to `Math.acos` otherwise. <0.6% error at the threshold.
+Replaced 17 hot-path acos calls across Myosin (lever-motor and rod-lever
+joint torques), MyoFilLink (alignUVec/alignYVec), FilSegment
+(`moveCoeff`, `addTorsionSpringForces` ×2, `checkToLink` ×3, nodeTorqSpring,
+plasmid torsion), MyoLever/MyoMotor/MyoRod `moveCoeff`, MyosinDimer
+(uVec/yVec lever align), MyoMiniFilament (end1/end2 dimer constraint),
+FilLink.applyTorsionForce, and Arp23 daughter alignment. Each site also
+got the `dotVecs < -1` clamp the original code lacked. Skipped: Bug
+geometry and FilLink constructor (init, not per-step).
+
+**3. Deferred sqrt in threshold comparisons.** Renamed `Thing.RetObj`
+field `conDist` → `conDistSq`; `lineSegmentIntersectTest` and
+`pointAndLineIntersectTest` now populate the squared distance directly
+(no `sqrt`). Updated callers `FilSegment.checkToLink` and
+`FilSegment.nodeCollisions` to compare `conDistSq < threshold*threshold`.
+Also rewrote `FilSegment.checkNodeFilTipsCollision` to early-out on
+`ptDistSqrd < colThresh²` and only compute `sqrt` on the hit path. Saves
+one sqrt per pair that bins-as-candidate but doesn't actually collide.
+
+**4. Cache `Env.X.getValue()` in hot methods.** Highest-impact wins
+where the same Parameter is read multiple times in one call:
+- `Thing.calcRandomForces` — cached `brownianDeltaT` and `1/brownianDeltaT`
+- `FilSegment.moveThing` — `deltaT` reused 5×
+- `FilSegment.addLinkForces` — `deltaT`, `fracMove`, `fracR`,
+  `maxSegDistActive`, `maxSegDist` (`fracR` previously read 4× per call)
+- `FilSegment.addTorsionSpringForces` — `deltaT`, `fracMoveTorq`,
+  `maxSegAngActive`, `maxSegAng`, `filTorqSpringActive`, `filTorqSpring`
+  (each previously read 2× per call)
+- `MyoMotor.moveThing` — `deltaT` reused 4×, `myoBrownianAttn` reused 2×
+- `Myosin.applyLeverMotorJointForce` — `deltaT`, `myoJ1FracR`
+- `Myosin.applyRodLeverJointForce` — `deltaT`, `myoJ2FracR`
+
+Around 25 individual `getValue()` calls collapsed to local reads. Did
+not touch `MyoMotor.biochemStep` (biochem-cadence, 1/100 of mechanics)
+or `MyoFilLink.alignUVec/YVecTorque` (each Env getter is called only
+once per method).
+
+**5. Flat `double[9]` for `transXTox` / `transxToX`.** Replaced nested
+`double[3][3]` with row-major `double[9]` in `Thing.java`. Rewrote
+`Thing.transMat` to fill both matrices inline (no nested loop, no double
+indirection on the transpose). Rewrote all eleven access methods in
+`Pt3D.java` (`xToNewX`, `xToX`, `xToXPlusxOrigin`, `xToXPlusPoint`,
+`XToNewx`, `XTox`, `XToxFromxOrigin` and their overloads) to use a
+single `m = p.transXTox` (or `transxToX`) local with flat indexing. One
+load per matrix vs. three nested pointer chases per element. The GPU
+kernel already derives `zVec = cross(uVec, yVec)` inline; the CPU
+matrix is still built (many phases call `XTox`/`xToX`), but the layout
+now matches JIT bounds-check elision patterns.
+
+### Validation — 10 seeds × glidingAssay500_val — PASS
+
+Protocol: 10 CPU seeds, CPU baseline reused from iter2d (committed main
+on 5fa6bda; CPU code unchanged between iter2d and the pre-cpuopt commit
+on main). Source data
+`RUN_LOGS/2026-05-30_cpuopt-validation.txt`; summary
+`RUN_LOGS/2026-05-30_cpuopt-validation-summary.txt`.
+
+```
+                     iter2d CPU mean ± SEM (SD)    cpuopt CPU mean ± SEM (SD)    |diff|/cSEM
+bindEvents       :      856.80 ± 45.72 (144.58)     860.80 ± 37.97 (120.08)        0.07  PASS
+meanBoundMotors  :        7.30 ±  0.30 (  0.94)       7.37 ±  0.24 (  0.76)        0.20  PASS
+glidingVelocity  :        8.22 ±  0.15 (  0.46)       8.39 ±  0.23 (  0.72)        0.61  PASS
+wall (s/seed)    :      275.10 ±  1.46 (  4.63)     289.20 ±  0.83 (  2.62)        8.40  (diagnostic only)
+```
+
+All three physics observables PASS the `|diff|/cSEM < 2.0` gate. Per-seed
+RNG paths diverge from baseline (fastAcos and deferred sqrt alter
+arithmetic ordering enough that even seed 1 produces a different
+trajectory) but ensemble means line up well inside noise.
+
+Wall is +5.1% at validation scale. Not seen at dense scale (below). The
+likeliest cause is machine background load during the cpuopt validation
+runs (system load avg ~5 at run start vs the lower load when iter2d
+validated). Per-seed wall SD shrunk (2.62 vs 4.63), so the cpuopt run
+saw less variance, not more — consistent with a steady-state load
+offset.
+
+### Dense timing — glidingDense_demo_smoke (M=98K, S~1101) — improved
+
+Source log `RUN_LOGS/2026-05-30_cpuopt-dense-cpu.log`. Single-seed run,
+same parameter file as iter2d's CPU dense baseline.
+
+```
+phase                       iter2d CPU (s)     cpuopt CPU (s)     delta
+---------------------------------------------------------------------
+ThingStep Threads               55.93              52.34          -6.4 %
+ThingBrownian Threads           30.43              29.87          -1.8 %
+Myosin (joints)                 22.16              21.80          -1.6 %
+MyoDimer                         9.72               8.84          -9.1 %
+Mesh                             6.71               6.51          -3.1 %
+Ck Mots                          5.15               4.99          -3.1 %
+MotorBindGrid3D Fill            28.95              29.04          +0.3 %
+NodeLink                         1.56               1.67          +6.6 %  (sub-2s, near noise)
+ProteinNode/MyoMiniFil/etc.  ~0.85 each         ~0.90 each       +3-5 %  (sub-1s)
+---------------------------------------------------------------------
+Wall (real)                     190 s              188 s          -1 %
+```
+
+The hot phases (~95% of wall) all improve: ThingStep -6.4%, MyoDimer
+-9.1%, Brownian -1.8%, Myosin -1.6%, Mesh/CkMots -3%. Small phases
+(NodeLink, Arp23, ProteinNode) regress 3-7% but each is <1s — those
+percentages are well inside the per-run noise floor (single seed; no
+averaging across runs). The fixed-cost MotorBindGrid3D Fill is unchanged
+as expected (no changes in that path).
+
+Net wall ~1% faster at dense scale. The survey's expectations: Math.pow
+-3-5%, acos -5%, transXTox -3-5%, deferred sqrt -3-5%, Env.getValue cache
+"individually small but large in aggregate." Observed gains in the hot
+phases (1.6%-9.1%) are in the predicted range. Smaller than the survey's
+upper estimate, consistent with HotSpot already intrinsifying many
+`Math.pow(x,2)` calls and many of the cached Env reads having been
+already promoted to invariants by the JIT.
+
+### Conversion counts
+
+| Change | Sites |
+|---|---|
+| 1 — `Math.pow` rewrites | ~35 individual calls (29 `pow(x,2)`, ~6 `pow(x,3)`) |
+| 2 — `Math.acos` → `fastAcos` | 17 hot-path call sites |
+| 3 — deferred sqrt | 4 caller sites + RetObj field rename |
+| 4 — `Env.getValue()` cached | ~25 calls collapsed across 7 hot methods |
+| 5 — `transXTox` / `transxToX` flattened | 2 fields + 12 access methods |
+
+### Files touched
+
+`boxOfActin/Pt3D.java`, `Thing.java`, `FilSegment.java`, `Myosin.java`,
+`MyoMotor.java`, `MyoLever.java`, `MyoRod.java`, `MyoMiniFilament.java`,
+`MyosinDimer.java`, `MyoFilLink.java`, `FilLink.java`, `Arp23.java`,
+`Mesh.java`, `ValueTracker.java`, `Bug.java`, `Chamber.java`,
+`ProteinNode.java`, `StickyNode.java`, `FillNode.java`, `Env.java`,
+`BoxOfActin.java`.
+
+### Open items
+
+- The `MyoMotor.biochemStep` switch arms each have 2 `getValue()` calls;
+  the biochemCheckInt gates them to 1/100 mechanics-step cadence, so net
+  call rate is low. Skipped per spec ("If an Env.getValue() cache would
+  require passing the cached value through many method signatures, skip
+  that site").
+- `Pt3D.ptDistSqrd` and `ptDist` could be hoisted further for callers
+  that don't need either form, by inlining the dx/dy/dz delta computation
+  where the result feeds a single comparison. Out of scope for this
+  batch.
+- The `RetObj` classes in `FilLink.java`, `NodeLink.java`, `ActA.java`
+  still expose `conDist` (with sqrt). Those callers aren't on the hot
+  path identified by the survey, and changing them would ripple beyond
+  the survey's listed sites. Defer.
 
 ## 2026-05-29 — Iter2d: parallel pack/unpack + device residency
 

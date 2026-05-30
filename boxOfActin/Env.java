@@ -403,7 +403,7 @@ public class Env {
 	static private final double nodeTransDiff_init = Boltz*tempK / (6*Math.PI*aeta.getValue()*(1.0e-6*nodeRadius.getValue()));
 	static final Parameter nodeTransDiff = new Parameter("nodeTransDiff"," Protein Node Translation Diffusivity", nodeTransDiff_init,"m^2/s", Parameter.DOUBLE, false);
 
-	static private final double nodeRotDiff_init = Boltz*tempK / (8*Math.PI*aeta.getValue()*Math.pow(1.0e-6*nodeRadius.getValue(),3));
+	static private final double nodeRotDiff_init = Boltz*tempK / (8*Math.PI*aeta.getValue()*(1.0e-6*nodeRadius.getValue())*(1.0e-6*nodeRadius.getValue())*(1.0e-6*nodeRadius.getValue()));
 	static final Parameter nodeRotDiff = new Parameter("nodeRotDiff"," Protein Node Rotational Diffusivity", nodeRotDiff_init, "/s",Parameter.DOUBLE, false);
 	
 	static final Parameter showProteinNode = new Parameter("showProteinNode"," Draw Protein Node?", 0, "  ",Parameter.BOOLEAN, true);

@@ -116,15 +116,16 @@ public class MyoFilLink {
 	public void alignUVecTorque () {
 		torsionVec.cross(mySeg.uVec,myMotor.uVec);
 		torsionVec.unitVec();
-		
+
 		double dotVecs = Pt3D.Dot(mySeg.uVec,myMotor.uVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
-		
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
+
 		double angRelaxed = Myosin.uncockedMotor_ActinAngle;
 		if (myMotor.isCocked()) { angRelaxed = Myosin.cockedMotor_ActinAngle; }
 		double angD = angTween-angRelaxed;
-			
+
 		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angD/((1/myMotor.bRotGam.y + 1/mySeg.bRotGam.y)*Env.deltaT.getValue());
 		
@@ -146,7 +147,8 @@ public class MyoFilLink {
 		
 		double dotVecs = Pt3D.Dot(mySeg.yVec,myMotor.yVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 			
 		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angTween/((1/myMotor.bRotGam.x + 1/mySeg.bRotGam.x)*Env.deltaT.getValue());

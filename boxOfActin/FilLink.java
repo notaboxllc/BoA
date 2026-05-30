@@ -225,13 +225,15 @@ public class FilLink {
 			torsionVec.unitVec();
 			dotVecs = Pt3D.Dot(fil1.uVec,fil2.uVec);
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
-			angTween = Math.acos(dotVecs);
+			if (dotVecs < -1.0) { dotVecs = -1.0; }
+			angTween = Pt3D.fastAcos(dotVecs);
 		} else {
 			torsionVec.cross(fil1.uVec,fil2.uVecR);
 			torsionVec.unitVec();
 			dotVecs = Pt3D.Dot(fil1.uVec,fil2.uVec);
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
-			angTween = Math.abs(Math.acos(dotVecs)-Math.PI);
+			if (dotVecs < -1.0) { dotVecs = -1.0; }
+			angTween = Math.abs(Pt3D.fastAcos(dotVecs)-Math.PI);
 		}
 		
 		

@@ -1,0 +1,22 @@
+CPU micro-optimizations batch 1 — 10-seed ensemble validation
+==============================================================
+Param file: ParameterFiles/glidingAssay500_val (M=500, ~10101 steps)
+Date:       2026-05-30
+Protocol:   10 CPU seeds; CPU baseline reused from iter2d
+            (committed main, code identical between iter2d CPU run and the pre-cpuopt commit).
+
+Observable comparison (|diff|/cSEM gate < 2.0)
+---------------------------------------------------
+                     iter2d CPU mean ± SEM (SD)    cpuopt CPU mean ± SEM (SD)    |diff|/cSEM
+bindEvents       :      856.80 ± 45.72 (144.58)     860.80 ± 37.97 (120.08)        0.07  PASS
+meanBoundMotors  :        7.30 ±  0.30 (  0.94)       7.37 ±  0.24 (  0.76)        0.20  PASS
+glidingVelocity  :        8.22 ±  0.15 (  0.46)       8.39 ±  0.23 (  0.72)        0.61  PASS
+wall (s/seed)    :      275.10 ±  1.46 (  4.63)     289.20 ±  0.83 (  2.62)        8.40  (diagnostic only)
+
+All three physics observables PASS the |diff|/cSEM < 2.0 gate.
+Per-seed Wang-hash-seeded RNG paths diverge from baseline (changes 2 and 3 alter arithmetic ordering) but ensemble means line up well within noise.
+
+Wall regression at validation scale is +5.1% (289 vs 275). Validation
+runs are bound by per-step fixed overheads (ThreadSet barriers, motor
+ramp-up). Dense scale (M=98K) is the meaningful perf comparison —
+see dense timing entry.

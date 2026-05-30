@@ -156,7 +156,8 @@ public class ProteinNode extends Thing {
 	}
 	
 	public static double defaultRotDiff () {
-		double defaultRotGam = 8*Math.PI*Env.aeta.getValue()*Math.pow(1.0e-6*Env.nodeRadius.getValue(),3);
+		double nrM = 1.0e-6*Env.nodeRadius.getValue();
+		double defaultRotGam = 8*Math.PI*Env.aeta.getValue()*(nrM*nrM*nrM);
 		return Env.Boltz*Env.tempK/defaultRotGam;
 	}
 	
@@ -182,7 +183,7 @@ public class ProteinNode extends Thing {
 			bRotGam.div(Env.Boltz*Env.tempK,bRotDiff);		// Einstein's relation gamma=kT/D
 		} else {
 			double radiusM = getRadius()*1.0e-6;
-			bRotGam.x = 8*Math.PI*Env.aeta.getValue()*Math.pow(radiusM,3);	// drag for turning about x
+			bRotGam.x = 8*Math.PI*Env.aeta.getValue()*(radiusM*radiusM*radiusM);	// drag for turning about x
 			bRotGam.y = bRotGam.x;
 			bRotGam.z = bRotGam.x;
 			bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);		// Einstein's relation gamma=kT/D

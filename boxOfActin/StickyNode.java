@@ -174,7 +174,7 @@ public class StickyNode extends ProteinNode {
 			bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 			//System.out.println ("nodeTransDiff = " + bTransDiff.x);
 
-			bRotGam.x = tstDiffFactor*8*Math.PI*Env.aeta.getValue()*Math.pow(radiusM,3);	// drag for turning about x
+			bRotGam.x = tstDiffFactor*8*Math.PI*Env.aeta.getValue()*(radiusM*radiusM*radiusM);	// drag for turning about x
 			bRotGam.y = bRotGam.x;
 			bRotGam.z = bRotGam.x;
 			bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);		// Einstein's relation gamma=kT/D

@@ -1469,8 +1469,8 @@ public class BoxOfActin {
 				if (Env.benchmarkFilament && deflFil.midSeg != null && deflFil.segs != null) {
 					double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 					double zetaPerp = deflFil.midSeg.bTransGam.y;
-					deflFil.tauTheo = deflFil.segs.length * zetaPerp * Math.pow(spanM, 3)
-						/ (Env.EI * Math.pow(Math.PI, 4));
+					deflFil.tauTheo = deflFil.segs.length * zetaPerp * (spanM*spanM*spanM)
+						/ (Env.EI * (Math.PI*Math.PI*Math.PI*Math.PI));
 				}
 			}
 			// Force-frac refresh: recompute transverse force and analytic deflection immediately.
@@ -1686,7 +1686,7 @@ public class BoxOfActin {
 
 			// τ_theo = N × ζ_perp_seg × L³ / (EI × π⁴)  (first bending mode, pinned-pinned)
 			double zetaPerp = deflFil.midSeg.bTransGam.y;
-			deflFil.tauTheo = n * zetaPerp * Math.pow(spanM, 3) / (Env.EI * Math.pow(Math.PI, 4));
+			deflFil.tauTheo = n * zetaPerp * (spanM*spanM*spanM) / (Env.EI * (Math.PI*Math.PI*Math.PI*Math.PI));
 			deflFil.tauMeas = Double.NaN;
 			deflFil.tauMeasFrozen = false;
 			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", deflFil.tauTheo, zetaPerp);

@@ -33,8 +33,10 @@ public class Thing extends Object {
 										// CPU calcRandomForces() skips this Thing (kernel generates Brownian inline)
 	Pt3D coord = new Pt3D();			// the x,y,and z position of the Thing
 	static Pt3D maxPos = Env.worldDimension;	// maximum x position this Thing can occupy
-	double [][] transXTox = new double [3][3];	// transformation matrix from fixed to body-fixed frame
-	double [][] transxToX = new double [3][3];	// the inverse transformation... body-fixed to fixed
+	// 3x3 transformation matrices, flat row-major: [row*3 + col].
+	// transXTox: fixed→body-fixed. transxToX: body-fixed→fixed (transpose).
+	double [] transXTox = new double [9];
+	double [] transxToX = new double [9];
 	Pt3D uVec = new Pt3D(1,0,0);		// the unit vector that describes the orientation of the player
 	Pt3D uVecR = new Pt3D(-1,0,0);		// opposite direction of uVec
 	Pt3D yVec = new Pt3D(0,1,0);		// the first transvers vector for this body... in y direction
@@ -109,7 +111,7 @@ public class Thing extends Object {
 	public static class RetObj {
 		// this is the object passed by from line-line and line-point intersect tests
 		Pt3D conPt1, conPt2, ray1, ray2, ray3, ray4;
-		double conDist = 0;
+		double conDistSq = 0;  // squared contact distance — callers compare against threshold²
 		double alpha, beta;	 // the coefficients of ray1 and ray2, respectively, to define contact pts from end1s
 		boolean collision = false;
 		
@@ -362,10 +364,12 @@ public class Thing extends Object {
 		// this method takes uniform deviates and finds random numbers with a
 		// Gaussian distribution of mean=0, variance=2Dt, as applies for diffusive
 		// motion of a particle with diffusivity D.
+		double bDt = Env.brownianDeltaT.getValue();
+		double invBDt = 1.0 / bDt;
 		// get fresh random value pairs in unit circle {v1,v2,rsq,facterm}
-		xVals.newValue(Env.brownianDeltaT.getValue(),this);
-		yVals.newValue(Env.brownianDeltaT.getValue(),this);
-		zVals.newValue(Env.brownianDeltaT.getValue(),this);
+		xVals.newValue(bDt,this);
+		yVals.newValue(bDt,this);
+		zVals.newValue(bDt,this);
 		// rearrange values into v1, v2, rsq, and facterm Pt3Ds
 		v1.setVals(xVals.v1,yVals.v1,zVals.v1);
 		v2.setVals(xVals.v2,yVals.v2,zVals.v2);
@@ -376,8 +380,8 @@ public class Thing extends Object {
 		fac1.vecSqrt(tempPt);
 		tempPt.mult(bRotDiff, facterm);
 		fac2.vecSqrt(tempPt);
-		randForces.mult(1.0/Env.brownianDeltaT.getValue(), v1, fac1, bTransGam);
-		randTorques.mult(1.0/Env.brownianDeltaT.getValue(), v2, fac2, bRotGam);
+		randForces.mult(invBDt, v1, fac1, bTransGam);
+		randTorques.mult(invBDt, v2, fac2, bRotGam);
 	}
 	
 	public static void brownianMotionForAll () {
@@ -388,24 +392,16 @@ public class Thing extends Object {
 	}
 	
 	public void transMat () {
-		transXTox [0][0] = uVec.x;
-		transXTox [0][1] = uVec.y;
-		transXTox [0][2] = uVec.z;
-		transXTox [1][0] = yVec.x;
-		transXTox [1][1] = yVec.y;
-		transXTox [1][2] = yVec.z;
-		transXTox [2][0] = zVec.x;
-		transXTox [2][1] = zVec.y;
-		transXTox [2][2] = zVec.z;
-		// the inverse transformation is found as the transpose of this matrix
-		// since the direction cosine matrix is orthogonal.
-		double curVal;
-		for (int i = 0; i < 3; i++) {
-			for (int j = 0; j < 3; j++) {
-				curVal = transXTox [j][i];
-				transxToX [i][j] = curVal;
-			}
-		}
+		double ux = uVec.x, uy = uVec.y, uz = uVec.z;
+		double yx = yVec.x, yy = yVec.y, yz = yVec.z;
+		double zx = zVec.x, zy = zVec.y, zz = zVec.z;
+		transXTox[0] = ux; transXTox[1] = uy; transXTox[2] = uz;
+		transXTox[3] = yx; transXTox[4] = yy; transXTox[5] = yz;
+		transXTox[6] = zx; transXTox[7] = zy; transXTox[8] = zz;
+		// inverse transformation is the transpose (orthogonal direction-cosine matrix)
+		transxToX[0] = ux; transxToX[1] = yx; transxToX[2] = zx;
+		transxToX[3] = uy; transxToX[4] = yy; transxToX[5] = zy;
+		transxToX[6] = uz; transxToX[7] = yz; transxToX[8] = zz;
 	}
 	
 	public void resetCounters() {
@@ -478,7 +474,7 @@ public class Thing extends Object {
 					retO.beta = beta;
 					retO.conPt1.add(pt1A, alpha, retO.ray1);
 					retO.conPt2.add(pt2A, beta, retO.ray2);
-					retO.conDist = Pt3D.ptDist (retO.conPt1,retO.conPt2);
+					retO.conDistSq = Pt3D.ptDistSqrd(retO.conPt1,retO.conPt2);
 				}
 			}
 		}		
@@ -501,7 +497,7 @@ public class Thing extends Object {
 		if ((alpha <= 1) & (alpha >= 0)) {	// the perpendicular projection is on the line segment...  then check distance
 			retO.collision = true;
 			retO.conPt1.add(ptA, alpha,retO.ray1);		// define perpendicular point
-			retO.conDist = Pt3D.ptDist (retO.conPt1,point);
+			retO.conDistSq = Pt3D.ptDistSqrd(retO.conPt1,point);
 		}
 	}
 

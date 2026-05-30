@@ -21,15 +21,32 @@ public class Pt3D {
 	// methods for calculating the distance between two points
 	public static double ptDist (Pt3D pt1, Pt3D pt2) {
 		// calculates the distance between two points.
-		double distsqrd = Math.pow(pt1.x-pt2.x,2) + Math.pow(pt1.y-pt2.y,2) + Math.pow(pt1.z-pt2.z,2);
-		return Math.sqrt(distsqrd);
+		double dx = pt1.x-pt2.x, dy = pt1.y-pt2.y, dz = pt1.z-pt2.z;
+		return Math.sqrt(dx*dx + dy*dy + dz*dz);
 	}
-	
+
 	public static double ptDistSqrd (Pt3D pt1, Pt3D pt2) {
 		// calculates the square of the distance between two points
-		return Math.pow(pt1.x-pt2.x, 2) + Math.pow(pt1.y-pt2.y, 2) + Math.pow(pt1.z-pt2.z, 2);
+		double dx = pt1.x-pt2.x, dy = pt1.y-pt2.y, dz = pt1.z-pt2.z;
+		return dx*dx + dy*dy + dz*dz;
 	}
 	
+	// Fast acos with small-angle approximation. Branches near ±1 use
+	// θ ≈ √(2(1-|cosθ|)), <0.6% error at |cosθ|=0.95. Falls back to
+	// Math.acos elsewhere. Caller is responsible for clamping into [-1,1].
+	public static double fastAcos (double dot) {
+		if (dot > 0.95) {
+			double t = 1.0 - dot;
+			if (t < 0) t = 0;
+			return Math.sqrt(2.0 * t);
+		} else if (dot < -0.95) {
+			double t = 1.0 + dot;
+			if (t < 0) t = 0;
+			return Math.PI - Math.sqrt(2.0 * t);
+		}
+		return Math.acos(dot);
+	}
+
 	// methods for magnitude and magnitude squared of a 3-vector
 	public static double vecMag (Pt3D vec) {
 		return Math.sqrt(vec.x*vec.x + vec.y*vec.y + vec.z*vec.z);
@@ -396,116 +413,100 @@ public class Pt3D {
 		// *** TRANSFORMATIONS ***
 	// method to transform from a players body-fixed coordinate system to fixed coord frame
 	public static Pt3D xToNewX (Thing player, Pt3D ptInx) {
+		double [] m = player.transxToX;
+		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
 		double [] ptInX = new double [3];
-		for (int i = 0; i < 3; i ++) {
-			ptInX[i] = player.transxToX[i][0]*ptInx.x + player.transxToX[i][1]*ptInx.y + player.transxToX[i][2]*ptInx.z;
-		}
+		ptInX[0] = m[0]*px + m[1]*py + m[2]*pz;
+		ptInX[1] = m[3]*px + m[4]*py + m[5]*pz;
+		ptInX[2] = m[6]*px + m[7]*py + m[8]*pz;
 		return new Pt3D (ptInX);
 	}
-	
+
 	public void xToX (Thing p, Pt3D ptInx) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInx is also this point
-		tempx = p.transxToX[0][0]*ptInx.x + p.transxToX[0][1]*ptInx.y + p.transxToX[0][2]*ptInx.z;
-		tempy = p.transxToX[1][0]*ptInx.x + p.transxToX[1][1]*ptInx.y + p.transxToX[1][2]*ptInx.z;
-		tempz = p.transxToX[2][0]*ptInx.x + p.transxToX[2][1]*ptInx.y + p.transxToX[2][2]*ptInx.z;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		double [] m = p.transxToX;
+		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;	// snapshot in case ptInx == this
+		this.x = m[0]*px + m[1]*py + m[2]*pz;
+		this.y = m[3]*px + m[4]*py + m[5]*pz;
+		this.z = m[6]*px + m[7]*py + m[8]*pz;
 	}
-	
+
 	public void xToX (Thing p) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInx is also this point
-		tempx = p.transxToX[0][0]*this.x + p.transxToX[0][1]*this.y + p.transxToX[0][2]*this.z;
-		tempy = p.transxToX[1][0]*this.x + p.transxToX[1][1]*this.y + p.transxToX[1][2]*this.z;
-		tempz = p.transxToX[2][0]*this.x + p.transxToX[2][1]*this.y + p.transxToX[2][2]*this.z;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		double [] m = p.transxToX;
+		double px = this.x, py = this.y, pz = this.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz;
+		this.y = m[3]*px + m[4]*py + m[5]*pz;
+		this.z = m[6]*px + m[7]*py + m[8]*pz;
 	}
-	
+
 	public void xToXPlusxOrigin (Thing p, Pt3D ptInx) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInx is also this point
-		tempx = p.transxToX[0][0]*ptInx.x + p.transxToX[0][1]*ptInx.y + p.transxToX[0][2]*ptInx.z;
-		tempy = p.transxToX[1][0]*ptInx.x + p.transxToX[1][1]*ptInx.y + p.transxToX[1][2]*ptInx.z;
-		tempz = p.transxToX[2][0]*ptInx.x + p.transxToX[2][1]*ptInx.y + p.transxToX[2][2]*ptInx.z;
-		this.x = tempx + p.coord.x;
-		this.y = tempy + p.coord.y;
-		this.z = tempz + p.coord.z;
+		double [] m = p.transxToX;
+		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz + p.coord.x;
+		this.y = m[3]*px + m[4]*py + m[5]*pz + p.coord.y;
+		this.z = m[6]*px + m[7]*py + m[8]*pz + p.coord.z;
 	}
-	
+
 	public void xToXPlusxOrigin (Thing p) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInx is also this point
-		tempx = p.transxToX[0][0]*this.x + p.transxToX[0][1]*this.y + p.transxToX[0][2]*this.z;
-		tempy = p.transxToX[1][0]*this.x + p.transxToX[1][1]*this.y + p.transxToX[1][2]*this.z;
-		tempz = p.transxToX[2][0]*this.x + p.transxToX[2][1]*this.y + p.transxToX[2][2]*this.z;
-		this.x = tempx + p.coord.x;
-		this.y = tempy + p.coord.y;
-		this.z = tempz + p.coord.z;
+		double [] m = p.transxToX;
+		double px = this.x, py = this.y, pz = this.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz + p.coord.x;
+		this.y = m[3]*px + m[4]*py + m[5]*pz + p.coord.y;
+		this.z = m[6]*px + m[7]*py + m[8]*pz + p.coord.z;
 	}
-	
+
 	public void xToXPlusPoint (Thing p, Pt3D ptInx, Pt3D addPt) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInx is also this point
-		tempx = p.transxToX[0][0]*ptInx.x + p.transxToX[0][1]*ptInx.y + p.transxToX[0][2]*ptInx.z;
-		tempy = p.transxToX[1][0]*ptInx.x + p.transxToX[1][1]*ptInx.y + p.transxToX[1][2]*ptInx.z;
-		tempz = p.transxToX[2][0]*ptInx.x + p.transxToX[2][1]*ptInx.y + p.transxToX[2][2]*ptInx.z;
-		this.x = tempx + addPt.x;
-		this.y = tempy + addPt.y;
-		this.z = tempz + addPt.z;
+		double [] m = p.transxToX;
+		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz + addPt.x;
+		this.y = m[3]*px + m[4]*py + m[5]*pz + addPt.y;
+		this.z = m[6]*px + m[7]*py + m[8]*pz + addPt.z;
 	}
-	
+
 	// method to transform from a players fixed coordinate system to body-fixed coord frame
 	public static Pt3D XToNewx (Thing player, Pt3D ptInX) {
+		double [] m = player.transXTox;
+		double px = ptInX.x, py = ptInX.y, pz = ptInX.z;
 		double [] ptInx = new double [3];
-		for (int i = 0; i < 3; i ++) {
-			ptInx[i] = player.transXTox[i][0]*ptInX.x + player.transXTox[i][1]*ptInX.y + player.transXTox[i][2]*ptInX.z;
-		}
+		ptInx[0] = m[0]*px + m[1]*py + m[2]*pz;
+		ptInx[1] = m[3]*px + m[4]*py + m[5]*pz;
+		ptInx[2] = m[6]*px + m[7]*py + m[8]*pz;
 		return new Pt3D (ptInx);
 	}
-	
+
 	public void XTox (Thing p, Pt3D ptInX) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInX is also this point
-		tempx = p.transXTox[0][0]*ptInX.x + p.transXTox[0][1]*ptInX.y + p.transXTox[0][2]*ptInX.z;
-		tempy = p.transXTox[1][0]*ptInX.x + p.transXTox[1][1]*ptInX.y + p.transXTox[1][2]*ptInX.z;
-		tempz = p.transXTox[2][0]*ptInX.x + p.transXTox[2][1]*ptInX.y + p.transXTox[2][2]*ptInX.z;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		double [] m = p.transXTox;
+		double px = ptInX.x, py = ptInX.y, pz = ptInX.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz;
+		this.y = m[3]*px + m[4]*py + m[5]*pz;
+		this.z = m[6]*px + m[7]*py + m[8]*pz;
 	}
-	
+
 	public void XTox (Thing p) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInX is also this point
-		tempx = p.transXTox[0][0]*this.x + p.transXTox[0][1]*this.y + p.transXTox[0][2]*this.z;
-		tempy = p.transXTox[1][0]*this.x + p.transXTox[1][1]*this.y + p.transXTox[1][2]*this.z;
-		tempz = p.transXTox[2][0]*this.x + p.transXTox[2][1]*this.y + p.transXTox[2][2]*this.z;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		double [] m = p.transXTox;
+		double px = this.x, py = this.y, pz = this.z;
+		this.x = m[0]*px + m[1]*py + m[2]*pz;
+		this.y = m[3]*px + m[4]*py + m[5]*pz;
+		this.z = m[6]*px + m[7]*py + m[8]*pz;
 	}
-	
+
 	public void XToxFromxOrigin (Thing p, Pt3D ptInX) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInX is also this point
+		double [] m = p.transXTox;
 		double ptFromOx = ptInX.x-p.coord.x;
 		double ptFromOy = ptInX.y-p.coord.y;
 		double ptFromOz = ptInX.z-p.coord.z;
-		tempx = p.transXTox[0][0]*ptFromOx + p.transXTox[0][1]*ptFromOy + p.transXTox[0][2]*ptFromOz;
-		tempy = p.transXTox[1][0]*ptFromOx + p.transXTox[1][1]*ptFromOy + p.transXTox[1][2]*ptFromOz;
-		tempz = p.transXTox[2][0]*ptFromOx + p.transXTox[2][1]*ptFromOy + p.transXTox[2][2]*ptFromOz;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		this.x = m[0]*ptFromOx + m[1]*ptFromOy + m[2]*ptFromOz;
+		this.y = m[3]*ptFromOx + m[4]*ptFromOy + m[5]*ptFromOz;
+		this.z = m[6]*ptFromOx + m[7]*ptFromOy + m[8]*ptFromOz;
 	}
-	
+
 	public void XToxFromxOrigin (Thing p) {
-		double tempx, tempy, tempz;	// necessary for proper function if ptInX is also this point
+		double [] m = p.transXTox;
 		double ptFromOx = this.x-p.coord.x;
 		double ptFromOy = this.y-p.coord.y;
 		double ptFromOz = this.z-p.coord.z;
-		tempx = p.transXTox[0][0]*ptFromOx + p.transXTox[0][1]*ptFromOy + p.transXTox[0][2]*ptFromOz;
-		tempy = p.transXTox[1][0]*ptFromOx + p.transXTox[1][1]*ptFromOy + p.transXTox[1][2]*ptFromOz;
-		tempz = p.transXTox[2][0]*ptFromOx + p.transXTox[2][1]*ptFromOy + p.transXTox[2][2]*ptFromOz;
-		this.x = tempx;
-		this.y = tempy;
-		this.z = tempz;
+		this.x = m[0]*ptFromOx + m[1]*ptFromOy + m[2]*ptFromOz;
+		this.y = m[3]*ptFromOx + m[4]*ptFromOy + m[5]*ptFromOz;
+		this.z = m[6]*ptFromOx + m[7]*ptFromOy + m[8]*ptFromOz;
 	}
 	
 

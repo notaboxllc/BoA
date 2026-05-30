@@ -130,7 +130,7 @@ public class MyoMotor extends Thing {
 		bTransGam.x = 6*Math.PI*Env.aeta.getValue()*radiusM;//(2*Math.PI*Env.aeta.getValue()*headLengthM)/(denomLogTerm + aParallel);
 		bTransGam.y = bTransGam.x;//(4*Math.PI*Env.aeta.getValue()*headLengthM)/(denomLogTerm + aOrthog);
 		bTransGam.z = bTransGam.y;
-		bRotGam.x = 8*Math.PI*Env.aeta.getValue()*Math.pow(radiusM,3);//4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*headLengthM;	// drag for turning about x
+		bRotGam.x = 8*Math.PI*Env.aeta.getValue()*(radiusM*radiusM*radiusM);//4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*headLengthM;	// drag for turning about x
 		bRotGam.y = bRotGam.x;//(Math.PI*Env.aeta.getValue()*Math.pow(headLengthM,3))/(3*(denomLogTerm + aTurning));
 		bRotGam.z = bRotGam.y;
 		
@@ -263,59 +263,62 @@ public class MyoMotor extends Thing {
 	public void moveThing () {
 		if (Env.myosinsOff) { return; }
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
-		
+
+		double dt = Env.deltaT.getValue();
+
 		// first check that forceSum and torqueSum aren't wacky... exit method if they are
-		if (!forceSum.checkPt3D()) { 
-			talkln ("Crazy forceSum in " + this); 
+		if (!forceSum.checkPt3D()) {
+			talkln ("Crazy forceSum in " + this);
 			forceSum.zero();
 			forceSum.inc(randForces);
 		}
-		if (!torqueSum.checkPt3D()) { 
-			talkln ("Crazy torqueSum in " + this); 
+		if (!torqueSum.checkPt3D()) {
+			talkln ("Crazy torqueSum in " + this);
 			torqueSum.zero();
 			torqueSum.inc(randTorques);
 		}
-		
+
 		// Work in coordinates aligned with the rod... transform forces and torques into body-fixed axis....
 		bForceSum.XTox(this, forceSum);
 		bTorqueSum.XTox(this, torqueSum);
 
 		// add brownian force and torque... these are zero except at every chosen time-step
 		if (!Env.brownianMyoMotionOff) {
-			bForceSum.inc(Env.myoBrownianAttn.getValue(),randForces); //trans
-			bTorqueSum.inc(Env.myoBrownianAttn.getValue(),randTorques); //rot
+			double myoBrownianAttn = Env.myoBrownianAttn.getValue();
+			bForceSum.inc(myoBrownianAttn,randForces); //trans
+			bTorqueSum.inc(myoBrownianAttn,randTorques); //rot
 		}
 		// now that the forces and torques are in the body fixed frame, we apply the eoms....
 		bVeloc.div(1.0e6, bForceSum, bTransGam);	// in micron/sec
 		bAngVeloc.div(bTorqueSum, bRotGam);			// in radians/sec
-			
+
 		// ** before progressing .... check that bVeloc and bAngVeloc are not NaN... exit if wacky
 		if (!bVeloc.checkPt3D()) { talkln ("** problem with bVeloc for " + this); return; }
 		if (!bAngVeloc.checkPt3D()) { talkln ("** problem with bAngVeloc for " + this); return; }
-		
+
 		// New Positions
 		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coord updated
 		veloc.xToX(this, bVeloc);
-		coord.inc(Env.deltaT.getValue(),veloc);  // just position = velocity*time
-		
-		//deltaBAng.inc(Env.deltaT.getValue(),bAngVeloc);
+		coord.inc(dt,veloc);  // just position = velocity*time
+
+		//deltaBAng.inc(dt,bAngVeloc);
 		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
 		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
-		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
+		double uVecTransInZ = -bAngVeloc.y * dt;	// arclength out at 1 micron
+		double uVecTransInY = bAngVeloc.z * dt;
 		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
-		
-		// for yVec 
+
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
+		double yVecTransInZ = bAngVeloc.x * dt;	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
+
 		initialize();
-		
+
 	}
 	
 	public double getDim () {
@@ -329,7 +332,9 @@ public class MyoMotor extends Thing {
 		} else {
 			cosBeta = Pt3D.Dot(uVecR, linkUVec);
 		}
-		double beta = Math.acos(cosBeta);
+		if (cosBeta > 1.0) cosBeta = 1.0;
+		if (cosBeta < -1.0) cosBeta = -1.0;
+		double beta = Pt3D.fastAcos(cosBeta);
 		double cosAlpha = Math.sin(beta);
 		double lSqrd = 1e-12*getDim()*getDim();
 		double Cx = cosBeta*cosBeta/bTransGam.x;

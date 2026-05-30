@@ -49,7 +49,7 @@ public class Chamber extends Crucible {
 		dimZ = zDim;
 		dims = new Pt3D(dimX,dimY,dimZ);	// dimensions of the box
 		boxVolume = 8*dimX*dimY*dimZ;  // volume in cubic microns.  Note 2*dimX*2*dimY*2*dimZ
-		microMolarChangePerMonomer = (Math.pow(1e5,3)*1e6/(boxVolume*Env.AvogadroNum));		// (1e-6)^4 is for units.
+		microMolarChangePerMonomer = ((1e5*1e5*1e5)*1e6/(boxVolume*Env.AvogadroNum));		// (1e-6)^4 is for units.
 	
 		makeMyosinHeads();
 		makeMyosinDimers();

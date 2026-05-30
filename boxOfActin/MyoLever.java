@@ -55,7 +55,7 @@ public class MyoLever extends Thing {
 		bTransGam.y = (4*Math.PI*Env.aeta.getValue()*tailLengthM)/(denomLogTerm + aOrthog);
 		bTransGam.z = bTransGam.y;
 		bRotGam.x = 4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*tailLengthM;	// drag for turning about x
-		bRotGam.y = (Math.PI*Env.aeta.getValue()*Math.pow(tailLengthM,3))/(3*(denomLogTerm + aTurning));
+		bRotGam.y = (Math.PI*Env.aeta.getValue()*(tailLengthM*tailLengthM*tailLengthM))/(3*(denomLogTerm + aTurning));
 		bRotGam.z = bRotGam.y;
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
@@ -156,7 +156,9 @@ public class MyoLever extends Thing {
 		} else {
 			cosBeta = Pt3D.Dot(uVecR, linkUVec);
 		}
-		double beta = Math.acos(cosBeta);
+		if (cosBeta > 1.0) cosBeta = 1.0;
+		if (cosBeta < -1.0) cosBeta = -1.0;
+		double beta = Pt3D.fastAcos(cosBeta);
 		double cosAlpha = Math.sin(beta);
 		double lSqrd = 1e-12*getDim()*getDim();
 		double Cx = cosBeta*cosBeta/bTransGam.x;

@@ -359,7 +359,7 @@ public class FilSegment extends Thing {
 		bTransGam.y = (4*Math.PI*Env.aeta.getValue()*asIfLengthM)/(denomLogTerm + aOrthog);
 		bTransGam.z = bTransGam.y;
 		bRotGam.x = 4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*asIfLengthM;	// drag for turning about x
-		bRotGam.y = (Math.PI*Env.aeta.getValue()*Math.pow(asIfLengthM,3))/(3*(denomLogTerm + aTurning));
+		bRotGam.y = (Math.PI*Env.aeta.getValue()*(asIfLengthM*asIfLengthM*asIfLengthM))/(3*(denomLogTerm + aTurning));
 		bRotGam.z = bRotGam.y;
 		
 		// Viscous-blob drag addition — removed 2026-05-17 (Round 7); see JOURNAL.md.
@@ -489,28 +489,30 @@ public class FilSegment extends Thing {
 		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
 
+		double dt = Env.deltaT.getValue();
+
 		// Work in coordinates aligned with the rod... transform forces and torques into body-fixed axis....
 		bForceSum.XTox(this, forceSum);
 		bTorqueSum.XTox(this, torqueSum);
-		
+
 		// add brownian force and torque... these are zero except at every chosen time-step
 		if (!Env.brownianFilMotionOff && !brownianOff) {
 			double transScale,rotScale;
-			if (motherFil == null) {	
+			if (motherFil == null) {
 				// trans
 				transScale = Env.BTransCoeff.getValue();
 				if (linkedToCt > 0) { transScale = transScale/(1 + Env.xLinkTransAttn.getValue()*linkedToCt); }
-				if (actAOn) { 
-					transScale *= bTransGam.y/Thing.lmBug.bTransGam.y; //Env.actATetherTransAttn.getValue(); 
+				if (actAOn) {
+					transScale *= bTransGam.y/Thing.lmBug.bTransGam.y; //Env.actATetherTransAttn.getValue();
 					randForces.XTox(this,Thing.lmBug.randForcesInX);	// use bug random forces
 				}
 				bForceSum.inc(transScale,randForces);
-				
+
 				// rot
 				rotScale = Env.BRotCoeff.getValue();
 				if (linkedToCt > 0) { rotScale = rotScale/(1+ Env.xLinkRotAttn.getValue()*linkedToCt); }
-				if (actAOn) { 
-					rotScale *= bRotGam.y/Thing.lmBug.bRotGam.y; //Env.actATetherRotAttn.getValue(); 
+				if (actAOn) {
+					rotScale *= bRotGam.y/Thing.lmBug.bRotGam.y; //Env.actATetherRotAttn.getValue();
 					randTorques.XTox(this,Thing.lmBug.randTorquesInX);
 				}
 				if (!filAtEnd1 | !filAtEnd2) {			// only apply brownian torques to end filaments.. best matches expected angular correlations
@@ -518,7 +520,7 @@ public class FilSegment extends Thing {
 				}
 			} else {  // use mother filaments thermal forces if I'm an Arp2/3 branch
 				try {
-					// trans 
+					// trans
 					randForces.XTox(this,motherFil.randForcesInX);			// and finally back to body-fixed for this filament
 					transScale = Math.min(1,(bTransGam.y/motherFil.bTransGam.y)); // ratio of translation drag coeff, but not greater than 1
 					if (actAOn) { transScale *= Env.actATetherTransAttn.getValue(); }
@@ -527,7 +529,7 @@ public class FilSegment extends Thing {
 					randTorques.XTox(this,motherFil.randTorquesInX);
 					rotScale = Math.min(1,(bRotGam.y/motherFil.bRotGam.y));  // ratio or rotational drag coeff but not greater than 1
 					if (actAOn) { rotScale *= Env.actATetherRotAttn.getValue(); }
-					bTorqueSum.inc(rotScale,motherFil.randTorques); // scale brownian torques copied from mother filament 
+					bTorqueSum.inc(rotScale,motherFil.randTorques); // scale brownian torques copied from mother filament
 				} catch (NullPointerException npe) {
 					talkln("catching null pointer exception trying to ~share brownian motion in FilSegment.moveThing()");
 				}
@@ -536,30 +538,30 @@ public class FilSegment extends Thing {
 		// now that the forces and torques are in the body fixed frame, we apply the eoms....
 		bVeloc.div(1.0e6, bForceSum, bTransGam);		// in micron/sec
 		bAngVeloc.div(bTorqueSum, bRotGam);			// in radians/sec
-		
+
 		// New Positions
 		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coord updated
 		veloc.xToX(this, bVeloc);
-		coord.inc(Env.deltaT.getValue(),veloc);  // just position = velocity*time
-		
-		//deltaBAng.inc(Env.deltaT.getValue(),bAngVeloc);
+		coord.inc(dt,veloc);  // just position = velocity*time
+
+		//deltaBAng.inc(dt,bAngVeloc);
 		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
 		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
-		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
+		double uVecTransInZ = -bAngVeloc.y * dt;	// arclength out at 1 micron
+		double uVecTransInY = bAngVeloc.z * dt;
 		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
 		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
 		uVec.unitVec();		// make a unit vector
-		
-		// for yVec 
+
+		// for yVec
 		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
+		double yVecTransInZ = bAngVeloc.x * dt;	// arclength at 1 micron
 		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
 		yVec.xToX(this);
 		yVec.unitVec();
-		
-		initialize();		
-		
+
+		initialize();
+
 	}
 	
 	public void calcRandomForces () {  // override Thing.calRandomForces to account for sync'd brownian motion and to avoid wasting calculation of independent values
@@ -1304,7 +1306,7 @@ public class FilSegment extends Thing {
 		}
 		if (cosBeta > 1.0) cosBeta = 1.0;
 		if (cosBeta < -1.0) cosBeta = -1.0;
-		double beta = Math.acos(cosBeta);
+		double beta = Pt3D.fastAcos(cosBeta);
 		double cosAlpha = Math.sin(beta);
 		double lSqrd = 1e-12*length*length;
 		double Cx = cosBeta*cosBeta/bTransGam.x;
@@ -1354,27 +1356,33 @@ public class FilSegment extends Thing {
 		// version1.2 of soft lagrange multipliers; constraining forces translational and rotational.
 		// this filament takes care of both end links, if not already visited, then marks as visited on this and linked fils
 		// this method doesn't care if ptAtEnd2 is end2Fil.end1 or end2Fil.end2
-		
+
+		double dt = Env.deltaT.getValue();
+		double fracMove = Env.fracMove.getValue();
+		double fracR = Env.fracR.getValue();
+		boolean maxSegDistActive = Env.maxSegDist.isActive();
+		double maxSegDist = Env.maxSegDist.getValue();
+
 		// first double-check validity of links
 		// non-existence of attached filament
 		validateEnd2Link();
 		validateEnd1Link();
-		
+
 		if (filAtEnd2 & !end2LinkCkd) {
 			linkPt.add(end2,Env.actinMonoRadius,uVecR);		// link point is half a monomer back from end2 tip
 			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd2);
-			
+
 			// check distance if fils can break apart
 			end2SegDist.registerValue(strainDist);
-			if (Env.maxSegDist.isActive() & end2SegDist.averageVal() > Env.maxSegDist.getValue()) {
+			if (maxSegDistActive & end2SegDist.averageVal() > maxSegDist) {
 				breakAtEnd2();
 				talkln ("broke because dist too large between linked segments");
 				return;
 			}
-			
+
 			linkUVec.unitVec(strainDist,ptAtEnd2,linkPt);
 			linkUVecR.scale(-1,linkUVec);
-			
+
 			double moveCoeff1 = moveCoeff(2,linkUVec);
 			double moveCoeff2;
 			if (ptAtEnd2 == end2Fil.end1) {
@@ -1382,31 +1390,31 @@ public class FilSegment extends Thing {
 			} else {
 				moveCoeff2 = end2Fil.moveCoeff(2, linkUVecR);
 			}
-			double forceMag = (Env.fracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeff1 + moveCoeff2));
-			
+			double forceMag = (fracMove*1.0e-6*strainDist)/(dt*(moveCoeff1 + moveCoeff2));
+
 			// filter instantaneous F through averaging
 			F.scale(forceMag,linkUVec);
 			//filLink2Track.registerValue(F);
 			//F.copy(filLink2Track.averagePtVal());
-			
+
 			incForceSum(F);
-			R.scale(0.5e-6*length*Env.fracR.getValue(),uVec);
+			R.scale(0.5e-6*length*fracR,uVec);
 			RcrossF.cross(R,F);
 			incTorqueSum(RcrossF);
 			end2LinkCkd = true;
-			
+
 			Fopp.scale(-1,F);
 			end2Fil.incForceSum(Fopp);
 			if (ptAtEnd2 == end2Fil.end1) {
-				R.scale(0.5e-6*end2Fil.length*Env.fracR.getValue(),end2Fil.uVecR);
+				R.scale(0.5e-6*end2Fil.length*fracR,end2Fil.uVecR);
 				end2Fil.end1LinkCkd = true;
 			} else {
-				R.scale(0.5e-6*end2Fil.length*Env.fracR.getValue(),end2Fil.uVec);
+				R.scale(0.5e-6*end2Fil.length*fracR,end2Fil.uVec);
 				end2Fil.end2LinkCkd = true;
 			}
 			RcrossF.cross(R,Fopp);
 			end2Fil.incTorqueSum(RcrossF);
-			
+
 			// add these link forces to the axial loads on each segment
 			incEnd2AxialForce(Pt3D.Dot(uVec,F)); // axial force contribution
 			if (ptAtEnd2 == end2Fil.end1) {
@@ -1414,29 +1422,29 @@ public class FilSegment extends Thing {
 			} else {
 				end2Fil.incEnd2AxialForce(Pt3D.Dot(end2Fil.uVec,Fopp)); // axial force contribution
 			}
-			
+
 			// propagate a change in filID.... lower filID always used
 			if (filID != end2Fil.filID) {
 				if (filID < end2Fil.filID) { end2Fil.filID = filID; } else { filID = end2Fil.filID; }
 			}
 		}
-		
+
 		// take care of link at end1
 		if (filAtEnd1 & !end1LinkCkd) {
 			linkPt.add(end1,Env.actinMonoRadius,uVec);		// link point is half a monomer back from end2 tip
 			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd1);
-			
+
 			// check distance if fils can break apart
 			end1SegDist.registerValue(strainDist);
-			if (Env.maxSegDist.isActive() & end1SegDist.averageVal() > Env.maxSegDist.getValue()) {
+			if (maxSegDistActive & end1SegDist.averageVal() > maxSegDist) {
 				breakAtEnd1();
 				talkln ("broke because dist too large between linked segments");
 				return;
 			}
-			
+
 			linkUVec.unitVec(strainDist,ptAtEnd1,linkPt);
 			linkUVecR.scale(-1,linkUVec);
-			
+
 			double moveCoeff1 = moveCoeff(1,linkUVec);
 			double moveCoeff2;
 			if (ptAtEnd1 == end1Fil.end1) {
@@ -1444,33 +1452,33 @@ public class FilSegment extends Thing {
 			} else {
 				moveCoeff2 = end1Fil.moveCoeff(2, linkUVecR);
 			}
-			double forceMag = (Env.fracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeff1 + moveCoeff2));
-			
+			double forceMag = (fracMove*1.0e-6*strainDist)/(dt*(moveCoeff1 + moveCoeff2));
+
 			//filter instantaneous F through averaging
 			F.scale(forceMag,linkUVec);
 			//filLink1Track.registerValue(F);
 			//F.copy(filLink1Track.averagePtVal());
-		
+
 			incForceSum(F);
-			R.scale(0.5e-6*length*Env.fracR.getValue(),uVecR);
+			R.scale(0.5e-6*length*fracR,uVecR);
 			//R.zero();	// remove if you want torque from links
 			RcrossF.cross(R,F);
 			incTorqueSum(RcrossF);
 			end1LinkCkd = true;
-			
+
 			Fopp.scale(-1,F);
 			end1Fil.incForceSum(Fopp);
 			if (ptAtEnd1 == end1Fil.end1) {
-				R.scale(0.5e-6*end1Fil.length*Env.fracR.getValue(),end1Fil.uVecR);
+				R.scale(0.5e-6*end1Fil.length*fracR,end1Fil.uVecR);
 				end1Fil.end1LinkCkd = true;
 			} else {
-				R.scale(0.5e-6*end1Fil.length*Env.fracR.getValue(),end1Fil.uVec);
+				R.scale(0.5e-6*end1Fil.length*fracR,end1Fil.uVec);
 				end1Fil.end2LinkCkd = true;
 			}
 			//R.zero();	// remove if you want torque from links
 			RcrossF.cross(R,Fopp);
 			end1Fil.incTorqueSum(RcrossF);
-			
+
 			// add these link forces to the axial loads on each segment
 			incEnd1AxialForce(Pt3D.Dot(uVecR,F)); // axial force contribution
 			if (ptAtEnd1 == end1Fil.end1) {
@@ -1518,8 +1526,10 @@ public class FilSegment extends Thing {
 			} else {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end2Fil.uVecR);
 			}
-			double moveCoeff1 = 1/bTransGam.x + Math.pow(1e-6*length*cosAngTween1/2,2)/bRotGam.y;
-			double moveCoeff2 = 1/end2Fil.bTransGam.x + Math.pow(1e-6*end2Fil.length*cosAngTween2/2,2)/end2Fil.bRotGam.y;
+			double arm1 = 1e-6*length*cosAngTween1/2;
+			double arm2 = 1e-6*end2Fil.length*cosAngTween2/2;
+			double moveCoeff1 = 1/bTransGam.x + (arm1*arm1)/bRotGam.y;
+			double moveCoeff2 = 1/end2Fil.bTransGam.x + (arm2*arm2)/end2Fil.bRotGam.y;
 			double forceMag = (Env.fracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeff1 + moveCoeff2));
 		
 			// filter instantaneous F through averaging
@@ -1582,8 +1592,10 @@ public class FilSegment extends Thing {
 			} else {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end1Fil.uVecR);
 			}
-			double moveCoeff1 = 1/bTransGam.x + Math.pow(1e-6*length*cosAngTween1/2,2)/bRotGam.y;
-			double moveCoeff2 = 1/end1Fil.bTransGam.x + Math.pow(1e-6*end1Fil.length*cosAngTween2/2,2)/end1Fil.bRotGam.y;
+			double arm1 = 1e-6*length*cosAngTween1/2;
+			double arm2 = 1e-6*end1Fil.length*cosAngTween2/2;
+			double moveCoeff1 = 1/bTransGam.x + (arm1*arm1)/bRotGam.y;
+			double moveCoeff2 = 1/end1Fil.bTransGam.x + (arm2*arm2)/end1Fil.bRotGam.y;
 			double forceMag = (Env.fracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeff1 + moveCoeff2));
 			
 			//filter instantaneous F through averaging
@@ -1632,7 +1644,14 @@ public class FilSegment extends Thing {
 		// rotational spring which works to straighten out the filament
 		// this filament takes care of spring at both ends, if not visited, then marks as visited for involved fils
 		// this method doesn't care if ptAtEnd2 is end2Fil.end1 or end2Fil.end2
-		
+
+		double dt = Env.deltaT.getValue();
+		double fracMoveTorq = Env.fracMoveTorq.getValue();
+		boolean maxSegAngActive = Env.maxSegAngle.isActive();
+		double maxSegAng = Env.maxSegAngle.getValue();
+		boolean filTorqSpringActive = Env.filTorqSpring.isActive();
+		double filTorqSpring = Env.filTorqSpring.getValue();
+
 		if (filAtEnd2 & !end2TorqCkd) {
 			end2TorqCkd = true;
 			double dotVecs;
@@ -1650,27 +1669,27 @@ public class FilSegment extends Thing {
 			
 			if (dotVecs > 1.0) dotVecs = 1.0;
 			if (dotVecs < -1.0) dotVecs = -1.0;
-			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 
 			// check if angle too large
 			end2SegAng.registerValue(angTween);
-			/*if (Env.maxSegAngle.isActive() & end2SegAng.averageVal() > Env.maxSegAngle.getValue()/4) { 
+			/*if (maxSegAngActive & end2SegAng.averageVal() > maxSegAng/4) {
 				talkln ("Something happening!");
 				Env.paintOn = true;
 			}*/
-			if (Env.maxSegAngle.isActive() & end2SegAng.averageVal() > Env.maxSegAngle.getValue()) { 
+			if (maxSegAngActive & end2SegAng.averageVal() > maxSegAng) {
 				angTween = 0;
 				talkln ("broke because angle too large between linked segments");
-				filAtEnd2 = false; ptAtEnd2 = null; 
+				filAtEnd2 = false; ptAtEnd2 = null;
 			}
-			
+
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 			double torsionMag;
-			if (Env.filTorqSpring.isActive()) {
-				torsionMag = Env.fracMoveTorq.getValue()*Env.filTorqSpring.getValue()*angTween;
-			} else { 
-				//torsionMag = Env.fracMoveTorq.getValue()*(Math.PI/180)*end2SegAng.averageVal()/((1/bRotGam.y + 1/end2Fil.bRotGam.y)*Env.deltaT.getValue());
-				torsionMag = Env.fracMoveTorq.getValue()*(Math.PI/180)*angTween/((1/bRotGam.y + 1/end2Fil.bRotGam.y)*Env.deltaT.getValue());
+			if (filTorqSpringActive) {
+				torsionMag = fracMoveTorq*filTorqSpring*angTween;
+			} else {
+				//torsionMag = fracMoveTorq*(Math.PI/180)*end2SegAng.averageVal()/((1/bRotGam.y + 1/end2Fil.bRotGam.y)*dt);
+				torsionMag = fracMoveTorq*(Math.PI/180)*angTween/((1/bRotGam.y + 1/end2Fil.bRotGam.y)*dt);
 			}
 		
 			if (torsionVec.checkPt3D()) {
@@ -1704,27 +1723,27 @@ public class FilSegment extends Thing {
 			
 			if (dotVecs > 1.0) dotVecs = 1.0;
 			if (dotVecs < -1.0) dotVecs = -1.0;
-			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 
 			// check if angle too large
 			end1SegAng.registerValue(angTween);
-			/*if (Env.maxSegAngle.isActive() & end1SegAng.averageVal() > Env.maxSegAngle.getValue()/4) { 
+			/*if (maxSegAngActive & end1SegAng.averageVal() > maxSegAng/4) {
 				talkln ("Something happening!");
 				Env.paintOn = true;
 			}*/
-			if (Env.maxSegAngle.isActive() & end1SegAng.averageVal() > Env.maxSegAngle.getValue()) { 
+			if (maxSegAngActive & end1SegAng.averageVal() > maxSegAng) {
 				angTween = 0;
 				talkln ("broke because angle too large between linked segments");
-				filAtEnd1 = false; ptAtEnd1 = null; 
+				filAtEnd1 = false; ptAtEnd1 = null;
 			}
-			
+
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 			double torsionMag;
-			if (Env.filTorqSpring.isActive()) {
-				torsionMag = Env.fracMoveTorq.getValue()*Env.filTorqSpring.getValue()*angTween;
-			} else { 
-				//torsionMag = Env.fracMoveTorq.getValue()*(Math.PI/180)*end1SegAng.averageVal()/((1/bRotGam.y + 1/end1Fil.bRotGam.y)*Env.deltaT.getValue());
-				torsionMag = Env.fracMoveTorq.getValue()*(Math.PI/180)*angTween/((1/bRotGam.y + 1/end1Fil.bRotGam.y)*Env.deltaT.getValue());
+			if (filTorqSpringActive) {
+				torsionMag = fracMoveTorq*filTorqSpring*angTween;
+			} else {
+				//torsionMag = fracMoveTorq*(Math.PI/180)*end1SegAng.averageVal()/((1/bRotGam.y + 1/end1Fil.bRotGam.y)*dt);
+				torsionMag = fracMoveTorq*(Math.PI/180)*angTween/((1/bRotGam.y + 1/end1Fil.bRotGam.y)*dt);
 			}
 			if (torsionVec.checkPt3D()) {
 				torsionVec.scale(torsionMag);
@@ -1924,9 +1943,11 @@ public class FilSegment extends Thing {
 		double attnFactor = 0.3;
 		double filTipR = Env.filTipRadiusForCollisions.getValue();
 		Pt3D filTipCenter = Pt3D.Add(fil.end2,filTipR,fil.uVecR);
-		double pDist = Pt3D.ptDist(node.coord, filTipCenter);
-		if (pDist< node.getRadius()+filTipR) {
-			double impingedist = (node.getRadius()+filTipR) - pDist;
+		double pDistSq = Pt3D.ptDistSqrd(node.coord, filTipCenter);
+		double colThresh = node.getRadius()+filTipR;
+		if (pDistSq < colThresh*colThresh) {
+			double pDist = Math.sqrt(pDistSq);
+			double impingedist = colThresh - pDist;
 		    Pt3D nodeVec = Pt3D.UnitVec(pDist, node.coord, filTipCenter);
 			Pt3D filVec = Pt3D.Reverse(nodeVec);
 			double mag = (attnFactor*1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/node.bTransGam.x+1/fil.bTransGam.y);
@@ -1964,25 +1985,26 @@ public class FilSegment extends Thing {
 		
 		double angTween,angTweenR;
 		double maxAngle = Env.maxXLinkBondAngle.getValue();
-		switch (Env.xLinks.getIntValue()) { 
+		switch (Env.xLinks.getIntValue()) {
 		case 0:
-			angTween = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVec));
-			angTweenR = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVecR));
+			angTween = Pt3D.fastAcos(Pt3D.Dot(fil1.uVec, fil2.uVec));
+			angTweenR = Pt3D.fastAcos(Pt3D.Dot(fil1.uVec, fil2.uVecR));
 			if ((angTween > maxAngle) & (angTweenR > maxAngle)) { return; }
 			break;
 		case 1:
-			angTween = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVec));
+			angTween = Pt3D.fastAcos(Pt3D.Dot(fil1.uVec, fil2.uVec));
 			if (angTween > maxAngle) { return; }
 			break;
 		case -1:
-			angTweenR = Math.acos(Pt3D.Dot(fil1.uVec, fil2.uVecR));
+			angTweenR = Pt3D.fastAcos(Pt3D.Dot(fil1.uVec, fil2.uVecR));
 			//if (Env.xLinkTesting) { System.out.println("Angle between test filaments is " + angTween + " radians"); }
 			if (angTweenR > maxAngle) { return; }
 			break;
 		}
 		
 		lineSegmentIntersectTest(fil1.end1,fil1.end2,fil2.end1,fil2.end2,retO);
-		if ((retO.collision) && retO.conDist < Env.crossLinkGrabDist.getValue()) {
+		double xLinkGrab = Env.crossLinkGrabDist.getValue();
+		if ((retO.collision) && retO.conDistSq < xLinkGrab*xLinkGrab) {
 			double loc1 = Pt3D.ptDist(fil1.end1,retO.conPt1) + (2*fil1.myPRNG.nextDouble()-1)*minFilLinkSep;
 			double loc2 = Pt3D.ptDist(fil2.end1,retO.conPt2) + (2*fil2.myPRNG.nextDouble()-1)*minFilLinkSep;
 			if (loc1 > fil1.length) { loc1 = fil1.length; }
@@ -2034,7 +2056,8 @@ public class FilSegment extends Thing {
 			curNode = ProteinNode.theNodes[i];
 			if (nodeInFilSegBoundingBox(curNode)) {
 				Thing.pointAndLineIntersectTest(curNode.coord, end1, end2, retObj);
-				if (retObj.collision && retObj.conDist < curNode.getRadius()) {
+				double nodeR = curNode.getRadius();
+				if (retObj.collision && retObj.conDistSq < nodeR*nodeR) {
 					double arcOnFil = Pt3D.ptDist(end1, retObj.conPt1);
 					//curNode.myosinOn(this,arcOnFil);
 				}
@@ -2191,7 +2214,8 @@ public class FilSegment extends Thing {
 				double dotVecs = Pt3D.Dot(forminVecInX,uVec);
 				//if (dotVecs < 0) { dotVecs = 0; }
 				if (dotVecs > 1) { dotVecs = 1; }
-				double angTween = Math.acos(dotVecs);
+				if (dotVecs < -1) { dotVecs = -1; }
+				double angTween = Pt3D.fastAcos(dotVecs);
 				double torqMag = Env.nodeTorqSpring.getValue()*angTween;
 				//System.out.println ("angTween = " + angTween*180/Math.PI);
 				R.cross(uVec,forminVecInX);
@@ -2294,7 +2318,7 @@ public class FilSegment extends Thing {
 			toPlasmidUVec.unitVec(end2,end2Node.coord);	// the unit vector orthogonal to the plasmid at the attachment point
 			torsionVec.cross(uVecR,toPlasmidUVec);
 			torsionVec.unitVec();
-			double angTween = Math.acos(Pt3D.Dot(uVecR,toPlasmidUVec));
+			double angTween = Pt3D.fastAcos(Pt3D.Dot(uVecR,toPlasmidUVec));
 			double torsionMag;
 			if (Env.nodeTorqSpring.isActive()) {
 				torsionMag = Env.nodeTorqSpring.getValue()*angTween;

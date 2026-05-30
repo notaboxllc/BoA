@@ -92,7 +92,8 @@ public class MyosinDimer {
 		
 		double dotVecs = Pt3D.Dot(myo1.myoLever.uVec,myo2.myoLever.uVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 		
 		double angD = angTween-leverAngle;
 			
@@ -117,7 +118,8 @@ public class MyosinDimer {
 		
 		double dotVecs = Pt3D.Dot(myo1.myoLever.yVec,myo2.myoLever.yVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 		
 		double angD = angTween-180;
 			

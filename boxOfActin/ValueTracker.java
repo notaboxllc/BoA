@@ -120,7 +120,8 @@ public class ValueTracker {
 		double aveVal = runningAverageVal();
 		double numerator = 0;
 		for (int i=0;i<count;i++) {
-			numerator += Math.pow(vals[i]-aveVal,2);
+			double d = vals[i]-aveVal;
+			numerator += d*d;
 		}
 
 		return numerator/count;
@@ -134,9 +135,12 @@ public class ValueTracker {
 		double numeratorY=0;
 		double numeratorZ=0;
 		for (int i=0;i<count;i++) {
-			numeratorX += Math.pow(ptVals[i].x-avePtVal.x,2);
-			numeratorY += Math.pow(ptVals[i].y-avePtVal.y,2);
-			numeratorZ += Math.pow(ptVals[i].z-avePtVal.z,2);
+			double dx = ptVals[i].x-avePtVal.x;
+			double dy = ptVals[i].y-avePtVal.y;
+			double dz = ptVals[i].z-avePtVal.z;
+			numeratorX += dx*dx;
+			numeratorY += dy*dy;
+			numeratorZ += dz*dz;
 		}
 		return new Pt3D (numeratorX/count,numeratorY/count,numeratorZ/count);
 	}

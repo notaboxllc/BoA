@@ -301,7 +301,8 @@ public class Mesh {
 	
 	public void fillFilSegMesh (int filSegNum, Pt3D startPt, Pt3D stopPt){
 		int id=filSegNum;
-		double segLength = Math.sqrt(Math.pow(startPt.x-stopPt.x,2) + Math.pow(startPt.y-stopPt.y,2));
+		double dxLen = startPt.x-stopPt.x, dyLen = startPt.y-stopPt.y;
+		double segLength = Math.sqrt(dxLen*dxLen + dyLen*dyLen);
 		boolean useLineAlgorithm=segLength>MIN_LENGTH_FOR_LINE_ALGORITHM;
 		
 		//X AXIS

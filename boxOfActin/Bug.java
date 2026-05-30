@@ -104,10 +104,10 @@ public class Bug extends Crucible {
 		innerRadius = radius-corticalDepth;
 		cylLength = length-2*radius;
 		halfCylLength = cylLength/2.0;
-		cylVolume = (length-2*radius)*Math.pow(radius,2)*Math.PI;
-		sphVolume = 4*Math.PI*Math.pow(radius,3)/3;
+		cylVolume = (length-2*radius)*(radius*radius)*Math.PI;
+		sphVolume = 4*Math.PI*(radius*radius*radius)/3;
 		bugVolume = cylVolume + sphVolume;  // volume in cubic microns
-		microMolarChangePerMonomer = (Math.pow(1e5,3)*1e6/(bugVolume*Env.AvogadroNum));		// (1e-6)^4 is for units.
+		microMolarChangePerMonomer = ((1e5*1e5*1e5)*1e6/(bugVolume*Env.AvogadroNum));		// (1e-6)^4 is for units.
 		bigSphRadSqrd = 1.05*(length/2)*(length/2);	// used for eliminating possible collisions
 		
 		// viscous resistance definitions... for prolate ellipsoid of revolution ... see Berg p. 57 and 84
@@ -118,7 +118,7 @@ public class Bug extends Crucible {
 		bTransGam.y = 8*Math.PI*Env.aeta.getValue()*a/(Math.log(2*a/b) + .5);
 		bTransGam.z = bTransGam.y;
 		bRotGam.x = 16*Math.PI*Env.aeta.getValue()*a*b*b/3;
-		bRotGam.y = (8*Math.PI*Env.aeta.getValue()*Math.pow(a,3)/3)/(Math.log(2*a/b) - .5);
+		bRotGam.y = (8*Math.PI*Env.aeta.getValue()*(a*a*a)/3)/(Math.log(2*a/b) - .5);
 		bRotGam.z = bRotGam.y;
 	
 		bTransGam_base.copy(bTransGam);
@@ -254,7 +254,7 @@ public class Bug extends Crucible {
 	}
 	
 	public double getVolume () {  // spherical part + cylindrical part
-		return (4/3)*Math.PI*Math.pow(radius,3) + Math.PI*radius*radius*length;
+		return (4/3)*Math.PI*(radius*radius*radius) + Math.PI*radius*radius*length;
 	}
 	
 	public double getMonomerConc () {

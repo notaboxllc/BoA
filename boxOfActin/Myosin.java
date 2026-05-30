@@ -140,28 +140,30 @@ public class Myosin {
 	}
 	
 	public void applyLeverMotorJointForce () {
+		double dt = Env.deltaT.getValue();
+		double myoJ1FracR = Env.myoJ1FracR.getValue();
 		double strainDist = Pt3D.ptDist(myoLever.end2, myoMotor.end1);
 		linkUVec1.unitVec(myoLever.end2,myoMotor.end1);
 		linkUVec2.scale(-1,linkUVec1);
 		double moveCoeffHead = myoMotor.moveCoeff(1,linkUVec1);
 		double moveCoeffTail = myoLever.moveCoeff(2,linkUVec2);
-		double forceMag = (Env.myoJ1FracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveCoeffHead + moveCoeffTail));
+		double forceMag = (Env.myoJ1FracMove.getValue()*1.0e-6*strainDist)/(dt*(moveCoeffHead + moveCoeffTail));
 		//double forceMag = (1.0e-6*strainDist*1e-8);
 
 		// forces and torques applied to myosin motor domain
 		F.scale(forceMag,linkUVec1);
 		myoMotor.incForceSum(F);
-		R.scale(0.5e-6*Env.myoMotorLength.getValue()*Env.myoJ1FracR.getValue(),myoMotor.uVecR);
+		R.scale(0.5e-6*Env.myoMotorLength.getValue()*myoJ1FracR,myoMotor.uVecR);
 		RcrossF.cross(R,F);
 		myoMotor.incTorqueSum(RcrossF);
-		
+
 		// forces and torques applied to myosin lever arm
 		F.scale(-1,F);
 		myoLever.incForceSum(F);
-		R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ1FracR.getValue(),myoLever.uVec);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ1FracR,myoLever.uVec);
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
-		
+
 	}
 	
 	public void applyLeverMotorJointTorque () {
@@ -180,8 +182,9 @@ public class Myosin {
 		
 		double dotVecs = Pt3D.Dot(myoLever.uVec,myoMotor.uVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
-		
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
+
 		double angRelaxed = uncockedLever_MotorAngle;
 		if (myoMotor.isCocked()) { angRelaxed = cockedLever_MotorAngle; }
 		double angD = angTween-angRelaxed;
@@ -204,28 +207,30 @@ public class Myosin {
 	}
 	
 	public void applyRodLeverJointForce () {
+		double dt = Env.deltaT.getValue();
+		double myoJ2FracR = Env.myoJ2FracR.getValue();
 		double strainDist = Pt3D.ptDist(myoRod.end2, myoLever.end1);
 		linkUVec1.unitVec(myoRod.end2,myoLever.end1);
 		linkUVec2.scale(-1,linkUVec1);
 		double moveC1 = myoLever.moveCoeff(1,linkUVec1);
 		double moveC2 = myoRod.moveCoeff(2,linkUVec2);
-		double forceMag = (Env.myoJ2FracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(moveC1 + moveC2));
+		double forceMag = (Env.myoJ2FracMove.getValue()*1.0e-6*strainDist)/(dt*(moveC1 + moveC2));
 		//double forceMag = (1.0e-6*strainDist*1e-8);
 
 		// forces and torques applied to myosin lever arm
 		F.scale(forceMag,linkUVec1);
 		myoLever.incForceSum(F);
-		R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ2FracR.getValue(),myoLever.uVecR);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ2FracR,myoLever.uVecR);
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
-		
+
 		// forces and torques applied to myosin rod
 		F.scale(-1,F);
 		myoRod.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue()*Env.myoJ2FracR.getValue(),myoRod.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue()*myoJ2FracR,myoRod.uVec);
 		RcrossF.cross(R,F);
 		myoRod.incTorqueSum(RcrossF);
-		
+
 	}
 	
 	public void applyRodLeverJointTorque () {
@@ -236,8 +241,9 @@ public class Myosin {
 		
 		double dotVecs = Pt3D.Dot(myoRod.uVec,myoLever.uVec);
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
-		double angTween = Math.acos(dotVecs)*180/Math.PI;
-		
+		if (dotVecs < -1.0) { dotVecs = -1.0; }
+		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
+
 		double angRelaxed = 0;
 		double angD = angTween-angRelaxed;
 			

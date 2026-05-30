@@ -136,7 +136,7 @@ public class MyoMiniFilament extends Thing {
 		bTransGam.y = (4*Math.PI*Env.aeta.getValue()*tailLengthM)/(denomLogTerm + aOrthog);
 		bTransGam.z = bTransGam.y;
 		bRotGam.x = 4*Math.PI*Env.aeta.getValue()*radiusM*radiusM*tailLengthM;	// drag for turning about x
-		bRotGam.y = (Math.PI*Env.aeta.getValue()*Math.pow(tailLengthM,3))/(3*(denomLogTerm + aTurning));
+		bRotGam.y = (Math.PI*Env.aeta.getValue()*(tailLengthM*tailLengthM*tailLengthM))/(3*(denomLogTerm + aTurning));
 		bRotGam.z = bRotGam.y;
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
@@ -432,7 +432,8 @@ public class MyoMiniFilament extends Thing {
 			
 			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVecR);
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
-			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			if (dotVecs < -1.0) { dotVecs = -1.0; }
+			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 			
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 			double torsionMag = Env.myoMiniFilAlign.getValue()*(Math.PI/180)*angTween/((1/curMyoRod.bRotGam.y + 1/bRotGam.y)*Env.deltaT.getValue());
@@ -475,7 +476,8 @@ public class MyoMiniFilament extends Thing {
 			
 			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVec);
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
-			double angTween = Math.acos(dotVecs)*180/Math.PI;
+			if (dotVecs < -1.0) { dotVecs = -1.0; }
+			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 			
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 			double torsionMag = Env.myoMiniFilAlign.getValue()*(Math.PI/180)*angTween/((1/curMyoRod.bRotGam.y + 1/bRotGam.y)*Env.deltaT.getValue());
