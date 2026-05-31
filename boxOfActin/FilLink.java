@@ -87,17 +87,19 @@ public class FilLink {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.xLinkStart:
+					if (filLinkCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*filLinkCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.xLinkStop:
+					if (filLinkCt == 0) return;
 					gather(); break;
 			}
 		}

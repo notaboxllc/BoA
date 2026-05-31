@@ -41,52 +41,56 @@ public class Crucible extends Thing {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints2Start:
+					if (Env.numChamberFixedMyos.getIntValue() == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*Env.numChamberFixedMyos.getIntValue()/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.myoJoints2Stop:
+					if (Env.numChamberFixedMyos.getIntValue() == 0) return;
 					gather(); break;
 			}
 		}
-		
+
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.myoJoints2Start:
 					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-						keepMyosinOnSurface(i); 
+						keepMyosinOnSurface(i);
 					}
 					break;
 			}
 		}
 	}
-	
+
 	static class ChamberMyoDThreads extends ThreadSet {
 		ChamberMyoDThreads () {
 			super (Env.numMyoThreads, "Chamber MyoDimer Threads");
 		}
-	
+
 		public void divideAndConquer (int jobId) {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints2Start:
+					if (Env.numChamberFixedMyoDimers.getIntValue() == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*Env.numChamberFixedMyoDimers.getIntValue()/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.myoJoints2Stop:
+					if (Env.numChamberFixedMyoDimers.getIntValue() == 0) return;
 					gather(); break;
 			}
 		}

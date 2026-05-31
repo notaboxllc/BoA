@@ -90,31 +90,37 @@ public class Mesh {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.meshFilsStart:
+					if (FilSegment.filSegmentCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*FilSegment.filSegmentCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 				case Env.meshNodesStart:
+					if (ProteinNode.nodeCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*ProteinNode.nodeCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 				case Env.meshMotorsStart:
+					if (MyoMotor.motorCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*MyoMotor.motorCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.meshFilsStop:
+					if (FilSegment.filSegmentCt == 0) return;
 					gather(); break;
 				case Env.meshNodesStop:
+					if (ProteinNode.nodeCt == 0) return;
 					gather(); break;
 				case Env.meshMotorsStop:
+					if (MyoMotor.motorCt == 0) return;
 					gather(); break;
 			}
 		}
@@ -188,6 +194,7 @@ public class Mesh {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.motCollStart:
+					if (MyoMotor.motorCt == 0) return;
 					// Divide by motor count for motor-centric 3D grid query
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*MyoMotor.motorCt/numThreads;
@@ -200,6 +207,7 @@ public class Mesh {
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.motCollStop:
+					if (MyoMotor.motorCt == 0) return;
 					gather(); break;
 			}
 		}

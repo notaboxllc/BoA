@@ -91,17 +91,19 @@ public class ActA {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.actAStart:
+					if (actACt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*actACt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.actAStop:
+					if (actACt == 0) return;
 					gather(); break;
 			}
 		}

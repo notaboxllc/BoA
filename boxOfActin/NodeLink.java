@@ -82,17 +82,19 @@ public class NodeLink {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.membraneLinksStart:
+					if (nodeLinkCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*nodeLinkCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.membraneLinksStop:
+					if (nodeLinkCt == 0) return;
 					gather(); break;
 			}
 		}

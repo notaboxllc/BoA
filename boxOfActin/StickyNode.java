@@ -139,17 +139,19 @@ public class StickyNode extends ProteinNode {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.membraneMoveStart:
+					if (nodeCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*nodeCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.membraneMoveStop:
+					if (nodeCt == 0) return;
 					gather(); break;
 			}
 		}

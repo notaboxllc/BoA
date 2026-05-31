@@ -48,17 +48,19 @@ public class MyosinDimer {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints1Start:
+					if (myoDimerCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*myoDimerCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.myoJoints1Stop:
+					if (myoDimerCt == 0) return;
 					gather(); break;
 			}
 		}

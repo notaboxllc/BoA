@@ -73,6 +73,7 @@ public class Myosin {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints1Start:
+					if (myoCt == 0) return;
 					if (Env.useGPU) {
 						// GPU path runs per-Myosin joints in GPUMyosinJoints.computeJoints();
 						// zero out the worker chunks so the spawned threads do no per-Myosin work.
@@ -87,10 +88,11 @@ public class Myosin {
 			}
 
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.myoJoints1Stop:
+					if (myoCt == 0) return;
 					gather(); break;
 			}
 		}

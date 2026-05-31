@@ -91,17 +91,19 @@ public class Arp23 {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.xLinkStart: // for now, arp2/3 calculations are concurrent with crosslinkers
+					if (arp23Ct == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*arp23Ct/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.xLinkStop:
+					if (arp23Ct == 0) return;
 					gather(); break;
 			}
 		}

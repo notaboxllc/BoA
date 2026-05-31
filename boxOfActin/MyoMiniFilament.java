@@ -94,17 +94,19 @@ public class MyoMiniFilament extends Thing {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints2Start:
+					if (myoMiniFilCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*myoMiniFilCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.myoJoints2Stop:
+					if (myoMiniFilCt == 0) return;
 					gather(); break;
 			}
 		}

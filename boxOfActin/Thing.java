@@ -199,6 +199,7 @@ public class Thing extends Object {
 				case Env.biochemStart:
 				case Env.resetCtStart:
 				case Env.gatherForcesStart:
+					if (thingCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
 					}
@@ -213,6 +214,7 @@ public class Thing extends Object {
 				case Env.biochemStop:
 				case Env.resetCtStop:
 				case Env.gatherForcesStop:
+					if (thingCt == 0) return;
 					gather(); break;
 			}
 		}
@@ -260,17 +262,19 @@ public class Thing extends Object {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.bForcesStart:
+					if (thingCt == 0) return;
 					for (int i=0; i <= numThreads; i++) {
 						jobDiv[i] = i*thingCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
-			
+
 		}
-		
+
 		public void regroup (int jobId) {
 			switch (jobId) {
 				case Env.bForcesStop:
+					if (thingCt == 0) return;
 					gather(); break;
 			}
 		}

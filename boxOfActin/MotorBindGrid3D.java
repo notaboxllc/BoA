@@ -281,11 +281,12 @@ public class MotorBindGrid3D {
         @Override
         public void divideAndConquer(int jobId) {
             if (jobId == Env.motorBindGrid3DStart) {
+                int filCt   = FilSegment.filSegmentCt;
+                int motorCt = MyoMotor.motorCt;
+                if (filCt == 0 && motorCt == 0) return;
                 // Stamp the step once so motorFilCollisions sees a stable
                 // lastWriteTime even if zero cells get written this step.
                 lastWriteTime = Env.counter;
-                int filCt   = FilSegment.filSegmentCt;
-                int motorCt = MyoMotor.motorCt;
                 for (int i = 0; i <= numThreads; i++) {
                     filJobDiv[i]   = i * filCt   / numThreads;
                     motorJobDiv[i] = i * motorCt / numThreads;
@@ -297,6 +298,7 @@ public class MotorBindGrid3D {
         @Override
         public void regroup(int jobId) {
             if (jobId == Env.motorBindGrid3DStop) {
+                if (FilSegment.filSegmentCt == 0 && MyoMotor.motorCt == 0) return;
                 gather();
             }
         }
