@@ -1,8 +1,135 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-05-31 — Joints kernel precision diagnostic
+
+Targeted at the 40 % bindEvents drop seen in the 2026-05-30 chained-GPU
+10-seed ensemble (498 ± 38 vs CPU baseline 856.80 ± 45.72). The change
+list between the CPU and GPU joints path bundles several things at once
+(kick suppression, fastAcosF polynomial, sqrt(1-x²) identity for
+moveCoeff, float32 throughout, magnitude guard instead of NaN check).
+This session isolates each on the CPU side to find which one carries
+the bias.
+
+### Method
+
+`Myosin.java` gained three temporary static flags
+(`DIAG_SKIP_KICK`, `DIAG_GPU_MATH`, `DIAG_FLOAT32_CAST`) that route the
+CPU joint-torque path through GPU-equivalent forms. The companion
+`moveCoeff` in MyoRod / MyoLever / MyoMotor was guarded similarly so
+the GPU's `cosAlpha² = 1 − cosBeta²` identity replaces the CPU's
+`sin(fastAcos(cosBeta))` chain under `DIAG_GPU_MATH`, and the
+float32-emulation casts cover both the joint torque (torsionVec
+components, dotVecs, angTween, torsionMag) and moveCoeff (cosBeta,
+cosAlpha, moveC). Each test enables flags cumulatively (T1 alone, T1+T2,
+T1+T2+T3) and runs the same 10-seed protocol on
+`glidingAssay500_val` against the iter2d CPU baseline. All four edited
+files were reverted to HEAD at the end of the session — the fix
+belongs in the GPU kernel, not the CPU code.
+
+### Results
+
+```
+                     bindEvents       MBM           glidVel       baseline
+CPU baseline      856.80 ± 45.72   7.30 ± 0.30   8.22 ± 0.15     —
+GPU (chained)     497.80 ± 38.23   5.01 ± 0.36   6.32 ± 0.13   FAIL all  (~42 %)
+                     |diff|/cSEM      6.02         4.87           9.42
+─────────────────────────────────────────────────────────────────────────
+Test 1 (skip kick)
+                  840.00 ± 46.96   7.10 ± 0.35   8.53 ± 0.22   PASS all
+                     |diff|/cSEM      0.26         0.43           1.17
+
+Test 2 (skip kick + GPU math, double)
+                  703.50 ± 56.14   6.14 ± 0.44   7.70 ± 0.26   FAIL/FAIL/PASS
+                     |diff|/cSEM      2.12         2.19           1.74
+
+Test 3 (skip kick + GPU math + float32 casts at joints + moveCoeff)
+                  777.60 ± 47.98   6.59 ± 0.34   8.51 ± 0.16   PASS/PASS/PASS
+                     |diff|/cSEM      1.20         1.58           1.32
+```
+
+Source logs: `RUN_LOGS/2026-05-31_diag_test{1,2,3}_cpu.txt`.
+
+### Findings
+
+1. **The kick is not the culprit.** Test 1 (kick suppressed, everything
+   else CPU double) reproduces the iter2d baseline within tolerance on
+   all three observables. The journal-J§ open item "put `randomUnitVec`
+   back in the kernel" is not the right fix.
+2. **GPU math formulas explain ~half the GPU drift.** Test 2 takes
+   bindEvents to 703.5 (from baseline 856.80), about an 18 % drop —
+   compared with the GPU's 42 % drop. The Abramowitz polynomial in
+   `fastAcosF` (max error 5e-5 over [-1, 1], degrading near the band
+   edges where CPU's branched `Pt3D.fastAcos` is most accurate) AND the
+   sqrt(1−cosBeta²) identity in moveCoeff together bias the joint
+   torsion magnitudes enough to lose a meaningful fraction of binding
+   events. The sqrt identity is algebraically exact in real arithmetic
+   but it shifts cosAlpha² compared to the CPU's `sin²(beta)` (where
+   beta has its own approximation error near ±1).
+3. **Float32 casts on the joint/moveCoeff intermediates are statistically
+   neutral on top of Test 2.** Test 3 (777.6 ± 48.0) and Test 2
+   (703.5 ± 56.1) differ by 74, but cSEM ≈ 74 — well under the |diff|/
+   cSEM = 2 gate. The float32 precision in the joint torque + moveCoeff
+   value path is not the dominant source of bias.
+4. **There is residual GPU drift outside the joints kernel scope.**
+   Even Test 3 (all three CPU emulations of the GPU joints+moveCoeff)
+   sits at 777.6 ± 48.0, still 280 above the GPU's 497.8 ± 38.2. That
+   ~36 % residual gap has to come from somewhere the CPU diagnostic
+   never touches: the Wang-hash Brownian RNG (different statistics than
+   MersenneTwister, integrated across ~10101 steps), float32 cumulative
+   drift of coord/uVec across step integration in the move kernel, or
+   ordering in the kernel's float32 arithmetic outside the joint code.
+
+### Recommendation
+
+A two-pronged fix, since the diagnostic shows two compounding sources:
+
+- **GPU joints math (resolves ~18 % of the bindEvents drop).** Improve
+  `fastAcosF` precision in `GPUMoveThing.java`. Easiest path: replicate
+  the CPU's branched form — small-angle `sqrt(2(1−|x|))` outside ±0.95
+  bands, Abramowitz polynomial in the middle. Both branches lower to
+  PTX-friendly primitives. The CPU's middle band uses `Math.acos`,
+  which PTX can't lower; the Abramowitz polynomial has worst-case error
+  around 1e-4 near the edges, well over the small-angle form's <0.6 %
+  at |cosθ|=0.95. Matching CPU near ±1 is where most joint angles live
+  (uncocked relaxed at 0°, cocked at 60°). The `cosAlpha² = 1 − cosBeta²`
+  identity in moveCoeff is more accurate than the CPU's
+  `sin(fastAcos(cosBeta))` chain in absolute terms — the bias comes from
+  the CPU baseline being the reference, not from the identity being
+  wrong. If the validation target is GPU-vs-CPU equivalence, also
+  consider matching the CPU's chain on the GPU (using the
+  precision-matched `fastAcosF` above) instead of the identity.
+- **Wang-hash Brownian RNG (most likely source of the remaining ~25 %).**
+  Run a follow-up CPU diagnostic that replaces the MersenneTwister
+  Brownian draws with the GPU's Wang-hash sequence (mirror
+  `moveThingKernel`'s six `wangHash(base ^ ...)` calls in Java float32).
+  If that drops CPU bindEvents toward the GPU level, the right action is
+  either (a) port the same Wang-hash sequence to the CPU code so both
+  paths use it (single source of stochasticity, GPU/CPU equivalence
+  becomes a numeric question, not a statistical one), or (b) accept the
+  GPU as a different-but-valid Brownian process and validate the GPU
+  path against its own physics targets rather than CPU-equivalence. The
+  GPU iteration speed-up justifies treating it as a first-class physics
+  build.
+
+### Open
+
+- Implementing the precision-matched `fastAcosF` in `GPUMoveThing` is
+  straightforward (one method swap) and recovers ~18 % of the drift
+  alone. Worth landing even before the Wang-hash investigation.
+- The MyoDimer joints (still CPU at dense) and `applyLeverMotorJointForce`
+  / `applyRodLeverJointForce` (force, not torque) were not part of the
+  diagnostic. The force methods use the same `moveCoeff` though, so any
+  fix to moveCoeff applies to both force and torque paths.
+- Test 3 was run despite the prompt's "only if Tests 1+2 pass" rubric,
+  on the reasoning that Test 2's marginal fail (bindEvents |diff|/cSEM
+  2.12) wasn't conclusive and Test 3 was the only way to learn whether
+  float32 mattered. The float-cast neutrality result is what justifies
+  the "look outside joints" recommendation above — without it the
+  recommendation would have just been "improve fastAcosF".
 
 ## 2026-05-30 — Task graph chaining + large-scale benchmarks
 

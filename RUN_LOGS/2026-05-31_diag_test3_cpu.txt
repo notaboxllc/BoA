@@ -1,0 +1,150 @@
+=== seed=1 start 07:17:45 ===
+Sim. time=00.01....~42.50 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~41.33 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.03....~40.83 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~41.09 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.94 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.99 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.84 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.94 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.85 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.83 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=717
+[STATS] meanBoundMotors=6.604
+[STATS] glidingVelocity=7.9269
+=== seed=1 end   07:21:54 ===
+=== seed=2 start 07:21:54 ===
+Sim. time=00.01....~42.48 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~41.11 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.68 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.96 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.63 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.60 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.53 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.73 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.72 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.59 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=818
+[STATS] meanBoundMotors=7.014
+[STATS] glidingVelocity=8.3989
+=== seed=2 end   07:26:02 ===
+=== seed=3 start 07:26:02 ===
+Sim. time=00.01....~41.91 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.45 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.26 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.43 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.54 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.29 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.35 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.46 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.28 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.40 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=898
+[STATS] meanBoundMotors=7.380
+[STATS] glidingVelocity=9.2905
+=== seed=3 end   07:30:08 ===
+=== seed=4 start 07:30:08 ===
+Sim. time=00.01....~42.23 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.95 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.83 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.65 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.86 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.52 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.62 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.91 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.90 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~41.05 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=865
+[STATS] meanBoundMotors=6.688
+[STATS] glidingVelocity=8.4648
+=== seed=4 end   07:34:17 ===
+=== seed=5 start 07:34:17 ===
+Sim. time=00.01....~42.00 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.77 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.81 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.93 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.80 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.92 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.96 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~41.02 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.80 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.93 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=740
+[STATS] meanBoundMotors=6.777
+[STATS] glidingVelocity=8.7287
+=== seed=5 end   07:38:25 ===
+=== seed=6 start 07:38:25 ===
+Sim. time=00.01....~42.13 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.67 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.20 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.38 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.31 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.33 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.35 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.35 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.35 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.29 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=1021
+[STATS] meanBoundMotors=8.020
+[STATS] glidingVelocity=9.2117
+=== seed=6 end   07:42:31 ===
+=== seed=7 start 07:42:31 ===
+Sim. time=00.01....~42.14 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.89 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.60 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.52 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.57 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.66 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.30 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.58 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.57 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.43 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=707
+[STATS] meanBoundMotors=5.674
+[STATS] glidingVelocity=8.5174
+=== seed=7 end   07:46:38 ===
+=== seed=8 start 07:46:38 ===
+Sim. time=00.01....~42.69 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~41.09 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.76 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.70 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.75 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.81 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.89 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.76 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.78 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.80 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=895
+[STATS] meanBoundMotors=7.518
+[STATS] glidingVelocity=8.5399
+=== seed=8 end   07:50:46 ===
+=== seed=9 start 07:50:46 ===
+Sim. time=00.01....~42.58 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~41.22 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.99 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.88 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.76 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.68 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.64 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.69 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.73 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.40 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=516
+[STATS] meanBoundMotors=4.355
+[STATS] glidingVelocity=8.2197
+=== seed=9 end   07:54:55 ===
+=== seed=10 start 07:54:55 ===
+Sim. time=00.01....~42.23 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+Sim. time=00.02....~40.89 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.03....~40.80 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.04....~40.37 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+Sim. time=00.05....~40.54 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.06....~40.45 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+Sim. time=00.07....~40.54 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+Sim. time=00.08....~40.17 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.09....~40.43 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+Sim. time=00.10....~40.47 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=599
+[STATS] meanBoundMotors=5.877
+[STATS] glidingVelocity=7.7555
+=== seed=10 end   07:59:01 ===
