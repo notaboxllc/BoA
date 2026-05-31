@@ -73,12 +73,19 @@ public class Myosin {
 			this.jobId = jobId;
 			switch (jobId) {
 				case Env.myoJoints1Start:
-					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*myoCt/numThreads;	// divide the job amongst threads
+					if (Env.useGPU) {
+						// GPU path runs per-Myosin joints in GPUMyosinJoints.computeJoints();
+						// zero out the worker chunks so the spawned threads do no per-Myosin work.
+						// (MyosinDimer.myoDimerThreads keeps its CPU dispatch in this wave.)
+						for (int i=0; i <= numThreads; i++) { jobDiv[i] = 0; }
+					} else {
+						for (int i=0; i <= numThreads; i++) {
+							jobDiv[i] = i*myoCt/numThreads;	// divide the job amongst threads
+						}
 					}
 					spawn(); break;
 			}
-			
+
 		}
 		
 		public void regroup (int jobId) {

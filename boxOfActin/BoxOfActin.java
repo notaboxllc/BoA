@@ -759,7 +759,11 @@ public class BoxOfActin {
 				startAllThreadSets(Env.membraneLinksStart);
 				waitOnAllThreadSets(Env.membraneLinksStop);
 
-				// actual myosin joints
+				// actual myosin joints. GPU path runs per-Myosin jointConstraints()
+				// as a single kernel; the CPU Myosin.myoThreads short-circuits when
+				// useGPU is set. MyosinDimer (cross-Myosin coupling) keeps its CPU
+				// dispatch via the same myoJoints1 wave.
+				if (Env.useGPU) { GPUMyosinJoints.computeJoints(); }
 				startAllThreadSets(Env.myoJoints1Start);
 				waitOnAllThreadSets(Env.myoJoints1Stop);
 
@@ -1245,6 +1249,15 @@ public class BoxOfActin {
 			double ex    = GPUMoveThing.getExecNanos()   / 1.0e9;
 			double un    = GPUMoveThing.getUnpackNanos() / 1.0e9;
 			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk, ex, un);
+		}
+		if (Env.useGPU && GPUMyosinJoints.getCallCount() > 0) {
+			int    calls = GPUMyosinJoints.getCallCount();
+			double tot   = GPUMyosinJoints.getTotalNanos()  / 1.0e9;
+			double pk    = GPUMyosinJoints.getPackNanos()   / 1.0e9;
+			double ex    = GPUMyosinJoints.getExecNanos()   / 1.0e9;
+			double un    = GPUMyosinJoints.getUnpackNanos() / 1.0e9;
+			System.out.printf("[STATS] gpuMyosinJoints total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk, ex, un);
 		}
 		// [STATS] glidingVelocity: mean per-filament longWindowSpeedXY at end of run.

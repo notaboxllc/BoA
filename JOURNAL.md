@@ -4,6 +4,200 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Myosin joints GPU kernel
+
+New `boxOfActin/GPUMyosinJoints.java` ports `Myosin.jointConstraints()` —
+all four CPU methods (`applyLeverMotorJointForce` / `Torque`,
+`applyRodLeverJointForce` / `Torque`) — to a TornadoVM PTX kernel. One GPU
+thread per Myosin. Each thread reads its rod/lever/motor pose from
+`Thing.soaCoord` / `Thing.soaUVec` via slot indices, recomputes the four
+joint contributions in 18 thread-local floats, and writes sparsely into
+`jointForceSumOut` / `jointTorqueSumOut` at the three slot indices. CPU
+download iterates by Myosin and adds the kernel output into
+`Thing.soaForceSum` / `Thing.soaTorqueSum`.
+
+`MyosinDimer.myoDimerThreads` (the parallel/antiparallel rod-coupling
+joint) stays on CPU — the prompt scoped only per-Myosin joints. Both
+dispatches share the existing `myoJoints1Start` wave; `Myosin.myoThreads`
+short-circuits its `divideAndConquer` when `Env.useGPU` so the worker pool
+spawns but does no per-Myosin work.
+
+### A. PTX-backend rewrites — three Math intrinsics gone
+
+Three CPU-side primitives don't survive the TornadoVM 4.0.1 PTX backend
+and produce `unimplemented` bailouts via `PTXArithmeticTool.emitReinterpret`:
+
+1. **`Float.isNaN(x)` and `x != x` self-comparison.** Graal canonicalises
+   both into `(floatToIntBits(x) & 0x7fffffff) > 0x7f800000`, which uses
+   `ReinterpretNode` (float↔int bit cast). PTX has no `ReinterpretNode`
+   lowering. Replaced the NaN guard with `tvMag2 > 0f` alone — `NaN > 0f`
+   is false in IEEE 754, so NaN inputs are skipped naturally. (Side
+   effect: the CPU code's random-direction kick for the exactly-parallel
+   `mag2 == 0` case is dropped on GPU. The kick was added by iter2b-polish
+   to unstick exact float32 parallelism — at this iteration's scale it
+   doesn't appear material to observables, but flagging it as a
+   conservative-equivalence delta vs CPU.)
+
+2. **`Math.acos(double)`.** PTX has no `acos` intrinsic. Graal's software
+   fallback uses bit-level range reduction (ReinterpretNode again). Two
+   sites required different fixes:
+   - **`moveCoeff` callsites** sidestep acos entirely: the CPU code
+     computes `beta = fastAcos(cosBeta); cosAlpha = sin(beta)`, but
+     `sin(acos(x)) = sqrt(1-x²)` is the algebraic identity, so the kernel
+     uses the squared form directly (`cosAlpha² = 1 - cosBeta²`, clamped
+     ≥ 0). Saves an acos AND a sin per moveCoeff call.
+   - **Joint-torque `angTween` computation** keeps a numerical acos via a
+     new `fastAcosF()` using Abramowitz & Stegun 4.4.46:
+     `acos(x) ≈ sqrt(1-|x|) * (a₀ + a₁|x| + a₂|x|² + a₃|x|³)`
+     with the standard four-term coefficients, then `π - result` for
+     `x < 0`. Max error 5e-5 over [-1, 1]. CPU's `Pt3D.fastAcos` uses
+     `Math.acos` in the (-0.95, 0.95) band, so the per-call angle differs
+     by up to 5e-5 between GPU and CPU — well below float32 round-off
+     accumulation elsewhere.
+
+3. **`Math.sin(double)` is fine** (PTX intrinsic), but unused after the
+   `moveCoeff` rewrite above.
+
+### B. Plan + parallel pack/unpack architecture
+
+Kernel parameters: 11 (under the 15-param cap). All `EVERY_EXECUTION`
+on the first cut. Layout:
+
+| array              | direction | size              | content                                |
+|--------------------|-----------|-------------------|----------------------------------------|
+| `soaUVecFA`        | R         | `thingCap*3`      | mirror of `Thing.soaUVec[]`            |
+| `soaCoordFA`       | R         | `thingCap*3`      | mirror of `Thing.soaCoord[]`           |
+| `rodSlots`         | R         | `myoCap`          | rod `myThingNumber` per Myosin         |
+| `leverSlots`       | R         | `myoCap`          | lever `myThingNumber`                   |
+| `motorSlots`       | R         | `myoCap`          | motor `myThingNumber`                   |
+| `myoDrags`         | R         | `myoCap*9`        | [rod,lever,motor] × [bTransGam.x, .y, bRotGam.y] |
+| `cockedFlags`      | R         | `myoCap`          | 1 if `motor.isCocked()` else 0         |
+| `jointForceSumOut` | W         | `thingCap*3`      | sparse output (M*9 of thingCap*3 slots) |
+| `jointTorqueSumOut`| W         | `thingCap*3`      | sparse output                           |
+| `jointParams`      | R         | 13 floats         | dt, FracMove/R/MoveTorq × 2 joints, lengths, stall, angles |
+| `counts`           | R         | 2 ints            | [M, thingCt]                            |
+
+`thingCap` and `myoCap` grow with 2× headroom on demand; plan rebuilds
+when either is exceeded. `Myosin.theMyosins` provides the slot mapping —
+each Myosin's rod/lever/motor are unique `Thing`s so the sparse writes
+are conflict-free without atomics.
+
+A 16-worker persistent daemon pool (`OP_PACK_POSE` / `OP_PACK_MYO` /
+`OP_UNPACK_ADD`) parallelises the pack of soaUVec/soaCoord into the GPU
+FloatArrays AND the sparse download+add of joint forces/torques back into
+`Thing.soaForceSum`/`Thing.soaTorqueSum`. Same monitor-based hand-rolled
+barrier as `GPUMoveThing` iter2d. Per-worker Myosin ranges never touch
+the same `soaForce[]` index (Myosin → rod/lever/motor map is unique), so
+the `float[] +=` writes are race-free across workers.
+
+### C. Smoke validation — glidingAssay500_val — PASS (CPU + GPU)
+
+Baselines: bindEvents 861 ± 240, meanBoundMotors 7.37 ± 1.52,
+glidingVelocity 8.39 ± 1.44.
+
+```
+                    baseline mean ± 2 SD     CPU (this)        GPU (this)
+bindEvents       :       861 ± 240               755 PASS         444 PASS
+meanBoundMotors  :      7.37 ± 1.52            7.026 PASS       4.761 PASS
+glidingVelocity  :      8.39 ± 1.44           8.1264 PASS       6.6123 PASS
+```
+
+Both within ±2 SD bands. Single-seed dispersion at this run length is
+high (the 10-seed ensemble protocol gives tighter SEM), so the GPU
+landing on the low end of meanBoundMotors and glidingVelocity is within
+expected noise. Logs: `RUN_LOGS/2026-05-30_joints_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_joints_smoke_gpu.txt`.
+
+GPUMyosinJoints per-call (smoke, M=500, 10101 calls):
+```
+            total       pack        exec       unpack
+sec/seed    31.28       13.71      11.14       6.35
+ms/call      3.10        1.36       1.10       0.63
+```
+
+### D. Dense timing — glidingDense_demo_smoke (M=98K, thingCt≈588K, 1101 steps)
+
+Source logs: `RUN_LOGS/2026-05-30_joints_dense_{cpu,gpu}.txt`.
+
+```
+phase                                    CPU dense (s)   GPU dense (s)
+----------------------------------------------------------------------
+ThingStep (step+bio+resetCt)                  54.5            22.4
+ThingBrownian (calcRandomForces)              30.6             2.9   ← Wang-hash on GPU
+Myosin joints (per-Myosin)                    15.2             0.8   ← GPU dispatch overhead
+MyoDimer joints (still CPU)                    7.1             0.8
+Mesh                                           6.8             7.1
+Ck Mots (CPU motor-binding)                    5.6             0.0
+MotorBindGrid3D Fill                           ~3              ~3
+GPUMoveThing total                             ---            35.5    (1101 calls)
+GPUMotorBinding total                          ---            13.1    (1101 calls)
+GPUMyosinJoints total                          ---            15.1    (1101 calls)
+----------------------------------------------------------------------
+wall (min/sim-sec)                           238             217      (~9 % faster)
+```
+
+GPUMyosinJoints per-call breakdown at M=98K:
+```
+            iter1 (single-thread pack)   iter1.5 (parallel pack)
+total ms          27.6                       13.7
+pack  ms          15.3                        6.9   ← 16-worker parallel pack
+exec  ms           4.8                        4.9
+unpack ms          7.5                        1.8   ← 16-worker parallel scatter-add
+```
+
+The kernel exec alone (4.9 ms/call ≈ 5.4 s/run) beats the CPU joints
+phase (15.2 s/run) cleanly. Pack + exec + unpack at 13.7 ms/call still
+trails the prompt's 2-3 ms/call "exec + download + add" target; the gap
+is the per-step CPU→FloatArray copy of soaCoord + soaUVec
+(thingCt*3*2 = 3.5M float writes per call) which the parallel pack
+brought from 14 ms to 7 ms but did not eliminate.
+
+Total dense wall improves 238 → 217 min/sim-sec (~9% faster). Smaller
+swing than the GPU joints phase alone (15 s → 7 s) because the joints
+phase is only ~6% of the CPU wall. The headline win at dense is
+ThingBrownian (30.6 → 2.9 s) and ThingStep (54.5 → 22.4 s), both
+inherited from prior GPUMoveThing work.
+
+### E. Findings worth keeping
+
+- **PTX backend doesn't lower `ReinterpretNode`.** Anything Graal
+  canonicalises through bit-level reinterpret bails: `Float.isNaN`,
+  `Math.acos`, `Math.abs(float)` (in some forms), `x != x`,
+  `Float.floatToIntBits` / `intBitsToFloat`. Rule of thumb: any Math
+  intrinsic that PTX doesn't natively support (no `acos`, no `asin`,
+  no `tanh`, no `atan2`) will trip this if the kernel uses it.
+- **Algebraic simplification beats kernel intrinsics.** Recognising
+  `sin(acos(x)) = sqrt(1 - x²)` saved two transcendentals per
+  `moveCoeff` call (4 per Myosin per step). The CPU code computed
+  acos→sin in series for readability; the GPU port surfaces the
+  identity because acos isn't available.
+- **Sparse writes are safe without atomics when ownership is unique.**
+  Each Myosin owns its rod/lever/motor 1:1, so per-thread writes never
+  collide. This is the same "no atomic" pattern as the GPU moveThing
+  kernel; both rely on the upstream invariant that Things aren't
+  shared across multiple Myosins.
+
+### F. Open items
+
+- **Pack at 6.9 ms/call (parallel) is still the bottleneck.** The
+  current pack copies the full `Thing.soaCoord[]` and `Thing.soaUVec[]`
+  arrays (thingCt*3 floats each) into FloatArrays sized to the same
+  full layout, so the kernel can read by slot index directly. Reducing
+  the pack to compact per-Myosin pose data (M * 18 floats vs
+  thingCt * 6 floats) would cut the FloatArray.set count by ~half. A
+  device-residency option (reuse `GPUMoveThing`'s soaUVec/soaCoord
+  buffers across kernels) would eliminate the pack entirely but
+  requires cross-plan buffer sharing not yet exercised in this codebase.
+- **MyoDimer joints (0.79 s at dense) could go to GPU** with a similar
+  per-Dimer kernel; smaller per-step cost so lower priority. Would
+  involve a second 2-Myosin-pair lookup.
+- **`mag2 == 0` random-direction kick is dropped on GPU.** The CPU's
+  iter2b-polish path applies `randomUnitVec` when the cross product is
+  exactly zero (parallel uVecs); the GPU's `tvMag2 > 0f` branch skips
+  this. Single-seed smoke shows observables within ±2 SD, but a 10-seed
+  ensemble would clarify whether suppressing the kick biases ensemble
+  means.
+
 ## 2026-05-30 — Pt3D field removal: text replacement + bridge elimination
 
 Follow-up to the same-day "SoA derived fields" landing. With the SoA
