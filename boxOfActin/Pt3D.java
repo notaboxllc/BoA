@@ -411,113 +411,135 @@ public class Pt3D {
 	}
 	// ******************************************************
 		// *** TRANSFORMATIONS ***
+	// Transformation matrices live in Thing.soaTransXTox (row-major, 9 floats
+	// per Thing). transxToX is the transpose; we read transXTox via index
+	// swapping rather than storing both. All transform methods inline the
+	// matrix reads so the JIT can keep the 9 floats in registers.
 	// method to transform from a players body-fixed coordinate system to fixed coord frame
 	public static Pt3D xToNewX (Thing player, Pt3D ptInx) {
-		double [] m = player.transxToX;
+		final int b9 = player.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
-		double [] ptInX = new double [3];
-		ptInX[0] = m[0]*px + m[1]*py + m[2]*pz;
-		ptInX[1] = m[3]*px + m[4]*py + m[5]*pz;
-		ptInX[2] = m[6]*px + m[7]*py + m[8]*pz;
-		return new Pt3D (ptInX);
+		return new Pt3D(
+			m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz,
+			m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz,
+			m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz);
 	}
 
 	public void xToX (Thing p, Pt3D ptInx) {
-		double [] m = p.transxToX;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;	// snapshot in case ptInx == this
-		this.x = m[0]*px + m[1]*py + m[2]*pz;
-		this.y = m[3]*px + m[4]*py + m[5]*pz;
-		this.z = m[6]*px + m[7]*py + m[8]*pz;
+		this.x = m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz;
+		this.y = m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz;
+		this.z = m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz;
 	}
 
 	public void xToX (Thing p) {
-		double [] m = p.transxToX;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = this.x, py = this.y, pz = this.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz;
-		this.y = m[3]*px + m[4]*py + m[5]*pz;
-		this.z = m[6]*px + m[7]*py + m[8]*pz;
+		this.x = m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz;
+		this.y = m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz;
+		this.z = m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz;
 	}
 
 	public void xToXPlusxOrigin (Thing p, Pt3D ptInx) {
-		double [] m = p.transxToX;
+		final int b9 = p.myThingNumber * 9;
+		final int b3 = p.myThingNumber * 3;
+		final float[] m = Thing.soaTransXTox;
+		final float[] c = Thing.soaCoord;
 		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz + p.coord.x;
-		this.y = m[3]*px + m[4]*py + m[5]*pz + p.coord.y;
-		this.z = m[6]*px + m[7]*py + m[8]*pz + p.coord.z;
+		this.x = m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz + c[b3];
+		this.y = m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz + c[b3+1];
+		this.z = m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz + c[b3+2];
 	}
 
 	public void xToXPlusxOrigin (Thing p) {
-		double [] m = p.transxToX;
+		final int b9 = p.myThingNumber * 9;
+		final int b3 = p.myThingNumber * 3;
+		final float[] m = Thing.soaTransXTox;
+		final float[] c = Thing.soaCoord;
 		double px = this.x, py = this.y, pz = this.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz + p.coord.x;
-		this.y = m[3]*px + m[4]*py + m[5]*pz + p.coord.y;
-		this.z = m[6]*px + m[7]*py + m[8]*pz + p.coord.z;
+		this.x = m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz + c[b3];
+		this.y = m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz + c[b3+1];
+		this.z = m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz + c[b3+2];
 	}
 
 	public void xToXPlusPoint (Thing p, Pt3D ptInx, Pt3D addPt) {
-		double [] m = p.transxToX;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz + addPt.x;
-		this.y = m[3]*px + m[4]*py + m[5]*pz + addPt.y;
-		this.z = m[6]*px + m[7]*py + m[8]*pz + addPt.z;
+		this.x = m[b9  ]*px + m[b9+3]*py + m[b9+6]*pz + addPt.x;
+		this.y = m[b9+1]*px + m[b9+4]*py + m[b9+7]*pz + addPt.y;
+		this.z = m[b9+2]*px + m[b9+5]*py + m[b9+8]*pz + addPt.z;
 	}
 
 	// method to transform from a players fixed coordinate system to body-fixed coord frame
 	public static Pt3D XToNewx (Thing player, Pt3D ptInX) {
-		double [] m = player.transXTox;
+		final int b9 = player.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = ptInX.x, py = ptInX.y, pz = ptInX.z;
-		double [] ptInx = new double [3];
-		ptInx[0] = m[0]*px + m[1]*py + m[2]*pz;
-		ptInx[1] = m[3]*px + m[4]*py + m[5]*pz;
-		ptInx[2] = m[6]*px + m[7]*py + m[8]*pz;
-		return new Pt3D (ptInx);
+		return new Pt3D(
+			m[b9  ]*px + m[b9+1]*py + m[b9+2]*pz,
+			m[b9+3]*px + m[b9+4]*py + m[b9+5]*pz,
+			m[b9+6]*px + m[b9+7]*py + m[b9+8]*pz);
 	}
 
 	public void XTox (Thing p, Pt3D ptInX) {
-		double [] m = p.transXTox;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = ptInX.x, py = ptInX.y, pz = ptInX.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz;
-		this.y = m[3]*px + m[4]*py + m[5]*pz;
-		this.z = m[6]*px + m[7]*py + m[8]*pz;
+		this.x = m[b9  ]*px + m[b9+1]*py + m[b9+2]*pz;
+		this.y = m[b9+3]*px + m[b9+4]*py + m[b9+5]*pz;
+		this.z = m[b9+6]*px + m[b9+7]*py + m[b9+8]*pz;
 	}
 
 	// SoA bridge: same as XTox(Thing, Pt3D) but reads the input vector from
 	// a float[] starting at `base`. Used by moveThing readers after the SoA
 	// canonical force/torque storage conversion (Thing.soaForceSum/soaTorqueSum).
 	public void XToxFromFloats (Thing p, float[] arr, int base) {
-		double [] m = p.transXTox;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = arr[base], py = arr[base + 1], pz = arr[base + 2];
-		this.x = m[0]*px + m[1]*py + m[2]*pz;
-		this.y = m[3]*px + m[4]*py + m[5]*pz;
-		this.z = m[6]*px + m[7]*py + m[8]*pz;
+		this.x = m[b9  ]*px + m[b9+1]*py + m[b9+2]*pz;
+		this.y = m[b9+3]*px + m[b9+4]*py + m[b9+5]*pz;
+		this.z = m[b9+6]*px + m[b9+7]*py + m[b9+8]*pz;
 	}
 
 	public void XTox (Thing p) {
-		double [] m = p.transXTox;
+		final int b9 = p.myThingNumber * 9;
+		final float[] m = Thing.soaTransXTox;
 		double px = this.x, py = this.y, pz = this.z;
-		this.x = m[0]*px + m[1]*py + m[2]*pz;
-		this.y = m[3]*px + m[4]*py + m[5]*pz;
-		this.z = m[6]*px + m[7]*py + m[8]*pz;
+		this.x = m[b9  ]*px + m[b9+1]*py + m[b9+2]*pz;
+		this.y = m[b9+3]*px + m[b9+4]*py + m[b9+5]*pz;
+		this.z = m[b9+6]*px + m[b9+7]*py + m[b9+8]*pz;
 	}
 
 	public void XToxFromxOrigin (Thing p, Pt3D ptInX) {
-		double [] m = p.transXTox;
-		double ptFromOx = ptInX.x-p.coord.x;
-		double ptFromOy = ptInX.y-p.coord.y;
-		double ptFromOz = ptInX.z-p.coord.z;
-		this.x = m[0]*ptFromOx + m[1]*ptFromOy + m[2]*ptFromOz;
-		this.y = m[3]*ptFromOx + m[4]*ptFromOy + m[5]*ptFromOz;
-		this.z = m[6]*ptFromOx + m[7]*ptFromOy + m[8]*ptFromOz;
+		final int b9 = p.myThingNumber * 9;
+		final int b3 = p.myThingNumber * 3;
+		final float[] m = Thing.soaTransXTox;
+		final float[] c = Thing.soaCoord;
+		double ptFromOx = ptInX.x - c[b3];
+		double ptFromOy = ptInX.y - c[b3+1];
+		double ptFromOz = ptInX.z - c[b3+2];
+		this.x = m[b9  ]*ptFromOx + m[b9+1]*ptFromOy + m[b9+2]*ptFromOz;
+		this.y = m[b9+3]*ptFromOx + m[b9+4]*ptFromOy + m[b9+5]*ptFromOz;
+		this.z = m[b9+6]*ptFromOx + m[b9+7]*ptFromOy + m[b9+8]*ptFromOz;
 	}
 
 	public void XToxFromxOrigin (Thing p) {
-		double [] m = p.transXTox;
-		double ptFromOx = this.x-p.coord.x;
-		double ptFromOy = this.y-p.coord.y;
-		double ptFromOz = this.z-p.coord.z;
-		this.x = m[0]*ptFromOx + m[1]*ptFromOy + m[2]*ptFromOz;
-		this.y = m[3]*ptFromOx + m[4]*ptFromOy + m[5]*ptFromOz;
-		this.z = m[6]*ptFromOx + m[7]*ptFromOy + m[8]*ptFromOz;
+		final int b9 = p.myThingNumber * 9;
+		final int b3 = p.myThingNumber * 3;
+		final float[] m = Thing.soaTransXTox;
+		final float[] c = Thing.soaCoord;
+		double ptFromOx = this.x - c[b3];
+		double ptFromOy = this.y - c[b3+1];
+		double ptFromOz = this.z - c[b3+2];
+		this.x = m[b9  ]*ptFromOx + m[b9+1]*ptFromOy + m[b9+2]*ptFromOz;
+		this.y = m[b9+3]*ptFromOx + m[b9+4]*ptFromOy + m[b9+5]*ptFromOz;
+		this.z = m[b9+6]*ptFromOx + m[b9+7]*ptFromOy + m[b9+8]*ptFromOz;
 	}
 	
 

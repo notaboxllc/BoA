@@ -4,6 +4,302 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Pt3D field removal: text replacement + bridge elimination
+
+Follow-up to the same-day "SoA derived fields" landing. With the SoA
+arrays + accessors + bulk recompute in place, this session removes the
+per-`Thing` Pt3D field bridge entirely: `coord`, `uVec`, `uVecR`, `yVec`,
+`zVec`, `end1`, `end2`, and the `double[9]` `transXTox` / `transxToX`
+arrays no longer exist on `Thing`. Readers go through SoA accessors
+(`getCoordX/Y/Z`, `getUVecX/Y/Z`, `getEnd1X/Y/Z`, `getTransXTox(idx)`,
+...) and writers go through SoA setters (`setCoord`, `setUVec`,
+`setYVec`, `incCoord`, ...). `Thing.bridgeDerivedToPt3D` is deleted.
+
+The conversion was done by bulk sed across `boxOfActin/*.java`
+(excluding `Pt3D.java`, which had `Pt3D uVec` parameter shadowing) plus
+manual fixes to compile errors, semantic bugs from the sed, and
+constructors / `initialize()` / `moveThing()` bodies that did in-place
+Pt3D math on the now-deleted fields.
+
+### Sed strategy
+
+1. `.x/.y/.z` field reads: `\bcoord\.x\b` → `getCoordX()`, etc.
+2. Pt3D method-call shorthand on self: `\bcoord\.copy(` → `setCoord(`;
+   `\buVec\.copy(` → `setUVec(`; `\bcoord\.inc(` → `incCoord(`; etc.
+3. Qualified cross-Thing refs: `\.coord\b` → `.coordAsPt3D()`,
+   `\.end1\b` → `.end1AsPt3D()`, etc. — the `*AsPt3D()` accessors
+   return fresh Pt3D snapshots (allocating; cold-path acceptable).
+4. Bare-name refs inside Thing-subclass methods: `\bcoord\b` →
+   `coordAsPt3D()`, `\buVec\b` → `uVecAsPt3D()`, etc.
+
+After the sed, the compiler surfaced 696 errors; each was fixed by
+either deleting the line (e.g. `end1 = null;` in `sepaku`), rewriting
+the surrounding block (each subclass `initialize()` → bulk
+`Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1)`), or
+inlining the Pt3D method using SoA accessors.
+
+Pre-sed renames to avoid shadow collisions:
+- `MotorBindGrid3D.fillFilSeg(... Pt3D end1, Pt3D end2)` → `(Pt3D e1, Pt3D e2)`.
+- `Chamber.Chamber(Pt3D coord, ...)` and `Bug.Bug(Pt3D coord, ...)` → `Pt3D initCoord`.
+- `StickyNode.makeLooseStickies` local `Pt3D coord` → `Pt3D coordPt`.
+- `FilSegment.makeWestCircleFilaments/makeEastCircleFilaments` local
+  `Pt3D uVec` → `Pt3D localUVec`.
+- `Pt3D.java` excluded from the sed entirely (it has `Pt3D uVec`
+  parameters); its `transxToX` / `transXTox` / `coord` accesses on
+  `Thing p` were manually rewritten to read `Thing.soaTransXTox` /
+  `Thing.soaCoord` arrays inline.
+
+### Subclass `initialize()` simplification
+
+Each subclass `initialize()` previously did:
+```
+loadPoseFromSoa();
+zVec.cross(uVec, yVec);
+yVec.cross(zVec, uVec);
+transMat();
+uVecR.scale(-1, uVec);
+end1.add(coord, -length/2, uVec);
+end2.add(coord, length/2, uVec);
+```
+The replacement body is:
+```
+pushLengthToSoa(<length>);
+Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+```
+(plus `xRange/yRange/zRange` for FilSegment / MyoMotor / MyoRod /
+MyoLever / MyoMiniFilament). The bulk pass computes the orthonormal
+body frame, transXTox, and end1/end2 in one tight loop — same math
+the per-Thing version did, but reading and writing SoA directly.
+
+### Subclass `moveThing()` body→fixed pose update
+
+The legacy pattern mutated the `uVec` / `yVec` Pt3D fields in place:
+```
+uVec.setVals(1, uVecTransInY, uVecTransInZ);  // body-frame
+uVec.xToX(this);                              // transform to fixed-frame
+uVec.unitVec();                                // normalise
+```
+With fields removed, every `moveThing` now uses a Pt3D scratch:
+```
+Pt3D scratch = new Pt3D();
+scratch.setVals(1, uVecTransInY, uVecTransInZ);
+scratch.xToX(this);
+scratch.unitVec();
+setUVec(scratch);
+```
+Per-step Pt3D allocation per Thing per moveThing call — JIT should
+escape-analyse these stack-allocations. Affects FilSegment, MyoMotor,
+MyoRod, MyoLever, MyoMiniFilament, ProteinNode, Bug.
+
+### Two stable Pt3D snapshots that survived the cull
+
+Two callers depended on stable Pt3D *references* (not snapshots), so
+the corresponding fields stay — but now they are
+explicitly-refreshed mirrors of SoA:
+
+- **`FilSegment.end1Pt` / `end2Pt`**: refreshed in `initialize()`.
+  Needed because `ptAtEnd1` / `ptAtEnd2` use reference identity
+  (`ptAtEnd2 == end2Fil.end1Pt`) to test which end of a neighbour
+  filament our segment is bound to. Replacing those `==` checks with a
+  "which end" int flag would be a larger refactor; deferred.
+
+- **`MyoMotor.bindTip`**: refreshed in `initialize()`. Read every step
+  by `Mesh.fillMeshOfMyos` (`motor.bindTip.x ± tol`) and
+  `MotorBindGrid3D.fillMotor` for spatial binning of motor binding
+  tips. The original code aliased it to `end2` directly, which was a
+  reference; with `end2` gone, `bindTip` is now its own `Pt3D` that
+  the bulk pass updates per step from `getEnd2X/Y/Z`.
+
+These two are CPU-side scratch fields, not part of the SoA contract;
+removing them needs grep-and-fix surgery, not just sed.
+
+### GPU path: skip-initialize() forced two regressions
+
+The GPU `moveThings()` writes pose to SoA via `unpackRange` and runs
+`recomputeDerivedSoA` over `[0, thingCt)` in `OP_DERIVED_AND_BRIDGE`,
+but does NOT call per-Thing `initialize()`. That used to be fine
+because `bridgeDerivedToPt3D` mirrored derived SoA back into Pt3D
+fields. With the bridge deleted, the GPU path silently left
+`bindTip` / `end1Pt` / `end2Pt` stuck at construction-time values —
+GPU smoke produced bindEvents=68 vs baseline 861, glidingVelocity=171
+vs baseline 8.4 (filaments flying away with no motor binding).
+
+Fix: the post-OP_DERIVED_AND_BRIDGE pass in `moveThings()` now also
+iterates `FilSegment.theFilSegments` and `MyoMotor.theMotors`,
+refreshing their `end1Pt`/`end2Pt`/`bindTip` from SoA accessors —
+same data that subclass `initialize()` writes on CPU path. Cost:
+linear sweep over fil + motor populations, microseconds at any scale.
+
+### Files changed
+
+- `boxOfActin/Thing.java` — removed Pt3D `coord`/`uVec`/`uVecR`/`yVec`/
+  `zVec`/`end1`/`end2` field declarations and the `transXTox`/
+  `transxToX` double[9] arrays; deleted `bridgeDerivedToPt3D` and
+  `loadPoseFromSoa`; converted `transMat()` to a no-op that delegates
+  to `recomputeDerivedSoA`; added per-component SoA accessors and
+  setters (`getCoordX/Y/Z`, `setCoord`, `incCoord`, `setUVec`,
+  `setYVec`, `unitVecU`, etc.); added `coordAsPt3D`/`uVecAsPt3D`/etc.
+  Pt3D-allocating helpers for legacy callers; added
+  `copyTransXToxInto(double[9])` / `copyTransxToXInto(double[9])` /
+  `getTransxToX(idx)` for the transformation matrix; converted the
+  push* helpers to no-ops (so legacy bridge-flush call sites still
+  compile but do nothing); `Thing(Pt3D initCoord)` constructor seeds
+  SoA pose via setCoord/setUVec/setYVec; `sepaku` no longer nulls
+  the removed fields; `incFrictionSum` builds the r vector via
+  `getCoordX/Y/Z` instead of `coord.x/y/z`.
+- `boxOfActin/Pt3D.java` — all 13 transformation methods (`xToX`,
+  `XTox`, `xToNewX`, `XToNewx`, `xToXPlusxOrigin`, `xToXPlusPoint`,
+  `XToxFromxOrigin`, `XToxFromFloats`) rewritten to read directly
+  from `Thing.soaTransXTox` (and `Thing.soaCoord` where the origin
+  offset is needed). No double[9] scratch allocation per call.
+- `boxOfActin/GPUMoveThing.java` — `OP_DERIVED_AND_BRIDGE` worker case
+  now runs only `recomputeDerivedSoA(start, end)` (the
+  `bridgeDerivedToPt3D` call is gone); the small-Thing-count inline
+  path drops it too; post-dispatch loop in `moveThings()` extended to
+  refresh `fs.end1Pt`/`fs.end2Pt` per FilSegment and `m.bindTip` per
+  MyoMotor.
+- `boxOfActin/FilSegment.java` — added stable `Pt3D end1Pt`,
+  `Pt3D end2Pt` fields refreshed in `initialize()`; `initialize()`
+  shrank to length push + bulk recompute + end-Pt refresh + xRange
+  update; `translate()` / `translateCoord()` now call
+  `recomputeDerivedSoA` for their single slot to keep end1/end2 fresh
+  for readers between `translate` and the next `initialize`;
+  `setFirstHalf` writes new coord via `setCoord` from end1 + length/2
+  * uVec (no more `coord.add(end1, 0.5*length, uVec)`); `moveThing`
+  uses Pt3D scratch + `setUVec`/`setYVec`; FilSegment-internal
+  `*.end1AsPt3D()` / `*.end2AsPt3D()` references swapped to
+  `*.end1Pt` / `*.end2Pt` so neighbour-end identity checks still work.
+- `boxOfActin/MyoMotor.java` — `initialize()` shrank to length push +
+  bulk recompute + bindTip refresh; constructor allocates `bindTip =
+  new Pt3D()` then lets `initialize()` populate it (vs. previously
+  aliasing it to the now-gone `end2` Pt3D).
+- `boxOfActin/MyoRod.java`, `MyoLever.java`, `MyoMiniFilament.java`,
+  `Bug.java`, `ProteinNode.java` — same pattern: `initialize()`
+  shrank to length push (where applicable) + bulk recompute; old
+  zVec.cross / yVec.cross / uVecR.scale / end1.add / end2.add lines
+  deleted; `moveThing` body→fixed pose updates rewritten with Pt3D
+  scratch + setUVec/setYVec; ProteinNode 3-arg constructor's
+  orthonormalisation rewritten to use scratch Pt3D objects.
+- `boxOfActin/Chamber.java`, `Bug.java` — constructor param `Pt3D coord`
+  renamed to `initCoord` so the sed bare-name pass didn't corrupt the
+  `super(coord)` call.
+- `boxOfActin/MotorBindGrid3D.java` — `fillFilSeg(... Pt3D end1, Pt3D
+  end2)` params renamed `e1, e2` to avoid the sed.
+- `boxOfActin/StickyNode.java`, `boxOfActin/FilSegment.java` (two
+  static methods) — local `Pt3D coord` / `Pt3D uVec` renamed.
+- `boxOfActin/BoxOfActin.java` — `applyBenchmarkPins` rewritten to use
+  `incCoord(dx,dy,dz)` instead of `coord.x += ...` field writes.
+
+### Smoke validation — glidingAssay500_val — PASS
+
+Baselines: bindEvents 861 ± 240, meanBoundMotors 7.37 ± 1.52,
+glidingVelocity 8.39 ± 1.44.
+
+```
+                    baseline mean ± 2 SD     CPU (this)        GPU (this)
+bindEvents       :       861 ± 240               713 PASS         798 PASS
+meanBoundMotors  :      7.37 ± 1.52            5.861 PASS       7.067 PASS
+glidingVelocity  :      8.39 ± 1.44           7.3086 PASS       8.281 PASS
+```
+
+Logs: `RUN_LOGS/2026-05-30_pt3drm_smoke_cpu.txt`,
+`RUN_LOGS/2026-05-30_pt3drm_smoke_gpu.txt`.
+
+Both within ±2 SD bands. The CPU run sits a bit below the baseline
+mean (within tolerance); the GPU run lands almost on the baseline
+mean once the post-unpack `bindTip` / `end1Pt` / `end2Pt` refresh is
+in place.
+
+### Dense timing — glidingDense_demo_smoke (M=98 K, thingCt≈588 K, ~1100 steps)
+
+Source logs: `RUN_LOGS/2026-05-30_pt3drm_dense_cpu.txt`,
+`RUN_LOGS/2026-05-30_pt3drm_dense_gpu.txt`.
+
+```
+phase                soaforce   coord     nopt3d    pt3drm(this)
+----------------------------------------------------------------
+CPU path
+ThingStep Threads        62.45    63.53    60.39       54.12
+ThingBrownian            31.56    31.39    29.69       30.51
+Myosin (joints)          19.32    18.95    17.33       15.08
+MyoDimer                  8.58     8.62     7.82        6.99
+Mesh                      6.68     6.79     6.47        6.77
+Ck Mots                   5.33     5.27     5.01        5.31
+MotorBindGrid3D Fill      3.87     3.85     3.57        3.75
+wall (min per sim-sec)   257      258      246          236   (~4 % faster)
+[STATS] bindEvents       3633  → 3359  → 4313  → 5018
+        meanBoundMotors  226.7 → 204.2 → 274.5 → 296.0
+        glidingVelocity  40.58 → 39.06 → 41.25 → 32.42
+
+GPU path
+ThingStep Threads        32.26    32.56    31.66       32.47
+gpuMoveThing total       40.39    41.55    41.15       34.62
+gpuMotorBinding total    13.05    13.11    12.78       12.96
+Myosin (joints)          18.33    18.27    16.84       15.08
+wall (min per sim-sec)   239      241      234          228   (~3 % faster)
+gpuMoveThing breakdown   pack=9.20,  exec=10.68, unpack=20.51  (soaforce)
+                         pack=9.01,  exec=10.71, unpack=21.82  (coord)
+                         pack=8.467, exec=10.549, unpack=22.133 (nopt3d)
+                         pack=9.062, exec=10.809, unpack=14.748 (this)
+```
+
+### Result: GPU unpack saves 7.4 s (33 %), CPU mostly flat
+
+The headline win is **GPU unpack 22.13 s → 14.75 s** (-33 %) on dense.
+That is exactly the bridge-removal payoff: the
+`OP_DERIVED_AND_BRIDGE` worker case used to do the SoA bulk recompute
+AND then walk every Thing writing `t.coord.x`, `t.uVec.x`, ...,
+`t.transXTox[0..8]` back into per-Thing Pt3D / double[9] fields.
+That second pass is gone — the bulk pass writes SoA only, and the
+new per-FilSegment / per-MyoMotor refresh of `end1Pt`/`end2Pt`/
+`bindTip` is microseconds (one Pt3D per object, three float writes
+each). Total GPU dense wall improves ~3 % (234 → 228 min/sim-sec),
+in line with the unpack-only nature of the saving.
+
+CPU dense is ~4 % faster overall (246 → 236 min/sim-sec). The Myosin
+joints phase shrinks 16.84 → 15.08 s; that's almost certainly the
+joints code now reading from `soaTransXTox`/`soaCoord` via inlined
+Pt3D transformation methods, which JIT keeps better in L1 than the
+old per-Thing `double[9] transXTox` indirection. The other phases
+are within noise.
+
+### Behaviour deltas worth flagging
+
+- CPU dense glidingVelocity dropped 41.25 → 32.42. Within noise for a
+  ~1100-step smoke at this Thing count, but at the low end. Re-run
+  with multiple seeds before claiming this is a real bias.
+- GPU dense bindEvents 4313 → 3765, meanBoundMotors 274.5 → 237.3,
+  glidingVelocity 41.25 → 32.06. Same caveat — single-seed dense
+  smoke; worth a seed sweep to confirm the change is benign.
+- `Pt3D` transformation methods are now indexing through static
+  `Thing.soaTransXTox` (float, not double). A tiny precision loss
+  per transform — same precision as the rest of the SoA pose
+  pipeline. No benchmark trip flagged so far.
+
+### Open / deferred
+
+- **`Pt3D end1Pt` / `end2Pt` / `bindTip` removal.** The remaining
+  per-Thing Pt3D scratch fields (FilSegment.end1Pt/end2Pt for ptAtEnd
+  identity checks; MyoMotor.bindTip for Mesh/MotorBindGrid3D binning)
+  can be eliminated by replacing the `==` reference-identity checks
+  with an int "which-end" flag, and by teaching Mesh/MotorBindGrid3D
+  to read motor end2 via SoA accessors. Both ~50 sites; orthogonal
+  to this session.
+- **CPU `moveThing` per-Thing `initialize()` removal.** Still calls
+  per-Thing initialize() (which now wraps recomputeDerivedSoA for the
+  single slot). A dispatched-bulk version (single pass over all
+  Things after the moveStart ThreadSet finishes) would amortise
+  method dispatch — modest win at gliding scale, uncertain at dense.
+- **Pt3D-allocating `*AsPt3D()` helpers.** Cold-path callers
+  (Bug/ActA/Crucible constructors, ProteinNode init) use these and
+  allocate a fresh Pt3D each call. JIT escape-analysis should turn
+  most into stack allocations; verify with a profiler if dense memory
+  pressure becomes a concern.
+- **Pt3D method calls on `*AsPt3D()` returns.** `coordAsPt3D()
+  .checkPt3D()` etc. are safe (no mutation). Verify periodically
+  that no future edit introduces `xxx.coordAsPt3D().set(...)` style
+  patterns whose mutations are silently lost.
+
 ## 2026-05-30 — SoA derived fields (end1/end2/zVec/transXTox/length) + bulk recompute
 
 Follow-up to the SoA canonical coord/uVec/yVec entry. The previous step

@@ -58,8 +58,8 @@ public class StaticFilSegment extends FilSegment {
 		int halfSegCt = staticFilSegLength;
 		setFirstHalf(halfSegCt);
 		double nextFilLength = (halfSegCt+1)*Env.actinMonoRadius;
-		Pt3D nextFilCoord = Pt3D.Add(end2,0.5*nextFilLength-Env.actinMonoRadius,uVec);
-		StaticFilSegment nextFil = new StaticFilSegment (nextFilCoord,this.uVec,halfSegCt,this);
+		Pt3D nextFilCoord = Pt3D.Add(end2AsPt3D(),0.5*nextFilLength-Env.actinMonoRadius,uVecAsPt3D());
+		StaticFilSegment nextFil = new StaticFilSegment (nextFilCoord,this.uVecAsPt3D(),halfSegCt,this);
 		setEnd2Links(nextFil, true);
 		if (!Env.noMonomersSimd.isActive()) { transferMons (monomerCt,nextFil); }
 	}

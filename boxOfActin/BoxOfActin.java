@@ -788,10 +788,10 @@ public class BoxOfActin {
 				}
 				// Round 3 diagnostic: trace force application path
 				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
-					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coord=(%.4f,%.4f,%.4f) veloc.y=%.4e%n",
+					System.err.printf("[BENCH:STEP] step=%d forceSum=(%.4e,%.4e,%.4e) coordAsPt3D()=(%.4f,%.4f,%.4f) veloc.y=%.4e%n",
 						benchStepCount,
 						deflFil.midSeg.getForceSumX(), deflFil.midSeg.getForceSumY(), deflFil.midSeg.getForceSumZ(),
-						deflFil.midSeg.coord.x, deflFil.midSeg.coord.y, deflFil.midSeg.coord.z,
+						deflFil.midSeg.getCoordX(), deflFil.midSeg.getCoordY(), deflFil.midSeg.getCoordZ(),
 						deflFil.midSeg.veloc.y);
 				}
 
@@ -800,7 +800,7 @@ public class BoxOfActin {
 					// Iteration 2b: unified Thing.moveThing() kernel. The GPU path
 					// packs eligible Things (MyoMotor/MyoRod/MyoLever/root FilSegment
 					// in this first pass), runs the branchless integration kernel,
-					// unpacks coord/uVec/yVec, and runs initialize() on the affected
+					// unpacks coordAsPt3D()/uVecAsPt3D()/yVecAsPt3D(), and runs initialize() on the affected
 					// Things. Ineligible Things (Bug, ProteinNode, MyoMiniFilament,
 					// branches, ActA-bound segments, etc.) fall back to CPU
 					// moveThing() inside GPUMoveThing.moveThings(). Crucible/Chamber/
@@ -815,10 +815,10 @@ public class BoxOfActin {
 
 				// F1 benchmark: restore pinned endpoints after integration
 				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
-				// Round 3 diagnostic: midpoint coord after integration + pin correction
+				// Round 3 diagnostic: midpoint coordAsPt3D() after integration + pin correction
 				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
-					System.err.printf("[BENCH:POST] step=%d coord.y=%.6e veloc.y=%.4e%n",
-						benchStepCount, deflFil.midSeg.coord.y, deflFil.midSeg.veloc.y);
+					System.err.printf("[BENCH:POST] step=%d getCoordY()=%.6e veloc.y=%.4e%n",
+						benchStepCount, deflFil.midSeg.getCoordY(), deflFil.midSeg.veloc.y);
 				}
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
@@ -1269,15 +1269,15 @@ public class BoxOfActin {
 	// endpoint drifts; the correction below restores it exactly regardless of the source).
 	private static void applyBenchmarkPins() {
 		if (deflFil.firstSeg == null || deflFil.lastSeg == null) return;
-		deflFil.firstSeg.coord.x += deflFil.anchor1.x - deflFil.firstSeg.end1.x;
-		deflFil.firstSeg.coord.y += deflFil.anchor1.y - deflFil.firstSeg.end1.y;
-		deflFil.firstSeg.coord.z += deflFil.anchor1.z - deflFil.firstSeg.end1.z;
-		deflFil.firstSeg.pushCoordToSoa();   // SoA bridge: caller mutated Pt3D coord; flush before initialize() reads SoA
+		deflFil.firstSeg.incCoord(
+			deflFil.anchor1.x - deflFil.firstSeg.getEnd1X(),
+			deflFil.anchor1.y - deflFil.firstSeg.getEnd1Y(),
+			deflFil.anchor1.z - deflFil.firstSeg.getEnd1Z());
 		deflFil.firstSeg.initialize();
-		deflFil.lastSeg.coord.x += deflFil.anchor2.x - deflFil.lastSeg.end2.x;
-		deflFil.lastSeg.coord.y += deflFil.anchor2.y - deflFil.lastSeg.end2.y;
-		deflFil.lastSeg.coord.z += deflFil.anchor2.z - deflFil.lastSeg.end2.z;
-		deflFil.lastSeg.pushCoordToSoa();
+		deflFil.lastSeg.incCoord(
+			deflFil.anchor2.x - deflFil.lastSeg.getEnd2X(),
+			deflFil.anchor2.y - deflFil.lastSeg.getEnd2Y(),
+			deflFil.anchor2.z - deflFil.lastSeg.getEnd2Z());
 		deflFil.lastSeg.initialize();
 	}
 
@@ -1289,9 +1289,9 @@ public class BoxOfActin {
 		double az = deflFil.anchor2.z - deflFil.anchor1.z;
 		double aLen = Math.sqrt(ax*ax + ay*ay + az*az);
 		ax /= aLen; ay /= aLen; az /= aLen;
-		double px = deflFil.midSeg.coord.x - deflFil.anchor1.x;
-		double py = deflFil.midSeg.coord.y - deflFil.anchor1.y;
-		double pz = deflFil.midSeg.coord.z - deflFil.anchor1.z;
+		double px = deflFil.midSeg.getCoordX() - deflFil.anchor1.x;
+		double py = deflFil.midSeg.getCoordY() - deflFil.anchor1.y;
+		double pz = deflFil.midSeg.getCoordZ() - deflFil.anchor1.z;
 		double proj = px*ax + py*ay + pz*az;
 		double perpX = px - proj*ax, perpY = py - proj*ay, perpZ = pz - proj*az;
 		double obs = Math.sqrt(perpX*perpX + perpY*perpY + perpZ*perpZ);
@@ -1367,7 +1367,7 @@ public class BoxOfActin {
 	}
 
 	// LP benchmark: accumulate EWMA of tangent-tangent correlation C(s) for this output frame.
-	// Called once per output frame inside synchronized(Env.safeO). Reads segment uVec — read-only, safe.
+	// Called once per output frame inside synchronized(Env.safeO). Reads segment uVecAsPt3D() — read-only, safe.
 	private static void accumulateLpData() {
 		if (lpFil == null) return;
 		if (Env.lpActive.getValue() == 0) return;
@@ -1379,7 +1379,7 @@ public class BoxOfActin {
 			int pairs = 0;
 			double sum = 0.0;
 			for (int i = 0; i + k < nLp; i++) {
-				sum += Pt3D.Dot(lpSegs[i].uVec, lpSegs[i + k].uVec);
+				sum += Pt3D.Dot(lpSegs[i].uVecAsPt3D(), lpSegs[i + k].uVecAsPt3D());
 				pairs++;
 			}
 			double cNew = (pairs > 0) ? sum / pairs : 1.0;
@@ -1443,9 +1443,9 @@ public class BoxOfActin {
 		if (deflFil.segs == null || deflFil.initCoords == null) return;
 		for (int i = 0; i < deflFil.segs.length; i++) {
 			FilSegment s = deflFil.segs[i];
-			s.coord.setVals(deflFil.initCoords[i].x, deflFil.initCoords[i].y, deflFil.initCoords[i].z);
-			s.uVec.setVals(1, 0, 0);
-			s.yVec.setVals(0, 1, 0);
+			s.setCoord(deflFil.initCoords[i].x, deflFil.initCoords[i].y, deflFil.initCoords[i].z);
+			s.setUVec(1, 0, 0);
+			s.setYVec(0, 1, 0);
 			s.pushPoseToSoa();           // SoA bridge: caller mutated Pt3D directly; flush before initialize() reads SoA
 			s.initialize();
 			s.zeroForceSumSlot();
@@ -1681,8 +1681,8 @@ public class BoxOfActin {
 			deflFil.firstSeg = segs[0];
 			deflFil.lastSeg  = segs[n - 1];
 			deflFil.midSeg   = segs[n / 2];
-			deflFil.anchor1.setVals(segs[0].end1.x, segs[0].end1.y, segs[0].end1.z);
-			deflFil.anchor2.setVals(segs[n-1].end2.x, segs[n-1].end2.y, segs[n-1].end2.z);
+			deflFil.anchor1.setVals(segs[0].getEnd1X(), segs[0].getEnd1Y(), segs[0].getEnd1Z());
+			deflFil.anchor2.setVals(segs[n-1].getEnd2X(), segs[n-1].getEnd2Y(), segs[n-1].getEnd2Z());
 			double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac.getValue() / (spanM * spanM);
 			deflFil.transForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
@@ -1690,7 +1690,7 @@ public class BoxOfActin {
 			deflFil.segs = segs;
 			deflFil.initCoords = new Pt3D[n];
 			for (int i = 0; i < n; i++) {
-				deflFil.initCoords[i] = new Pt3D(segs[i].coord.x, segs[i].coord.y, segs[i].coord.z);
+				deflFil.initCoords[i] = new Pt3D(segs[i].getCoordX(), segs[i].getCoordY(), segs[i].getCoordZ());
 			}
 			// Suppress Brownian forces on deflection chain (per-segment, replacing removed global flag)
 			for (FilSegment s : segs) s.brownianOff = true;
@@ -1716,11 +1716,11 @@ public class BoxOfActin {
 			deflFil.tauMeasFrozen = false;
 			System.out.printf("[BENCH] τ_theo=%.3f s  ζ_perp_seg=%.3e N·s/m%n", deflFil.tauTheo, zetaPerp);
 
-			// Round 3 diagnostic: print each segment's center coord, length, and anchor flag
+			// Round 3 diagnostic: print each segment's center coordAsPt3D(), length, and anchor flag
 			for (int i = 0; i < n; i++) {
 				boolean isAnchor = (segs[i] == deflFil.firstSeg || segs[i] == deflFil.lastSeg);
-				System.err.printf("[BENCH:CHAIN] i=%d coord=(%.4f,%.4f,%.4f) length=%.4f isAnchor=%b%n",
-					i, segs[i].coord.x, segs[i].coord.y, segs[i].coord.z, segs[i].length, isAnchor);
+				System.err.printf("[BENCH:CHAIN] i=%d coordAsPt3D()=(%.4f,%.4f,%.4f) length=%.4f isAnchor=%b%n",
+					i, segs[i].getCoordX(), segs[i].getCoordY(), segs[i].getCoordZ(), segs[i].length, isAnchor);
 			}
 
 			// --- LP benchmark chain (free BCs, Brownian forces) ---

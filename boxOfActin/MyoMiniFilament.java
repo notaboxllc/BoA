@@ -21,7 +21,7 @@ public class MyoMiniFilament extends Thing {
 	static double headZone = 0.05; // �m  distribution of myosins about each end of filament
 	private int boundFilaments = 0;			// counter for number of bound actin filaments
 	
-	// end1 (free end) / end2 (attached to head) live on Thing now;
+	// end1AsPt3D() (free end) / end2AsPt3D() (attached to head) live on Thing now;
 	// bridgeDerivedToPt3D writes them after every GPU step.
 	
 	// empirical fit for viscous drags
@@ -76,7 +76,7 @@ public class MyoMiniFilament extends Thing {
 		super(initCoord);
 		addMiniFil(this);
 
-		uVec.copy(initUVec);
+		setUVec(initUVec);
 		calculateProperties();
 		pushPoseToSoa();
 		initialize();
@@ -121,8 +121,8 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void set (Pt3D setCoord, Pt3D setUVec, double dim, double rad) {
-		coord.copy(setCoord);
-		uVec.copy(setUVec);
+		setCoord(setCoord);
+		setUVec(setUVec);
 		length = dim;
 		radius = rad;
 		pushPoseToSoa();
@@ -147,26 +147,11 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void initialize () {
-		// SoA bridge: pull canonical pose into Pt3D fields.
-		loadPoseFromSoa();
-		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
-		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
-		zVec.cross(uVec, yVec);
-		yVec.cross(zVec, uVec);
-		// find the transformation matrices at this time step
-		transMat ();
-		// define opposite to uVec direction, used frequently
-		uVecR.scale(-1,uVec);
-
-		// re-find the end points of the rod to make sure they meet length criteria
-		end1.add(coord, -0.5*length, uVec);
-		end2.add(coord, 0.5*length, uVec);
-		pushLengthToSoa(length);   // keep SoA derived bulk pass in sync
-
-		// for collision detection
-		xRange = Math.abs(coord.x-end2.x);
-		yRange = Math.abs(coord.y-end2.y);
-		zRange = Math.abs(coord.z-end2.z);
+		pushLengthToSoa(length);
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+		xRange = Math.abs(getCoordX()-getEnd2X());
+		yRange = Math.abs(getCoordY()-getEnd2Y());
+		zRange = Math.abs(getCoordZ()-getEnd2Z());
 	}
 	
 	public void moveThing () {
@@ -176,9 +161,9 @@ public class MyoMiniFilament extends Thing {
 		Pt3D randForcesSnap = null, randTorquesSnap = null;
 		Pt3D bTransGamSnap = null, bRotGamSnap = null;
 		if (Env.myoMiniTeleportDiag) {
-			coordBefore    = new Pt3D(coord.x,      coord.y,      coord.z);
-			end1Before     = new Pt3D(end1.x,       end1.y,       end1.z);
-			end2Before     = new Pt3D(end2.x,       end2.y,       end2.z);
+			coordBefore    = new Pt3D(getCoordX(),      getCoordY(),      getCoordZ());
+			end1Before     = new Pt3D(getEnd1X(),       getEnd1Y(),       getEnd1Z());
+			end2Before     = new Pt3D(getEnd2X(),       getEnd2Y(),       getEnd2Z());
 			forceSumSnap   = new Pt3D(getForceSumX(),  getForceSumY(),  getForceSumZ());
 			torqueSumSnap  = new Pt3D(getTorqueSumX(), getTorqueSumY(), getTorqueSumZ());
 			randForcesSnap = new Pt3D(randForces.x, randForces.y, randForces.z);
@@ -219,29 +204,28 @@ public class MyoMiniFilament extends Thing {
 		// New Positions
 		// ....then transform back into fixed coordinate frame
 		veloc.xToX(this, bVeloc);
-		coord.inc(Env.deltaT.getValue(), veloc);
+		incCoord(Env.deltaT.getValue(), veloc);
 
-		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
-		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
+		Pt3D scratch = new Pt3D();
+		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();
 		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
-		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
-		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
-		uVec.unitVec();		// make a unit vector
+		scratch.setVals(1, uVecTransInY, uVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setUVec(scratch);
 
-		// for yVec
-		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
-		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
-		yVec.xToX(this);
-		yVec.unitVec();
+		double yVecTransInX = -uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();
+		scratch.setVals(yVecTransInX, 1, yVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setYVec(scratch);
 
-		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 
 		// TELEPORT_DIAG — check displacement; emit full state dump if threshold exceeded
 		if (Env.myoMiniTeleportDiag) {
-			double disp = Pt3D.ptDist(coordBefore, coord);
+			double disp = Pt3D.ptDist(coordBefore, coordAsPt3D());
 			if (disp > Env.myoMiniTeleportThreshold) {
 				dumpTeleportDiag(coordBefore, end1Before, end2Before,
 						forceSumSnap, torqueSumSnap,
@@ -263,17 +247,17 @@ public class MyoMiniFilament extends Thing {
 				"t=%.4f step=%d minifil#%d disp=%.3eµm",
 				Env.simulationTime, Env.counter, myMyoMiniNumber, disp));
 		System.err.println(p + String.format(
-				"  coord:      (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				"  coordAsPt3D():      (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
 				coordBefore.x, coordBefore.y, coordBefore.z,
-				coord.x, coord.y, coord.z));
+				getCoordX(), getCoordY(), getCoordZ()));
 		System.err.println(p + String.format(
-				"  end1:       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				"  end1AsPt3D():       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
 				end1Before.x, end1Before.y, end1Before.z,
-				end1.x, end1.y, end1.z));
+				getEnd1X(), getEnd1Y(), getEnd1Z()));
 		System.err.println(p + String.format(
-				"  end2:       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
+				"  end2AsPt3D():       (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)",
 				end2Before.x, end2Before.y, end2Before.z,
-				end2.x, end2.y, end2.z));
+				getEnd2X(), getEnd2Y(), getEnd2Z()));
 		System.err.println(p + String.format(
 				"  forceSum   = (%.3e, %.3e, %.3e)",
 				forceSumSnap.x, forceSumSnap.y, forceSumSnap.z));
@@ -339,7 +323,7 @@ public class MyoMiniFilament extends Thing {
 			
 			myoPtsInX[i] = new Pt3D();
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
-			myoPtsInX[i].inc(coord);
+			myoPtsInX[i].inc(coordAsPt3D());
 			myosins[i] = new Myosin(myoPtsInX[i]);
 			//myosins[i].rodInvisible = true;
 		}
@@ -348,7 +332,7 @@ public class MyoMiniFilament extends Thing {
 	public void updateMyosinPositions () {
 		for (int i=0;i<numMyosinHeads;i++) {
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
-			myoPtsInX[i].inc(coord);
+			myoPtsInX[i].inc(coordAsPt3D());
 		}
 	}
 	
@@ -358,8 +342,8 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyosinHeads;i++) {
 			curMyo = myosins[i];
 			curAttPt = myoPtsInX[i];
-			double strainDist = Pt3D.ptDist(curMyo.myoRod.end1, curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyo.myoRod.end1);
+			double strainDist = Pt3D.ptDist(curMyo.myoRod.end1AsPt3D(), curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyo.myoRod.end1AsPt3D());
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyo.myoRod.bTransGam.y + 1/bTransGam.y));
 
@@ -382,8 +366,8 @@ public class MyoMiniFilament extends Thing {
 			
 			myoDimerPtsEnd1InX[i] = new Pt3D();
 			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
-			myoDimerPtsEnd1InX[i].inc(coord);
-			myoDimersEnd1[i] = new MyosinDimer(myoDimerPtsEnd1InX[i],uVecR);
+			myoDimerPtsEnd1InX[i].inc(coordAsPt3D());
+			myoDimersEnd1[i] = new MyosinDimer(myoDimerPtsEnd1InX[i],uVecRAsPt3D());
 			//myosins[i].rodInvisible = true;
 		}
 		
@@ -396,8 +380,8 @@ public class MyoMiniFilament extends Thing {
 			
 			myoDimerPtsEnd2InX[i] = new Pt3D();
 			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);
-			myoDimerPtsEnd2InX[i].inc(coord);
-			myoDimersEnd2[i] = new MyosinDimer(myoDimerPtsEnd2InX[i],uVec);
+			myoDimerPtsEnd2InX[i].inc(coordAsPt3D());
+			myoDimersEnd2[i] = new MyosinDimer(myoDimerPtsEnd2InX[i],uVecAsPt3D());
 			//myosins[i].rodInvisible = true;
 		}
 	}
@@ -405,10 +389,10 @@ public class MyoMiniFilament extends Thing {
 	public void updateMyosinDimerPositions () {
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
-			myoDimerPtsEnd1InX[i].inc(coord);
+			myoDimerPtsEnd1InX[i].inc(coordAsPt3D());
 			
 			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);
-			myoDimerPtsEnd2InX[i].inc(coord);
+			myoDimerPtsEnd2InX[i].inc(coordAsPt3D());
 		}
 	}
 	
@@ -421,8 +405,8 @@ public class MyoMiniFilament extends Thing {
 			curMyoD = myoDimersEnd1[i];
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd1InX[i];
-			double strainDist = Pt3D.ptDist(curMyoRod.end1, curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyoRod.end1);
+			double strainDist = Pt3D.ptDist(curMyoRod.end1AsPt3D(), curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyoRod.end1AsPt3D());
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
 
@@ -433,10 +417,10 @@ public class MyoMiniFilament extends Thing {
 			incForceSum(F);
 			
 			// torque to maintain alignment (more or less)
-			torsionVec.cross(curMyoRod.uVec,uVecR);
+			torsionVec.cross(curMyoRod.uVecAsPt3D(),uVecRAsPt3D());
 			torsionVec.unitVec();
 			
-			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVecR);
+			double dotVecs = Pt3D.Dot(curMyoRod.uVecAsPt3D(),uVecRAsPt3D());
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
 			if (dotVecs < -1.0) { dotVecs = -1.0; }
 			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -465,8 +449,8 @@ public class MyoMiniFilament extends Thing {
 			curMyoD = myoDimersEnd2[i];
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd2InX[i];
-			double strainDist = Pt3D.ptDist(curMyoRod.end1, curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyoRod.end1);
+			double strainDist = Pt3D.ptDist(curMyoRod.end1AsPt3D(), curAttPt);
+			linkUVec1.unitVec(curAttPt,curMyoRod.end1AsPt3D());
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
 
@@ -477,10 +461,10 @@ public class MyoMiniFilament extends Thing {
 			incForceSum(F);
 			
 			// torque to maintain alignment (more or less)
-			torsionVec.cross(curMyoRod.uVec,uVec);
+			torsionVec.cross(curMyoRod.uVecAsPt3D(),uVecAsPt3D());
 			torsionVec.unitVec();
 			
-			double dotVecs = Pt3D.Dot(curMyoRod.uVec,uVec);
+			double dotVecs = Pt3D.Dot(curMyoRod.uVecAsPt3D(),uVecAsPt3D());
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
 			if (dotVecs < -1.0) { dotVecs = -1.0; }
 			double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -517,16 +501,16 @@ public class MyoMiniFilament extends Thing {
 	
 	public void checkOuterBugCollision () {
 		double mag;
-		theBox.amICollidingOuter(cE,end1,getRadius());
+		theBox.amICollidingOuter(cE,end1AsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
-			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end1);
+			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end1AsPt3D());
 		}
 		
-		theBox.amICollidingOuter(cE,end2,getRadius());
+		theBox.amICollidingOuter(cE,end2AsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
-			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end2);
+			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end2AsPt3D());
 		}
 	}
 	
@@ -535,10 +519,10 @@ public class MyoMiniFilament extends Thing {
 			MyoMiniFilament iP = myoMiniFils[i];
 			for (int p=i+1;p<myoMiniFilCt;p++) {
 				MyoMiniFilament pP = myoMiniFils[p];
-				double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+				double pDist = Pt3D.ptDist(iP.coordAsPt3D(), pP.coordAsPt3D());
 				if (pDist<pP.getRadius()+iP.getRadius()) {
 					double impingedist = pP.getRadius()+iP.getRadius() - pDist;
-				    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coord, pP.coord);
+				    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coordAsPt3D(), pP.coordAsPt3D());
 					Pt3D pVec = Pt3D.Reverse(iVec);
 					double mag = (1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/iP.bTransGam.x+1/pP.bTransGam.x);
 					iP.incForceSum(Pt3D.Scale(mag,iVec));

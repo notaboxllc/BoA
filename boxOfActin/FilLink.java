@@ -145,7 +145,7 @@ public class FilLink {
 		simTimeFormed = Env.simulationTime;
 		
 		// store orientation.. fixed for life of FilLink
-		double vecDot = Pt3D.Dot(fil1.uVec,fil2.uVec);
+		double vecDot = Pt3D.Dot(fil1.uVecAsPt3D(),fil2.uVecAsPt3D());
 		double angTween = Math.acos(vecDot);
 		//System.out.println ("initial ang tween is " + angTween);
 		if (angTween > Math.PI/2) { orientSame = false; }
@@ -153,8 +153,8 @@ public class FilLink {
 	}
 	
 	public void updatePts () {
-		pt1.add(fil1.end1,loc1,fil1.uVec);
-		pt2.add(fil2.end1,loc2,fil2.uVec);
+		pt1.add(fil1.end1AsPt3D(),loc1,fil1.uVecAsPt3D());
+		pt2.add(fil2.end1AsPt3D(),loc2,fil2.uVecAsPt3D());
 		linkLength = Pt3D.ptDist(pt1, pt2);
 		linkVec.sub(pt2,pt1);
 	}
@@ -221,16 +221,16 @@ public class FilLink {
 		double dotVecs;
 		double angTween;
 		if (orientSame) {
-			torsionVec.cross(fil1.uVec,fil2.uVec);
+			torsionVec.cross(fil1.uVecAsPt3D(),fil2.uVecAsPt3D());
 			torsionVec.unitVec();
-			dotVecs = Pt3D.Dot(fil1.uVec,fil2.uVec);
+			dotVecs = Pt3D.Dot(fil1.uVecAsPt3D(),fil2.uVecAsPt3D());
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
 			if (dotVecs < -1.0) { dotVecs = -1.0; }
 			angTween = Pt3D.fastAcos(dotVecs);
 		} else {
-			torsionVec.cross(fil1.uVec,fil2.uVecR);
+			torsionVec.cross(fil1.uVecAsPt3D(),fil2.uVecRAsPt3D());
 			torsionVec.unitVec();
-			dotVecs = Pt3D.Dot(fil1.uVec,fil2.uVec);
+			dotVecs = Pt3D.Dot(fil1.uVecAsPt3D(),fil2.uVecAsPt3D());
 			if (dotVecs > 1.0) { dotVecs = 1.0; }
 			if (dotVecs < -1.0) { dotVecs = -1.0; }
 			angTween = Math.abs(Pt3D.fastAcos(dotVecs)-Math.PI);
@@ -265,7 +265,7 @@ public class FilLink {
 	
 	/*public void checkForAnnealing () {
 		if (Env.simulationTime - simTimeFormed > 1) { 
-			FilSegment.annealSegments(fil1, fil1.end2, fil2, fil2.end1);
+			FilSegment.annealSegments(fil1, fil1.end2AsPt3D(), fil2, fil2.end1AsPt3D());
 		}
 	}*/
 
@@ -278,13 +278,13 @@ public class FilLink {
 		// check a mess (4) of different possibilities
 		if (!fil1.filAtEnd2 & !fil1.nodeAtEnd2) {
 			if (!fil2.filAtEnd1 & !fil2.nodeAtEnd1) {
-				ptD = Pt3D.ptDist(fil1.end2, fil2.end1);
+				ptD = Pt3D.ptDist(fil1.end2AsPt3D(), fil2.end1AsPt3D());
 				if (ptD < Env.annealDist.getValue()) { 
 					//System.out.println("1st Ck passed: ptD = " + ptD);
-					cosAngTween = Pt3D.Dot(fil1.uVec, fil2.uVec);
+					cosAngTween = Pt3D.Dot(fil1.uVecAsPt3D(), fil2.uVecAsPt3D());
 					if (cosAngTween > Env.annealAngleCosine.getValue()) {
 						//System.out.println ("case1");
-						FilSegment.annealSegments(fil1, fil1.end2, fil2, fil2.end1);
+						FilSegment.annealSegments(fil1, fil1.end2AsPt3D(), fil2, fil2.end1AsPt3D());
 						//System.out.println ("Annealed!");
 						this.active = false;
 						return;
@@ -293,12 +293,12 @@ public class FilLink {
 			}
 			
 			if (!fil2.filAtEnd2 & !fil2.nodeAtEnd2) {
-				ptD = Pt3D.ptDist(fil1.end2,fil2.end2);
+				ptD = Pt3D.ptDist(fil1.end2AsPt3D(),fil2.end2AsPt3D());
 				if (ptD < Env.annealDist.getValue()) { 
-					cosAngTween = Pt3D.Dot(fil1.uVec, fil2.uVecR);
+					cosAngTween = Pt3D.Dot(fil1.uVecAsPt3D(), fil2.uVecRAsPt3D());
 					if (cosAngTween > Env.annealAngleCosine.getValue()) {
 						//System.out.println ("case2");
-						FilSegment.annealSegments(fil1, fil1.end2, fil2, fil2.end2);
+						FilSegment.annealSegments(fil1, fil1.end2AsPt3D(), fil2, fil2.end2AsPt3D());
 						//System.out.println ("Annealed!");
 						this.active = false;
 						return;
@@ -309,12 +309,12 @@ public class FilLink {
 		
 		if (!fil1.filAtEnd1 & !fil1.nodeAtEnd1) {
 			if (!fil2.filAtEnd1 & !fil2.nodeAtEnd1) {
-				ptD = Pt3D.ptDist(fil1.end1, fil2.end1);
+				ptD = Pt3D.ptDist(fil1.end1AsPt3D(), fil2.end1AsPt3D());
 				if (ptD < Env.annealDist.getValue()) { 
-					cosAngTween = Pt3D.Dot(fil1.uVecR, fil2.uVec);
+					cosAngTween = Pt3D.Dot(fil1.uVecRAsPt3D(), fil2.uVecAsPt3D());
 					if (cosAngTween > Env.annealAngleCosine.getValue()) {
 						//System.out.println ("case3");
-						FilSegment.annealSegments(fil1, fil1.end1, fil2, fil2.end1);
+						FilSegment.annealSegments(fil1, fil1.end1AsPt3D(), fil2, fil2.end1AsPt3D());
 						//System.out.println ("Annealed!");
 						this.active = false;
 						return;
@@ -323,12 +323,12 @@ public class FilLink {
 			}
 			
 			if (!fil2.filAtEnd2 & !fil2.nodeAtEnd2) {
-				ptD = Pt3D.ptDist(fil1.end1, fil2.end2);
+				ptD = Pt3D.ptDist(fil1.end1AsPt3D(), fil2.end2AsPt3D());
 				if (ptD < Env.annealDist.getValue()) { 
-					cosAngTween = Pt3D.Dot(fil1.uVecR, fil2.uVecR);
+					cosAngTween = Pt3D.Dot(fil1.uVecRAsPt3D(), fil2.uVecRAsPt3D());
 					if (cosAngTween > Env.annealAngleCosine.getValue()) {
 						//System.out.println ("case4");
-						FilSegment.annealSegments(fil1, fil1.end1, fil2, fil2.end2);
+						FilSegment.annealSegments(fil1, fil1.end1AsPt3D(), fil2, fil2.end2AsPt3D());
 						//System.out.println ("Annealed!");
 						this.active = false;
 						return;
@@ -441,9 +441,9 @@ public class FilLink {
           1001.0,// visualization type : fiber
           70000+idnum,   // agent instance ID
           7,   	 // agent type ID --XLink
-          coord.x,  // position X
-          coord.y,  // position Y
-          coord.z,  // position Z  
+          getCoordX(),  // position X
+          getCoordY(),  // position Y
+          getCoordZ(),  // position Z  
           angle.x,  // rotation X --can be zero for fiber
           angle.y,  // rotation Y --can be zero for fiber
           angle.z,  // rotation Z --can be zero for fiber

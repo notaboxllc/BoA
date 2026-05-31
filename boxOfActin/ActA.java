@@ -159,7 +159,7 @@ public class ActA {
 	public void nucleateFilament() {
 		if (!bound) {
 			if (ThreadLocalRandom.current().nextDouble() < Env.actANucProb.getValue()*Env.actinConc.getValue()*Env.deltaT.getValue()) {
-				Pt3D normalOut = Pt3D.Sub(ptOnBugInX, myBug.coord);
+				Pt3D normalOut = Pt3D.Sub(ptOnBugInX, myBug.coordAsPt3D());
 				normalOut.unitVec();
 				Pt3D loc = Pt3D.Add(ptOnBugInX,3*Env.actinMonoRadius,normalOut);
 				normalOut.scale(-1);
@@ -199,9 +199,9 @@ public class ActA {
 	}
 	
 	public void updatePts () {
-		ptOnBugInX.xToXPlusPoint(myBug ,ptOnBug, myBug.coord);  // stored loc on bug transformed to fixed-frame point in space
+		ptOnBugInX.xToXPlusPoint(myBug ,ptOnBug, myBug.coordAsPt3D());  // stored loc on bug transformed to fixed-frame point in space
 		try {
-			ptOnFilInX.add(boundFil.end1,boundLoc,boundFil.uVec);  // binding pt on filament to fixed-frame point in space
+			ptOnFilInX.add(boundFil.end1AsPt3D(),boundLoc,boundFil.uVecAsPt3D());  // binding pt on filament to fixed-frame point in space
 		} catch (NullPointerException npe) {
 			System.out.println ("NPE in updatePts: bound = " + bound + ", boundFil = " + boundFil + ", monomers = " + boundFil.monomerCt);
 		}
@@ -214,7 +214,7 @@ public class ActA {
 	}
 	
 	public void updatePtOnBugInX () {
-		ptOnBugInX.xToXPlusPoint(myBug ,ptOnBug, myBug.coord);  // stored loc on bug transformed to fixed-frame point in space
+		ptOnBugInX.xToXPlusPoint(myBug ,ptOnBug, myBug.coordAsPt3D());  // stored loc on bug transformed to fixed-frame point in space
 	}
 
 	public void setFil(FilSegment fil, double loc) {
@@ -241,7 +241,7 @@ public class ActA {
 	}
 	
 	static void checkBindingToActA(FilSegment fil, Pt3D pt) {
-		// pt comes in as the vector from bug.coord to collision point in bug's coordinate system
+		// pt comes in as the vector from bug.coordAsPt3D() to collision point in bug's coordinate system
 		if (fil.actAOn) { return; } // hack, only one ActA per filament with this here
 		ActA bindTo = findCloseActA(pt);
 		if (bindTo != null) { // found an available ActA close enough!
@@ -411,9 +411,9 @@ public class ActA {
           1001.0,// visualization type : fiber
           60000+idnum,   // agent instance ID
           6,   	 // agent type ID --ActA
-          coord.x,  // position X
-          coord.y,  // position Y
-          coord.z,  // position Z  
+          getCoordX(),  // position X
+          getCoordY(),  // position Y
+          getCoordZ(),  // position Z  
           angle.x,  // rotation X --can be zero for fiber
           angle.y,  // rotation Y --can be zero for fiber
           angle.z,  // rotation Z --can be zero for fiber
@@ -425,7 +425,7 @@ public class ActA {
 		FileOps.addJSonID(id);
 		if (bound) { 	// only saving actively linked ActAs
 			try {
-				if (!boundFil.coord.checkPt3D()) { return ""; } // make sure rod isn't in crazy state
+				if (!boundFil.coordAsPt3D().checkPt3D()) { return ""; } // make sure rod isn't in crazy state
 				String lmPtXStr = String.format("%.2f",Env.simJSonsScale*ptOnBugInX.x);
 				String lmPtYStr = String.format("%.2f",Env.simJSonsScale*ptOnBugInX.y);
 				String lmPtZStr = String.format("%.2f",Env.simJSonsScale*ptOnBugInX.z);

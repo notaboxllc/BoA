@@ -124,7 +124,7 @@ public class Mesh {
 				case Env.meshFilsStart:
 					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
 						FilSegment curSeg = FilSegment.theFilSegments[i];
-						Mesh.FILSEG_MESH.fillFilSegMesh(curSeg.filArrayPos, curSeg.end1, curSeg.end2);
+						Mesh.FILSEG_MESH.fillFilSegMesh(curSeg.filArrayPos, curSeg.end1AsPt3D(), curSeg.end2AsPt3D());
 					}
 					break;
 				case Env.meshNodesStart:
@@ -358,8 +358,8 @@ public class Mesh {
 		int id=node.myNodeNumber;
 	
 		//X AXIS
-		double startValue=node.coord.x-node.getRadius();
-		double stopValue=node.coord.x+node.getRadius();			
+		double startValue=node.getCoordX()-node.getRadius();
+		double stopValue=node.getCoordX()+node.getRadius();			
 		
 		int startBinX = getBinX(startValue);
 		int stopBinX = getBinX(stopValue);
@@ -371,8 +371,8 @@ public class Mesh {
 		}
 	
 		//Y AXIS
-		startValue=node.coord.y-node.getRadius();
-		stopValue=node.coord.y+node.getRadius();			
+		startValue=node.getCoordY()-node.getRadius();
+		stopValue=node.getCoordY()+node.getRadius();			
 		
 		int startBinY = getBinY(startValue);
 		int stopBinY = getBinY(stopValue);

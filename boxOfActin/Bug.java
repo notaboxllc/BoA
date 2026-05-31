@@ -32,7 +32,7 @@ public class Bug extends Crucible {
 	static float initialTrans = 0.6f;	// initial transparency
 	static float initialEmit = 0.1f;	// initial emmissive color
 	
-	// end1 (cap1 tip) / end2 (cap2 tip) live on Thing now;
+	// end1AsPt3D() (cap1 tip) / end2AsPt3D() (cap2 tip) live on Thing now;
 	// bridgeDerivedToPt3D writes them after every GPU step.
 	Pt3D rec1 = new Pt3D();						// location of cap1 center
 	Pt3D rec2 = new Pt3D();						// location of cap2 center
@@ -89,14 +89,13 @@ public class Bug extends Crucible {
 	Pt3D fricForceTmp = new Pt3D();  // used in calc. of friction force from normal force
 
 	
-	public Bug (Pt3D coord, double len, double rad) {
-		super (coord);
-		uVec.copy(0,1,0);	// point bug in positive y-direction
-		yVec.copy(1,0,0);
+	public Bug (Pt3D initCoord, double len, double rad) {
+		super (initCoord);
+		setUVec(0,1,0);	// point bug in positive y-direction
+		setYVec(1,0,0);
 		length = len;
 		radius = rad;
 		calculateProperties();
-		pushPoseToSoa();
 		initialize();
 	}
 	
@@ -132,21 +131,13 @@ public class Bug extends Crucible {
 	}
 	
 	public void initialize () {
-		// SoA bridge: pull canonical pose into Pt3D fields.
-		loadPoseFromSoa();
-		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
-		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
-		zVec.cross(uVec, yVec);
-		yVec.cross(zVec, uVec);
-		// find the transformation matrices at this time step
-		transMat ();
-
-		// find the cap end points and cap hemisphere centers
-		end1.add(coord, -length/2, uVec);
-		end2.add(coord, length/2, uVec);
-		rec1.add(coord, -(length/2 - radius), uVec);
-		rec2.add(coord, length/2 - radius, uVec);
-		pushLengthToSoa(length);   // keep SoA derived bulk pass in sync
+		// Canonical pose lives in SoA arrays; derived end1/end2/zVec/transXTox
+		// computed by recomputeDerivedSoA from coord/uVec/yVec/length.
+		pushLengthToSoa(length);
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+		// Cap hemisphere centers, recomputed inline (no SoA equivalent yet).
+		rec1.add(coordAsPt3D(), -(length/2 - radius), uVecAsPt3D());
+		rec2.add(coordAsPt3D(), length/2 - radius, uVecAsPt3D());
 	}
 	
 	public void step () {
@@ -222,27 +213,28 @@ public class Bug extends Crucible {
 		
 		// ....then transform back into fixed coordinate frame
 		veloc.xToX(this, bVeloc);
-		coord.inc(Env.deltaT.getValue(), veloc);
+		incCoord(Env.deltaT.getValue(), veloc);
 		
-		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
-		// for uVec
+		// to apply body-fixed angular velocities, build the new unit vectors
+		// in a scratch Pt3D, transform body→fixed, normalise, then write back to SoA.
+		Pt3D scratch = new Pt3D();
 		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
 		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
-		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
-		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
-		uVec.unitVec();		// make a unit vector
-		
-		// for yVec
-		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
-		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
-		yVec.xToX(this);
-		yVec.unitVec();
+		scratch.setVals(1, uVecTransInY, uVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setUVec(scratch);
+
+		double yVecTransInX = -uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();
+		scratch.setVals(yVecTransInX, 1, yVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setYVec(scratch);
 
 		// update path coordinate
-		pathCoord.inc(Env.deltaT.getValue(), bVeloc); // path coordinates are just path velocity * deltaT
+		pathCoord.inc(Env.deltaT.getValue(), bVeloc);
 
-		pushPoseToSoa();   // canonical SoA flush
 		initialize();
 	}
 	
@@ -295,13 +287,11 @@ public class Bug extends Crucible {
 	public static void makeListeriaBug() {
 		Thing.lmBug = new Bug(new Pt3D(0,-5,0), Env.bugLength.getValue(), Env.bugRadius.getValue());
 		Pt3D dispV = new Pt3D(halfCylLength*1.2, radius/2, radius/2);
-		Pt3D end1 = Pt3D.Add(lmBug.coord, 1,dispV);
-		Pt3D end2 = Pt3D.Add(lmBug.coord, -1,dispV);
-		//new ProteinNode(end1,false);
-		//new ProteinNode(end2,false);
-		Pt3D webOrigin = Pt3D.Add(lmBug.end2, 4*radius,lmBug.uVec);
+		// (unused locals end1AsPt3D()/end2AsPt3D() removed during Pt3D field cleanup; the commented
+		// `new ProteinNode(end1AsPt3D(),false)` lines were dead.)
+		Pt3D webOrigin = Pt3D.Add(lmBug.end2AsPt3D(), 4*radius,lmBug.uVecAsPt3D());
 		//FilSegment.makeWebOfActin(webOrigin,radius);
-		Pt3D filCoord = Pt3D.Add(lmBug.end1, -radius/2,lmBug.uVec);
+		Pt3D filCoord = Pt3D.Add(lmBug.end1AsPt3D(), -radius/2,lmBug.uVecAsPt3D());
 		//FilSegment.makeTestBranchedFilament(filCoord);
 		//FilSegment.firstActATest(filCoord, lmBug);
 		Thing.lmBug.makeActAs();
@@ -344,14 +334,14 @@ public class Bug extends Crucible {
 	}
 	
 	public synchronized void addPathColForceOnBug (Pt3D forceVec) {
-		double pCForce = Pt3D.Dot(forceVec,uVec);
+		double pCForce = Pt3D.Dot(forceVec,uVecAsPt3D());
 		Env.addColForceInx(pCForce);
 		pathCollisionForce += pCForce;
 		filamentCollisions ++;
 	}
 	
 	public synchronized void addPathTetherForceOnBug (Pt3D forceVec) {
-		double pTForce = Pt3D.Dot(forceVec,uVec);
+		double pTForce = Pt3D.Dot(forceVec,uVecAsPt3D());
 		Env.addLinkForce(pTForce);
 		pathTetherForce += pTForce;
 		filamentTethers ++;
@@ -393,7 +383,7 @@ public class Bug extends Crucible {
 				pt.x += -1*halfCylLength;
 			}
 		}
-		pt.inc(coord);
+		pt.inc(coordAsPt3D());
 		return pt;
 	}
 	
@@ -430,7 +420,7 @@ public class Bug extends Crucible {
 				pt.x += -1*halfCylLength;
 			}
 		}
-		pt.inc(coord);
+		pt.inc(coordAsPt3D());
 		return pt;
 	}
 	
@@ -444,7 +434,7 @@ public class Bug extends Crucible {
 		pt.x = nodeGen.nextGaussian()*(Env.nodeZone.getValue()/2); // gaussian dist.
 		//pt.x = 2*Env.mtRNG.nextDouble()*Env.nodeZone - Env.nodeZone;	// uniform dist.
 		if (Math.abs(pt.x) > Env.nodeZone.getValue()) { pt.x *= Env.nodeZone.getValue()/Math.abs(pt.x); } // bring in outliers from gaussian
-		pt.inc(coord);
+		pt.inc(coordAsPt3D());
 		return pt;
 	}
 	
@@ -468,7 +458,7 @@ public class Bug extends Crucible {
 	
 	public void amICollidingOuter (CollisionEvent lcE, Pt3D ctr, double R) {
 		lcE.zeroDelta();	// set cE.delta = 0.... no collision if unchanged below
-		lcE.tmpPt1.sub(ctr, coord);
+		lcE.tmpPt1.sub(ctr, coordAsPt3D());
 		lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z);
 		double yzDist = Pt3D.vecMag(lcE.forceUVec);
 		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// check collisions in cylindrical section of bug
@@ -483,7 +473,7 @@ public class Bug extends Crucible {
 			
 		} else {		// check collisions in hemispherical caps
 			if (lcE.tmpPt1.x > 0) {	// positive x hemisphere
-				lcE.tmpPt2.copy(coord.x+halfCylLength, coord.y, coord.z);
+				lcE.tmpPt2.copy(getCoordX()+halfCylLength, getCoordY(), getCoordZ());
 				double topdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
 				if (topdist + R < radius) {
 					return;
@@ -494,7 +484,7 @@ public class Bug extends Crucible {
 				}
 			}
 			if (lcE.tmpPt1.x < 0) {  // negative x hemisphere
-				lcE.tmpPt2.copy(coord.x-halfCylLength, coord.y, coord.z);
+				lcE.tmpPt2.copy(getCoordX()-halfCylLength, getCoordY(), getCoordZ());
 				double botdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
 				if (botdist + R < radius) {
 					return;
@@ -510,8 +500,8 @@ public class Bug extends Crucible {
 	
 	public void amICollidingInner (CollisionEvent lcE, Pt3D ctr, double R) {
 		lcE.zeroDelta();	// set cE.delta = 0.... no collision if unchanged below
-		double dist = Pt3D.ptDist(ctr, coord);
-		lcE.tmpPt1.sub(ctr, coord);
+		double dist = Pt3D.ptDist(ctr, coordAsPt3D());
+		lcE.tmpPt1.sub(ctr, coordAsPt3D());
 		lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z);
 		double yzDist = Pt3D.vecMag(lcE.forceUVec);
 		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// check collisions in cylindrical section of bug
@@ -525,7 +515,7 @@ public class Bug extends Crucible {
 			
 		} else {		// check collisions in hemispherical caps
 			if (lcE.tmpPt1.x > 0) {	// positive x hemisphere
-				lcE.tmpPt2.copy(coord.x+halfCylLength, coord.y, coord.z);
+				lcE.tmpPt2.copy(getCoordX()+halfCylLength, getCoordY(), getCoordZ());
 				double topdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
 				if (topdist + R > innerRadius) {
 					return;
@@ -536,7 +526,7 @@ public class Bug extends Crucible {
 				}
 			}
 			if (lcE.tmpPt1.x < 0) {  // negative x hemisphere
-				lcE.tmpPt2.copy(coord.x-halfCylLength, coord.y, coord.z);
+				lcE.tmpPt2.copy(getCoordX()-halfCylLength, getCoordY(), getCoordZ());
 				double botdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
 				if (botdist + R > innerRadius) {
 					return;
@@ -553,14 +543,14 @@ public class Bug extends Crucible {
 	public void amICollidingFromOutside (CollisionEvent lcE, Pt3D ctr, double R) {
 		// big difference from amICollidingInner/Outer: bug moves.  Probably should make those methods more general like this one
 		// CollisionEvent leaves this method with:
-		//		tmpPt1: vector from bug.coord to contact point, in bugs coordinate frame (i.e. small x)
+		//		tmpPt1: vector from bug.coordAsPt3D() to contact point, in bugs coordinate frame (i.e. small x)
 		//		tmpPt2: unused except in cylinder collision where we store normal force unit vec in x
 		//		delta: impinge distance in microns
 		//		forceUVec: outward normal unit vector, either normal to cylinder or hemispheres, depending on collision case
 		lcE.bigDelta();	// set cE.delta to large number
 		lcE.setCollision(false);; // set to no collision
-		lcE.tmpPt1.sub(ctr, coord); // vector to object point in X
-		// fast check to eliminate distant objects: if distSqrd from object to bug coord > a big sphere around bug then return
+		lcE.tmpPt1.sub(ctr, coordAsPt3D()); // vector to object point in X
+		// fast check to eliminate distant objects: if distSqrd from object to bug coordAsPt3D() > a big sphere around bug then return
 		if (Pt3D.vecMagSqrd(lcE.tmpPt1) > bigSphRadSqrd) { return; }
 		lcE.tmpPt1.XTox(this);	// convert to bug's coordinate system x
 		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// check collisions in cylindrical section of bug
@@ -581,7 +571,7 @@ public class Bug extends Crucible {
 			
 		} else {		// check collisions in hemispherical caps
 			if (lcE.tmpPt1.x > 0) {	// positive x hemisphere
-				lcE.forceUVec.sub(ctr,rec2);  // force direction is outward from center of hemisphere at end2
+				lcE.forceUVec.sub(ctr,rec2);  // force direction is outward from center of hemisphere at end2AsPt3D()
 				double topdist = Pt3D.vecMag(lcE.forceUVec);  // distance from center of hemisphere to object point
 				lcE.delta = topdist-R-radius;
 				if (lcE.delta > 0) {  // return if outside hemisphere
@@ -594,7 +584,7 @@ public class Bug extends Crucible {
 				}
 			}
 			if (lcE.tmpPt1.x < 0) {  // negative x hemisphere
-				lcE.forceUVec.sub(ctr,rec1);  // force direction is outward from center of hemisphere at end1
+				lcE.forceUVec.sub(ctr,rec1);  // force direction is outward from center of hemisphere at end1AsPt3D()
 				double botdist = Pt3D.vecMag(lcE.forceUVec);  // distance from center of hemisphere to object point
 				lcE.delta = botdist-R-radius;
 				if (lcE.delta > 0) {
@@ -611,7 +601,7 @@ public class Bug extends Crucible {
 	}
 
 	
-	public void possibleCloseTip (double dist) {	// a single filament can count twice here if both end1 and end2 are close
+	public void possibleCloseTip (double dist) {	// a single filament can count twice here if both end1AsPt3D() and end2AsPt3D() are close
 		if (dist < Env.viscShellDist) { tipsInShell ++; }
 	}
 	
@@ -668,7 +658,7 @@ public class Bug extends Crucible {
 		while (seekingSlot) {
 			//lnRdm = Rdm.uRdm(this);
 			lnRdm = actARnd.nextDouble();
-			xRad = lnRdm*length - radius; // zero is at rec1 (center of cap at end1)
+			xRad = lnRdm*length - radius; // zero is at rec1 (center of cap at end1AsPt3D())
 			if (actALocs.decValue(xRad)) { seekingSlot = false; }  // found a valid location for a new ActA
 		}
 		if ((xRad < 0) | (xRad > cylLength)) {	// on hemispherical caps
@@ -726,23 +716,23 @@ public class Bug extends Crucible {
           1000.0,// visualization type : default
           0.0,   // agent instance ID
           0,   	 // agent type ID
-          coord.x,  // position X
-          coord.y,  // position Y
-          coord.z,  // position Z  
+          getCoordX(),  // position X
+          getCoordY(),  // position Y
+          getCoordZ(),  // position Z  
           angle.x,  // rotation X
           angle.y,  // rotation Y
           angle.z,  // rotation Z
           capRad,   // radius
           0.0,   // number of subpoint values following this number
 		 */
-		String coordXStr = String.format("%.2f",Env.simJSonsScale*coord.x);
-		String coordYStr = String.format("%.2f",Env.simJSonsScale*coord.y);
-		String coordZStr = String.format("%.2f",Env.simJSonsScale*coord.z);
-		// end1
+		String coordXStr = String.format("%.2f",Env.simJSonsScale*getCoordX());
+		String coordYStr = String.format("%.2f",Env.simJSonsScale*getCoordY());
+		String coordZStr = String.format("%.2f",Env.simJSonsScale*getCoordZ());
+		// end1AsPt3D()
 		String rec1XStr = String.format("%.2f",Env.simJSonsScale*rec1.x);
 		String rec1YStr = String.format("%.2f",Env.simJSonsScale*rec1.y);
 		String rec1ZStr = String.format("%.2f",Env.simJSonsScale*rec1.z);
-		// end2
+		// end2AsPt3D()
 		String rec2XStr = String.format("%.2f",Env.simJSonsScale*rec2.x);
 		String rec2YStr = String.format("%.2f",Env.simJSonsScale*rec2.y);
 		String rec2ZStr = String.format("%.2f",Env.simJSonsScale*rec2.z);

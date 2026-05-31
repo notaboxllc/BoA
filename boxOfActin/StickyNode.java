@@ -183,7 +183,7 @@ public class StickyNode extends ProteinNode {
 	public void biochemStep () {
 		super.biochemStep();
 		if (fixedNode) { return; }  // not letting unmovable modes get Rho Hot 
-		if (Math.abs(coord.x) > .4*Env.membraneCellRadius.getValue()) { return; }
+		if (Math.abs(getCoordX()) > .4*Env.membraneCellRadius.getValue()) { return; }
 		
 		// hot spot origination
 		double getHotProb = 0;//2e-3*Env.biochemDeltaT.getValue();
@@ -226,8 +226,8 @@ public class StickyNode extends ProteinNode {
 		if (iAmHotRho) {
 			double nucFilProb = Env.nucRateNearArpFactors.getValue()*Env.biochemDeltaT.getValue();
 			if (myPRNG.nextDouble() < nucFilProb) {  // testing only...
-				Pt3D nucVec = zVec;
-				Pt3D nucPt = Pt3D.Add(coord, -1.3*Env.membraneNodeRadius.getValue(),nucVec);
+				Pt3D nucVec = zVecAsPt3D();
+				Pt3D nucPt = Pt3D.Add(coordAsPt3D(), -1.3*Env.membraneNodeRadius.getValue(),nucVec);
 				FilSegment.makeArp23NucFilament(nucPt, nucVec);
 			}
 		}
@@ -273,7 +273,7 @@ public class StickyNode extends ProteinNode {
 	}
 	
 	public void internalPressure () {
-		Pt3D outVec = Pt3D.UnitVec(coord,centerOfSphere);
+		Pt3D outVec = Pt3D.UnitVec(coordAsPt3D(),centerOfSphere);
 		outVec.scale(Env.outwardCellForce.getValue());
 		// Direct slot increment: this runs inside moveThing on the membraneMove
 		// worker pass AFTER gatherThreadAccumulators(), so we cannot route this
@@ -282,15 +282,15 @@ public class StickyNode extends ProteinNode {
 	}
 
 	public void fakeConstrictingRing () {
-		Pt3D inVec = Pt3D.UnitVec(centerOfSphere,coord);
+		Pt3D inVec = Pt3D.UnitVec(centerOfSphere,coordAsPt3D());
 		inVec.scale(1e-20);
 		incForceSumSlot(inVec.x, inVec.y, inVec.z);
 	}
 	
 	public void addSphericalConstraintForce () {
-		Pt3D forceVec = Pt3D.Sub(coord, centerOfSphere);  // radially outward
+		Pt3D forceVec = Pt3D.Sub(coordAsPt3D(), centerOfSphere);  // radially outward
 		forceVec.unitVec();	// make unit vec
-		double radialDisp = Env.membraneCellRadius.getValue()-Pt3D.ptDist(coord, centerOfSphere);
+		double radialDisp = Env.membraneCellRadius.getValue()-Pt3D.ptDist(coordAsPt3D(), centerOfSphere);
 		double forceMag = 0.4*(1.0e-6*radialDisp/Env.collisionDeltaT.getValue())/(1/bTransGam.x);
 		incForceSum(Pt3D.Scale(forceMag,forceVec));
 	}
@@ -473,10 +473,10 @@ public class StickyNode extends ProteinNode {
 	
 	public static void makeLooseStickies (int numStickies) {
 		double sR = 0.05; // microns
-		Pt3D coord;
+		Pt3D coordPt;
 		for (int i=0; i<numStickies; i++) {
-			coord = theBox.rdmPtInside(sR);
-			new StickyNode (coord, sR, 2);
+			coordPt = theBox.rdmPtInside(sR);
+			new StickyNode (coordPt, sR, 2);
 		}
 	}
 	

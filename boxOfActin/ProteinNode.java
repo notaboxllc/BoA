@@ -82,15 +82,19 @@ public class ProteinNode extends Thing {
 
 	public ProteinNode (Pt3D initCoord, Pt3D initUVec, Pt3D initZVec, boolean fromQKFile) {
 		super(initCoord);
-		uVec.copy(initUVec); // uVec and zVec may not yet be truly orthogonal
-		zVec.copy(initZVec);
-		yVec.cross(zVec,uVec);
-		yVec.unitVec();		// normalize for sure
-		uVec.cross(yVec,zVec);
-		uVec.unitVec();  // since yVec is random direction must normalize this result
+		// initUVec and initZVec may not be truly orthogonal; orthonormalise in
+		// Pt3D scratch then push uVec/yVec to SoA. zVec is derived from uVec×yVec
+		// by recomputeDerivedSoA in initialize().
+		Pt3D yScratch = new Pt3D();
+		yScratch.cross(initZVec, initUVec);
+		yScratch.unitVec();
+		Pt3D uScratch = new Pt3D();
+		uScratch.cross(yScratch, initZVec);
+		uScratch.unitVec();
+		setUVec(uScratch);
+		setYVec(yScratch);
 		addNode(this);
 		calculateProperties();
-		pushPoseToSoa();
 		initialize();
 		makeMyosinSinglets();
 		makeMyosinDimers();
@@ -197,14 +201,9 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void initialize () {
-		// SoA bridge: pull canonical pose into Pt3D fields.
-		loadPoseFromSoa();
-		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
-		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
-		zVec.cross(uVec, yVec);
-		yVec.cross(zVec, uVec);
-		// find the transformation matrices at this time step
-		transMat ();
+		// ProteinNode has no length, but recomputeDerivedSoA still computes
+		// transXTox and zVec from uVec/yVec — needed by downstream phases.
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
 	}
 	
 	public void moveThing () {
@@ -247,24 +246,23 @@ public class ProteinNode extends Thing {
 		if (!xMove) { veloc.x = 0; } 
 		if (!yMove) { veloc.y = 0; }
 		if (!zMove) { veloc.z = 0; }
-		coord.inc(Env.deltaT.getValue(), veloc);
+		incCoord(Env.deltaT.getValue(), veloc);
 		
-		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
-		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
+		Pt3D scratch = new Pt3D();
+		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();
 		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
-		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
-		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
-		uVec.unitVec();		// make a unit vector
-		
-		// for yVec
-		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
-		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
-		yVec.xToX(this);
-		yVec.unitVec();
+		scratch.setVals(1, uVecTransInY, uVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setUVec(scratch);
 
-		pushPoseToSoa();   // canonical SoA flush
+		double yVecTransInX = -uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();
+		scratch.setVals(yVecTransInX, 1, yVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setYVec(scratch);
+
 		initialize();
 	}
 	
@@ -328,7 +326,7 @@ public class ProteinNode extends Thing {
 			
 			myoPtsInX[i] = new Pt3D();
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
-			myoPtsInX[i].inc(coord);
+			myoPtsInX[i].inc(coordAsPt3D());
 			myosins[i] = new Myosin(myoPtsInX[i],myoUVec);
 			myosins[i].setOwnerNode(this);
 			//if (Env.showProteinNode.isActive()) { myosins[i].setRodInvisible(true); }
@@ -338,7 +336,7 @@ public class ProteinNode extends Thing {
 	public void makeMyosinSinglets (Pt3D hemisphereNormal) {
 		for (int i=0;i<myoCt;i++) {
 			myoPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
-			// check if randomly created uVec points to opposite hemisphere, if so change direction
+			// check if randomly created uVecAsPt3D() points to opposite hemisphere, if so change direction
 			if (Pt3D.Dot(hemisphereNormal, myoPtsInx[i]) < 0) {
 				myoPtsInx[i].reverse();
 			}
@@ -348,7 +346,7 @@ public class ProteinNode extends Thing {
 			
 			myoPtsInX[i] = new Pt3D();
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
-			myoPtsInX[i].inc(coord);
+			myoPtsInX[i].inc(coordAsPt3D());
 			myosins[i] = new Myosin(myoPtsInX[i],myoUVec);
 			myosins[i].setOwnerNode(this);
 			//if (Env.showProteinNode.isActive()) { myosins[i].setRodInvisible(true); }
@@ -359,7 +357,7 @@ public class ProteinNode extends Thing {
 	public void updateMyosinPositions () {
 		for (int i=0;i<myoCt;i++) {
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
-			myoPtsInX[i].inc(coord);
+			myoPtsInX[i].inc(coordAsPt3D());
 		}
 	}
 	
@@ -371,7 +369,7 @@ public class ProteinNode extends Thing {
 		for (int i=0;i<myoCt;i++) {
 			curMyo = myosins[i];
 			curAttPt = myoPtsInX[i];
-			myoAttPt = curMyo.myoRod.end1;  // rod end1 or end2?  Hmmm...
+			myoAttPt = curMyo.myoRod.end1AsPt3D();  // rod end1AsPt3D() or end2AsPt3D()?  Hmmm...
 			double strainDist = Pt3D.ptDist(myoAttPt, curAttPt);
 			linkUVec1.unitVec(curAttPt,myoAttPt);
 			linkUVec2.scale(-1,linkUVec1);
@@ -408,7 +406,7 @@ public class ProteinNode extends Thing {
 			
 			myoDimerPtsInX[i] = new Pt3D();
 			myoDimerPtsInX[i].xToX(this,myoDimerPtsInx[i]);
-			myoDimerPtsInX[i].inc(coord);
+			myoDimerPtsInX[i].inc(coordAsPt3D());
 			myodimers[i] = new MyosinDimer(myoDimerPtsInX[i],myoUVec);
 			myodimers[i].setOwnerNode(this);
 			//myosins[i].rodInvisible = true;
@@ -418,7 +416,7 @@ public class ProteinNode extends Thing {
 	public void makeMyosinDimers (Pt3D hemisphereNormal) {
 		for (int i=0;i<myoDimerCt;i++) {
 			myoDimerPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
-			// check if randomly created uVec points to opposite hemisphere, if so change direction
+			// check if randomly created uVecAsPt3D() points to opposite hemisphere, if so change direction
 			if (Pt3D.Dot(hemisphereNormal, myoDimerPtsInx[i]) < 0) {
 				myoDimerPtsInx[i].reverse();
 			}
@@ -427,7 +425,7 @@ public class ProteinNode extends Thing {
 			
 			myoDimerPtsInX[i] = new Pt3D();
 			myoDimerPtsInX[i].xToX(this,myoDimerPtsInx[i]);
-			myoDimerPtsInX[i].inc(coord);
+			myoDimerPtsInX[i].inc(coordAsPt3D());
 			myodimers[i] = new MyosinDimer(myoDimerPtsInX[i],myoUVec);
 			myodimers[i].setOwnerNode(this);
 			//myosins[i].rodInvisible = true;
@@ -437,7 +435,7 @@ public class ProteinNode extends Thing {
 	public void updateMyosinDimerPositions () {
 		for (int i=0;i<myoDimerCt;i++) {
 			myoDimerPtsInX[i].xToX(this,myoDimerPtsInx[i]);
-			myoDimerPtsInX[i].inc(coord);
+			myoDimerPtsInX[i].inc(coordAsPt3D());
 		}
 	}
 	
@@ -450,13 +448,13 @@ public class ProteinNode extends Thing {
 			curMyoD = myodimers[i];
 			curRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsInX[i];
-			double strainDist = Pt3D.ptDist(curRod.end1, curAttPt);
-			linkUVec1.unitVec(curAttPt,curRod.end1);
+			double strainDist = Pt3D.ptDist(curRod.end1AsPt3D(), curAttPt);
+			linkUVec1.unitVec(curAttPt,curRod.end1AsPt3D());
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = attnForce*(Env.myoDimerFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curRod.bTransGam.y + 1/bTransGam.y));
 
 			F.scale(forceMag,linkUVec1);
-			curMyoD.myo1.myoRod.incForceSum(F,curRod.end1);
+			curMyoD.myo1.myoRod.incForceSum(F,curRod.end1AsPt3D());
 			
 			F.scale(-1,F);
 			incForceSum(F,curAttPt);
@@ -479,7 +477,7 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void checkOuterBugCollision () {
-		theBox.amICollidingOuter(cE,coord,getRadius());
+		theBox.amICollidingOuter(cE,coordAsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
@@ -487,7 +485,7 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void checkInnerBugCollision () {
-		theBox.amICollidingInner(cE,coord,getRadius());
+		theBox.amICollidingInner(cE,coordAsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
@@ -495,7 +493,7 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void checkBugCollisionFromOutside() {
-		lmBug.amICollidingFromOutside(cE,coord,radius);
+		lmBug.amICollidingFromOutside(cE,coordAsPt3D(),radius);
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
@@ -509,10 +507,10 @@ public class ProteinNode extends Thing {
 			ProteinNode iP = theNodes[i];
 			for (int p=i+1;p<nodeCt;p++) {
 				ProteinNode pP = theNodes[p];
-				double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+				double pDist = Pt3D.ptDist(iP.coordAsPt3D(), pP.coordAsPt3D());
 				if (pDist<pP.getRadius()+iP.getRadius()) {
 					double impingedist = pP.getRadius()+iP.getRadius() - pDist;
-				    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coord, pP.coord);
+				    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coordAsPt3D(), pP.coordAsPt3D());
 					Pt3D pVec = Pt3D.Reverse(iVec);
 					double mag = (1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/iP.bTransGam.x+1/pP.bTransGam.x);
 					iP.incForceSum(Pt3D.Scale(mag,iVec));
@@ -586,7 +584,7 @@ public class ProteinNode extends Thing {
 				return;
 			}  
 			if (!iP.fullyBound() && !pP.fullyBound()) { //(Env.simulationTime < 0) {
-				double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+				double pDist = Pt3D.ptDist(iP.coordAsPt3D(), pP.coordAsPt3D());
 				double radDist = pP.getRadius()+iP.getRadius();
 				if (pDist < 1.0*radDist) { StickyNode.ckToLink((StickyNode)iP,(StickyNode)pP); }
 				return;
@@ -611,11 +609,11 @@ public class ProteinNode extends Thing {
 	}
 	
 	public static void forceCollision (ProteinNode iP, ProteinNode pP, double attnF) {
-		double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+		double pDist = Pt3D.ptDist(iP.coordAsPt3D(), pP.coordAsPt3D());
 		double radDist = pP.getRadius()+iP.getRadius();
 		if (pDist < radDist) {
 			double impingedist = radDist - pDist;
-		    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coord, pP.coord);
+		    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coordAsPt3D(), pP.coordAsPt3D());
 			Pt3D pVec = Pt3D.Reverse(iVec);
 			double mag = attnF*(1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/iP.bTransGam.x+1/pP.bTransGam.x);
 			iP.incForceSum(Pt3D.Scale(mag,iVec));
@@ -630,11 +628,11 @@ public class ProteinNode extends Thing {
 	public static void oneSidedForceCollision (ProteinNode iP, ProteinNode pP, double attnF) {
 		// First object gets collision force applied... second gets away clean!  Only for ghost aspects of sim., like fill nodes tracking volume/concentrations
 		// force mag calculation considers second object to be immobile... all motion from iP
-		double pDist = Pt3D.ptDist(iP.coord, pP.coord);
+		double pDist = Pt3D.ptDist(iP.coordAsPt3D(), pP.coordAsPt3D());
 		double radDist = pP.getRadius()+iP.getRadius();
 		if (pDist < radDist) {
 			double impingedist = radDist - pDist;
-		    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coord, pP.coord);
+		    Pt3D iVec = Pt3D.UnitVec(pDist, iP.coordAsPt3D(), pP.coordAsPt3D());
 			//Pt3D pVec = Pt3D.Reverse(iVec);  // not used in one-sided collision
 			double mag = attnF*(1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/iP.bTransGam.x);
 			iP.incForceSum(Pt3D.Scale(mag,iVec));
@@ -658,13 +656,13 @@ public class ProteinNode extends Thing {
 				if (Env.mtRNG.nextDouble() < Env.kNodeNuc.getValue()*Env.deltaT.getValue()) {
 					Pt3D nucVec = curP.getNucleationVec();
 					//Pt3D newAttachPt = Pt3D.Scale(curP.getRadius(),nucVec);
-					//newAttachPt.inc(curP.coord);
-					nucVec.scale(-1);	// reverse direction if end2 is node attached
-					FilSegment newFil = new FilSegment (curP.coord,nucVec,-1);
+					//newAttachPt.inc(curP.coordAsPt3D());
+					nucVec.scale(-1);	// reverse direction if end2AsPt3D() is node attached
+					FilSegment newFil = new FilSegment (curP.coordAsPt3D(),nucVec,-1);
 					newFil.translate(newFil.length/2,nucVec);
 					newFil.nodeAtEnd2=true;
 					newFil.end2Node=curP;
-					newFil.end2PAttachPt.XToxFromxOrigin(curP,newFil.end2);
+					newFil.end2PAttachPt.XToxFromxOrigin(curP,newFil.end2AsPt3D());
 					newFil.end2PAttachPt.zero();  // use this for formins at center of node
 					newFil.forminVecInx.XTox(curP,nucVec);
 					curP.filamentOn();
@@ -675,12 +673,12 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void bespokeNodeFilament (int numMons, Pt3D nucVec) { 
-		Pt3D nucVecR = Pt3D.Reverse(nucVec); // reverse uVec direction if end2 is node attached
-		FilSegment bespokeFil = new FilSegment (coord,nucVecR,-1,numMons,false);
+		Pt3D nucVecR = Pt3D.Reverse(nucVec); // reverse uVecAsPt3D() direction if end2AsPt3D() is node attached
+		FilSegment bespokeFil = new FilSegment (coordAsPt3D(),nucVecR,-1,numMons,false);
 		bespokeFil.translate(bespokeFil.length/2,nucVec);
 		bespokeFil.nodeAtEnd2=true;
 		bespokeFil.end2Node=this;
-		bespokeFil.end2PAttachPt.XToxFromxOrigin(this,bespokeFil.end2);
+		bespokeFil.end2PAttachPt.XToxFromxOrigin(this,bespokeFil.end2AsPt3D());
 		bespokeFil.end2PAttachPt.zero();  // use this for formins at center of node
 		bespokeFil.forminVecInx.XTox(this,nucVecR);
 		filamentOn();
@@ -700,7 +698,7 @@ public class ProteinNode extends Thing {
 		if (Env.twoForminsOpposite) {
 			if (forminCt >= 1) {
 				nucTo = forminFils[0];
-				nucVec.copy(nucTo.uVec);
+				nucVec.copy(nucTo.uVecAsPt3D());
 			}
 		}
 		
@@ -768,7 +766,7 @@ public class ProteinNode extends Thing {
 	public static Pt3D getMinMaxZOfNodeDistro () {
 		Pt3D minMax = new Pt3D(1e6,1e-6,0);  	// store min in x, max in y.  z could be some other feature of distro in the future
 		for (int i=0;i<nodeCt;i++) {
-			double curZ = theNodes[i].coord.z;
+			double curZ = theNodes[i].getCoordZ();
 			if (curZ < minMax.x) { minMax.x = curZ; }
 			if (curZ > minMax.y) { minMax.y = curZ; }
 		}

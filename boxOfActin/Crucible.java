@@ -112,8 +112,8 @@ public class Crucible extends Thing {
 		Myosin curMyo = Thing.theBox.myosins[i];
 		MyoRod curRod = curMyo.myoRod;
 		Pt3D curAttPt = Thing.theBox.myoPtsInX[i];
-		double strainDist = Pt3D.ptDist(curRod.end1, curAttPt);
-		linkUVec1.unitVec(curAttPt,curRod.end1);
+		double strainDist = Pt3D.ptDist(curRod.end1AsPt3D(), curAttPt);
+		linkUVec1.unitVec(curAttPt,curRod.end1AsPt3D());
 		//linkUVec2.scale(-1,linkUVec1);
 		double forceMag = (Env.myoDimerFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curRod.bTransGam.y));
 
@@ -134,8 +134,8 @@ public class Crucible extends Thing {
 		MyosinDimer curMyoD = Thing.theBox.myodimers[i];
 		MyoRod curRod = curMyoD.myo1.myoRod;
 		Pt3D curAttPt = Thing.theBox.myoDimerPtsInX[i];
-		double strainDist = Pt3D.ptDist(curRod.end1, curAttPt);
-		linkUVec1.unitVec(curAttPt,curRod.end1);
+		double strainDist = Pt3D.ptDist(curRod.end1AsPt3D(), curAttPt);
+		linkUVec1.unitVec(curAttPt,curRod.end1AsPt3D());
 		//linkUVec2.scale(-1,linkUVec1);
 		double forceMag = (Env.myoDimerFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curRod.bTransGam.y));
 

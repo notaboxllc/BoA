@@ -87,10 +87,10 @@ public class MyosinDimer {
 	}
 	
 	public void alignUVecLeversTorque () {
-		torsionVec.cross(myo1.myoLever.uVec,myo2.myoLever.uVec);
+		torsionVec.cross(myo1.myoLever.uVecAsPt3D(),myo2.myoLever.uVecAsPt3D());
 		torsionVec.unitVec();
 		
-		double dotVecs = Pt3D.Dot(myo1.myoLever.uVec,myo2.myoLever.uVec);
+		double dotVecs = Pt3D.Dot(myo1.myoLever.uVecAsPt3D(),myo2.myoLever.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -113,10 +113,10 @@ public class MyosinDimer {
 	}
 	
 	public void alignYVecLeversTorque () {
-		torsionVec.cross(myo1.myoLever.yVec,myo2.myoLever.yVec);
+		torsionVec.cross(myo1.myoLever.yVecAsPt3D(),myo2.myoLever.yVecAsPt3D());
 		torsionVec.unitVec();
 		
-		double dotVecs = Pt3D.Dot(myo1.myoLever.yVec,myo2.myoLever.yVec);
+		double dotVecs = Pt3D.Dot(myo1.myoLever.yVecAsPt3D(),myo2.myoLever.yVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -144,8 +144,8 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end1, myoRod2.end1);
-		linkUVec1.unitVec(myoRod2.end1,myoRod1.end1);
+		strainDist = Pt3D.ptDist(myoRod1.end1AsPt3D(), myoRod2.end1AsPt3D());
+		linkUVec1.unitVec(myoRod2.end1AsPt3D(),myoRod1.end1AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(1,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(1,linkUVec2);
@@ -153,13 +153,13 @@ public class MyosinDimer {
 
 		F.scale(forceMag,linkUVec1);
 		myoRod1.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecR);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod1.incTorqueSum(RcrossF);
 		
 		F.scale(-1,F);
 		myoRod2.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecR);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod2.incTorqueSum(RcrossF);
 	}
@@ -170,8 +170,8 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part II
-		strainDist = Pt3D.ptDist(myoRod1.end2, myoRod2.end2);
-		linkUVec1.unitVec(myoRod2.end2,myoRod1.end2);
+		strainDist = Pt3D.ptDist(myoRod1.end2AsPt3D(), myoRod2.end2AsPt3D());
+		linkUVec1.unitVec(myoRod2.end2AsPt3D(),myoRod1.end2AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(2,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(2,linkUVec2);
@@ -179,13 +179,13 @@ public class MyosinDimer {
 
 		F.scale(forceMag,linkUVec1);
 		myoRod1.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod1.incTorqueSum(RcrossF);
 		
 		F.scale(-1,F);
 		myoRod2.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod2.incTorqueSum(RcrossF);
 	}
@@ -196,8 +196,8 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end1, myoRod2.end2);
-		linkUVec1.unitVec(myoRod2.end2,myoRod1.end1);
+		strainDist = Pt3D.ptDist(myoRod1.end1AsPt3D(), myoRod2.end2AsPt3D());
+		linkUVec1.unitVec(myoRod2.end2AsPt3D(),myoRod1.end1AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(1,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(2,linkUVec2);
@@ -205,13 +205,13 @@ public class MyosinDimer {
 
 		F.scale(forceMag,linkUVec1);
 		myoRod1.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecR);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod1.incTorqueSum(RcrossF);
 		
 		F.scale(-1,F);
 		myoRod2.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod2.incTorqueSum(RcrossF);
 	}
@@ -222,8 +222,8 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end2, myoRod2.end1);
-		linkUVec1.unitVec(myoRod2.end1,myoRod1.end2);
+		strainDist = Pt3D.ptDist(myoRod1.end2AsPt3D(), myoRod2.end1AsPt3D());
+		linkUVec1.unitVec(myoRod2.end1AsPt3D(),myoRod1.end2AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(2,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(1,linkUVec2);
@@ -231,13 +231,13 @@ public class MyosinDimer {
 
 		F.scale(forceMag,linkUVec1);
 		myoRod1.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod1.incTorqueSum(RcrossF);
 		
 		F.scale(-1,F);
 		myoRod2.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecR);
+		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod2.incTorqueSum(RcrossF);
 	}
@@ -278,7 +278,7 @@ public class MyosinDimer {
 	}
 	
 	public void setCM () {
-		myCM.add(myo1.myoRod.end2,myo2.myoRod.end2);
+		myCM.add(myo1.myoRod.end2AsPt3D(),myo2.myoRod.end2AsPt3D());
 		myCM.scale(0.5);
 	}
 	
@@ -290,10 +290,10 @@ public class MyosinDimer {
 			if (!FilSegment.theFilSegments[i].filAtEnd1) { end1Fil = FilSegment.theFilSegments[i]; }
 			if (!FilSegment.theFilSegments[i].filAtEnd2) { end2Fil = FilSegment.theFilSegments[i]; }
 		}
-		Pt3D bigUVec = Pt3D.UnitVec(end1Fil.end1,end2Fil.end2);
+		Pt3D bigUVec = Pt3D.UnitVec(end1Fil.end1AsPt3D(),end2Fil.end2AsPt3D());
 		setCM();
-		double toCMDist = Pt3D.ptDist(end1Fil.end1,myCM);
-		Pt3D toCMUVec = Pt3D.UnitVec(toCMDist,end1Fil.end1,myCM);
+		double toCMDist = Pt3D.ptDist(end1Fil.end1AsPt3D(),myCM);
+		Pt3D toCMUVec = Pt3D.UnitVec(toCMDist,end1Fil.end1AsPt3D(),myCM);
 		double cosAng = Pt3D.Dot(bigUVec, toCMUVec);
 		return toCMDist*cosAng;
 	}

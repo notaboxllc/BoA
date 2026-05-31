@@ -31,8 +31,8 @@ public class Arp23 {
 	FilSegment motherFil,daughterFil; 
 	double momLoc;	// location on mother filament of arp2/3
 	Pt3D momPt = new Pt3D();
-	Pt3D relaxDUVec = new Pt3D();	// what daughter uVec should be, in mother's body-fixed frame... set at branch formation
-	Pt3D curDUVec = new Pt3D();		// what daughter uVec should be in fixed-frame... calculated each time step
+	Pt3D relaxDUVec = new Pt3D();	// what daughter uVecAsPt3D() should be, in mother's body-fixed frame... set at branch formation
+	Pt3D curDUVec = new Pt3D();		// what daughter uVecAsPt3D() should be in fixed-frame... calculated each time step
 	Pt3D curDTipLoc = new Pt3D(); // where tip of daughter filament should be
 	int arp23Num;
 	double branchAngOffMotherYAxis;
@@ -151,7 +151,7 @@ public class Arp23 {
 		simTimeFormed = Env.simulationTime;
 		
 		// store orientation of branch relative to body-fixed mother coordinate system.. fixed for life of FilLink
-		relaxDUVec.XTox(motherFil,daughterFil.uVec);
+		relaxDUVec.XTox(motherFil,daughterFil.uVecAsPt3D());
 
 		active = true;
 	}
@@ -183,9 +183,9 @@ public class Arp23 {
 	
 	
 	public void updatePts () {
-		momPt.add(motherFil.end1,momLoc,motherFil.uVec);
-		endDisplacement = Pt3D.ptDist(momPt,daughterFil.end1);
-		displacementVec.sub(daughterFil.end1,momPt);
+		momPt.add(motherFil.end1AsPt3D(),momLoc,motherFil.uVecAsPt3D());
+		endDisplacement = Pt3D.ptDist(momPt,daughterFil.end1AsPt3D());
+		displacementVec.sub(daughterFil.end1AsPt3D(),momPt);
 		
 		curDUVec.xToX(motherFil, relaxDUVec);
 		curDTipLoc.add(momPt,daughterFil.length,curDUVec);
@@ -218,7 +218,7 @@ public class Arp23 {
 		motherFil.incForceSum(forceVec,momPt);
 			
 		forceVec.reverse();
-		daughterFil.incForceSum(forceVec,daughterFil.end1);
+		daughterFil.incForceSum(forceVec,daughterFil.end1AsPt3D());
 		//System.out.println("force on daughter = " + curForceMag);
 	}
 	
@@ -228,9 +228,9 @@ public class Arp23 {
 	
 		double dotVecs;
 		double angTween;
-		torsionVec.cross(curDUVec,daughterFil.uVec);
+		torsionVec.cross(curDUVec,daughterFil.uVecAsPt3D());
 		torsionVec.unitVec();
-		dotVecs = Pt3D.Dot(curDUVec,daughterFil.uVec);
+		dotVecs = Pt3D.Dot(curDUVec,daughterFil.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		angTween = Pt3D.fastAcos(dotVecs);
@@ -322,9 +322,9 @@ public class Arp23 {
           1000.0,// visualization type : default sphere
           50000+arpCounter,   // agent instance ID
           5,   	 // agent type ID --ARP2/3
-          coord.x,  // position X
-          coord.y,  // position Y
-          coord.z,  // position Z  
+          getCoordX(),  // position X
+          getCoordY(),  // position Y
+          getCoordZ(),  // position Z  
           angle.x,  // rotation X --can be zero for fiber
           angle.y,  // rotation Y --can be zero for fiber
           angle.z,  // rotation Z --can be zero for fiber
@@ -339,8 +339,8 @@ public class Arp23 {
 		arpJSonIDCounter++;
 		
 		try {
-			Pt3D arpEnd1Pt = Pt3D.Add(motherFil.end1, momLoc, motherFil.uVec);
-			Pt3D arpEnd2Pt = Pt3D.Add(arpEnd1Pt, Env.radOfCap,daughterFil.uVec);
+			Pt3D arpEnd1Pt = Pt3D.Add(motherFil.end1AsPt3D(), momLoc, motherFil.uVecAsPt3D());
+			Pt3D arpEnd2Pt = Pt3D.Add(arpEnd1Pt, Env.radOfCap,daughterFil.uVecAsPt3D());
 			String arpEnd1XStr = String.format("%.2f",Env.simJSonsScale*arpEnd1Pt.x);
 			String arpEnd1YStr = String.format("%.2f",Env.simJSonsScale*arpEnd1Pt.y);
 			String arpEnd1ZStr = String.format("%.2f",Env.simJSonsScale*arpEnd1Pt.z);

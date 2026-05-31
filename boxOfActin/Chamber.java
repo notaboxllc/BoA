@@ -42,8 +42,8 @@ public class Chamber extends Crucible {
 	//Pt3D tmp1 = new Pt3D();
 	//Pt3D tmp2 = new Pt3D();
 
-	public Chamber (Pt3D coord, double xDim, double yDim, double zDim) {
-		super (coord);
+	public Chamber (Pt3D initCoord, double xDim, double yDim, double zDim) {
+		super (initCoord);
 		dimX = xDim;
 		dimY = yDim;
 		dimZ = zDim;
@@ -124,7 +124,7 @@ public class Chamber extends Crucible {
 	
 	public void amICollidingOuter (CollisionEvent lcE, Pt3D ctr, double R) {
 		lcE.zeroDelta();
-		lcE.tmpPt1.sub(ctr, coord);
+		lcE.tmpPt1.sub(ctr, coordAsPt3D());
 		lcE.forceUVec.setVals(Math.signum(lcE.tmpPt1.x)*(dims.x/2-R),Math.signum(lcE.tmpPt1.y)*(dims.y/2-R),Math.signum(lcE.tmpPt1.z)*(dims.z/2-R));
 		lcE.forceUVec.sub(lcE.forceUVec, lcE.tmpPt1);
 		if (Math.signum(lcE.forceUVec.x)==Math.signum(lcE.tmpPt1.x)) { lcE.forceUVec.x = 0; }

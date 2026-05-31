@@ -4,7 +4,7 @@ public class MyoLever extends Thing {
 	static double radius = 0.002; // microns
 	Myosin myMyosin;
 	
-	// end1 (free end) / end2 (attached to head) live on Thing now;
+	// end1AsPt3D() (free end) / end2AsPt3D() (attached to head) live on Thing now;
 	// bridgeDerivedToPt3D writes them after every GPU step.
 	
 	// empirical fit for viscous drags
@@ -27,7 +27,7 @@ public class MyoLever extends Thing {
 	public MyoLever(Pt3D initCoord,Pt3D initUVec) {
 		super(initCoord);
 
-		uVec.copy(initUVec);
+		setUVec(initUVec);
 		calculateProperties();
 		pushPoseToSoa();
 		initialize();
@@ -37,13 +37,11 @@ public class MyoLever extends Thing {
 	public void sepaku () {
 		super.sepaku();
 		myMyosin = null;
-		end1 = null;
-		end2 = null;
 	}
 	
 	public void set (Pt3D setCoord, Pt3D setUVec, double dim) {
-		coord.copy(setCoord);
-		uVec.copy(setUVec);
+		setCoord(setCoord);
+		setUVec(setUVec);
 		Env.myoLeverLength.setValue(dim);
 		pushPoseToSoa();
 	}
@@ -67,26 +65,11 @@ public class MyoLever extends Thing {
 	}
 	
 	public void initialize () {
-		// SoA bridge: pull canonical pose into Pt3D fields.
-		loadPoseFromSoa();
-		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
-		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
-		zVec.cross(uVec, yVec);
-		yVec.cross(zVec, uVec);
-		// find the transformation matrices at this time step
-		transMat ();
-		// define opposite to uVec direction, used frequently
-		uVecR.scale(-1,uVec);
-
-		// re-find the end points of the rod to make sure they meet length criteria
-		end1.add(coord, -0.5*getDim(), uVec);
-		end2.add(coord, 0.5*getDim(), uVec);
-		pushLengthToSoa(getDim());   // keep SoA derived bulk pass in sync
-
-		// for collision detection
-		xRange = Math.abs(coord.x-end2.x);
-		yRange = Math.abs(coord.y-end2.y);
-		zRange = Math.abs(coord.z-end2.z);
+		pushLengthToSoa(getDim());
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+		xRange = Math.abs(getCoordX()-getEnd2X());
+		yRange = Math.abs(getCoordY()-getEnd2Y());
+		zRange = Math.abs(getCoordZ()-getEnd2Z());
 	}
 	
 	public void step () {
@@ -126,29 +109,26 @@ public class MyoLever extends Thing {
 		if (!bAngVeloc.checkPt3D()) { talkln ("** problem with bAngVeloc for " + this); return; }
 		
 		// New Positions
-		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coord updated
+		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coordAsPt3D() updated
 		veloc.xToX(this, bVeloc);
-		coord.inc(Env.deltaT.getValue(),veloc);  // just position = velocity*time
+		incCoord(Env.deltaT.getValue(),veloc);  // just position = velocity*time
 		
-		//deltaBAng.inc(Env.deltaT.getValue(),bAngVeloc);
-		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
-		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();	// arclength out at 1 micron
+		Pt3D scratch = new Pt3D();
+		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();
 		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
-		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
-		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
-		uVec.unitVec();		// make a unit vector
-		
-		// for yVec
-		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();	// arclength at 1 micron
-		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
-		yVec.xToX(this);
-		yVec.unitVec();
+		scratch.setVals(1, uVecTransInY, uVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setUVec(scratch);
 
-		pushPoseToSoa();   // canonical SoA flush
+		double yVecTransInX = -uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * Env.deltaT.getValue();
+		scratch.setVals(yVecTransInX, 1, yVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setYVec(scratch);
+
 		initialize();
-
 	}
 	
 	public double getDim () {
@@ -158,9 +138,9 @@ public class MyoLever extends Thing {
 	public double moveCoeff (int end, Pt3D linkUVec) {
 		double cosBeta;
 		if (end == 2) {
-			cosBeta = Pt3D.Dot(uVec, linkUVec);
+			cosBeta = Pt3D.Dot(uVecAsPt3D(), linkUVec);
 		} else {
-			cosBeta = Pt3D.Dot(uVecR, linkUVec);
+			cosBeta = Pt3D.Dot(uVecRAsPt3D(), linkUVec);
 		}
 		if (cosBeta > 1.0) cosBeta = 1.0;
 		if (cosBeta < -1.0) cosBeta = -1.0;

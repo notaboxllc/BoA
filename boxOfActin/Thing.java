@@ -31,23 +31,14 @@ public class Thing extends Object {
 	boolean removeMe = false;			// if true this Thing will be eliminated
 	boolean gpuHandled = false;			// iter2c: set by GPUMoveThing.classifyThings(); when true and Env.useGPU,
 										// CPU calcRandomForces() skips this Thing (kernel generates Brownian inline)
-	Pt3D coord = new Pt3D();			// the x,y,and z position of the Thing
+	// Canonical pose/orientation lives in static SoA arrays soaCoord/soaUVec/
+	// soaYVec (and soaEnd1/soaEnd2/soaZVec/soaTransXTox derived). The Pt3D
+	// coord/uVec/yVec/zVec/end1/end2/uVecR fields and the per-Thing transXTox/
+	// transxToX double[9] arrays were removed in the SoA derived-field-removal
+	// landing (2026-05-30). Readers use the per-component accessors
+	// (getCoordX/Y/Z, getUVecX/Y/Z, getEnd1X/Y/Z, getTransXTox(idx), etc.);
+	// writers use setCoord/setUVec/setYVec or the SoA arrays directly.
 	static Pt3D maxPos = Env.worldDimension;	// maximum x position this Thing can occupy
-	// 3x3 transformation matrices, flat row-major: [row*3 + col].
-	// transXTox: fixed→body-fixed. transxToX: body-fixed→fixed (transpose).
-	double [] transXTox = new double [9];
-	double [] transxToX = new double [9];
-	Pt3D uVec = new Pt3D(1,0,0);		// the unit vector that describes the orientation of the player
-	Pt3D uVecR = new Pt3D(-1,0,0);		// opposite direction of uVec
-	Pt3D yVec = new Pt3D(0,1,0);		// the first transvers vector for this body... in y direction
-	Pt3D zVec = new Pt3D(0,0,1);		// the second tranverse vector.. in z direction
-	// Body-axis endpoints (coord ± length/2 · uVec). Promoted from per-subclass
-	// declarations so bridgeDerivedToPt3D can write them uniformly. Point-like
-	// Things (ProteinNode/StickyNode/FillNode/Crucible/AnchorNode) have length=0
-	// and leave end1==end2==coord, which is harmless — those subclasses don't
-	// read end1/end2.
-	Pt3D end1 = new Pt3D();
-	Pt3D end2 = new Pt3D();
 	Pt3D veloc = new Pt3D();			// the fixed frame translational velocity values Xdot, Ydot, Zdot
 	Pt3D angVeloc = new Pt3D();		// the angular velocities psidot, thetadot, phidot
 	Pt3D bVeloc = new Pt3D(); 		// the body-fixed frame velocities xdot, ydot, zdot
@@ -165,12 +156,13 @@ public class Thing extends Object {
 		this.thingInstanceId = nextThingInstanceId++;
 		this.createdAtStep   = Env.counter;
 		instanceRegistry.put(this.thingInstanceId, this);
-		this.coord.copy(initCoord);
 		addThing(this);
-		// Seed the canonical SoA pose with the initial coord and the default
-		// uVec/yVec (1,0,0)/(0,1,0). Subclass constructors that overwrite
-		// uVec/yVec must call pushPoseToSoa() before their initialize() call.
-		pushPoseToSoa();
+		// Seed canonical SoA pose with initial coord and default uVec/yVec
+		// (1,0,0)/(0,1,0). Subclass constructors that overwrite uVec/yVec call
+		// setUVec/setYVec or write soaUVec/soaYVec directly.
+		setCoord(initCoord.x, initCoord.y, initCoord.z);
+		setUVec(1, 0, 0);
+		setYVec(0, 1, 0);
 	}
 	
 	public static class RetObj {
@@ -306,13 +298,7 @@ public class Thing extends Object {
 	}
 	
 	public void sepaku () {
-		coord = null;
-		transXTox = null;
-		transxToX = null;
-		uVec = null;
-		uVecR = null;
-		yVec = null;
-		zVec = null;
+		// pose/orientation/end fields live in static SoA arrays; nothing to null here.
 		veloc = null;
 		angVeloc = null;
 		bVeloc = null;
@@ -386,9 +372,9 @@ public class Thing extends Object {
 
 	public void incForceSum (Pt3D forceToAdd, Pt3D forcePoint) {
 		// r = (forcePoint - coord) * 1e-6 (µm → m), torque = r × force, fused write.
-		final double rx = (forcePoint.x - coord.x) * 1e-6;
-		final double ry = (forcePoint.y - coord.y) * 1e-6;
-		final double rz = (forcePoint.z - coord.z) * 1e-6;
+		final double rx = (forcePoint.x - getCoordX()) * 1e-6;
+		final double ry = (forcePoint.y - getCoordY()) * 1e-6;
+		final double rz = (forcePoint.z - getCoordZ()) * 1e-6;
 		final double fx = forceToAdd.x, fy = forceToAdd.y, fz = forceToAdd.z;
 		final double tx = ry*fz - rz*fy;
 		final double ty = rz*fx - rx*fz;
@@ -567,58 +553,128 @@ public class Thing extends Object {
 		taCapacity = newCap;
 	}
 
-	// ---- SoA pose bridge -------------------------------------------------
-	// Canonical pose lives in soaCoord/soaUVec/soaYVec. Pt3D coord/uVec/yVec
-	// are a CPU-reader bridge maintained in sync via loadPoseFromSoa() inside
-	// initialize(). Writers (moveThing end, constructors, translate, biochem
-	// coord.inc, splitSegment/join, benchmark pin reset) call pushPoseToSoa()
-	// (or the per-component helpers) BEFORE initialize() so initialize sees
-	// the new pose. The bridge is read-only for downstream CPU phases until
-	// the SoA-canonical refactor converts them one by one.
+	// ---- SoA pose bridge (no-ops after Pt3D field removal) --------------
+	// Canonical pose lives in soaCoord/soaUVec/soaYVec; writers go through
+	// setCoord/setUVec/setYVec or the SoA arrays directly. The push helpers
+	// are retained as no-ops so legacy call sites at write boundaries (which
+	// used to flush Pt3D → SoA after mutating the Pt3D) don't need surgery.
+	public void pushCoordToSoa() {}
+	public void pushUVecToSoa()  {}
+	public void pushYVecToSoa()  {}
+	public void pushPoseToSoa()  {}
 
-	public void pushCoordToSoa() {
+	// SoA pose accessors and mutators. After the Pt3D pose field removal,
+	// readers go through getCoordX/Y/Z, getUVecX/Y/Z, getYVecX/Y/Z; writers
+	// go through setCoord/setUVec/setYVec (or the per-component setters /
+	// inc helpers below).
+	public float getCoordX() { return soaCoord[myThingNumber * 3];     }
+	public float getCoordY() { return soaCoord[myThingNumber * 3 + 1]; }
+	public float getCoordZ() { return soaCoord[myThingNumber * 3 + 2]; }
+	public float getUVecX()  { return soaUVec [myThingNumber * 3];     }
+	public float getUVecY()  { return soaUVec [myThingNumber * 3 + 1]; }
+	public float getUVecZ()  { return soaUVec [myThingNumber * 3 + 2]; }
+	public float getYVecX()  { return soaYVec [myThingNumber * 3];     }
+	public float getYVecY()  { return soaYVec [myThingNumber * 3 + 1]; }
+	public float getYVecZ()  { return soaYVec [myThingNumber * 3 + 2]; }
+	public float getUVecRX() { return -soaUVec[myThingNumber * 3];     }
+	public float getUVecRY() { return -soaUVec[myThingNumber * 3 + 1]; }
+	public float getUVecRZ() { return -soaUVec[myThingNumber * 3 + 2]; }
+
+	public void setCoordX(double v) { soaCoord[myThingNumber * 3]     = (float) v; }
+	public void setCoordY(double v) { soaCoord[myThingNumber * 3 + 1] = (float) v; }
+	public void setCoordZ(double v) { soaCoord[myThingNumber * 3 + 2] = (float) v; }
+	public void setUVecX (double v) { soaUVec [myThingNumber * 3]     = (float) v; }
+	public void setUVecY (double v) { soaUVec [myThingNumber * 3 + 1] = (float) v; }
+	public void setUVecZ (double v) { soaUVec [myThingNumber * 3 + 2] = (float) v; }
+	public void setYVecX (double v) { soaYVec [myThingNumber * 3]     = (float) v; }
+	public void setYVecY (double v) { soaYVec [myThingNumber * 3 + 1] = (float) v; }
+	public void setYVecZ (double v) { soaYVec [myThingNumber * 3 + 2] = (float) v; }
+
+	public void setCoord(double x, double y, double z) {
 		final int b = myThingNumber * 3;
-		soaCoord[b]   = (float) coord.x;
-		soaCoord[b+1] = (float) coord.y;
-		soaCoord[b+2] = (float) coord.z;
+		soaCoord[b] = (float) x; soaCoord[b+1] = (float) y; soaCoord[b+2] = (float) z;
+	}
+	public void setUVec(double x, double y, double z) {
+		final int b = myThingNumber * 3;
+		soaUVec[b] = (float) x; soaUVec[b+1] = (float) y; soaUVec[b+2] = (float) z;
+	}
+	public void setYVec(double x, double y, double z) {
+		final int b = myThingNumber * 3;
+		soaYVec[b] = (float) x; soaYVec[b+1] = (float) y; soaYVec[b+2] = (float) z;
+	}
+	public void setCoord(Pt3D p) { setCoord(p.x, p.y, p.z); }
+	public void setUVec (Pt3D p) { setUVec(p.x, p.y, p.z); }
+	public void setYVec (Pt3D p) { setYVec(p.x, p.y, p.z); }
+
+	public void incCoord(Pt3D delta) {
+		final int b = myThingNumber * 3;
+		soaCoord[b]   += (float) delta.x;
+		soaCoord[b+1] += (float) delta.y;
+		soaCoord[b+2] += (float) delta.z;
+	}
+	public void incCoord(double scale, Pt3D delta) {
+		final int b = myThingNumber * 3;
+		soaCoord[b]   += (float) (scale * delta.x);
+		soaCoord[b+1] += (float) (scale * delta.y);
+		soaCoord[b+2] += (float) (scale * delta.z);
+	}
+	public void incCoord(double dx, double dy, double dz) {
+		final int b = myThingNumber * 3;
+		soaCoord[b]   += (float) dx;
+		soaCoord[b+1] += (float) dy;
+		soaCoord[b+2] += (float) dz;
 	}
 
-	public void pushUVecToSoa() {
+	// Normalise uVec in place (read SoA, scale, write back).
+	public void unitVecU() {
 		final int b = myThingNumber * 3;
-		soaUVec[b]   = (float) uVec.x;
-		soaUVec[b+1] = (float) uVec.y;
-		soaUVec[b+2] = (float) uVec.z;
+		double ux = soaUVec[b], uy = soaUVec[b+1], uz = soaUVec[b+2];
+		double mag2 = ux*ux + uy*uy + uz*uz;
+		if (mag2 > 0) {
+			double inv = 1.0 / Math.sqrt(mag2);
+			soaUVec[b]   = (float) (ux * inv);
+			soaUVec[b+1] = (float) (uy * inv);
+			soaUVec[b+2] = (float) (uz * inv);
+		}
 	}
 
-	public void pushYVecToSoa() {
+	// Read pose into Pt3D scratch (callers that still need a Pt3D for legacy APIs).
+	public void getCoord(Pt3D out) {
 		final int b = myThingNumber * 3;
-		soaYVec[b]   = (float) yVec.x;
-		soaYVec[b+1] = (float) yVec.y;
-		soaYVec[b+2] = (float) yVec.z;
+		out.x = soaCoord[b]; out.y = soaCoord[b+1]; out.z = soaCoord[b+2];
+	}
+	public void getUVec(Pt3D out) {
+		final int b = myThingNumber * 3;
+		out.x = soaUVec[b]; out.y = soaUVec[b+1]; out.z = soaUVec[b+2];
+	}
+	public void getYVec(Pt3D out) {
+		final int b = myThingNumber * 3;
+		out.x = soaYVec[b]; out.y = soaYVec[b+1]; out.z = soaYVec[b+2];
+	}
+	public void getZVec(Pt3D out) {
+		final int b = myThingNumber * 3;
+		out.x = soaZVec[b]; out.y = soaZVec[b+1]; out.z = soaZVec[b+2];
+	}
+	public void getEnd1(Pt3D out) {
+		final int b = myThingNumber * 3;
+		out.x = soaEnd1[b]; out.y = soaEnd1[b+1]; out.z = soaEnd1[b+2];
+	}
+	public void getEnd2(Pt3D out) {
+		final int b = myThingNumber * 3;
+		out.x = soaEnd2[b]; out.y = soaEnd2[b+1]; out.z = soaEnd2[b+2];
 	}
 
-	public void pushPoseToSoa() {
-		final int b = myThingNumber * 3;
-		soaCoord[b]   = (float) coord.x;
-		soaCoord[b+1] = (float) coord.y;
-		soaCoord[b+2] = (float) coord.z;
-		soaUVec[b]    = (float) uVec.x;
-		soaUVec[b+1]  = (float) uVec.y;
-		soaUVec[b+2]  = (float) uVec.z;
-		soaYVec[b]    = (float) yVec.x;
-		soaYVec[b+1]  = (float) yVec.y;
-		soaYVec[b+2]  = (float) yVec.z;
-	}
-
-	// Read canonical SoA pose back into Pt3D bridge fields. Called from
-	// initialize() so downstream Pt3D readers see the SoA values that the
-	// GPU kernel wrote (via unpack) or that CPU moveThing flushed.
-	public void loadPoseFromSoa() {
-		final int b = myThingNumber * 3;
-		coord.x = soaCoord[b];   coord.y = soaCoord[b+1]; coord.z = soaCoord[b+2];
-		uVec.x  = soaUVec[b];    uVec.y  = soaUVec[b+1];  uVec.z  = soaUVec[b+2];
-		yVec.x  = soaYVec[b];    yVec.y  = soaYVec[b+1];  yVec.z  = soaYVec[b+2];
-	}
+	// Pt3D-allocating accessors for legacy callers that expect a Pt3D
+	// (e.g., `Pt3D.Add(myBug.coordAsPt3D(), scale, dispV)`). Allocations are fine in
+	// cold paths (Bug construction, ActA tether init, Crucible link strain);
+	// hot paths should use the float accessors directly.
+	public Pt3D coordAsPt3D() { return new Pt3D(getCoordX(), getCoordY(), getCoordZ()); }
+	public Pt3D uVecAsPt3D()  { return new Pt3D(getUVecX(),  getUVecY(),  getUVecZ());  }
+	public Pt3D yVecAsPt3D()  { return new Pt3D(getYVecX(),  getYVecY(),  getYVecZ());  }
+	public Pt3D zVecAsPt3D()  { return new Pt3D(getZVecX(),  getZVecY(),  getZVecZ());  }
+	public Pt3D end1AsPt3D()  { return new Pt3D(getEnd1X(),  getEnd1Y(),  getEnd1Z());  }
+	public Pt3D end2AsPt3D()  { return new Pt3D(getEnd2X(),  getEnd2Y(),  getEnd2Z());  }
+	public Pt3D uVecRAsPt3D() { return new Pt3D(-getUVecX(), -getUVecY(), -getUVecZ()); }
 
 	// Push the per-Thing length into the SoA length array. Called from
 	// subclass constructors after the natural length is known and any time
@@ -642,9 +698,29 @@ public class Thing extends Object {
 	public float getZVecZ() { return soaZVec[myThingNumber * 3 + 2]; }
 	public float getLengthSoa() { return soaLength[myThingNumber]; }
 	// transXTox row-major; idx in [0,9). transxToX is the transpose
-	// (orthonormal matrix), reachable via getTransXToxT(idx) or by swapping
-	// (row,col) → (col,row).
+	// (orthonormal matrix), so transxToX(i)==transXTox(swap(i)).
 	public float getTransXTox(int idx) { return soaTransXTox[myThingNumber * 9 + idx]; }
+	// Transpose accessor: row-major (i,j) for transxToX is (j,i) for transXTox.
+	public float getTransxToX(int idx) {
+		// idx = row*3+col → transpose idx = col*3+row.
+		final int row = idx / 3, col = idx - row * 3;
+		return soaTransXTox[myThingNumber * 9 + col * 3 + row];
+	}
+	// Copy 9 floats of the body→fixed matrix into a caller-supplied double[9]
+	// scratch (Pt3D.XTox-style readers that load m once and reuse 9× per call).
+	public void copyTransXToxInto(double[] out) {
+		final int b9 = myThingNumber * 9;
+		out[0] = soaTransXTox[b9];   out[1] = soaTransXTox[b9+1]; out[2] = soaTransXTox[b9+2];
+		out[3] = soaTransXTox[b9+3]; out[4] = soaTransXTox[b9+4]; out[5] = soaTransXTox[b9+5];
+		out[6] = soaTransXTox[b9+6]; out[7] = soaTransXTox[b9+7]; out[8] = soaTransXTox[b9+8];
+	}
+	public void copyTransxToXInto(double[] out) {
+		final int b9 = myThingNumber * 9;
+		// transpose of the row-major 3×3 stored in soaTransXTox.
+		out[0] = soaTransXTox[b9];   out[1] = soaTransXTox[b9+3]; out[2] = soaTransXTox[b9+6];
+		out[3] = soaTransXTox[b9+1]; out[4] = soaTransXTox[b9+4]; out[5] = soaTransXTox[b9+7];
+		out[6] = soaTransXTox[b9+2]; out[7] = soaTransXTox[b9+5]; out[8] = soaTransXTox[b9+8];
+	}
 
 	// Bulk pass: recompute derived SoA arrays (end1, end2, zVec, transXTox)
 	// from the canonical coord/uVec/yVec/length arrays. Tight loop, SIMD-
@@ -707,52 +783,6 @@ public class Thing extends Object {
 		recomputeDerivedSoA(0, upTo);
 	}
 
-	// Bridge: pull derived SoA fields back into per-Thing Pt3D / transXTox
-	// state so unconverted CPU readers (which still chase Pt3D.end1.x etc.)
-	// see the values the bulk recompute just wrote. Per-Thing loop, but the
-	// body is direct field writes — no method dispatch, no Pt3D math.
-	// Called after recomputeDerivedSoA in the GPU unpack path. For CPU
-	// moveThing, the existing per-Thing initialize() handles bridge sync
-	// since the bulk pass and bridge run together in lock-step.
-	public static void bridgeDerivedToPt3D(int from, int upTo) {
-		final float[] coordArr = soaCoord;
-		final float[] uVecArr  = soaUVec;
-		final float[] yVecArr  = soaYVec;
-		final float[] zVecArr  = soaZVec;
-		final float[] end1Arr  = soaEnd1;
-		final float[] end2Arr  = soaEnd2;
-		final float[] mArr     = soaTransXTox;
-		final Thing[] arr      = theThings;
-		for (int i = from; i < upTo; i++) {
-			Thing t = arr[i];
-			if (t == null || t.removeMe) continue;
-			final int b3 = i * 3;
-			final int b9 = i * 9;
-			t.coord.x = coordArr[b3]; t.coord.y = coordArr[b3+1]; t.coord.z = coordArr[b3+2];
-			t.uVec.x  = uVecArr[b3];  t.uVec.y  = uVecArr[b3+1];  t.uVec.z  = uVecArr[b3+2];
-			t.yVec.x  = yVecArr[b3];  t.yVec.y  = yVecArr[b3+1];  t.yVec.z  = yVecArr[b3+2];
-			t.zVec.x  = zVecArr[b3];  t.zVec.y  = zVecArr[b3+1];  t.zVec.z  = zVecArr[b3+2];
-			t.end1.x  = end1Arr[b3];  t.end1.y  = end1Arr[b3+1];  t.end1.z  = end1Arr[b3+2];
-			t.end2.x  = end2Arr[b3];  t.end2.y  = end2Arr[b3+1];  t.end2.z  = end2Arr[b3+2];
-			t.uVecR.x = -t.uVec.x;    t.uVecR.y = -t.uVec.y;      t.uVecR.z = -t.uVec.z;
-			final double[] m = t.transXTox;
-			final double[] mt = t.transxToX;
-			float m0 = mArr[b9],   m1 = mArr[b9+1], m2 = mArr[b9+2];
-			float m3 = mArr[b9+3], m4 = mArr[b9+4], m5 = mArr[b9+5];
-			float m6 = mArr[b9+6], m7 = mArr[b9+7], m8 = mArr[b9+8];
-			m[0] = m0; m[1] = m1; m[2] = m2;
-			m[3] = m3; m[4] = m4; m[5] = m5;
-			m[6] = m6; m[7] = m7; m[8] = m8;
-			mt[0] = m0; mt[1] = m3; mt[2] = m6;
-			mt[3] = m1; mt[4] = m4; mt[5] = m7;
-			mt[6] = m2; mt[7] = m5; mt[8] = m8;
-		}
-	}
-
-	public static void bridgeDerivedToPt3D(int upTo) {
-		bridgeDerivedToPt3D(0, upTo);
-	}
-
 	// Sparse gather: walk each worker thread's dirty list, narrow the double
 	// per-thread contributions to float and add into soaForceSum/soaTorqueSum,
 	// then zero the touched slots and clear the dirty flag. Cost is O(sum of
@@ -808,7 +838,9 @@ public class Thing extends Object {
 	public synchronized void incFrictionSum (Pt3D forceVec, Pt3D forcePt) {  // send in as body-fixed frame force, fixed-frame point!!!
 		// friction force and torque are stored and used in movePlayer as body-fixed frame forces!!!
 		bFricForceSum.inc(forceVec);
-		rForce.sub(forcePt,coord);
+		rForce.x = forcePt.x - getCoordX();
+		rForce.y = forcePt.y - getCoordY();
+		rForce.z = forcePt.z - getCoordZ();
 		rForce.scale(1e-6);	// units (from µm to m)
 		rForce.XTox(this);
 		tempTorq.cross(rForce, forceVec);
@@ -865,17 +897,13 @@ public class Thing extends Object {
 		}
 	}
 	
+	// transMat()/transXTox/transxToX double[9] arrays were removed; the row-major
+	// 3×3 lives in static soaTransXTox indexed by myThingNumber*9+i. Callers
+	// invoke transMat() as a no-op so legacy initialize() bodies keep compiling;
+	// recomputeDerivedSoA(myThingNumber, myThingNumber+1) is the SoA way to
+	// refresh the matrix from the current uVec/yVec.
 	public void transMat () {
-		double ux = uVec.x, uy = uVec.y, uz = uVec.z;
-		double yx = yVec.x, yy = yVec.y, yz = yVec.z;
-		double zx = zVec.x, zy = zVec.y, zz = zVec.z;
-		transXTox[0] = ux; transXTox[1] = uy; transXTox[2] = uz;
-		transXTox[3] = yx; transXTox[4] = yy; transXTox[5] = yz;
-		transXTox[6] = zx; transXTox[7] = zy; transXTox[8] = zz;
-		// inverse transformation is the transpose (orthogonal direction-cosine matrix)
-		transxToX[0] = ux; transxToX[1] = yx; transxToX[2] = zx;
-		transxToX[3] = uy; transxToX[4] = yy; transxToX[5] = zy;
-		transxToX[6] = uz; transxToX[7] = yz; transxToX[8] = zz;
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
 	}
 	
 	public void resetCounters() {

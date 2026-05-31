@@ -771,7 +771,7 @@ public class Env {
 	static private final double fixedMyosinDensity_init = 400; // myosins per sq. micron fixed to surface
 	static final Parameter fixedMyosinDensity = new Parameter("fixedMyosinDensity", " Fixed Myosin Density on Surface",fixedMyosinDensity_init, "/µm^2");
 
-	static private final double fixedMyosinZValue_init = -0.05; // position of fixed myosin tail end1
+	static private final double fixedMyosinZValue_init = -0.05; // position of fixed myosin tail end1AsPt3D()
 	static final Parameter fixedMyosinZValue = new Parameter("fixedMyosinZValue", " Fixed Myosin Z-value of Rod End1",fixedMyosinZValue_init, "µm");
 
 	static private final double glidingFilamentLength_init = 1.0; // length of test filament

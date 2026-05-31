@@ -7,7 +7,7 @@ public class MyoMotor extends Thing {
 
 	// SoA arrays for GPU-ready motor-binding path
 	// Step 1a: motor head position + bound-state flag
-	// Step 1b: motor head orientation (uVec) + rod orientation (myMyosin.myoRod.uVec) — fine-check inputs
+	// Step 1b: motor head orientation (uVecAsPt3D()) + rod orientation (myMyosin.myoRod.uVecAsPt3D()) — fine-check inputs
 	static double[]  soaX     = new double[500000];
 	static double[]  soaY     = new double[500000];
 	static double[]  soaZ     = new double[500000];
@@ -22,10 +22,10 @@ public class MyoMotor extends Thing {
 	static void fillSoaArrays() {
 		// Read per-motor pose from the canonical SoA pose arrays
 		// (Thing.soaCoord / soaUVec) instead of chasing the per-motor Pt3D
-		// references. bindTip is the motor's end2 — the kernel/grid wants the
-		// motor head tip, not the centre, so we reconstruct end2 from coord
-		// and uVec the same way MyoMotor.initialize() does:
-		//     end2 = coord + 0.5 * motorLength * uVec
+		// references. bindTip is the motor's end2AsPt3D() — the kernel/grid wants the
+		// motor head tip, not the centre, so we reconstruct end2AsPt3D() from coordAsPt3D()
+		// and uVecAsPt3D() the same way MyoMotor.initialize() does:
+		//     end2AsPt3D() = coordAsPt3D() + 0.5 * motorLength * uVecAsPt3D()
 		// Cheaper than re-running initialize(); the value is needed only here.
 		final float[] soaCoordArr = Thing.soaCoord;
 		final float[] soaUVecArr  = Thing.soaUVec;
@@ -76,7 +76,7 @@ public class MyoMotor extends Thing {
 	boolean onFil = false;
 	boolean inRigor = false; // special flag... never unbinds a filament once it finds one
 	
-	// end1 (free end) / end2 (attached to head) live on Thing now;
+	// end1AsPt3D() (free end) / end2AsPt3D() (attached to head) live on Thing now;
 	// bridgeDerivedToPt3D writes them after every GPU step.
 	Pt3D bindTip;  
 	
@@ -103,40 +103,32 @@ public class MyoMotor extends Thing {
 		super(initCoord);
 
 		calculateProperties();
-		pushPoseToSoa();
-		initialize();
+		bindTip = new Pt3D();
+		initialize();   // refreshes bindTip from SoA end2
 		addMyoMotor(this);
-
-		// set binding points
-		bindTip = end2;
 		makeMyoFilLinks();
 	}
 
 	public MyoMotor(Pt3D initCoord, Pt3D initUVec) {
 		super(initCoord);
 
-		uVec.copy(initUVec);
+		setUVec(initUVec);
 		calculateProperties();
-		pushPoseToSoa();
-		initialize();
+		bindTip = new Pt3D();
+		initialize();   // refreshes bindTip from SoA end2
 		addMyoMotor(this);
-
-		// set binding points
-		bindTip = end2;
 		makeMyoFilLinks();
 	}
 	
 	public void sepaku () {
 		super.sepaku();
 		myMyosin = null;
-		end1 = null;
-		end2 = null;
 		bindTip = null;
 	}
 	
 	public void set (Pt3D setCoord, Pt3D setUVec, double dim, byte nucState) {
-		coord.copy(setCoord);
-		uVec.copy(setUVec);
+		setCoord(setCoord);
+		setUVec(setUVec);
 		Env.myoMotorLength.setValue(dim);
 		nucleotideState = nucState;
 		// SoA bridge: caller often follows with initialize(); make sure SoA is fresh.
@@ -162,26 +154,17 @@ public class MyoMotor extends Thing {
 	}
 	
 	public void initialize () {
-		// SoA bridge: pull canonical pose into Pt3D fields.
-		loadPoseFromSoa();
-		// this method assumes the unit x and y vectors have been set (though maybe not orthogonal), or are unchanged
-		// determine z-unit vectors, then reset y-unit vector to ensure orthogonality with uVec
-		zVec.cross(uVec, yVec);
-		yVec.cross(zVec, uVec);
-		// find the transformation matrices at this time step
-		transMat ();
-		// define opposite to uVec direction, used frequently
-		uVecR.scale(-1,uVec);
-
-		// re-find the end points of the rod to make sure they meet length criteria
-		end1.add(coord, -0.5*getDim(), uVec);
-		end2.add(coord, 0.5*getDim(), uVec);
-		pushLengthToSoa(getDim());   // keep SoA derived bulk pass in sync
-
+		pushLengthToSoa(getDim());
+		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+		// Refresh bindTip Pt3D snapshot — Mesh/MotorBindGrid3D read its x/y/z each
+		// step to spatially bin the motor's binding tip (= end2).
+		if (bindTip != null) {
+			bindTip.x = getEnd2X(); bindTip.y = getEnd2Y(); bindTip.z = getEnd2Z();
+		}
 		// for collision detection
-		xRange = Math.abs(coord.x-end2.x);
-		yRange = Math.abs(coord.y-end2.y);
-		zRange = Math.abs(coord.z-end2.z);
+		xRange = Math.abs(getCoordX()-getEnd2X());
+		yRange = Math.abs(getCoordY()-getEnd2Y());
+		zRange = Math.abs(getCoordZ()-getEnd2Z());
 	}
 	
 	public void step () {
@@ -198,7 +181,7 @@ public class MyoMotor extends Thing {
 	}
 	
 	public void checkOuterBugCollision () {
-		theBox.amICollidingOuter(cE,end1,radius);
+		theBox.amICollidingOuter(cE,end1AsPt3D(),radius);
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
@@ -321,29 +304,26 @@ public class MyoMotor extends Thing {
 		if (!bAngVeloc.checkPt3D()) { talkln ("** problem with bAngVeloc for " + this); return; }
 
 		// New Positions
-		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coord updated
+		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coordAsPt3D() updated
 		veloc.xToX(this, bVeloc);
-		coord.inc(dt,veloc);  // just position = velocity*time
+		incCoord(dt,veloc);  // just position = velocity*time
 
-		//deltaBAng.inc(dt,bAngVeloc);
-		// to apply the body-fixed angular velocities, approximate new unit vector from arc of rotations.. good for small rotations
-		// for uVec
-		double uVecTransInZ = -bAngVeloc.y * dt;	// arclength out at 1 micron
+		Pt3D scratch = new Pt3D();
+		double uVecTransInZ = -bAngVeloc.y * dt;
 		double uVecTransInY = bAngVeloc.z * dt;
-		uVec.setVals(1,uVecTransInY,uVecTransInZ);	// in body-fixed, not a unit vector yet
-		uVec.xToX(this);	// make in fixed-frame, not a unit vector yet
-		uVec.unitVec();		// make a unit vector
+		scratch.setVals(1, uVecTransInY, uVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setUVec(scratch);
 
-		// for yVec
-		double yVecTransInX = - uVecTransInY;
-		double yVecTransInZ = bAngVeloc.x * dt;	// arclength at 1 micron
-		yVec.setVals(yVecTransInX, 1, yVecTransInZ);
-		yVec.xToX(this);
-		yVec.unitVec();
+		double yVecTransInX = -uVecTransInY;
+		double yVecTransInZ = bAngVeloc.x * dt;
+		scratch.setVals(yVecTransInX, 1, yVecTransInZ);
+		scratch.xToX(this);
+		scratch.unitVec();
+		setYVec(scratch);
 
-		pushPoseToSoa();   // canonical SoA flush
 		initialize();
-
 	}
 	
 	public double getDim () {
@@ -353,9 +333,9 @@ public class MyoMotor extends Thing {
 	public double moveCoeff (int end, Pt3D linkUVec) {
 		double cosBeta;
 		if (end == 2) {
-			cosBeta = Pt3D.Dot(uVec, linkUVec);
+			cosBeta = Pt3D.Dot(uVecAsPt3D(), linkUVec);
 		} else {
-			cosBeta = Pt3D.Dot(uVecR, linkUVec);
+			cosBeta = Pt3D.Dot(uVecRAsPt3D(), linkUVec);
 		}
 		if (cosBeta > 1.0) cosBeta = 1.0;
 		if (cosBeta < -1.0) cosBeta = -1.0;
@@ -438,7 +418,7 @@ public class MyoMotor extends Thing {
 		// Formin-bound filament excluded (dead `&& myNode` branch from prior code not ported — unreachable)
 		if (FilSegment.soaNodeAtEnd2[filId]) { return; }
 
-		// Point-line geometry — perpendicular drop from motor bindTip onto fil end1→end2 segment
+		// Point-line geometry — perpendicular drop from motor bindTip onto fil end1AsPt3D()→end2AsPt3D() segment
 		final double e1x = FilSegment.soaEnd1X[filId];
 		final double e1y = FilSegment.soaEnd1Y[filId];
 		final double e1z = FilSegment.soaEnd1Z[filId];
@@ -464,7 +444,7 @@ public class MyoMotor extends Thing {
 		if (conDistSq >= myoColTol*myoColTol) { return; }
 
 		// Decision: bind. Fire the event (state-changing, synchronized inside ontoFilament).
-		// arcOnFil = |conPt - end1| = alpha * |end2 - end1| = alpha * sqrt(denom)
+		// arcOnFil = |conPt - end1AsPt3D()| = alpha * |end2AsPt3D() - end1AsPt3D()| = alpha * sqrt(denom)
 		final double arcOnFil = alpha * Math.sqrt(denom);
 		theMotors[motorId].ontoFilament(FilSegment.theFilSegments[filId], arcOnFil);
 	}

@@ -146,13 +146,13 @@ public class MotorBindGrid3D {
     // Fill methods — bounding-box approach (no Bresenham needed for step 1a)
     // -----------------------------------------------------------------------
 
-    void fillFilSeg(int filSegIdx, Pt3D end1, Pt3D end2) {
-        int x0 = getBinX(Math.min(end1.x, end2.x));
-        int x1 = getBinX(Math.max(end1.x, end2.x));
-        int y0 = getBinY(Math.min(end1.y, end2.y));
-        int y1 = getBinY(Math.max(end1.y, end2.y));
-        int z0 = getBinZ(Math.min(end1.z, end2.z));
-        int z1 = getBinZ(Math.max(end1.z, end2.z));
+    void fillFilSeg(int filSegIdx, Pt3D e1, Pt3D e2) {
+        int x0 = getBinX(Math.min(e1.x, e2.x));
+        int x1 = getBinX(Math.max(e1.x, e2.x));
+        int y0 = getBinY(Math.min(e1.y, e2.y));
+        int y1 = getBinY(Math.max(e1.y, e2.y));
+        int z0 = getBinZ(Math.min(e1.z, e2.z));
+        int z1 = getBinZ(Math.max(e1.z, e2.z));
         for (int x = x0; x <= x1; x++) {
             for (int y = y0; y <= y1; y++) {
                 for (int z = z0; z <= z1; z++) {
@@ -310,7 +310,7 @@ public class MotorBindGrid3D {
             int motorStop  = motorJobDiv[threadId + 1];
             for (int i = filStart; i < filStop; i++) {
                 FilSegment fs = FilSegment.theFilSegments[i];
-                grid.fillFilSeg(fs.filArrayPos, fs.end1, fs.end2);
+                grid.fillFilSeg(fs.filArrayPos, fs.end1AsPt3D(), fs.end2AsPt3D());
             }
             for (int i = motorStart; i < motorStop; i++) {
                 MyoMotor m = MyoMotor.theMotors[i];

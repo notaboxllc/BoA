@@ -23,7 +23,7 @@ public class MyoFilLink {
 	
 	MyoMotor myMotor = null;
 	FilSegment mySeg = null;
-	double posOnSeg = 0;			// the arclength position of a myosin from end1 of its segment
+	double posOnSeg = 0;			// the arclength position of a myosin from end1AsPt3D() of its segment
 	Pt3D motorPt = new Pt3D();		// point of attachment on node
 	Pt3D attachPt = new Pt3D();		// the fixed coordinate system position of the myosin attachment on filament
 	int lastPosUpdate = 0;
@@ -88,7 +88,7 @@ public class MyoFilLink {
 		
 		// calculate component of force toward barbed-end, signed magnitude needed for catch/slip Guo&Guilford (2006) release probability
 		// Here, forceDotFil is positive for a force that will move myosin to plus-end of filament)
-		forceDotFil = Pt3D.Dot(F,mySeg.uVec);
+		forceDotFil = Pt3D.Dot(F,mySeg.uVecAsPt3D());
 		//System.out.println ("forceDotFil = " + forceDotFil);
 		forceDotFilTrack.registerValue(forceDotFil);
 		
@@ -114,10 +114,10 @@ public class MyoFilLink {
 	}*/
 	
 	public void alignUVecTorque () {
-		torsionVec.cross(mySeg.uVec,myMotor.uVec);
+		torsionVec.cross(mySeg.uVecAsPt3D(),myMotor.uVecAsPt3D());
 		torsionVec.unitVec();
 
-		double dotVecs = Pt3D.Dot(mySeg.uVec,myMotor.uVec);
+		double dotVecs = Pt3D.Dot(mySeg.uVecAsPt3D(),myMotor.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -142,10 +142,10 @@ public class MyoFilLink {
 	}
 	
 	public void alignYVecTorque () {
-		torsionVec.cross(mySeg.yVec,myMotor.yVec);
+		torsionVec.cross(mySeg.yVecAsPt3D(),myMotor.yVecAsPt3D());
 		torsionVec.unitVec();
 		
-		double dotVecs = Pt3D.Dot(mySeg.yVec,myMotor.yVec);
+		double dotVecs = Pt3D.Dot(mySeg.yVecAsPt3D(),myMotor.yVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -168,7 +168,7 @@ public class MyoFilLink {
 	public void updatePos () {
 		if (lastPosUpdate != Env.counter) {
 			//motorPt.copy(myMotor.bindTip);
-			attachPt.add(mySeg.end1,posOnSeg,mySeg.uVec);
+			attachPt.add(mySeg.end1AsPt3D(),posOnSeg,mySeg.uVecAsPt3D());
 			lastPosUpdate = Env.counter;
 		}
 	}
@@ -181,7 +181,7 @@ public class MyoFilLink {
 	}
 	
 	public void validateSeg() {
-		if ((mySeg.end1 == null) | (mySeg.uVec == null) | mySeg.removeMe) {
+		if ((mySeg.end1AsPt3D() == null) | (mySeg.uVecAsPt3D() == null) | mySeg.removeMe) {
 			release();
 			return;
 		}

@@ -27,7 +27,7 @@ import uk.ac.manchester.tornado.api.types.arrays.IntArray;
  *     is the kernel itself. The previous step's FloatArray contents are
  *     already the correct CPU-visible state. FilSegment slots still re-pack
  *     coord/uVec/yVec every step because biochemStep poly/depoly can call
- *     coord.inc(), and the gliding-assay FilSegment count is small enough
+ *     incCoord(), and the gliding-assay FilSegment count is small enough
  *     that the per-slot Pt3D-read cost is negligible.
  *   - On the first call after classifyThings() (or after plan rebuild), the
  *     pack runs in "full" mode and writes coord/uVec/yVec for every slot.
@@ -120,12 +120,12 @@ public class GPUMoveThing {
     private static final int OP_PACK_FULL          = 0;
     private static final int OP_PACK_RESIDENT      = 1;
     private static final int OP_UNPACK             = 2;
-    // Bulk SoA derived recompute + Pt3D bridge over a contiguous Thing-index
-    // range. Replaces the per-Thing t.initialize() call that used to run
-    // inside unpackRange — the bulk pass amortises method dispatch and runs
-    // a SIMD-friendly tight loop over the canonical SoA arrays. The bridge
-    // step keeps unconverted CPU readers (Pt3D.end1.x etc.) seeing the
-    // freshly-computed derived state.
+    // Bulk SoA derived recompute over a contiguous Thing-index range.
+    // Replaces the per-Thing t.initialize() call that used to run inside
+    // unpackRange — the bulk pass amortises method dispatch and runs a
+    // SIMD-friendly tight loop over the canonical SoA arrays. With the
+    // Pt3D coord/uVec/yVec/end1/end2/zVec/transXTox fields removed there is
+    // no Pt3D bridge step — readers go straight to the SoA accessors.
     private static final int OP_DERIVED_AND_BRIDGE = 3;
     // Threshold below which the post-unpack bulk recompute + Pt3D bridge
     // runs inline on the main thread rather than dispatching to the worker
@@ -527,7 +527,6 @@ public class GPUMoveThing {
                     case OP_UNPACK:        unpackRange(start, end);      break;
                     case OP_DERIVED_AND_BRIDGE:
                         Thing.recomputeDerivedSoA(start, end);
-                        Thing.bridgeDerivedToPt3D(start, end);
                         break;
                     default: /* no-op */ break;
                 }
@@ -754,22 +753,32 @@ public class GPUMoveThing {
             // dense path keeps the parallel speedup.
             if (tc < DERIVED_BRIDGE_PARALLEL_THRESHOLD) {
                 Thing.recomputeDerivedSoA(0, tc);
-                Thing.bridgeDerivedToPt3D(0, tc);
             } else {
                 dispatchAndWait(OP_DERIVED_AND_BRIDGE, tc);
             }
-            // FilSegment xRange/yRange/zRange — only FilSegments read these
-            // (collision quick-reject in mightFilsCollide). Other subclasses
-            // write them in initialize() but never read them, so skipping the
-            // update for them is safe. Cheap pass — one iter per FilSegment.
+            // FilSegment per-step bookkeeping (collision-quick-reject xRange,
+            // and live end1Pt/end2Pt Pt3D snapshots used for ptAtEnd1/ptAtEnd2
+            // reference-identity checks in joint code). The GPU unpack path
+            // skips per-Thing initialize(), so these refreshes must happen here.
             int filCt = FilSegment.filSegmentCt;
             FilSegment[] fils = FilSegment.theFilSegments;
             for (int i = 0; i < filCt; i++) {
                 FilSegment fs = fils[i];
                 if (fs == null || fs.removeMe) continue;
-                fs.xRange = Math.abs(fs.coord.x - fs.end2.x);
-                fs.yRange = Math.abs(fs.coord.y - fs.end2.y);
-                fs.zRange = Math.abs(fs.coord.z - fs.end2.z);
+                fs.xRange = Math.abs(fs.getCoordX() - fs.getEnd2X());
+                fs.yRange = Math.abs(fs.getCoordY() - fs.getEnd2Y());
+                fs.zRange = Math.abs(fs.getCoordZ() - fs.getEnd2Z());
+                fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
+                fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
+            }
+            // MyoMotor.bindTip — live Pt3D snapshot of motor's end2 that
+            // Mesh/MotorBindGrid3D index every step. Same skip-initialize() reason.
+            int motorCt = MyoMotor.motorCt;
+            MyoMotor[] motors = MyoMotor.theMotors;
+            for (int i = 0; i < motorCt; i++) {
+                MyoMotor m = motors[i];
+                if (m == null || m.removeMe || m.bindTip == null) continue;
+                m.bindTip.x = m.getEnd2X(); m.bindTip.y = m.getEnd2Y(); m.bindTip.z = m.getEnd2Z();
             }
         }
         long unpackEnd = System.nanoTime();

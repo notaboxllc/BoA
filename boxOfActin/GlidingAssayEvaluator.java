@@ -185,7 +185,7 @@ public class GlidingAssayEvaluator {
             // Filament center-of-mass and total contour length.
             double cx = 0, cy = 0, cz = 0, totalLen = 0;
             for (FilSegment fs : segs) {
-                cx += fs.coord.x; cy += fs.coord.y; cz += fs.coord.z;
+                cx += fs.getCoordX(); cy += fs.getCoordY(); cz += fs.getCoordZ();
                 totalLen += fs.length;
             }
             cx /= segs.size(); cy /= segs.size(); cz /= segs.size();
@@ -282,17 +282,17 @@ public class GlidingAssayEvaluator {
         return json.toString();
     }
 
-    /** Perpendicular distance from pt to the finite line segment defined by fs.coord/uVec/length. */
+    /** Perpendicular distance from pt to the finite line segment defined by fs.coordAsPt3D()/uVecAsPt3D()/length. */
     private static double distToAxis(Pt3D pt, FilSegment fs) {
-        double dx = pt.x - fs.coord.x;
-        double dy = pt.y - fs.coord.y;
-        double dz = pt.z - fs.coord.z;
-        double proj = dx*fs.uVec.x + dy*fs.uVec.y + dz*fs.uVec.z;
+        double dx = pt.x - fs.getCoordX();
+        double dy = pt.y - fs.getCoordY();
+        double dz = pt.z - fs.getCoordZ();
+        double proj = dx*fs.getUVecX() + dy*fs.getUVecY() + dz*fs.getUVecZ();
         double halfLen = fs.length * 0.5;
         proj = Math.max(-halfLen, Math.min(halfLen, proj));
-        double px = dx - proj*fs.uVec.x;
-        double py = dy - proj*fs.uVec.y;
-        double pz = dz - proj*fs.uVec.z;
+        double px = dx - proj*fs.getUVecX();
+        double py = dy - proj*fs.getUVecY();
+        double pz = dz - proj*fs.getUVecZ();
         return Math.sqrt(px*px + py*py + pz*pz);
     }
 

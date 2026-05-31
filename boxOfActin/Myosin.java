@@ -142,8 +142,8 @@ public class Myosin {
 	public void applyLeverMotorJointForce () {
 		double dt = Env.deltaT.getValue();
 		double myoJ1FracR = Env.myoJ1FracR.getValue();
-		double strainDist = Pt3D.ptDist(myoLever.end2, myoMotor.end1);
-		linkUVec1.unitVec(myoLever.end2,myoMotor.end1);
+		double strainDist = Pt3D.ptDist(myoLever.end2AsPt3D(), myoMotor.end1AsPt3D());
+		linkUVec1.unitVec(myoLever.end2AsPt3D(),myoMotor.end1AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		double moveCoeffHead = myoMotor.moveCoeff(1,linkUVec1);
 		double moveCoeffTail = myoLever.moveCoeff(2,linkUVec2);
@@ -153,22 +153,22 @@ public class Myosin {
 		// forces and torques applied to myosin motor domain
 		F.scale(forceMag,linkUVec1);
 		myoMotor.incForceSum(F);
-		R.scale(0.5e-6*Env.myoMotorLength.getValue()*myoJ1FracR,myoMotor.uVecR);
+		R.scale(0.5e-6*Env.myoMotorLength.getValue()*myoJ1FracR,myoMotor.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoMotor.incTorqueSum(RcrossF);
 
 		// forces and torques applied to myosin lever arm
 		F.scale(-1,F);
 		myoLever.incForceSum(F);
-		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ1FracR,myoLever.uVec);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ1FracR,myoLever.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
 
 	}
 	
 	public void applyLeverMotorJointTorque () {
-		torsionVec.cross(myoLever.uVec,myoMotor.uVec);
-		// Float32 GPU uVec updates occasionally produce NaN components (orientation
+		torsionVec.cross(myoLever.uVecAsPt3D(),myoMotor.uVecAsPt3D());
+		// Float32 GPU uVecAsPt3D() updates occasionally produce NaN components (orientation
 		// drift past representable precision). The original code caught NaN at the
 		// bottom via checkPt3D and printed "Crazy torque" once per occurrence —
 		// at gliding-assay scale that is ~100k log lines per seed. Early-return on
@@ -180,7 +180,7 @@ public class Myosin {
 		if (Double.isNaN(torsionVec.x)) return;
 		torsionVec.unitVec();
 		
-		double dotVecs = Pt3D.Dot(myoLever.uVec,myoMotor.uVec);
+		double dotVecs = Pt3D.Dot(myoLever.uVecAsPt3D(),myoMotor.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
@@ -209,8 +209,8 @@ public class Myosin {
 	public void applyRodLeverJointForce () {
 		double dt = Env.deltaT.getValue();
 		double myoJ2FracR = Env.myoJ2FracR.getValue();
-		double strainDist = Pt3D.ptDist(myoRod.end2, myoLever.end1);
-		linkUVec1.unitVec(myoRod.end2,myoLever.end1);
+		double strainDist = Pt3D.ptDist(myoRod.end2AsPt3D(), myoLever.end1AsPt3D());
+		linkUVec1.unitVec(myoRod.end2AsPt3D(),myoLever.end1AsPt3D());
 		linkUVec2.scale(-1,linkUVec1);
 		double moveC1 = myoLever.moveCoeff(1,linkUVec1);
 		double moveC2 = myoRod.moveCoeff(2,linkUVec2);
@@ -220,26 +220,26 @@ public class Myosin {
 		// forces and torques applied to myosin lever arm
 		F.scale(forceMag,linkUVec1);
 		myoLever.incForceSum(F);
-		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ2FracR,myoLever.uVecR);
+		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ2FracR,myoLever.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
 
 		// forces and torques applied to myosin rod
 		F.scale(-1,F);
 		myoRod.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue()*myoJ2FracR,myoRod.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue()*myoJ2FracR,myoRod.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod.incTorqueSum(RcrossF);
 
 	}
 	
 	public void applyRodLeverJointTorque () {
-		torsionVec.cross(myoRod.uVec,myoLever.uVec);
+		torsionVec.cross(myoRod.uVecAsPt3D(),myoLever.uVecAsPt3D());
 		// See applyLeverMotorJointTorque — same float32 NaN guard, suppresses log spam.
 		if (Double.isNaN(torsionVec.x)) return;
 		torsionVec.unitVec();
 		
-		double dotVecs = Pt3D.Dot(myoRod.uVec,myoLever.uVec);
+		double dotVecs = Pt3D.Dot(myoRod.uVecAsPt3D(),myoLever.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;

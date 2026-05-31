@@ -26,8 +26,8 @@ public class MyosinFixed extends Myosin {
 	}
 	
 	public void applyRodFixedPtForce () {
-		double strainDist = Pt3D.ptDist(myoRod.end1, myFixedPt);
-		linkUVec1.unitVec(myoRod.end1,myFixedPt);
+		double strainDist = Pt3D.ptDist(myoRod.end1AsPt3D(), myFixedPt);
+		linkUVec1.unitVec(myoRod.end1AsPt3D(),myFixedPt);
 		linkUVec2.scale(-1,linkUVec1);
 		double moveC1 = 0; // fixed point is not going to move at all
 		double moveC2 = myoRod.moveCoeff(2,linkUVec2);
@@ -36,14 +36,14 @@ public class MyosinFixed extends Myosin {
 		// forces and torques applied to fixed pt (leaving code here in case a myo cluster becomes a thing that moves)
 		F.scale(forceMag,linkUVec1);
 		//myoLever.incForceSum(F);
-		//R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ2FracR.getValue(),myoLever.uVecR);
+		//R.scale(0.5e-6*Env.myoLeverLength.getValue()*Env.myoJ2FracR.getValue(),myoLever.uVecRAsPt3D());
 		//RcrossF.cross(R,F);
 		//myoLever.incTorqueSum(RcrossF);
 		
 		// forces and torques applied to myosin rod
 		F.scale(-1,F);
 		myoRod.incForceSum(F);
-		R.scale(0.5e-6*Env.myoRodLength.getValue()*Env.myoJ2FracR.getValue(),myoRod.uVec);
+		R.scale(0.5e-6*Env.myoRodLength.getValue()*Env.myoJ2FracR.getValue(),myoRod.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		//myoRod.incTorqueSum(RcrossF);
 		
@@ -113,7 +113,7 @@ public class MyosinFixed extends Myosin {
 			headerWritten = true;
 		}
 		if (curRun==1) { posData[curTimePt][0] = Env.simulationTime; } // write times only for first iteration
-		posData[curTimePt][curRun] = FilSegment.theFilSegments[0].coord.x;
+		posData[curTimePt][curRun] = FilSegment.theFilSegments[0].getCoordX();
 		curTimePt++;
 
 	}

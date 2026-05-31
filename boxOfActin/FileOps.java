@@ -455,7 +455,7 @@ public class FileOps {
 	public static void writeToGAssayFile () {
 		if (!gAssayFileMade) { mkGlidingAssayOutFile(); }
 		printValue(Env.simulationTime,gAssayPW);
-		gAssayPW.println(String.valueOf(FilSegment.theFilSegments[0].coord.x));
+		gAssayPW.println(String.valueOf(FilSegment.theFilSegments[0].getCoordX()));
 	}
 	
 	public static void writeGlidingAssayDataSet () {
