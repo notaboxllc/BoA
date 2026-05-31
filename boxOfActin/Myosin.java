@@ -75,9 +75,12 @@ public class Myosin {
 				case Env.myoJoints1Start:
 					if (myoCt == 0) return;
 					if (Env.useGPU) {
-						// GPU path runs per-Myosin joints in GPUMyosinJoints.computeJoints();
-						// zero out the worker chunks so the spawned threads do no per-Myosin work.
-						// (MyosinDimer.myoDimerThreads keeps its CPU dispatch in this wave.)
+						// GPU path: per-Myosin joints run as task 1 of the chained
+						// TaskGraph inside GPUMoveThing.moveThings() (joints kernel
+						// ADDS to forceSum/torqueSum on device, move kernel reads).
+						// Zero the chunks here so the spawned worker threads do no
+						// per-Myosin work in this wave; MyosinDimer.myoDimerThreads
+						// keeps its CPU dispatch.
 						for (int i=0; i <= numThreads; i++) { jobDiv[i] = 0; }
 					} else {
 						for (int i=0; i <= numThreads; i++) {

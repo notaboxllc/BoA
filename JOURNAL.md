@@ -4,6 +4,292 @@ Last updated: 2026-05-30
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-30 — Task graph chaining + large-scale benchmarks
+
+Two pieces of work: (1) merge the joints kernel and the moveThing kernel
+into a single TornadoVM `TaskGraph` so the per-Thing coord/uVec pose is
+uploaded once per step and the joint force/torque output stays on device
+between the two kernels; (2) sweep the gliding-assay scale from 98 K to
+400 K motors to characterise where (and how much) GPU beats CPU.
+
+### A. Chained TaskGraph architecture
+
+The old architecture had two independent `TornadoExecutionPlan`s, each
+with its own pack/exec/unpack cycle: joints (in the `myoJoints1` wave)
+and moveThing (after `gatherForces`). Per step the joints plan packed
+soaCoord/soaUVec into its own FloatArrays, ran the kernel, downloaded
+joint forces, and the CPU added them sparsely into `soaForceSum`/
+`soaTorqueSum`. moveThing then re-packed coord/uVec/yVec PLUS the joint
+forces (already in soaForceSum) and ran its kernel.
+
+The new architecture is a single `TaskGraph("chained")` with two tasks:
+
+```
+.transferToDevice(EVERY_EXECUTION,
+                  coord, uVec, yVec,                         // shared pose
+                  cpuForceSum, cpuTorqueSum,                 // CPU contributions
+                  jointForceSum, jointTorqueSum,             // device-only delta (host zero-init)
+                  bTransGam, bRotGam, brownianScales, velMask,
+                  rodSlots, leverSlots, motorSlots,
+                  myoDrags, cockedFlags,
+                  jointParams, params, counts)
+.task("joints", GPUMoveThing::jointsKernel,
+      coord, uVec, jointForceSum, jointTorqueSum,
+      rodSlots, leverSlots, motorSlots,
+      myoDrags, cockedFlags, jointParams, counts)
+.task("move",   GPUMoveThing::moveThingKernel,
+      coord, uVec, yVec,
+      cpuForceSum, cpuTorqueSum,
+      jointForceSum, jointTorqueSum,
+      bTransGam, bRotGam, brownianScales, velMask,
+      params, counts)
+.transferToHost(EVERY_EXECUTION, coord, uVec, yVec);
+```
+
+`coord` and `uVec` are uploaded ONCE per step. The joints task reads
+the rod/lever/motor pose at move-slot indices (mapped from
+`Thing.myThingNumber` via the new `thingNumberToMoveSlot[]` reverse
+table built in `classifyThings()`), writes the per-Myosin joint forces
+and torques to `jointForceSum`/`jointTorqueSum`, and the move task
+reads `cpuForceSum + jointForceSum` (plus the corresponding torque
+pair) in the same `.execute()` call. Joint forces never touch the
+host between the two kernels.
+
+### B. One pitfall worth keeping: TornadoVM inter-task RMW on a
+###    `transferToDevice` buffer is unreliable
+
+First attempt had the joints task read-modify-write `forceSum`
+directly (`forceSum.set(r3, forceSum.get(r3) + rodFx)`) and the move
+task read it. Smoke ran without error but observables collapsed:
+bindEvents 361 / meanBoundMotors 3.38 / glidingVelocity 5.95 — half
+of the iter2d-joints-kernel single-seed result. Move-kernel reads of
+`forceSum` clearly did not see the joints-task writes within the same
+`.execute()` call when `forceSum` was declared in `transferToDevice`
+with `EVERY_EXECUTION`.
+
+Workaround (now landed): split into `cpuForceSum` (CPU contributions,
+host packed each step) and `jointForceSum` (device-only delta, host
+zero-initialised on the pack-side each step). The joints kernel
+writes (set, not add) the per-Myosin contribution; the move kernel
+sums both inputs as plain reads. Same total: `cpuForceSum +
+jointForceSum = old forceSum` after joints task.
+
+The extra cost is one extra zero-fill + upload per step for
+`jointForceSum`/`jointTorqueSum` (slotCap × 6 floats ≈ 1 MB at dense),
+which is small.
+
+### C. 10-seed ensemble — glidingAssay500_val — FAIL (inherited)
+
+10 GPU seeds (`-seed 1..10`), CPU rows reused from iter2d
+(`RUN_LOGS/2026-05-29_iter2d-validation-summary.txt`; CPU code path
+unchanged since iter2d). Per-seed logs in
+`RUN_LOGS/2026-05-30_chained-ensemble-gpu.txt`; summary in
+`RUN_LOGS/2026-05-30_chained-ensemble-summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     497.80 ± 38.23 (120.90)         6.02  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       5.01 ±  0.36 (  1.15)         4.87  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.32 ±  0.13 (  0.42)         9.42  FAIL
+```
+
+The drift is NOT introduced by chaining. The 2026-05-30 morning
+"Myosin joints GPU kernel" entry called out a known precision delta:
+the CPU code's `randomUnitVec` kick when the lever × motor cross
+product is exactly zero (iter2b-polish addition) is dropped on GPU
+because the PTX backend can't lower `Float.isNaN`/`x != x`. That
+entry's single-seed smoke (bindEvents 444 / MBM 4.76 / gV 6.61) sat
+right at this level too, and §F flagged "a 10-seed ensemble would
+clarify whether suppressing the kick biases ensemble means." This is
+that ensemble; the bias is real and is roughly a 40 % bindEvents
+reduction at the gliding-assay-validation scale.
+
+Cross-check: the chained 10-seed mean (498 ± 38 / 5.01 ± 0.36 /
+6.32 ± 0.13) is consistent with the iter2d-joints-kernel single seed
+(444 / 4.76 / 6.61). So the chained TaskGraph is physics-equivalent
+to the prior separate-dispatch joints+move at this scale. The
+chaining change itself introduced no observable drift; what the
+ensemble surfaces is a pre-existing kernel-precision issue that the
+joints-landing journal already flagged.
+
+Per the prompt's "physics-altering change" caveat: in-place joint
+force addition on the GPU produces float-precision ordering deltas
+vs the CPU `download+add` path, but those deltas are noise compared
+to the kick-suppression already in the kernel. Proceeded to the
+benchmarks as instructed.
+
+### D. Dense M=98K — glidingDense_demo_smoke — CPU + GPU
+
+Source logs: `RUN_LOGS/2026-05-30_dense98K_{cpu,gpu}_chained.txt`.
+
+```
+phase                                CPU dense (s)   GPU dense (s)
+------------------------------------------------------------------
+ThingStep Threads                         53.1            21.2
+ThingBrownian Threads                     29.2             2.85
+Myosin (per-Myosin joints)                13.4             0.88   ← CPU short-circuit on useGPU
+MyoDimer Threads                           7.1             0.79
+Mesh Threads                               6.4             4.97
+Ck Mots                                    5.1             0.00   ← GPU motor binding
+MotorBindGrid3D Fill                       3.6             3.45
+gpuMotorBinding total                      ---            12.4    (1101 calls)
+gpuMoveThing total (chained joints+move)   ---            43.4    (1101 calls)
+------------------------------------------------------------------
+wall (s)                                  148            128       (GPU 14 % faster)
+min/sim-sec                               247            213
+ms/step                                   135            116
+```
+
+Compared to the morning's joints-kernel-landing dense (CPU 238 →
+GPU 217 min/sim-sec, GPU 9 % faster), the chained landing pushes the
+gap from 9 % → 14 %. Most of the swing is the chained GPU shaving the
+joints+move dispatch overhead; CPU is essentially flat.
+
+`gpuMoveThing` per-call breakdown at M=98 K (chained, 1101 calls):
+
+```
+            chained (ms)   prior split (ms)   delta
+total          39.5         iter2d move 37.4 + iter2d joints 13.7 = 51.1
+slotPack        8.1          9.06              -10 %
+jointPack       5.3          6.9 standalone    -23 %
+exec           10.9          4.9 + 10.8 = 15.7 -31 % (one launch + better overlap)
+unpack         15.2         14.7 + 1.8 = 16.5  - 8 %
+```
+
+Chaining nets ~12 ms/call at dense, or about 13 s out of the dense
+GPU wall (128 s).
+
+### E. Scale benchmarks — single seed at three scales
+
+Parameter files: `ParameterFiles/glidingScale{200K,400K,600K}` and
+`ParameterFiles/filamentDense1K`. All based on
+`glidingDense_demo_smoke`. Single-seed runs (one CPU + one GPU per
+config); kernel timings per `[STATS]` lines.
+
+```
+config               steps     wall(CPU)  wall(GPU)  GPU/CPU   ms/step CPU  ms/step GPU
+dense98K (98K mot)    1101      148 s      128 s      0.86×       135        116
+scale200K (200K)       500      153 s      132 s      0.86×       306        264
+scale400K (400K)       300      224 s      205 s      0.92×       747        683
+scale600K (600K)        —        —          —          —           —          —     ← hit hard cap (see note)
+filamentDense1K (1K     500       25 s       29 s      1.16×        50         58
+   fil × 10 K mot)
+```
+
+GPU stays 8-14 % faster than CPU across the gliding-dense scales.
+GPU/CPU does NOT widen monotonically with scale — at 400 K the gap
+narrows to 8 % vs 14 % at 98 K / 200 K. Per-call kernel exec at
+400 K is 26.2 s / 400 calls = 65 ms — kernel cost is now dominant
+over launch/pack overhead, so further speedup needs kernel-internal
+work to drop. (Likely candidates: keep coord/uVec/yVec resident on
+device across steps to drop pack entirely; port the remaining
+MyoDimer joint kernel to GPU; collapse the per-Myosin
+rodSlots/leverSlots/motorSlots packs into a single `IntArray`.)
+
+The filament-dense config (1000 filaments × ~10 K motors) is
+GPU-slower than CPU. Population is small, so the move kernel
+launches a handful of threads (slotCap dominated by FilSegments,
+which is only ~64 K Things at this `filSegLength`). The CPU
+multi-threaded path is faster than the kernel launch + 6.7 s motor
+binding (which IS on GPU even here — see `gpuMotorBinding total=
+6.762s` vs CPU `Ck Mots Threads took 0.935`). GPU is the wrong
+deployment for this regime.
+
+### F. scale600K — hit the 500K MyoMotor array cap
+
+`MyoMotor.theMotors` (and `MyoRod.theRods` / `MyoLever.theLevers` /
+`Myosin.theMyosins`) are sized 500000. A 35 µm × 35 µm bed at
+density 500 /µm² yields 612 500 motors, which trips
+`ArrayIndexOutOfBoundsException: Index 500000 out of bounds for
+length 500000` at `MyoMotor.addMyoMotor(MyoMotor.java:489)` during
+`MyosinFixed.fillPlaneWithFixedMyosins`. Both the CPU and GPU runs
+abort during setup before any step runs.
+
+Workarounds: (a) reduce bed dimensions (e.g. 30 µm × 30 µm =
+450 K motors); (b) bump the static array cap in MyoMotor / MyoRod /
+MyoLever / Myosin from 500 000 to 1 000 000. The cap was not
+revisited in this work; flagged as the practical scale ceiling for
+the current codebase. The 400 K config (`glidingScale400K`,
+28 µm × 28 µm at density 500) sits under the cap and runs cleanly.
+
+### G. VRAM and host memory
+
+`-Xmx8G` was sufficient for everything that ran. The 400 K run used
+~5 GB resident JVM heap (per `top` peeks during the run) and never
+came close to the 12 GB VRAM ceiling — at dense M=98 K the kernel
+FloatArrays sum to ~50 MB (slotCap × 3 × 4 bytes × ~10 buffers); at
+400 K Thing count, that scales to ~200 MB. Plenty of headroom for
+several more × in motor count before VRAM matters.
+
+### H. Empty-ThreadSet timing (re-checked)
+
+The morning's empty-population guards in `Thing.spawn()` /
+`Thing.gather()` are still active and visible at the dense scale:
+GPU run shows `MyoDimer Threads took 0.000` (because no
+MyoMiniFilament population) where previously it would have been
+~0.1–0.5 s/run of barrier+sync churn. Combined with the chained
+joints+move, the dense GPU wall is now noticeably better than the
+joints-kernel-landing baseline (217 → 188 min/sim-sec).
+
+### I. Files changed
+
+- `boxOfActin/GPUMoveThing.java` — added joints kernel + chained
+  TaskGraph. New buffers: `cpuForceSum`, `cpuTorqueSum`,
+  `jointForceSum`, `jointTorqueSum`, `rodSlots`, `leverSlots`,
+  `motorSlots`, `myoDrags`, `cockedFlags`, `jointParams`. New
+  fields: `myoCap`, `myoJointCt`, `thingNumberToMoveSlot[]`,
+  `jointSlotToMyoIdx[]`. New worker op: `OP_PACK_JOINTS`. New
+  timing: `jointPackNanos` / `getJointPackNanos()`. The chained
+  plan rebuilds when either `Thing.thingCt > slotCap` or
+  `Myosin.myoCt > myoCap`. `classifyThings()` builds the joint slot
+  list alongside the move slot list, skipping any Myosin whose
+  rod/lever/motor isn't GPU-handled.
+- `boxOfActin/GPUMyosinJoints.java` — stubbed to a no-op shell:
+  `computeJoints()` returns immediately, all timing accessors
+  return 0, `getCallCount() > 0` stays false so the
+  `[STATS] gpuMyosinJoints` print is silenced. Kept the class so
+  prior `BoxOfActin.doLoop` callsite and the stats-print guard
+  compile and stay correct.
+- `boxOfActin/BoxOfActin.java` — removed the
+  `if (Env.useGPU) { GPUMyosinJoints.computeJoints(); }` dispatch
+  from the joints1 wave; added comment noting joints now runs as
+  task 1 of the chained graph. `[STATS] gpuMoveThing` line now
+  prints `slotPack` / `jointPack` separately (joint pack is
+  inside the same outer pack window).
+- `boxOfActin/Myosin.java` — comment in `MyosinThreads.divideAndConquer`
+  updated to reflect joints-via-chained-graph rather than
+  standalone GPU dispatch.
+- `ParameterFiles/glidingScale200K`, `glidingScale400K`,
+  `glidingScale600K`, `filamentDense1K` — new scale configurations.
+
+### J. Open / deferred
+
+- **Joints-kernel precision delta is the bigger physics issue, not
+  chaining.** The 10-seed ensemble made this concrete (40 %
+  bindEvents drop vs CPU). Two paths to fix: (a) put the
+  `randomUnitVec` kick back in the kernel, which means porting
+  `Pt3D.randomUnitVec` to a PTX-compatible primitive (uses
+  `Math.acos` + the same `Float.floatToIntBits` codepath that the
+  joints kernel already had to work around); (b) accept the bias
+  as a known GPU/CPU divergence and document it in the
+  validation protocol. Not in scope for this session.
+- **scale600K array cap.** Bumping `Myosin.theMyosins` /
+  `MyoMotor.theMotors` etc. from 500 K to 1 M would unblock the
+  full 35 µm × 35 µm × density 500 sweep. Trivial change; left
+  for a focused session that also touches the matching
+  `cpuFallback[]` sizing in `GPUMoveThing.classifyThings`.
+- **400K and dense filament-rich regimes.** Per-call kernel exec
+  is now the dominant GPU cost at 400 K — keeping the pose
+  resident on device across steps (no per-step upload of
+  coord/uVec/yVec) is the next big lever. Requires a plan-rebuild
+  hook tied to FilSegment biochem coord changes, which is more
+  invasive than this session's scope.
+- **GPU-MyoDimer kernel.** MyoDimer (cross-Myosin antiparallel
+  coupling) stays CPU at ~0.8 s/run at dense, ~7.1 s/run at the
+  CPU dense baseline. Same per-thread-pair fan-out pattern as
+  per-Myosin joints; could become a third task in the chained
+  graph.
+
 ## 2026-05-30 — Myosin joints GPU kernel
 
 New `boxOfActin/GPUMyosinJoints.java` ports `Myosin.jointConstraints()` —

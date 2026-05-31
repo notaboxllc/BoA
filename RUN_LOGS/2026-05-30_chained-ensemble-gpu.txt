@@ -1,0 +1,81 @@
+=== seed=1 start 21:32:06 ===
+Sim. time=00.10....~50.73 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=353
+[STATS] meanBoundMotors=3.458
+[STATS] gpuMotorBinding total=74.522s calls=10101 pack=1.219s gridPack=0.106s exec=72.633s unpack=0.509s
+[STATS] gpuMoveThing total=72.076s calls=10101 pack=21.356s jointPack=8.176s exec=22.842s unpack=27.875s
+[STATS] glidingVelocity=6.1893
+=== seed=1 end 21:37:17 ===
+=== seed=2 start 21:37:17 ===
+Sim. time=00.10....~50.49 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=593
+[STATS] meanBoundMotors=5.560
+[STATS] gpuMotorBinding total=73.272s calls=10101 pack=1.205s gridPack=0.110s exec=71.393s unpack=0.508s
+[STATS] gpuMoveThing total=70.503s calls=10101 pack=20.723s jointPack=7.982s exec=22.422s unpack=27.355s
+[STATS] glidingVelocity=6.8529
+=== seed=2 end 21:42:27 ===
+=== seed=3 start 21:42:27 ===
+Sim. time=00.10....~51.04 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=602
+[STATS] meanBoundMotors=5.986
+[STATS] gpuMotorBinding total=73.068s calls=10101 pack=1.199s gridPack=0.102s exec=71.107s unpack=0.596s
+[STATS] gpuMoveThing total=72.094s calls=10101 pack=20.701s jointPack=8.104s exec=22.437s unpack=28.953s
+[STATS] glidingVelocity=6.1162
+=== seed=3 end 21:47:41 ===
+=== seed=4 start 21:47:41 ===
+Sim. time=00.10....~50.46 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=590
+[STATS] meanBoundMotors=5.900
+[STATS] gpuMotorBinding total=72.742s calls=10101 pack=1.194s gridPack=0.106s exec=70.883s unpack=0.505s
+[STATS] gpuMoveThing total=71.306s calls=10101 pack=20.562s jointPack=7.960s exec=22.287s unpack=28.454s
+[STATS] glidingVelocity=6.7172
+=== seed=4 end 21:52:51 ===
+=== seed=5 start 21:52:51 ===
+Sim. time=00.10....~51.67 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=243
+[STATS] meanBoundMotors=2.624
+[STATS] gpuMotorBinding total=72.926s calls=10101 pack=1.208s gridPack=0.102s exec=71.056s unpack=0.505s
+[STATS] gpuMoveThing total=72.818s calls=10101 pack=20.640s jointPack=8.000s exec=22.361s unpack=29.814s
+[STATS] glidingVelocity=5.5205
+=== seed=5 end 21:58:06 ===
+=== seed=6 start 21:58:06 ===
+Sim. time=00.10....~51.03 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=529
+[STATS] meanBoundMotors=5.505
+[STATS] gpuMotorBinding total=72.766s calls=10101 pack=1.192s gridPack=0.102s exec=70.907s unpack=0.504s
+[STATS] gpuMoveThing total=70.314s calls=10101 pack=20.405s jointPack=7.893s exec=22.270s unpack=27.636s
+[STATS] glidingVelocity=5.8655
+=== seed=6 end 22:03:16 ===
+=== seed=7 start 22:03:16 ===
+Sim. time=00.10....~51.45 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=471
+[STATS] meanBoundMotors=4.555
+[STATS] gpuMotorBinding total=72.612s calls=10101 pack=1.202s gridPack=0.103s exec=70.747s unpack=0.506s
+[STATS] gpuMoveThing total=72.524s calls=10101 pack=20.776s jointPack=8.141s exec=22.328s unpack=29.417s
+[STATS] glidingVelocity=6.3903
+=== seed=7 end 22:08:29 ===
+=== seed=8 start 22:08:29 ===
+Sim. time=00.10....~50.60 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=443
+[STATS] meanBoundMotors=4.985
+[STATS] gpuMotorBinding total=72.724s calls=10101 pack=1.189s gridPack=0.104s exec=70.871s unpack=0.505s
+[STATS] gpuMoveThing total=70.996s calls=10101 pack=20.696s jointPack=8.020s exec=22.316s unpack=27.979s
+[STATS] glidingVelocity=6.4228
+=== seed=8 end 22:13:39 ===
+=== seed=9 start 22:13:39 ===
+Sim. time=00.10....~50.93 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=577
+[STATS] meanBoundMotors=5.438
+[STATS] gpuMotorBinding total=72.655s calls=10101 pack=1.188s gridPack=0.103s exec=70.804s unpack=0.504s
+[STATS] gpuMoveThing total=72.567s calls=10101 pack=20.579s jointPack=7.957s exec=22.361s unpack=29.623s
+[STATS] glidingVelocity=6.8256
+=== seed=9 end 22:18:50 ===
+=== seed=10 start 22:18:50 ===
+Sim. time=00.10....~51.67 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] bindEvents=577
+[STATS] meanBoundMotors=6.046
+[STATS] gpuMotorBinding total=72.878s calls=10101 pack=1.208s gridPack=0.101s exec=71.006s unpack=0.503s
+[STATS] gpuMoveThing total=72.818s calls=10101 pack=20.816s jointPack=8.149s exec=22.292s unpack=29.708s
+[STATS] glidingVelocity=6.3438
+=== seed=10 end 22:24:06 ===
+ALL DONE 22:24:06

@@ -1,0 +1,68 @@
+=== scale400K_gpu start 22:38:13 ===
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingScale400K...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.003
+     Parameter assigned: toFileInterval set to 1000
+     Parameter assigned: remoteWriteInterval set to 2000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 28.0
+     Parameter assigned: boxYDim set to 28.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 400
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 141; xBinWidth = 0.2 µm
+nYBins = 141; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 141 x 141 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=2352804 myoCap=784000 moveBlock=64 jointBlock=64 runSeed=-499157505 nWorkers=16
+GPUMotorBinding: motorCap=500000 segCap=1000000 totalCells=79524 contentsCap=8000000 blockSize=64
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=4778
+[STATS] meanBoundMotors=635.988
+[STATS] gpuMotorBinding total=7.082s calls=400 pack=1.383s gridPack=0.480s exec=4.651s unpack=0.512s
+[STATS] gpuMoveThing total=65.033s calls=400 slotPack=13.729s jointPack=8.810s exec=16.251s unpack=26.242s
+[STATS] glidingVelocity=0.0000
+ThingStep Threads took 29.603000 seconds.
+ThingBrownian Threads took 4.268000 seconds.
+Myosin Threads took 0.397000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 6.509000 seconds.
+Ck Mesh Threads took 0.446000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.129000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 5.782000 seconds.
+Finished closing JSON plots!
+=== scale400K_gpu end 22:41:38 ===

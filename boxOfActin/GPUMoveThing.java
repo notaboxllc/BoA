@@ -12,26 +12,33 @@ import uk.ac.manchester.tornado.api.types.arrays.FloatArray;
 import uk.ac.manchester.tornado.api.types.arrays.IntArray;
 
 /**
- * GPU-accelerated Thing.moveThing() via TornadoVM — iteration 2d.
+ * GPU-accelerated Thing.moveThing() + per-Myosin jointConstraints() via
+ * TornadoVM — chained TaskGraph (2026-05-30 — chaining iter).
  *
- * Iter2d changes vs iter2c:
- *   - Parallel pack and unpack on a persistent N_WORKERS daemon-thread pool
- *     (default N = Math.min(16, availableProcessors)). Each worker handles a
- *     contiguous slot range; FloatArray.set/get on disjoint indices is safe
- *     because the underlying MemorySegment writes a single 4-byte word per
- *     index with no shared metadata.
- *   - coord/uVec/yVec are not re-packed for myosin slots on steps that don't
- *     follow a classify (topology) event. Between unpack(N) and pack(N+1),
- *     CPU phases never write to a GPU-handled MyoMotor/MyoRod/MyoLever's
- *     coord/uVec/yVec — those fields are touched only by moveThing(), which
- *     is the kernel itself. The previous step's FloatArray contents are
- *     already the correct CPU-visible state. FilSegment slots still re-pack
- *     coord/uVec/yVec every step because biochemStep poly/depoly can call
- *     incCoord(), and the gliding-assay FilSegment count is small enough
- *     that the per-slot Pt3D-read cost is negligible.
- *   - On the first call after classifyThings() (or after plan rebuild), the
- *     pack runs in "full" mode and writes coord/uVec/yVec for every slot.
- *     Subsequent steady-state calls run in "resident" mode.
+ * Single TaskGraph with two tasks executed in sequence per .execute():
+ *   1. "joints" — per-Myosin jointConstraints kernel (one thread per Myosin)
+ *      reads coord/uVec from device, ADDS rod/lever/motor joint forces and
+ *      torques in-place into the shared forceSum / torqueSum FloatArrays
+ *      using move-slot indexing.
+ *   2. "move"   — per-Thing integration kernel (one thread per move slot).
+ *      Reads the now-complete forceSum / torqueSum (CPU contributions from
+ *      this step's gather + GPU joint contributions from the joints task),
+ *      generates Brownian forces inline via Wang hash, integrates pose, and
+ *      writes new coord/uVec/yVec into the shared FloatArrays.
+ *
+ * Wins vs the previous two-plan architecture:
+ *   - coord/uVec uploaded ONCE per step (shared between tasks).
+ *   - Joint forces stay on device — no download → host add → re-upload round
+ *     trip; the move kernel reads forceSum directly.
+ *   - One kernel launch + buffer setup, not two.
+ *
+ * Slot model: both tasks index pose/force/torque buffers by GPU move-slot
+ * (capacity slotCap). classifyThings() assigns slot indices and writes the
+ * reverse map thingNumberToMoveSlot[myThingNumber] = slot. The joint pack
+ * maps each Myosin's rod/lever/motor (Thing index) → move slot. If any of
+ * the three is in cpuFallback (not GPU-handled), the Myosin is omitted from
+ * the joint slot list and its joints fall back to CPU (Myosin.myoThreads,
+ * which short-circuits on useGPU at the per-Myosin level).
  *
  * Scope (gliding-assay first pass): MyoMotor, MyoRod, MyoLever, and root
  * (motherFil == null) FilSegment instances. Ineligible Things (Bug,
@@ -41,106 +48,98 @@ import uk.ac.manchester.tornado.api.types.arrays.IntArray;
  */
 public class GPUMoveThing {
 
-    /** Per-kernel Wang-hash salt for cross-kernel seed namespace isolation.
-     *  Pattern: (m * 1000003) ^ (stepCount * 999983) ^ (runSeed * 7919). */
+    /** Per-kernel Wang-hash salt for cross-kernel seed namespace isolation. */
     public static final int KERNEL_ID = 2;
 
-    // Per-run seed sampled from Env.mtRNG at class load (a fresh JVM gets a
-    // fresh mtRNG seed via Long.MAX_VALUE * Math.random()). Different runs
-    // therefore produce different GPU Gaussian streams; same-JVM repeats are
-    // reproducible from the mtRNG sequence. Multiplied into the per-thread
-    // Wang-hash seed inside the kernel.
     private static final int runSeed = Env.mtRNG.nextInt();
 
     // Brownian-rule codes (cached per slot in classifyThings).
-    private static final int RULE_FIL   = 0;  // FilSegment root: tScale = BTransCoeff / (1 + xLinkAttn*linkedToCt)
-    private static final int RULE_MYO   = 1;  // MyoMotor / MyoRod: tScale = myoBrownianAttn (constant)
-    private static final int RULE_LEVER = 2;  // MyoLever: tScale = 0 (CPU has Brownian commented out)
+    private static final int RULE_FIL   = 0;
+    private static final int RULE_MYO   = 1;
+    private static final int RULE_LEVER = 2;
 
     // ----- capacity / current count -----
     private static int slotCap   = 0;
     private static int slotCount = 0;
+    private static int myoCap    = 0;
+    private static int myoJointCt = 0;   // Myosins with all 3 sub-Things GPU-handled
 
-    // ----- per-Thing SoA buffers (capacity slotCap) -----
+    // ----- shared per-Thing SoA buffers (capacity slotCap) -----
     private static FloatArray coord;          // slotCap * 3
     private static FloatArray uVec;           // slotCap * 3
     private static FloatArray yVec;           // slotCap * 3
-    private static FloatArray forceSum;       // slotCap * 3
-    private static FloatArray torqueSum;      // slotCap * 3
+    // CPU contributions are uploaded fresh each step (input only). The joints
+    // task writes its rod/lever/motor force/torque additions to a SEPARATE
+    // device-side delta buffer (jointForceSum / jointTorqueSum) so the move
+    // task can read both inputs as plain reads — avoids the inter-task
+    // read-modify-write semantics on a single shared buffer that TornadoVM
+    // does not always honor (writes from task 1 not visible to task 2 when
+    // the buffer is in transferToDevice EVERY_EXECUTION).
+    private static FloatArray cpuForceSum;    // slotCap * 3 -- transferToDevice (read by move)
+    private static FloatArray cpuTorqueSum;   // slotCap * 3 -- transferToDevice (read by move)
+    private static FloatArray jointForceSum;  // slotCap * 3 -- transferToDevice (host zero-init, joint writes, move reads)
+    private static FloatArray jointTorqueSum; // slotCap * 3 -- transferToDevice (host zero-init, joint writes, move reads)
     private static FloatArray bTransGam;      // slotCap * 3
     private static FloatArray bRotGam;        // slotCap * 3
-    private static FloatArray brownianScales; // slotCap * 2 (transScale, rotScale)
-    private static FloatArray velMask;        // slotCap * 3 (per-axis fixed-frame {0,1})
+    private static FloatArray brownianScales; // slotCap * 2
+    private static FloatArray velMask;        // slotCap * 3
+
+    // ----- per-Myosin joint inputs (capacity myoCap) -----
+    private static IntArray   rodSlots;       // myoCap -- move slot of myoRod
+    private static IntArray   leverSlots;     // myoCap -- move slot of myoLever
+    private static IntArray   motorSlots;     // myoCap -- move slot of myoMotor
+    private static FloatArray myoDrags;       // myoCap * 9 -- packed drag tensors for rod/lever/motor
+    private static IntArray   cockedFlags;    // myoCap
 
     // ----- small inputs -----
-    private static FloatArray params;         // [0]=deltaT, [1]=brownianForceMag = sqrt(2*kT/dt)
-    private static IntArray   counts;         // [0]=N, [1]=stepCount, [2]=runSeed
+    private static FloatArray params;         // move kernel: [0]=deltaT, [1]=brownianForceMag
+    private static FloatArray jointParams;    // joints kernel: 13 floats
+    private static IntArray   counts;         // [0]=slotCount, [1]=stepCount, [2]=runSeed, [3]=myoJointCt
 
     // ----- CPU-side index of packed Things, by slot -----
     private static int[]   gpuThingIndices;   // slot -> Thing.theThings[] index
     private static int[]   brownianRule;      // slot -> RULE_FIL / RULE_MYO / RULE_LEVER
+    private static int[]   thingNumberToMoveSlot;  // Thing.myThingNumber -> move slot (-1 if not GPU-handled)
+    private static int[]   jointSlotToMyoIdx;      // joint slot -> Myosin.theMyosins[] index
     private static Thing[] cpuFallback;
     private static int     cpuFallbackCt = 0;
     private static int     lastThingCt   = -1;
     private static boolean topologyDirty = true;
-    /** Set true whenever classifyThings remaps slot->thing or new capacity is
-     *  allocated; the next packPerStep must write coord/uVec/yVec for every
-     *  slot. Cleared at the end of packPerStep. */
     private static boolean coordsDirty   = true;
 
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
     private static GridScheduler        gridScheduler;
 
-    // Step counter incremented per moveThings() call; seeded into the Wang
-    // hash so successive steps produce independent Gaussian streams.
     private static int stepCounter = 0;
 
-    // Block size: 64 leaves headroom for register pressure. The Wang-hash
-    // Box-Muller path adds ~12 live floats (6 Gaussians + 6 uniforms) on
-    // top of iter2b's footprint. If we see CUDA_ERROR_LAUNCH_OUT_OF_
-    // RESOURCES at run time, drop to 32.
     private static final int MOVE_KERNEL_BLOCK_SIZE = 64;
+    private static final int JOINTS_KERNEL_BLOCK_SIZE = 64;
 
     // Timing accumulators
-    private static long packNanos   = 0;
-    private static long execNanos   = 0;
-    private static long unpackNanos = 0;
-    private static long totalNanos  = 0;
-    private static int  callCount   = 0;
+    private static long packNanos       = 0;
+    private static long execNanos       = 0;
+    private static long unpackNanos     = 0;
+    private static long totalNanos      = 0;
+    private static long jointPackNanos  = 0;
+    private static int  callCount       = 0;
 
-    // ---------------- Worker pool (iter2d) -------------------------------
-    // Persistent daemon threads share the simulation's existing Env.allThreadCt
-    // budget but stay parked between dispatches. Each dispatch (pack or
-    // unpack) divides slotCount into contiguous chunks; workers and the
-    // calling thread coordinate via two synchronized rendezvous points
-    // (start signal + completion count).
+    // ---------------- Worker pool -----------------------------------------
     private static final int N_WORKERS = Math.max(1,
             Math.min(Env.allThreadCt, Runtime.getRuntime().availableProcessors()));
     private static final int OP_PACK_FULL          = 0;
     private static final int OP_PACK_RESIDENT      = 1;
     private static final int OP_UNPACK             = 2;
-    // Bulk SoA derived recompute over a contiguous Thing-index range.
-    // Replaces the per-Thing t.initialize() call that used to run inside
-    // unpackRange — the bulk pass amortises method dispatch and runs a
-    // SIMD-friendly tight loop over the canonical SoA arrays. With the
-    // Pt3D coord/uVec/yVec/end1/end2/zVec/transXTox fields removed there is
-    // no Pt3D bridge step — readers go straight to the SoA accessors.
     private static final int OP_DERIVED_AND_BRIDGE = 3;
-    // Threshold below which the post-unpack bulk recompute + Pt3D bridge
-    // runs inline on the main thread rather than dispatching to the worker
-    // pool. Picked so gliding-assay-scale runs (Thing.thingCt ≈ 1300) avoid
-    // ~10 ms / step dispatch overhead while dense runs (≈ 588 K) still see
-    // the 16-way parallel speedup.
+    private static final int OP_PACK_JOINTS        = 4;  // per-Myosin: slots+drags+cocked
     private static final int DERIVED_BRIDGE_PARALLEL_THRESHOLD = 8000;
     private static Thread[] workers;
     private static final Object phaseLock = new Object();
-    private static int     currentPhase   = 0;   // bumped by master per dispatch
+    private static int     currentPhase   = 0;
     private static int     workersDone    = 0;
     private static int     workOp         = 0;
     private static int     workSlotCount  = 0;
     private static int     workChunkSize  = 0;
-    // Pre-fetched scalar constants for the pack path (re-read each dispatch).
     private static float   sBTransCoeff;
     private static float   sBRotCoeff;
     private static float   sXLinkTAttn;
@@ -150,9 +149,7 @@ public class GPUMoveThing {
     private static boolean sBrownianMyoOff;
 
     // -------------------------------------------------------------------------
-    // Wang hash — 32-bit integer mixer used as the per-thread RNG seed.
-    // Same-class private static so TornadoVM's PTX compiler inlines it into
-    // the kernel.
+    // Wang hash — 32-bit integer mixer.
     // -------------------------------------------------------------------------
     private static int wangHash(int seed) {
         seed = (seed ^ 61) ^ (seed >>> 16);
@@ -164,15 +161,313 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // GPU kernel — branchless per-Thing integration step with inline
-    // Wang-hash Brownian RNG. (Unchanged from iter2c.)
+    // fastAcos approximation (Abramowitz & Stegun 4.4.46). Caller must clamp
+    // x to [-1, 1]. Max error ~5e-5 over [-1, 1]. Used by jointsKernel; the
+    // PTX backend can't lower Math.acos (ReinterpretNode unimplemented).
+    // -------------------------------------------------------------------------
+    private static float fastAcosF(float x) {
+        float absx = (x < 0f) ? -x : x;
+        float poly = 1.5707288f
+                   + absx * (-0.2121144f
+                   + absx * ( 0.0742610f
+                   + absx * (-0.0187293f)));
+        float ret = poly * (float) Math.sqrt(1.0f - absx);
+        return (x < 0f) ? (3.14159265f - ret) : ret;
+    }
+
+    // -------------------------------------------------------------------------
+    // Joint kernel: one thread per Myosin. Reads rod/lever/motor pose from
+    // the SHARED coord/uVec FloatArrays (move-slot indexing), computes four
+    // joint contributions (lever-motor force, lever-motor torque, rod-lever
+    // force, rod-lever torque), and WRITES (set, not add) them to a separate
+    // jointForceSum / jointTorqueSum delta buffer. The host uploads a
+    // zero-initialised delta buffer each step, so the kernel's writes are
+    // the per-step joint contribution. The move task reads cpuForceSum +
+    // jointForceSum (and cpuTorqueSum + jointTorqueSum) as plain reads.
+    // Each Myosin's three sub-slots are unique, so writes are conflict-free
+    // without atomics.
+    // -------------------------------------------------------------------------
+    private static void jointsKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            IntArray   rodSlots,
+            IntArray   leverSlots,
+            IntArray   motorSlots,
+            FloatArray myoDrags,
+            IntArray   cockedFlags,
+            FloatArray jointParams,
+            IntArray   counts) {
+
+        int M = counts.get(3);
+
+        float dt              = jointParams.get(0);
+        float j1FracMove      = jointParams.get(1);
+        float j1FracR         = jointParams.get(2);
+        float j1FracMoveTorq  = jointParams.get(3);
+        float j2FracMove      = jointParams.get(4);
+        float j2FracR         = jointParams.get(5);
+        float j2FracMoveTorq  = jointParams.get(6);
+        float motorLen        = jointParams.get(7);
+        float leverLen        = jointParams.get(8);
+        float rodLen          = jointParams.get(9);
+        float stallForce      = jointParams.get(10);
+        float uncockedAng     = jointParams.get(11);
+        float cockedAng       = jointParams.get(12);
+
+        float DEG2RAD = 0.017453292f;
+        float RAD2DEG = 57.29578f;
+
+        for (@Parallel int m = 0; m < cockedFlags.getSize(); m++) {
+            if (m >= M) { return; }
+
+            int rodSlot   = rodSlots.get(m);
+            int leverSlot = leverSlots.get(m);
+            int motorSlot = motorSlots.get(m);
+
+            int r3  = rodSlot   * 3;
+            int l3  = leverSlot * 3;
+            int mo3 = motorSlot * 3;
+
+            float rcx = coord.get(r3),  rcy = coord.get(r3 + 1), rcz = coord.get(r3 + 2);
+            float rux = uVec.get(r3),   ruy = uVec.get(r3 + 1),  ruz = uVec.get(r3 + 2);
+            float lcx = coord.get(l3),  lcy = coord.get(l3 + 1), lcz = coord.get(l3 + 2);
+            float lux = uVec.get(l3),   luy = uVec.get(l3 + 1),  luz = uVec.get(l3 + 2);
+            float mcx = coord.get(mo3), mcy = coord.get(mo3 + 1), mcz = coord.get(mo3 + 2);
+            float mux = uVec.get(mo3),  muy = uVec.get(mo3 + 1),  muz = uVec.get(mo3 + 2);
+
+            int md9 = m * 9;
+            float rBTGx  = myoDrags.get(md9);
+            float rBTGy  = myoDrags.get(md9 + 1);
+            float rBRGy  = myoDrags.get(md9 + 2);
+            float lBTGx  = myoDrags.get(md9 + 3);
+            float lBTGy  = myoDrags.get(md9 + 4);
+            float lBRGy  = myoDrags.get(md9 + 5);
+            float mBTGx  = myoDrags.get(md9 + 6);
+            float mBTGy  = myoDrags.get(md9 + 7);
+            float mBRGy  = myoDrags.get(md9 + 8);
+
+            int cocked = cockedFlags.get(m);
+
+            float halfRod   = 0.5f * rodLen;
+            float halfLever = 0.5f * leverLen;
+            float halfMotor = 0.5f * motorLen;
+
+            float le1x = lcx - halfLever * lux, le1y = lcy - halfLever * luy, le1z = lcz - halfLever * luz;
+            float le2x = lcx + halfLever * lux, le2y = lcy + halfLever * luy, le2z = lcz + halfLever * luz;
+            float me1x = mcx - halfMotor * mux, me1y = mcy - halfMotor * muy, me1z = mcz - halfMotor * muz;
+            float re2x = rcx + halfRod * rux,   re2y = rcy + halfRod * ruy,   re2z = rcz + halfRod * ruz;
+
+            float rodFx = 0f,   rodFy = 0f,   rodFz = 0f;
+            float rodTx = 0f,   rodTy = 0f,   rodTz = 0f;
+            float leverFx = 0f, leverFy = 0f, leverFz = 0f;
+            float leverTx = 0f, leverTy = 0f, leverTz = 0f;
+            float motorFx = 0f, motorFy = 0f, motorFz = 0f;
+            float motorTx = 0f, motorTy = 0f, motorTz = 0f;
+
+            // applyLeverMotorJointForce
+            {
+                float dx = le2x - me1x, dy = le2y - me1y, dz = le2z - me1z;
+                float dist2 = dx * dx + dy * dy + dz * dz;
+                float strainDist = (float) Math.sqrt(dist2);
+                float invStrain = (strainDist > 0f) ? (1.0f / strainDist) : 0f;
+                float l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
+                float l2x = -l1x, l2y = -l1y, l2z = -l1z;
+
+                float cosBh = -(mux * l1x + muy * l1y + muz * l1z);
+                if (cosBh > 1.0f)  cosBh = 1.0f;
+                if (cosBh < -1.0f) cosBh = -1.0f;
+                float cosAlphH2 = 1.0f - cosBh * cosBh;
+                if (cosAlphH2 < 0f) cosAlphH2 = 0f;
+                float lSqH     = 1.0e-12f * motorLen * motorLen;
+                float CxH      = cosBh * cosBh / mBTGx;
+                float CperpH   = cosAlphH2 / mBTGy;
+                float CthetaH  = lSqH * cosAlphH2 / (4.0f * mBRGy);
+                float moveCh   = CxH + CperpH + CthetaH;
+
+                float cosBt = lux * l2x + luy * l2y + luz * l2z;
+                if (cosBt > 1.0f)  cosBt = 1.0f;
+                if (cosBt < -1.0f) cosBt = -1.0f;
+                float cosAlphT2 = 1.0f - cosBt * cosBt;
+                if (cosAlphT2 < 0f) cosAlphT2 = 0f;
+                float lSqT     = 1.0e-12f * leverLen * leverLen;
+                float CxT      = cosBt * cosBt / lBTGx;
+                float CperpT   = cosAlphT2 / lBTGy;
+                float CthetaT  = lSqT * cosAlphT2 / (4.0f * lBRGy);
+                float moveCt   = CxT + CperpT + CthetaT;
+
+                float denom = dt * (moveCh + moveCt);
+                float forceMag = (denom > 0f) ? (j1FracMove * 1.0e-6f * strainDist / denom) : 0f;
+
+                float Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
+
+                motorFx += Fx; motorFy += Fy; motorFz += Fz;
+                float Rms = -0.5e-6f * motorLen * j1FracR;
+                float Rmx = Rms * mux, Rmy = Rms * muy, Rmz = Rms * muz;
+                motorTx += Rmy * Fz - Rmz * Fy;
+                motorTy += Rmz * Fx - Rmx * Fz;
+                motorTz += Rmx * Fy - Rmy * Fx;
+
+                Fx = -Fx; Fy = -Fy; Fz = -Fz;
+                leverFx += Fx; leverFy += Fy; leverFz += Fz;
+                float Rls = 0.5e-6f * leverLen * j1FracR;
+                float Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
+                leverTx += Rly * Fz - Rlz * Fy;
+                leverTy += Rlz * Fx - Rlx * Fz;
+                leverTz += Rlx * Fy - Rly * Fx;
+            }
+
+            // applyLeverMotorJointTorque
+            {
+                float tvx = luy * muz - luz * muy;
+                float tvy = luz * mux - lux * muz;
+                float tvz = lux * muy - luy * mux;
+                float tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 0f) {
+                    float invMag = 1.0f / (float) Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+
+                    float dotVecs = lux * mux + luy * muy + luz * muz;
+                    if (dotVecs > 1.0f)  dotVecs = 1.0f;
+                    if (dotVecs < -1.0f) dotVecs = -1.0f;
+                    float angTween = fastAcosF(dotVecs) * RAD2DEG;
+
+                    float angRelaxed = (cocked == 1) ? cockedAng : uncockedAng;
+                    float angD = angTween - angRelaxed;
+
+                    float invBRG = 1.0f / mBRGy + 1.0f / lBRGy;
+                    float torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                    float maxMag = stallForce * 0.5f * motorLen * 1.0e-18f;
+                    if (torsionMag > maxMag) torsionMag = maxMag;
+
+                    leverTx += tvx * torsionMag;
+                    leverTy += tvy * torsionMag;
+                    leverTz += tvz * torsionMag;
+                    motorTx -= tvx * torsionMag;
+                    motorTy -= tvy * torsionMag;
+                    motorTz -= tvz * torsionMag;
+                }
+            }
+
+            // applyRodLeverJointForce
+            {
+                float dx = re2x - le1x, dy = re2y - le1y, dz = re2z - le1z;
+                float dist2 = dx * dx + dy * dy + dz * dz;
+                float strainDist = (float) Math.sqrt(dist2);
+                float invStrain = (strainDist > 0f) ? (1.0f / strainDist) : 0f;
+                float l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
+                float l2x = -l1x, l2y = -l1y, l2z = -l1z;
+
+                float cosB1 = -(lux * l1x + luy * l1y + luz * l1z);
+                if (cosB1 > 1.0f)  cosB1 = 1.0f;
+                if (cosB1 < -1.0f) cosB1 = -1.0f;
+                float cosAlph1_2 = 1.0f - cosB1 * cosB1;
+                if (cosAlph1_2 < 0f) cosAlph1_2 = 0f;
+                float lSq1     = 1.0e-12f * leverLen * leverLen;
+                float Cx1      = cosB1 * cosB1 / lBTGx;
+                float Cperp1   = cosAlph1_2 / lBTGy;
+                float Ctheta1  = lSq1 * cosAlph1_2 / (4.0f * lBRGy);
+                float moveC1   = Cx1 + Cperp1 + Ctheta1;
+
+                float cosB2 = rux * l2x + ruy * l2y + ruz * l2z;
+                if (cosB2 > 1.0f)  cosB2 = 1.0f;
+                if (cosB2 < -1.0f) cosB2 = -1.0f;
+                float cosAlph2_2 = 1.0f - cosB2 * cosB2;
+                if (cosAlph2_2 < 0f) cosAlph2_2 = 0f;
+                float lSq2     = 1.0e-12f * rodLen * rodLen;
+                float Cx2      = cosB2 * cosB2 / rBTGx;
+                float Cperp2   = cosAlph2_2 / rBTGy;
+                float Ctheta2  = lSq2 * cosAlph2_2 / (4.0f * rBRGy);
+                float moveC2   = Cx2 + Cperp2 + Ctheta2;
+
+                float denom = dt * (moveC1 + moveC2);
+                float forceMag = (denom > 0f) ? (j2FracMove * 1.0e-6f * strainDist / denom) : 0f;
+
+                float Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
+
+                leverFx += Fx; leverFy += Fy; leverFz += Fz;
+                float Rls = -0.5e-6f * leverLen * j2FracR;
+                float Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
+                leverTx += Rly * Fz - Rlz * Fy;
+                leverTy += Rlz * Fx - Rlx * Fz;
+                leverTz += Rlx * Fy - Rly * Fx;
+
+                Fx = -Fx; Fy = -Fy; Fz = -Fz;
+                rodFx += Fx; rodFy += Fy; rodFz += Fz;
+                float Rrs = 0.5e-6f * rodLen * j2FracR;
+                float Rrx = Rrs * rux, Rry = Rrs * ruy, Rrz = Rrs * ruz;
+                rodTx += Rry * Fz - Rrz * Fy;
+                rodTy += Rrz * Fx - Rrx * Fz;
+                rodTz += Rrx * Fy - Rry * Fx;
+            }
+
+            // applyRodLeverJointTorque
+            {
+                float tvx = ruy * luz - ruz * luy;
+                float tvy = ruz * lux - rux * luz;
+                float tvz = rux * luy - ruy * lux;
+                float tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 0f) {
+                    float invMag = 1.0f / (float) Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+
+                    float dotVecs = rux * lux + ruy * luy + ruz * luz;
+                    if (dotVecs > 1.0f)  dotVecs = 1.0f;
+                    if (dotVecs < -1.0f) dotVecs = -1.0f;
+                    float angTween = fastAcosF(dotVecs) * RAD2DEG;
+
+                    float invBRG = 1.0f / lBRGy + 1.0f / rBRGy;
+                    float torsionMag = j2FracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
+
+                    rodTx += tvx * torsionMag;
+                    rodTy += tvy * torsionMag;
+                    rodTz += tvz * torsionMag;
+                    leverTx -= tvx * torsionMag;
+                    leverTy -= tvy * torsionMag;
+                    leverTz -= tvz * torsionMag;
+                }
+            }
+
+            // Write joint contributions to the device-side delta buffers.
+            // Host uploaded zeros; this is the per-step contribution per slot.
+            // Each Myosin's three sub-slots are unique, so writes are conflict-free.
+            jointForceSum.set(r3,      rodFx);
+            jointForceSum.set(r3 + 1,  rodFy);
+            jointForceSum.set(r3 + 2,  rodFz);
+            jointTorqueSum.set(r3,     rodTx);
+            jointTorqueSum.set(r3 + 1, rodTy);
+            jointTorqueSum.set(r3 + 2, rodTz);
+
+            jointForceSum.set(l3,      leverFx);
+            jointForceSum.set(l3 + 1,  leverFy);
+            jointForceSum.set(l3 + 2,  leverFz);
+            jointTorqueSum.set(l3,     leverTx);
+            jointTorqueSum.set(l3 + 1, leverTy);
+            jointTorqueSum.set(l3 + 2, leverTz);
+
+            jointForceSum.set(mo3,      motorFx);
+            jointForceSum.set(mo3 + 1,  motorFy);
+            jointForceSum.set(mo3 + 2,  motorFz);
+            jointTorqueSum.set(mo3,     motorTx);
+            jointTorqueSum.set(mo3 + 1, motorTy);
+            jointTorqueSum.set(mo3 + 2, motorTz);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Move kernel — sums the CPU-contributed forceSum and the device-side
+    // joint-delta buffer to get the complete per-Thing force/torque, then
+    // generates Brownian inline via Wang hash and integrates pose.
     // -------------------------------------------------------------------------
     private static void moveThingKernel(
             FloatArray coord,
             FloatArray uVec,
             FloatArray yVec,
-            FloatArray forceSum,
-            FloatArray torqueSum,
+            FloatArray cpuForceSum,
+            FloatArray cpuTorqueSum,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
             FloatArray bTransGam,
             FloatArray bRotGam,
             FloatArray brownianScales,
@@ -184,10 +479,10 @@ public class GPUMoveThing {
         int   stepCount = counts.get(1);
         int   runSeed   = counts.get(2);
         float dt        = params.get(0);
-        float brownianForceMag = params.get(1);  // sqrt(2 * kT / dt)
+        float brownianForceMag = params.get(1);
 
         for (@Parallel int m = 0; m < coord.getSize() / 3; m++) {
-            if (m >= N) { return; }                  // inactive thread slot
+            if (m >= N) { return; }
 
             int i3 = m * 3;
             int i2 = m * 2;
@@ -202,21 +497,19 @@ public class GPUMoveThing {
             float yy = yVec.get(i3 + 1);
             float yz = yVec.get(i3 + 2);
 
-            // zVec = unit(cross(uVec, yVec))
             float zx = uy * yz - uz * yy;
             float zy = uz * yx - ux * yz;
             float zz = ux * yy - uy * yx;
             float zlen = 1.0f / (float) Math.sqrt(zx * zx + zy * zy + zz * zz);
             zx *= zlen; zy *= zlen; zz *= zlen;
 
-            float fx = forceSum.get(i3);
-            float fy = forceSum.get(i3 + 1);
-            float fz = forceSum.get(i3 + 2);
-            float tx = torqueSum.get(i3);
-            float ty = torqueSum.get(i3 + 1);
-            float tz = torqueSum.get(i3 + 2);
+            float fx = cpuForceSum.get(i3)     + jointForceSum.get(i3);
+            float fy = cpuForceSum.get(i3 + 1) + jointForceSum.get(i3 + 1);
+            float fz = cpuForceSum.get(i3 + 2) + jointForceSum.get(i3 + 2);
+            float tx = cpuTorqueSum.get(i3)     + jointTorqueSum.get(i3);
+            float ty = cpuTorqueSum.get(i3 + 1) + jointTorqueSum.get(i3 + 1);
+            float tz = cpuTorqueSum.get(i3 + 2) + jointTorqueSum.get(i3 + 2);
 
-            // Fixed -> body
             float bfx = ux * fx + uy * fy + uz * fz;
             float bfy = yx * fx + yy * fy + yz * fz;
             float bfz = zx * fx + zy * fy + zz * fz;
@@ -224,7 +517,6 @@ public class GPUMoveThing {
             float bty = yx * tx + yy * ty + yz * tz;
             float btz = zx * tx + zy * ty + zz * tz;
 
-            // ----- Brownian via Wang hash + Box-Muller --------------------
             int base = (m * 1000003) ^ (stepCount * 999983) ^ (runSeed * 7919);
             int h1 = wangHash(base);
             int h2 = wangHash(base ^ 0x9e3779b9);
@@ -250,10 +542,10 @@ public class GPUMoveThing {
             float gfy = r2 * (float) Math.cos(theta2);
             float gty = r2 * (float) Math.sin(theta2);
 
-            float r3 = (float) Math.sqrt(-2.0f * (float) Math.log(u5));
+            float r3v = (float) Math.sqrt(-2.0f * (float) Math.log(u5));
             float theta3 = 2.0f * 3.14159265f * u6;
-            float gfz = r3 * (float) Math.cos(theta3);
-            float gtz = r3 * (float) Math.sin(theta3);
+            float gfz = r3v * (float) Math.cos(theta3);
+            float gtz = r3v * (float) Math.sin(theta3);
 
             float btgX = bTransGam.get(i3);
             float btgY = bTransGam.get(i3 + 1);
@@ -272,7 +564,6 @@ public class GPUMoveThing {
             bty += rScale * brownianForceMag * (float) Math.sqrt(brgY) * gty;
             btz += rScale * brownianForceMag * (float) Math.sqrt(brgZ) * gtz;
 
-            // Overdamped Langevin in body frame.
             float bvx = 1.0e6f * bfx / btgX;
             float bvy = 1.0e6f * bfy / btgY;
             float bvz = 1.0e6f * bfz / btgZ;
@@ -280,7 +571,6 @@ public class GPUMoveThing {
             float bwy = bty / brgY;
             float bwz = btz / brgZ;
 
-            // Body -> fixed.
             float vx = ux * bvx + yx * bvy + zx * bvz;
             float vy = uy * bvx + yy * bvy + zy * bvz;
             float vz = uz * bvx + yz * bvy + zz * bvz;
@@ -293,7 +583,6 @@ public class GPUMoveThing {
             coord.set(i3 + 1, cy + dt * vy);
             coord.set(i3 + 2, cz + dt * vz);
 
-            // Small-angle orientation update.
             float uTransInZ = -bwy * dt;
             float uTransInY =  bwz * dt;
             float nuX = ux + yx * uTransInY + zx * uTransInZ;
@@ -317,45 +606,67 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // Lazy allocation + plan build.
+    // Lazy allocation + chained plan build.
     // -------------------------------------------------------------------------
-    private static void allocateAndBuildPlan(int newCap) {
-        slotCap = newCap;
+    private static void allocateAndBuildPlan(int newSlotCap, int newMyoCap) {
+        slotCap = newSlotCap;
+        myoCap  = Math.max(1, newMyoCap);
 
         coord          = new FloatArray(slotCap * 3);
         uVec           = new FloatArray(slotCap * 3);
         yVec           = new FloatArray(slotCap * 3);
-        forceSum       = new FloatArray(slotCap * 3);
-        torqueSum      = new FloatArray(slotCap * 3);
+        cpuForceSum    = new FloatArray(slotCap * 3);
+        cpuTorqueSum   = new FloatArray(slotCap * 3);
+        jointForceSum  = new FloatArray(slotCap * 3);  // host zeroed each step (sparse joint writes on device)
+        jointTorqueSum = new FloatArray(slotCap * 3);
         bTransGam      = new FloatArray(slotCap * 3);
         bRotGam        = new FloatArray(slotCap * 3);
         brownianScales = new FloatArray(slotCap * 2);
         velMask        = new FloatArray(slotCap * 3);
 
-        params = new FloatArray(2);
-        counts = new IntArray(3);
+        rodSlots       = new IntArray(myoCap);
+        leverSlots     = new IntArray(myoCap);
+        motorSlots     = new IntArray(myoCap);
+        myoDrags       = new FloatArray(myoCap * 9);
+        cockedFlags    = new IntArray(myoCap);
+        jointSlotToMyoIdx = new int[myoCap];
 
-        gpuThingIndices = new int[slotCap];
-        brownianRule    = new int[slotCap];
-        cpuFallback     = new Thing[Math.max(64, slotCap)];
+        params      = new FloatArray(2);
+        jointParams = new FloatArray(13);
+        counts      = new IntArray(4);
 
-        // Everything EVERY_EXECUTION; the per-call upload of coord/uVec/yVec
-        // is required because the kernel updates them in place and the
-        // device-side state must match the FloatArray after each Java-side
-        // change. coord pack-write skipping (iter2d) avoids the FloatArray
-        // re-write on the Java side; the upload itself remains a single
-        // bulk DMA and is not the bottleneck.
-        TaskGraph tg = new TaskGraph("moveThing")
+        gpuThingIndices       = new int[slotCap];
+        brownianRule          = new int[slotCap];
+        cpuFallback           = new Thing[Math.max(64, slotCap)];
+
+        // Chained TaskGraph: joints task writes per-step joint contributions
+        // to a SEPARATE device-side delta buffer (jointForceSum / jointTorqueSum
+        // are uploaded zero-initialised each step); move task reads
+        // cpuForceSum + jointForceSum (and cpuTorqueSum + jointTorqueSum) as
+        // plain reads. coord/uVec/yVec are shared between tasks (read by both,
+        // move writes new pose).
+        TaskGraph tg = new TaskGraph("chained")
             .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               coord, uVec, yVec,
-                              forceSum, torqueSum,
+                              cpuForceSum, cpuTorqueSum,
+                              jointForceSum, jointTorqueSum,
                               bTransGam, bRotGam,
                               brownianScales, velMask,
-                              params, counts)
+                              rodSlots, leverSlots, motorSlots,
+                              myoDrags, cockedFlags,
+                              jointParams, params, counts)
+            .task("joints",
+                  GPUMoveThing::jointsKernel,
+                  coord, uVec,
+                  jointForceSum, jointTorqueSum,
+                  rodSlots, leverSlots, motorSlots,
+                  myoDrags, cockedFlags,
+                  jointParams, counts)
             .task("move",
                   GPUMoveThing::moveThingKernel,
                   coord, uVec, yVec,
-                  forceSum, torqueSum,
+                  cpuForceSum, cpuTorqueSum,
+                  jointForceSum, jointTorqueSum,
                   bTransGam, bRotGam,
                   brownianScales, velMask,
                   params, counts)
@@ -365,16 +676,30 @@ public class GPUMoveThing {
         itg  = tg.snapshot();
         plan = new TornadoExecutionPlan(itg);
 
-        WorkerGrid worker = new WorkerGrid1D(slotCap);
-        worker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
-        gridScheduler = new GridScheduler("moveThing.move", worker);
+        WorkerGrid moveWorker = new WorkerGrid1D(slotCap);
+        moveWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
+        WorkerGrid jointWorker = new WorkerGrid1D(myoCap);
+        jointWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
 
-        // Force classify on next call so the new buffers get filled.
+        gridScheduler = new GridScheduler("chained.move", moveWorker);
+        gridScheduler.addWorkerGrid("chained.joints", jointWorker);
+
         topologyDirty = true;
         coordsDirty   = true;
 
-        System.out.printf("GPUMoveThing: slotCap=%d blockSize=%d runSeed=%d nWorkers=%d%n",
-                          slotCap, MOVE_KERNEL_BLOCK_SIZE, runSeed, N_WORKERS);
+        // Ensure thingNumberToMoveSlot is sized to cover all current Things.
+        ensureThingNumberMapCapacity();
+
+        System.out.printf("GPUMoveThing: slotCap=%d myoCap=%d moveBlock=%d jointBlock=%d runSeed=%d nWorkers=%d%n",
+                          slotCap, myoCap, MOVE_KERNEL_BLOCK_SIZE, JOINTS_KERNEL_BLOCK_SIZE,
+                          runSeed, N_WORKERS);
+    }
+
+    private static void ensureThingNumberMapCapacity() {
+        int needed = Math.max(slotCap, Thing.thingCt) + 8;
+        if (thingNumberToMoveSlot == null || thingNumberToMoveSlot.length < needed) {
+            thingNumberToMoveSlot = new int[needed * 2];
+        }
     }
 
     private static void closePlan() {
@@ -385,10 +710,6 @@ public class GPUMoveThing {
         }
     }
 
-    /** Invalidate the current plan — used when drag coefficients change
-     *  (e.g. aeta mutation triggers calculateProperties on all FilSegments).
-     *  Next moveThings() call rebuilds the plan and re-uploads bTransGam /
-     *  bRotGam. */
     public static void invalidatePlan() {
         closePlan();
         topologyDirty = true;
@@ -396,8 +717,7 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // Classify Things into GPU vs CPU fallback. (Unchanged from iter2c except
-    // for marking coordsDirty.)
+    // Classify Things into GPU vs CPU fallback, and build Myosin joint list.
     // -------------------------------------------------------------------------
     private static void classifyThings() {
         int n  = 0;
@@ -406,6 +726,10 @@ public class GPUMoveThing {
 
         double lpActiveV   = Env.lpActive.getValue();
         boolean myosinsOff = Env.myosinsOff;
+
+        ensureThingNumberMapCapacity();
+        // Sentinel -1 = "not GPU-handled".
+        java.util.Arrays.fill(thingNumberToMoveSlot, 0, Math.min(thingNumberToMoveSlot.length, tc + 1), -1);
 
         for (int i = 0; i < tc; i++) {
             Thing t = Thing.theThings[i];
@@ -451,11 +775,9 @@ public class GPUMoveThing {
             gpuThingIndices[n] = i;
             brownianRule[n]    = rule;
             t.gpuHandled       = true;
+            thingNumberToMoveSlot[t.myThingNumber] = n;
 
             int i3 = n * 3;
-            // velMask is all 1.0 for the in-scope types — fill it once at
-            // classify time (drag tensors are repacked every step by the
-            // per-step pack).
             velMask.set(i3,     1.0f);
             velMask.set(i3 + 1, 1.0f);
             velMask.set(i3 + 2, 1.0f);
@@ -467,21 +789,50 @@ public class GPUMoveThing {
         cpuFallbackCt = cn;
         lastThingCt   = tc;
         topologyDirty = false;
-        // Slot->Thing mapping may have shifted; the next pack must rewrite
-        // coord/uVec/yVec for every slot.
         coordsDirty   = true;
+
+        // Build the Myosin joint slot list. Each Myosin whose rod/lever/motor
+        // are ALL GPU-handled gets entries at index [0..myoJointCt) in
+        // rodSlots/leverSlots/motorSlots. CPU-fallback Myosins (myosinsOff,
+        // or any sub-Thing not GPU-handled) are omitted; their joints are
+        // handled by the CPU Myosin.myoThreads dispatch (which short-circuits
+        // on Env.useGPU at the per-Myosin level — see Myosin.jointConstraints).
+        int mj = 0;
+        Myosin[] myos = Myosin.theMyosins;
+        int myoCt = Myosin.myoCt;
+        for (int m = 0; m < myoCt; m++) {
+            Myosin myo = myos[m];
+            if (myo == null) continue;
+            int rIdx = myo.myoRod.myThingNumber;
+            int lIdx = myo.myoLever.myThingNumber;
+            int mIdx = myo.myoMotor.myThingNumber;
+            if (rIdx >= thingNumberToMoveSlot.length
+             || lIdx >= thingNumberToMoveSlot.length
+             || mIdx >= thingNumberToMoveSlot.length) continue;
+            int rs = thingNumberToMoveSlot[rIdx];
+            int ls = thingNumberToMoveSlot[lIdx];
+            int ms = thingNumberToMoveSlot[mIdx];
+            if (rs < 0 || ls < 0 || ms < 0) continue;
+            if (mj >= myoCap) continue;
+            rodSlots.set(mj,   rs);
+            leverSlots.set(mj, ls);
+            motorSlots.set(mj, ms);
+            jointSlotToMyoIdx[mj] = m;
+            mj++;
+        }
+        myoJointCt = mj;
     }
 
-    /** Public entry — called by BoxOfActin at the top of each step before
-     *  the Brownian phase so that ThingBrownianThreads sees up-to-date
-     *  gpuHandled flags. No-op if no topology change since last classify. */
     public static void onStepStart() {
+        int desiredSlotCap = Math.max(1024, Thing.thingCt * 2);
+        int desiredMyoCap  = Math.max(1024, Myosin.myoCt   * 2);
         if (plan == null) {
-            int initialCap = Math.max(1024, Thing.thingCt * 2);
-            allocateAndBuildPlan(initialCap);
-        } else if (Thing.thingCt > slotCap) {
+            allocateAndBuildPlan(desiredSlotCap, desiredMyoCap);
+        } else if (Thing.thingCt > slotCap || Myosin.myoCt > myoCap) {
             closePlan();
-            allocateAndBuildPlan(Math.max(slotCap * 2, Thing.thingCt * 2));
+            int ns = (Thing.thingCt > slotCap) ? Math.max(slotCap * 2, Thing.thingCt * 2) : slotCap;
+            int nm = (Myosin.myoCt  > myoCap)  ? Math.max(myoCap  * 2, Myosin.myoCt  * 2) : myoCap;
+            allocateAndBuildPlan(ns, nm);
         }
         if (topologyDirty || Thing.thingCt != lastThingCt) {
             classifyThings();
@@ -528,6 +879,7 @@ public class GPUMoveThing {
                     case OP_DERIVED_AND_BRIDGE:
                         Thing.recomputeDerivedSoA(start, end);
                         break;
+                    case OP_PACK_JOINTS:   packJointsRange(start, end);  break;
                     default: /* no-op */ break;
                 }
             }
@@ -562,12 +914,8 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // Pack a contiguous slot range. Called from each worker. The packCoords
-    // parameter selects between full pack (writes coord/uVec/yVec for every
-    // slot) and resident pack (writes coord/uVec/yVec only for FilSegment
-    // slots, which can be perturbed by biochemStep poly/depoly between
-    // steps; myosin slots inherit the kernel's previous-step output via the
-    // unchanged FloatArray).
+    // Pack per-slot move-kernel inputs (pose, force/torque, drags, brownian
+    // scales) for a contiguous slot range.
     // -------------------------------------------------------------------------
     private static void packRange(int slotStart, int slotEnd, boolean packCoords) {
         Thing[] theThings  = Thing.theThings;
@@ -575,9 +923,6 @@ public class GPUMoveThing {
         int[]   rules      = brownianRule;
         float[] soaForce   = Thing.soaForceSum;
         float[] soaTorque  = Thing.soaTorqueSum;
-        // Canonical SoA pose: coord/uVec/yVec are already float arrays matching
-        // the GPU FloatArray layout. The pack is a float→float copy from a
-        // contiguous backing array; no Pt3D pointer chase, no narrowing.
         float[] soaCoordArr = Thing.soaCoord;
         float[] soaUVecArr  = Thing.soaUVec;
         float[] soaYVecArr  = Thing.soaYVec;
@@ -599,8 +944,11 @@ public class GPUMoveThing {
 
             // FilSegment coord can change between steps via biochemStep
             // poly/depoly; always re-pack to stay coherent. Myosin types
-            // only mutate coord inside moveThing (the kernel), so the
-            // FloatArray already matches the SoA state on steady steps.
+            // only mutate coord inside the move kernel, so the FloatArray
+            // already matches the SoA state on steady steps. Joints task
+            // reads the same coord/uVec — myosins always need a valid pose
+            // (which they have from the previous kernel write) so this
+            // pack-skip is safe across both tasks.
             if (packCoords || rule == RULE_FIL) {
                 coord.set(i3,     soaCoordArr[s3]);
                 coord.set(i3 + 1, soaCoordArr[s3 + 1]);
@@ -612,16 +960,22 @@ public class GPUMoveThing {
                 yVec.set(i3 + 1,  soaYVecArr[s3 + 1]);
                 yVec.set(i3 + 2,  soaYVecArr[s3 + 2]);
             }
-            // Forces/torques are already float in the canonical
-            // soaForceSum/soaTorqueSum arrays.
-            forceSum.set(i3,     soaForce[s3]);
-            forceSum.set(i3 + 1, soaForce[s3 + 1]);
-            forceSum.set(i3 + 2, soaForce[s3 + 2]);
-            torqueSum.set(i3,     soaTorque[s3]);
-            torqueSum.set(i3 + 1, soaTorque[s3 + 1]);
-            torqueSum.set(i3 + 2, soaTorque[s3 + 2]);
-            // Drag tensors are still in Pt3D (read-mostly, change only on
-            // calculateProperties — no SoA storage yet).
+            cpuForceSum.set(i3,     soaForce[s3]);
+            cpuForceSum.set(i3 + 1, soaForce[s3 + 1]);
+            cpuForceSum.set(i3 + 2, soaForce[s3 + 2]);
+            cpuTorqueSum.set(i3,     soaTorque[s3]);
+            cpuTorqueSum.set(i3 + 1, soaTorque[s3 + 1]);
+            cpuTorqueSum.set(i3 + 2, soaTorque[s3 + 2]);
+            // Zero the joint-delta buffers for this slot; the joints kernel
+            // overwrites the rod/lever/motor entries on device. Other slots
+            // (FilSegments) keep zero, so the move kernel's cpuForceSum +
+            // jointForceSum sum is just cpuForceSum for non-Myosin slots.
+            jointForceSum.set(i3,      0f);
+            jointForceSum.set(i3 + 1,  0f);
+            jointForceSum.set(i3 + 2,  0f);
+            jointTorqueSum.set(i3,     0f);
+            jointTorqueSum.set(i3 + 1, 0f);
+            jointTorqueSum.set(i3 + 2, 0f);
             bTransGam.set(i3,     (float) t.bTransGam.x);
             bTransGam.set(i3 + 1, (float) t.bTransGam.y);
             bTransGam.set(i3 + 2, (float) t.bTransGam.z);
@@ -656,6 +1010,33 @@ public class GPUMoveThing {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Pack per-Myosin joint inputs (drags, cocked flag) for myosins in
+    // [start, end). Slot mappings (rodSlots/leverSlots/motorSlots) are
+    // populated by classifyThings() and reused across steps.
+    // -------------------------------------------------------------------------
+    private static void packJointsRange(int start, int end) {
+        Myosin[] myos = Myosin.theMyosins;
+        int[] toMyo = jointSlotToMyoIdx;
+        for (int mj = start; mj < end; mj++) {
+            Myosin myo = myos[toMyo[mj]];
+            MyoRod   rod   = myo.myoRod;
+            MyoLever lever = myo.myoLever;
+            MyoMotor motor = myo.myoMotor;
+            int d9 = mj * 9;
+            myoDrags.set(d9,     (float) rod.bTransGam.x);
+            myoDrags.set(d9 + 1, (float) rod.bTransGam.y);
+            myoDrags.set(d9 + 2, (float) rod.bRotGam.y);
+            myoDrags.set(d9 + 3, (float) lever.bTransGam.x);
+            myoDrags.set(d9 + 4, (float) lever.bTransGam.y);
+            myoDrags.set(d9 + 5, (float) lever.bRotGam.y);
+            myoDrags.set(d9 + 6, (float) motor.bTransGam.x);
+            myoDrags.set(d9 + 7, (float) motor.bTransGam.y);
+            myoDrags.set(d9 + 8, (float) motor.bRotGam.y);
+            cockedFlags.set(mj, motor.isCocked() ? 1 : 0);
+        }
+    }
+
     private static void unpackRange(int slotStart, int slotEnd) {
         int[]   indices   = gpuThingIndices;
         float[] soaCoordArr = Thing.soaCoord;
@@ -665,13 +1046,6 @@ public class GPUMoveThing {
             int thingIdx = indices[slot];
             int i3 = slot * 3;
             int s3 = thingIdx * 3;
-            // Write kernel output into the canonical SoA pose arrays
-            // (contiguous float[] writes, no Pt3D pointer chase). Derived
-            // fields (zVec/transXTox/end1/end2) and the Pt3D bridge run
-            // in a separate parallel pass (OP_DERIVED_AND_BRIDGE) after
-            // every worker has finished pose unpacks AND the cpuFallback
-            // moveThing loop has pushed its pose to SoA, so the bulk
-            // recompute sees a globally-consistent SoA pose snapshot.
             soaCoordArr[s3]     = coord.get(i3);
             soaCoordArr[s3 + 1] = coord.get(i3 + 1);
             soaCoordArr[s3 + 2] = coord.get(i3 + 2);
@@ -685,18 +1059,16 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // Public entry point.
+    // Public entry point — chained joints + move.
     // -------------------------------------------------------------------------
     public static void moveThings() {
         long t0 = System.nanoTime();
 
-        if (plan == null || topologyDirty || Thing.thingCt != lastThingCt) {
+        if (plan == null || topologyDirty || Thing.thingCt != lastThingCt
+            || Myosin.myoCt > myoCap) {
             onStepStart();
         }
 
-        // Snapshot scalar params once per call so the worker pack can read
-        // primitive fields without touching the Env Parameter machinery
-        // (which involves a HashMap.get).
         sBTransCoeff   = (float) Env.BTransCoeff.getValue();
         sBRotCoeff     = (float) Env.BRotCoeff.getValue();
         sXLinkTAttn    = (float) Env.xLinkTransAttn.getValue();
@@ -712,13 +1084,39 @@ public class GPUMoveThing {
             dispatchAndWait(op, sc);
             coordsDirty = false;
         }
+
+        // Per-Myosin joint pack — drags + cocked flags only; slot maps were
+        // set up by classifyThings() and reused. Skip when no joint Myosins.
+        long jointPackStart = System.nanoTime();
+        if (myoJointCt > 0) {
+            dispatchAndWait(OP_PACK_JOINTS, myoJointCt);
+        }
+        long jointPackEnd = System.nanoTime();
+
         params.set(0, (float) Env.deltaT.getValue());
         double kT = Env.Boltz * Env.tempK;
         double dt = Env.deltaT.getValue();
         params.set(1, (float) Math.sqrt(2.0 * kT / dt));
+
+        jointParams.set(0,  (float) Env.deltaT.getValue());
+        jointParams.set(1,  (float) Env.myoJ1FracMove.getValue());
+        jointParams.set(2,  (float) Env.myoJ1FracR.getValue());
+        jointParams.set(3,  (float) Env.myoJ1FracMoveTorq.getValue());
+        jointParams.set(4,  (float) Env.myoJ2FracMove.getValue());
+        jointParams.set(5,  (float) Env.myoJ2FracR.getValue());
+        jointParams.set(6,  (float) Env.myoJ2FracMoveTorq.getValue());
+        jointParams.set(7,  (float) Env.myoMotorLength.getValue());
+        jointParams.set(8,  (float) Env.myoLeverLength.getValue());
+        jointParams.set(9,  (float) Env.myoRodLength.getValue());
+        jointParams.set(10, (float) Env.myosinStallForce.getValue());
+        jointParams.set(11, (float) Myosin.uncockedLever_MotorAngle);
+        jointParams.set(12, (float) Myosin.cockedLever_MotorAngle);
+
         counts.set(0, slotCount);
         counts.set(1, stepCounter);
         counts.set(2, runSeed);
+        counts.set(3, myoJointCt);
+
         long packEnd = System.nanoTime();
 
         if (slotCount > 0) {
@@ -732,34 +1130,13 @@ public class GPUMoveThing {
         for (int i = 0; i < cpuFallbackCt; i++) {
             cpuFallback[i].moveThing();
         }
-        // SoA derived recompute + Pt3D bridge: now that every Thing has a
-        // fresh SoA pose (GPU workers wrote it for kernel slots; cpuFallback
-        // moveThing pushed it via pushPoseToSoa), the bulk pass can read the
-        // canonical pose, compute zVec/transXTox/end1/end2 into SoA derived
-        // arrays, and copy the result back into the Pt3D bridge fields that
-        // unconverted CPU readers chase. Parallelised across the same worker
-        // pool that just ran OP_UNPACK; partition is over Thing indices
-        // [0, thingCt) rather than GPU slots. cpuFallback Things see a
-        // redundant overwrite of their Pt3D with the same values they
-        // computed inside initialize() — harmless, and avoids needing a
-        // sparse "GPU slot index → Thing index" set membership check.
         int tc = Thing.thingCt;
         if (tc > 0) {
-            // Skip the worker dispatch for small thingCt — at gliding-assay
-            // scale (~1300 Things) the per-step dispatch overhead (~0.1–1 ms
-            // for synchronized notifyAll + wait across 16 workers) dwarfs the
-            // actual bulk-pass work (~130 µs single-threaded). Threshold
-            // chosen well below the dense-scale Thing count (~588 K) so the
-            // dense path keeps the parallel speedup.
             if (tc < DERIVED_BRIDGE_PARALLEL_THRESHOLD) {
                 Thing.recomputeDerivedSoA(0, tc);
             } else {
                 dispatchAndWait(OP_DERIVED_AND_BRIDGE, tc);
             }
-            // FilSegment per-step bookkeeping (collision-quick-reject xRange,
-            // and live end1Pt/end2Pt Pt3D snapshots used for ptAtEnd1/ptAtEnd2
-            // reference-identity checks in joint code). The GPU unpack path
-            // skips per-Thing initialize(), so these refreshes must happen here.
             int filCt = FilSegment.filSegmentCt;
             FilSegment[] fils = FilSegment.theFilSegments;
             for (int i = 0; i < filCt; i++) {
@@ -771,8 +1148,6 @@ public class GPUMoveThing {
                 fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
                 fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
             }
-            // MyoMotor.bindTip — live Pt3D snapshot of motor's end2 that
-            // Mesh/MotorBindGrid3D index every step. Same skip-initialize() reason.
             int motorCt = MyoMotor.motorCt;
             MyoMotor[] motors = MyoMotor.theMotors;
             for (int i = 0; i < motorCt; i++) {
@@ -783,31 +1158,32 @@ public class GPUMoveThing {
         }
         long unpackEnd = System.nanoTime();
 
-        packNanos   += packEnd   - packStart;
-        execNanos   += execEnd   - packEnd;
-        unpackNanos += unpackEnd - execEnd;
-        totalNanos  += unpackEnd - t0;
+        packNanos      += packEnd       - packStart;
+        jointPackNanos += jointPackEnd  - jointPackStart;
+        execNanos      += execEnd       - packEnd;
+        unpackNanos    += unpackEnd     - execEnd;
+        totalNanos     += unpackEnd     - t0;
         callCount++;
         stepCounter++;
     }
 
-    /** Diagnostic timing accessors — read by BoxOfActin at run end. */
-    public static long getTotalNanos()  { return totalNanos;  }
-    public static long getPackNanos()   { return packNanos;   }
-    public static long getExecNanos()   { return execNanos;   }
-    public static long getUnpackNanos() { return unpackNanos; }
-    public static int  getCallCount()   { return callCount;   }
+    public static long getTotalNanos()     { return totalNanos;     }
+    public static long getPackNanos()      { return packNanos;      }
+    public static long getJointPackNanos() { return jointPackNanos; }
+    public static long getExecNanos()      { return execNanos;      }
+    public static long getUnpackNanos()    { return unpackNanos;    }
+    public static int  getCallCount()      { return callCount;      }
 
-    /** Diagnostic counters. */
     public static int getSlotCount()     { return slotCount;     }
     public static int getCpuFallbackCt() { return cpuFallbackCt; }
     public static int getSlotCap()       { return slotCap;       }
+    public static int getMyoCap()        { return myoCap;        }
+    public static int getMyoJointCt()    { return myoJointCt;    }
     public static int getNumWorkers()    { return N_WORKERS;     }
 
-    /** Reset the plan (arrays survive); mirrors GPUMotorBinding.reset(). */
     public static void reset() {
         closePlan();
-        packNanos = execNanos = unpackNanos = totalNanos = 0;
+        packNanos = execNanos = unpackNanos = totalNanos = jointPackNanos = 0;
         callCount = 0;
         stepCounter = 0;
         topologyDirty = true;

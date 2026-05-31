@@ -1,0 +1,16 @@
+=== Chained-GPU 10-seed ensemble (glidingAssay500_val) ===
+bindEvents         (n=10): mean= 497.8000  SEM=38.2320  SD=120.9001
+meanBoundMotors    (n=10): mean=   5.0057  SEM= 0.3630  SD=  1.1478
+glidingVelocity    (n=10): mean=   6.3244  SEM= 0.1341  SD=  0.4240
+
+=== Iter2d CPU 10-seed baseline (reused; CPU unchanged) ===
+bindEvents              mean= 856.8000  SEM=45.7200  SD=144.5800
+meanBoundMotors         mean=   7.3000  SEM= 0.3000  SD=  0.9400
+glidingVelocity         mean=   8.2200  SEM= 0.1500  SD=  0.4600
+
+=== |diff|/cSEM gate (<2.0 PASS) ===
+bindEvents        : |497.800 - 856.800| / 59.5987 =  6.024  FAIL
+meanBoundMotors   : |  5.006 -   7.300| /  0.4709 =  4.872  FAIL
+glidingVelocity   : |  6.324 -   8.220| /  0.2012 =  9.422  FAIL
+
+SOME FAILED — see ratios above

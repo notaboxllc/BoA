@@ -1,0 +1,31 @@
+=== dense98K_cpu_chained start 22:25:08 ===
+Finished closing JSON plots!
+=== dense98K_cpu_chained end 22:27:36 ===
+=== dense98K_gpu_chained start 22:27:36 ===
+Finished closing JSON plots!
+=== dense98K_gpu_chained end 22:29:44 ===
+=== scale200K_cpu start 22:29:44 ===
+Finished closing JSON plots!
+=== scale200K_cpu end 22:32:17 ===
+=== scale200K_gpu start 22:32:17 ===
+Finished closing JSON plots!
+=== scale200K_gpu end 22:34:29 ===
+=== scale400K_cpu start 22:34:29 ===
+Finished closing JSON plots!
+=== scale400K_cpu end 22:38:13 ===
+=== scale400K_gpu start 22:38:13 ===
+Finished closing JSON plots!
+=== scale400K_gpu end 22:41:38 ===
+=== scale600K_cpu start 22:41:38 ===
+	at BoxOfActin.main(BoxOfActin.java:6)
+=== scale600K_cpu end 22:41:43 ===
+=== scale600K_gpu start 22:41:43 ===
+	at BoxOfActin.main(BoxOfActin.java:6)
+=== scale600K_gpu end 22:41:49 ===
+=== filamentDense1K_cpu start 22:41:49 ===
+Finished closing JSON plots!
+=== filamentDense1K_cpu end 22:42:14 ===
+=== filamentDense1K_gpu start 22:42:14 ===
+Finished closing JSON plots!
+=== filamentDense1K_gpu end 22:42:43 ===
+ALL BENCHMARKS DONE 22:42:43

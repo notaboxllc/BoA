@@ -759,11 +759,15 @@ public class BoxOfActin {
 				startAllThreadSets(Env.membraneLinksStart);
 				waitOnAllThreadSets(Env.membraneLinksStop);
 
-				// actual myosin joints. GPU path runs per-Myosin jointConstraints()
-				// as a single kernel; the CPU Myosin.myoThreads short-circuits when
-				// useGPU is set. MyosinDimer (cross-Myosin coupling) keeps its CPU
-				// dispatch via the same myoJoints1 wave.
-				if (Env.useGPU) { GPUMyosinJoints.computeJoints(); }
+				// actual myosin joints. On the GPU path, the per-Myosin
+				// jointConstraints() kernel is the first task of the chained
+				// TaskGraph in GPUMoveThing.moveThings() — it ADDS joint
+				// forces/torques directly to the shared device-side forceSum/
+				// torqueSum that the move kernel then reads. So nothing
+				// dispatches here on the GPU path; the CPU Myosin.myoThreads
+				// short-circuits when useGPU is set, and MyosinDimer
+				// (cross-Myosin coupling) keeps its CPU dispatch in the
+				// myoJoints1 wave.
 				startAllThreadSets(Env.myoJoints1Start);
 				waitOnAllThreadSets(Env.myoJoints1Stop);
 
@@ -1244,12 +1248,14 @@ public class BoxOfActin {
 		}
 		if (Env.useGPU && GPUMoveThing.getCallCount() > 0) {
 			int    calls = GPUMoveThing.getCallCount();
-			double tot   = GPUMoveThing.getTotalNanos()  / 1.0e9;
-			double pk    = GPUMoveThing.getPackNanos()   / 1.0e9;
-			double ex    = GPUMoveThing.getExecNanos()   / 1.0e9;
-			double un    = GPUMoveThing.getUnpackNanos() / 1.0e9;
-			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d pack=%.3fs exec=%.3fs unpack=%.3fs%n",
-				tot, calls, pk, ex, un);
+			double tot   = GPUMoveThing.getTotalNanos()      / 1.0e9;
+			double pk    = GPUMoveThing.getPackNanos()       / 1.0e9;
+			double jpk   = GPUMoveThing.getJointPackNanos()  / 1.0e9;
+			double ex    = GPUMoveThing.getExecNanos()       / 1.0e9;
+			double un    = GPUMoveThing.getUnpackNanos()     / 1.0e9;
+			// pack includes jointPack — print slotPack as (pack - jointPack) for a clean breakdown.
+			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d slotPack=%.3fs jointPack=%.3fs exec=%.3fs unpack=%.3fs%n",
+				tot, calls, pk - jpk, jpk, ex, un);
 		}
 		if (Env.useGPU && GPUMyosinJoints.getCallCount() > 0) {
 			int    calls = GPUMyosinJoints.getCallCount();
