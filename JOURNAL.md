@@ -4,6 +4,92 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Rod-lever joint stiffness 0→0.1: STOP at rest-angle gate
+
+Planner asked: set `myoJ2FracMoveTorq = 0.10` and run the conformation
+pre-check + 10-seed CPU/GPU ensembles to see whether a small biologically-
+defensible torsional stiffness in the rod-lever (S2 hinge) joint pins the
+soft DOF so the GPU tracks CPU, while keeping gliding velocity in the
+5–8 µm/s range. Pre-registered STOP: if the rod-lever rest angle was
+undefined (spring never active), do not guess — flag for planner.
+
+### Code read — STOP triggered
+
+`applyRodLeverJointTorque()` (`boxOfActin/Myosin.java:262-291`) does
+apply a Hookean restoring torque proportional to `myoJ2FracMoveTorq` when
+that coefficient is nonzero. The rest angle is **hardcoded to 0** at
+`Myosin.java:273`:
+
+```
+double angRelaxed = 0;
+double angD = angTween-angRelaxed;
+...
+double torsionMag = Env.myoJ2FracMoveTorq.getValue()*(Math.PI/180)*angD
+                   / ((1/myoLever.bRotGam.y + 1/myoRod.bRotGam.y)*Env.deltaT.getValue());
+```
+
+This rest angle is **consistent with the constructor geometry** —
+`Myosin(rodEnd1, unitVec)` at `Myosin.java:52-65` lays rod, lever, and
+motor along the *same* `unitVec`, so at birth θ_RL = 0 (rod ‖ lever).
+The rest angle of 0 = "restore to the assembly conformation".
+
+But: this rest angle has never been exercised in production because
+`myoJ2FracMoveTorq` has been exactly 0 for the entire history of the
+parameter (per 2026-05-31 Part 1 diagnostic). The simulation's
+*natural* equilibrium without this spring is θ_RL ≈ 96° (1.676 rad CPU,
+1.602 rad GPU) — far from the construction angle of 0°. That ~96°
+equilibrium emerges from the balance of (a) rod-lever joint **stretch**
+force coupling, (b) lever-motor torsion holding lever-motor at 0° or
+60° depending on cocked state, (c) R×F moment-arm coupling, and
+(d) Brownian forcing.
+
+### Why this is the STOP condition
+
+Activating `myoJ2FracMoveTorq = 0.10` with rest = 0 does *not* gently
+pin the soft DOF at the current ~96° equilibrium. It actively pulls
+the conformation from ~96° back toward 0° (rod-lever colinear). That
+is a structural restoration toward the construction geometry, not a
+small biologically-defensible perturbation. The effective spring
+constant at J2=0.1 vs the prevailing torques would likely shift θ_RL
+by tens of degrees, not the small pinning effect the planner described
+as "biologically defensible" for the compliant S2 hinge.
+
+Two reasonable planner choices, neither I should make:
+
+1. **Rest angle = 0 (current default)**: accept that turning on the
+   spring forcibly resets myosin geometry to the construction angle.
+   Defensible only if the construction angle IS the intended biological
+   relaxed S2-neck angle — but the simulation has been running ~96°
+   relaxed for years, so callers depend on that geometry.
+2. **Rest angle = ~96° (current natural equilibrium)**: pick the
+   observed CPU equilibrium θ_RL = 1.676 rad as the new explicit rest
+   angle so J2=0.1 pins the soft DOF without rearranging the molecule.
+   Equivalent to introducing `uncockedRod_LeverAngle` /
+   `cockedRod_LeverAngle` parallel to the existing lever-motor
+   constants — possibly with cocked/uncocked variants if cocked
+   binding shifts θ_RL.
+
+Choice 2 matches the planner's stated intent ("pin the soft DOF so the
+GPU tracks the CPU") and the biological framing ("compliant but not a
+free swivel"). Choice 1 would invalidate the existing parameter file
+calibrations.
+
+### State
+
+- `Env.java` **unchanged** — `myoJ2FracMoveTorq` still at 0.00.
+- `Myosin.java` **unchanged** — rest angle still hardcoded 0.
+- No diagnostic runs, no ensembles. Per task scope, stopping for
+  planner decision on the rest angle before any model change lands.
+
+### Open — for planner
+
+- Pick a rest angle (0, ~96°, or split cocked/uncocked).
+- If choice 2, decide whether to introduce a `Parameter` (mutable at
+  runtime, would let us sweep cheaply) or a `static double` like the
+  existing `uncockedLever_MotorAngle` / `cockedLever_MotorAngle`.
+- Once chosen, re-issue the J2=0.1 conformation pre-check task with
+  the rest angle baked in.
+
 ## 2026-05-31 — Joint parameter + signed-torque diagnostic (CLEAN)
 
 Planner: the 4° rod-lever conformation bias (θ_RL 1.602 GPU vs
