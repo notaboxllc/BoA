@@ -4,6 +4,217 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Pose normalization diagnostic (uVec drift hypothesis)
+
+Planner hypothesis: the GPU's device-resident `uVec`/`yVec` drift off
+unit length and off orthogonality across many steps because the chained
+TaskGraph keeps poses on device and the move kernel does not
+re-normalize. The drift would feed biased `dot(uVecA, uVecB)` values
+into the joints kernel each step, explaining the steady-state θ_RL
+shift that double-precision joint arithmetic could not undo.
+
+This entry confirms or refutes the hypothesis via a code-read plus a
+direct measurement of |uVec|, |yVec|, and |uVec·yVec| over both configs.
+
+### Part 1 — Code read
+
+**A. Does the GPU move kernel re-normalize the orientation vectors?**
+
+`boxOfActin/GPUMoveThing.java` lines 689–707, the trailing rotation
+update of `moveThingKernel`:
+
+```
+float nuX = ux + yx * uTransInY + zx * uTransInZ;
+...
+float nuInv = 1.0f / (float) Math.sqrt(nuX * nuX + nuY * nuY + nuZ * nuZ);
+uVec.set(i3,     nuX * nuInv);
+uVec.set(i3 + 1, nuY * nuInv);
+uVec.set(i3 + 2, nuZ * nuInv);
+...
+float nyInv = 1.0f / (float) Math.sqrt(nyX * nyX + nyY * nyY + nyZ * nyZ);
+yVec.set(i3,     nyX * nyInv);
+yVec.set(i3 + 1, nyY * nyInv);
+yVec.set(i3 + 2, nyZ * nyInv);
+```
+
+Magnitudes are normalized to unit length explicitly. The kernel does
+NOT perform an explicit Gram-Schmidt re-orthogonalization of yVec
+against the new uVec — both are integrated via independent first-order
+rotations and normalized in magnitude only. The first-order rotation
+preserves orthogonality to O((bw·dt)²) and accumulated float32 errors
+were the worry.
+
+**B. Does the CPU/host path re-normalize/re-orthogonalize?**
+
+`boxOfActin/Thing.java` lines 736–784, `recomputeDerivedSoA`:
+
+```
+float zx = uy*yz - uz*yy; ...
+float zmag2 = zx*zx + zy*zy + zz*zz;
+if (zmag2 > 0f) {
+    float inv = (float) (1.0 / Math.sqrt(zmag2));
+    zx *= inv; zy *= inv; zz *= inv;
+}
+zVecArr[b3] = zx; ...
+// yVec' = zVec × uVec (restores orthogonality).
+yx = zy*uz - zz*uy;
+yy = zz*ux - zx*uz;
+yz = zx*uy - zy*ux;
+yVecArr[b3] = yx; yVecArr[b3+1] = yy; yVecArr[b3+2] = yz;
+```
+
+`recomputeDerivedSoA` (called every step on the host after
+`unpackRange`) computes `zVec = uVec × yVec`, normalizes zVec, then
+**overwrites yVec to `zVec × uVec`** so the body frame is exactly
+orthonormal by construction (modulo |uVec|=1 from the GPU kernel).
+uVec itself is taken as-is from the GPU's normalized output — no host
+re-normalization.
+
+**C. Transfer mode in the chained TaskGraph (`GPUMoveThing.java:751-785`):**
+
+```
+TaskGraph tg = new TaskGraph("chained")
+    .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                      coord, uVec, yVec, ...)
+    ...
+    .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                    coord, uVec, yVec);
+```
+
+Both directions are `EVERY_EXECUTION`. **The device poses are NOT
+device-resident across steps** — they are uploaded from host
+`soaCoord`/`soaUVec`/`soaYVec` each step and downloaded back each
+step. The CPU re-orthogonalization in `recomputeDerivedSoA` is
+applied between unpack and the next pack, so the device receives
+freshly orthonormalized poses every step.
+
+**D. CPU-joints (passing) vs GPU-joints (failing) pose flow:**
+
+Identical. `DIAG_CPU_JOINTS=true` only zeros `counts[3]` so the GPU
+joints kernel becomes a no-op (line 1004–1006); the move kernel,
+unpack, and `recomputeDerivedSoA` paths are unchanged. CPU joints
+write to `soaForceSum` (uploaded as `cpuForceSum`) instead of the
+device `jointForceSum`. The pose normalization profile of the two
+configs is necessarily identical at the code level.
+
+**Code-read verdict: the chained plan already does what the
+hypothesis worried it didn't.** Magnitudes normalized in the kernel,
+orthogonality restored on the host every step, no device-resident
+drift possible.
+
+### Part 2 — Measurement
+
+Extended `boxOfActin/JointDiag.java` with `|uVec|`, `|yVec|`,
+`|uVec·yVec|` Welford accumulators across all (rod, lever, motor) ×
+sample tuples, plus first-sample / last-sample drift trackers.
+Sampled every 50 steps over a 10100-step `glidingAssay500_val` run,
+single seed (1), both configs.
+
+Logs: `RUN_LOGS/2026-05-31_posenorm_CPUJOINTS.log`,
+`RUN_LOGS/2026-05-31_posenorm_GPUJOINTS.log`.
+
+```
+                                DOUBLE (CPU joints)    FLOAT32 (GPU joints)
+samples (3 per Myo × time)      8,484,000              8,484,000
+|uVec|       mean               0.99999999             0.99999999
+             SD                 4.74e-08               4.74e-08
+             max_dev_from_1     1.91e-07               1.91e-07
+|yVec|       mean               1.00000000             1.00000000
+             SD                 6.44e-08               6.44e-08
+             max_dev_from_1     3.13e-07               3.14e-07
+|uVec·yVec|  mean               1.16e-08               1.16e-08
+             SD                 1.04e-08               1.04e-08
+             max                8.65e-08               8.74e-08
+drift |uVec|       step 50 → 10100  0.9999999946 → 0.9999999939   0.9999999945 → 0.9999999944
+drift |uVec·yVec|  step 50 → 10100  9.86e-09 → 1.15e-08            1.01e-08 → 1.15e-08
+theta_RL    mean                1.675985 rad           1.602238 rad   ← 4.2° bias reproduces
+head_z      mean                -0.038815 µm           +0.015898 µm   ← bias reproduces
+head_z      SD                  0.048644 µm            0.084485 µm    ← bias reproduces
+bindEvents                      987                    221            ← bias reproduces
+glidingVelocity                 9.10 µm/s              5.60 µm/s
+```
+
+Pose vectors stay at unit length to ~2e-7 (float32 representation
+floor) and orthogonal to ~1e-8 (1e-15 of unit area) in BOTH configs,
+with no drift over 10100 steps. Both metrics match between configs to
+many digits.
+
+### Verdict — REFUTED
+
+The hypothesis that the device-resident `uVec` drifts off unit length
+or off orthogonality is decisively refuted. Three independent lines of
+evidence converge:
+
+1. **Code:** EVERY_EXECUTION transfers preclude device-resident drift;
+   the kernel renormalizes magnitudes; the host re-orthogonalizes
+   yVec each step. Whatever pose-normalization quality exists, both
+   CPU-joints and GPU-joints configs share it.
+2. **Measurement, CPU-joints config:** |uVec|, |yVec|, |uVec·yVec|
+   sit at the float32 numerical floor; no drift.
+3. **Measurement, GPU-joints config:** identical pose-normalization
+   metrics; the conformational bias (θ_RL, head_z, bindEvents)
+   reproduces unchanged.
+
+The bias is NOT in the pose vectors. It comes from something else in
+how the GPU pipeline evolves poses vs the CPU pipeline — and the only
+remaining difference between the two configs is **where the joint
+forces were computed (CPU double vs GPU float32)**.
+
+### What this leaves on the table
+
+The bias is consistent with what `GPU_NUMERICAL_PRECISION.md` §1
+already documents and what today's prior entries already concluded:
+**float32 quantization at storage propagates into the joint
+computation's pose inputs, biasing the equilibrium of the stiff
+torsion springs even when the joint arithmetic itself is in double.**
+The 24-bit float32 mantissa puts a ~6e-8 relative error on every uVec
+component at upload. The joints kernel widens to double on read, but
+the values it widens are already quantized; `dot(uVec_A, uVec_B)` ≠
+cos(θ) to ~1e-7 per component, and that bias times a stiff k shifts
+the equilibrium.
+
+The CPU-joints config evades this not because it has better pose
+precision (it has the same float32 storage) but because the CPU joint
+computation runs **before** the pose round-trips through the GPU SoA —
+it reads the Pt3D fields, which are double, before any float
+narrowing. The GPU joint computation reads the FloatArray, which is
+float32 always.
+
+### Recommended next move
+
+This refutes one specific mechanism. The correct fix path is now
+unambiguous: **promote `soaUVec` / `soaCoord` to double-backed device
+storage** (TornadoVM `DoubleArray`), so the joints kernel reads
+double pose inputs from the start. Estimated effort: ~1 day, gated
+by the conformation pre-check (θ_RL → 1.676). The chained TaskGraph
+structure does not need to change; only the FloatArray types.
+
+The pose-normalization diagnostic remains useful as a sanity check
+that future kernel changes (especially the pose-precision promotion)
+don't accidentally break the magnitude/orthogonality invariants.
+
+### Files changed (default-off)
+
+- `boxOfActin/JointDiag.java` — added pose-normalization accumulators
+  (|uVec|, |yVec|, |uVec·yVec| Welford means, SDs, max deviations,
+  first/last drift trackers). Gated by the existing `ENABLED` flag
+  / `BOA_DIAG_JOINT_STATS` env var. New per-config dump section
+  `=== POSE NORMALIZATION DIAGNOSTIC ===` printed after the existing
+  joint-angle dump.
+
+Final state: `JointDiag.ENABLED = false`. Production behaviour
+unchanged. The extended dump fires when the same env var as the
+2026-05-31 conformation diagnostic is set.
+
+### Open
+
+- The double-pose promotion is the live recommendation. Same single-
+  seed conformation pre-check applies: if θ_RL returns to ~1.676
+  with `coord` and `uVec` promoted to `DoubleArray`, the cheap path
+  is two-axis precision promotion. If not, the cause is even deeper
+  in the pipeline (Brownian generation, drag tensors, dt) and the
+  diagnostic strategy should pivot.
+
 ## 2026-05-31 — Double-precision joint arithmetic + accurate acos (no conformational recovery)
 
 Planner: widen the GPU jointsKernel's torque/force chain to double
