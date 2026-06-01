@@ -178,6 +178,11 @@ public class BoxOfActin {
 		// make Things, etc
 		makeCrucible();
 		makeInitialThings();
+		// 2026-05-31 joint param + signed-torque diagnostic — Part 1 startup dump
+		// (no-op when BOA_DIAG_PARAMS unset). Must run AFTER makeInitialThings so
+		// drag tensors are populated on the first Myosin.
+		JointParamDiag.initFromEnv();
+		JointParamDiag.dumpParams();
 		if (Env.glidingAssay.isActive()) {
 			GlidingAssayEvaluator.create();
 			glidingEvaluator = GlidingAssayEvaluator.getInstance();
@@ -871,6 +876,9 @@ public class BoxOfActin {
 
 				// 2026-05-31 conformation diagnostic — no-op when JointDiag.ENABLED=false.
 				JointDiag.sample();
+				// 2026-05-31 joint param + signed-torque diagnostic — Part 3 late-step dump
+				// (no-op when BOA_DIAG_PARAMS unset).
+				JointParamDiag.sample();
 
 				// C3: safe-point — pause check (with inspect drain while waiting),
 				// kill check, then final inspect drain. Order: pause > kill > inspect.

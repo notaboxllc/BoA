@@ -1,0 +1,41 @@
+=== PART 1: PARAMETER TABLE (CPU double vs GPU float32 narrow) ===
+param                             CPU(double)     GPU(float widened)               abs diff
+deltaT                       1.0000000000e-05       9.9999997474e-06       2.5262124918e-13
+myoJ1FracMove                4.0000000000e-01       4.0000000596e-01       5.9604644553e-09
+myoJ1FracR                   4.0000000000e-01       4.0000000596e-01       5.9604644553e-09
+myoJ1FracMoveTorq            4.0000000000e-01       4.0000000596e-01       5.9604644553e-09
+myoJ2FracMove                4.0000000000e-01       4.0000000596e-01       5.9604644553e-09
+myoJ2FracR                   4.0000000000e-01       4.0000000596e-01       5.9604644553e-09
+myoJ2FracMoveTorq            0.0000000000e+00       0.0000000000e+00       0.0000000000e+00
+myoMotorLength               2.0000000000e-02       1.9999999553e-02       4.4703483623e-10
+myoLeverLength               8.0000000000e-03       8.0000003800e-03       3.7997961028e-10
+myoRodLength                 8.0000000000e-02       7.9999998212e-02       1.7881393449e-09
+myosinStallForce             6.0000000000e+00       6.0000000000e+00       0.0000000000e+00
+uncockedLM_deg               0.0000000000e+00       0.0000000000e+00       0.0000000000e+00
+cockedLM_deg                 6.0000000000e+01       6.0000000000e+01       0.0000000000e+00
+-- drag tensors (first Myosin, packed into myoDrags[0..8]) --
+rod.bTransGam.x              2.1029231872e-08       2.1029231689e-08       1.8234536183e-16
+rod.bTransGam.y              2.9307036469e-08       2.9307036797e-08       3.2874442216e-16
+rod.bRotGam.y                2.7805542501e-23       2.7805541995e-23       5.0528474795e-31
+lever.bTransGam.x            1.0192795263e-08       1.0192795052e-08       2.1010176959e-16
+lever.bTransGam.y            6.5571633428e-09       6.5571632568e-09       8.5986523998e-17
+lever.bRotGam.y              1.7213922306e-24       1.7213923139e-24       8.3335483283e-32
+motor.bTransGam.x            1.8849555922e-08       1.8849556582e-08       6.6072896371e-16
+motor.bTransGam.y            1.8849555922e-08       1.8849556582e-08       6.6072896371e-16
+motor.bRotGam.y              2.5132741229e-24       2.5132741620e-24       3.9130215945e-32
+-- derived: LM torsion maxMag cap (N*m, both formulas) --
+maxMag_LM_cap                6.0000000000e-20       5.9999998659e-20       1.3411045130e-27
+
+=== PART 2: THRESHOLDS / CLAMPS / GUARDS ===
+CPU applyLeverMotorJointForce  : no threshold/cap. cosBeta clamped to [-1,1] in moveCoeff.
+GPU applyLeverMotorJointForce  : strainDist>0, denom>0 guards (zero force if zero). cosB clamped to [-1,1].
+CPU applyLeverMotorJointTorque : isNaN(torsion)->return; unitVec() (random kick if mag==0);
+                                  dotVecs clamp [-1,1]; maxMag = stall*0.5*motorLen*1e-18 N*m (positive cap only).
+GPU applyLeverMotorJointTorque : tvMag2>0 skip (no kick); dotVecs clamp; maxMag identical formula.
+CPU applyRodLeverJointForce    : no threshold/cap.
+GPU applyRodLeverJointForce    : strainDist>0, denom>0 guards.
+CPU applyRodLeverJointTorque   : isNaN(torsion)->return; unitVec(); dotVecs clamp; NO maxMag cap.
+GPU applyRodLeverJointTorque   : tvMag2>0 skip; dotVecs clamp; NO maxMag cap.
+Difference: zero-magnitude branch (CPU = randomUnitVec kick, GPU = skip). Tiny per-step kick.
+            Already isolated as <=16 events of the ~330 by 2026-05-31 §Test 1.
+=== END PART 1+2 ===

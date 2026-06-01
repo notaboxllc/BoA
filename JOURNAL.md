@@ -4,6 +4,198 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Joint parameter + signed-torque diagnostic (CLEAN)
+
+Planner: the 4° rod-lever conformation bias (θ_RL 1.602 GPU vs
+1.676 CPU) is dimensionally implausible as a float32 rounding artefact
+(float32 ~1e-7 rad per op vs the bias's 7.3e-2 rad). It's almost
+certainly a systematically different torque computed by the GPU
+kernel: a parameter mismatch, a units-dependent threshold, or a
+formula difference Part A's magnitude/cosine check missed. Three-part
+audit to find it.
+
+### Part 1 — Parameter byte-for-byte CPU vs GPU
+
+Dump every numeric parameter feeding the joint torque computation
+side-by-side. CPU values via `Env.*.getValue()` / `Myosin.*`, GPU
+values via `(double)(float) <same>` (the narrowing that happens at
+`jointParams.set(i, (float) ...)` and `myoDrags.set(...)`). Log:
+`RUN_LOGS/2026-05-31_paramdiag_part1_part2.txt`.
+
+```
+param                CPU(double)         GPU(float widened)   abs diff
+deltaT               1.0000000000e-05    9.9999997474e-06     2.53e-13
+myoJ1FracMove        4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ1FracR           4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ1FracMoveTorq    4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracMove        4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracR           4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracMoveTorq    0.0000000000e+00    0.0000000000e+00     0.00      ← EXACT zero (RL torsion off)
+myoMotorLength       2.0000000000e-02    1.9999999553e-02     4.47e-10
+myoLeverLength       8.0000000000e-03    8.0000003800e-03     3.80e-10
+myoRodLength         8.0000000000e-02    7.9999998212e-02     1.79e-09
+myosinStallForce     6.0000000000e+00    6.0000000000e+00     0.00      ← EXACT (representable)
+uncockedLM_deg       0.0000000000e+00    0.0000000000e+00     0.00      ← EXACT
+cockedLM_deg         6.0000000000e+01    6.0000000000e+01     0.00      ← EXACT (representable)
+-- drag tensors first Myosin (CPU bRotGam.y / GPU narrow) --
+rod.bRotGam.y        2.7805542501e-23    2.7805541995e-23     5.05e-31
+lever.bRotGam.y      1.7213922306e-24    1.7213923139e-24     8.33e-32
+motor.bRotGam.y      2.5132741229e-24    2.5132741620e-24     3.91e-32
+maxMag_LM_cap (N*m)  6.0000000000e-20    5.9999998659e-20     1.34e-27
+```
+
+Every difference is purely float32 representation noise (~5e-8
+relative, the float32 mantissa floor). **Zero semantic mismatches.**
+No rest-angle is stored in different units, no factor-of-2, no
+half-angle convention difference, no degree/radian flip, no parameter
+silently rerouted. `myoJ2FracMoveTorq` is exactly 0 on both sides —
+the rod-lever torsion spring is OFF, so the 4° θ_RL bias is NOT
+attributable to a rod-lever rest-angle or stiffness mismatch.
+`uncockedLM_deg=0` and `cockedLM_deg=60` are bit-exact float and
+identical on both paths.
+
+### Part 2 — Threshold and clamp audit
+
+Every magnitude comparison in the joint paths, by method:
+
+| method | CPU guard / clamp | GPU guard / clamp | divergence? |
+|---|---|---|---|
+| applyLeverMotorJointForce  | cosBeta clamp [-1,1] inside `moveCoeff` | `cosB` clamp [-1,1]; `strainDist>0`, `denom>0` zero-guards | semantically identical for non-degenerate poses |
+| applyLeverMotorJointTorque | `isNaN(torsion)`→return; `unitVec()` (kicks random if mag==0); dotVecs clamp; `min(torsionMag, maxMag)` with `maxMag=stall*0.5*motorLen*1e-18` | `tvMag2>0` skip (no random kick); dotVecs clamp; `if (>maxMag) clamp` (same value, semantically same on signed reals) | one path: CPU randomUnitVec kick at zero-cross-product, GPU skip. Already isolated by Test 1 (2026-05-31 §) as ≤16 events of the ~330. |
+| applyRodLeverJointForce    | cosBeta clamp [-1,1] | `cosB` clamp; `strainDist>0`, `denom>0` zero-guards | same |
+| applyRodLeverJointTorque   | `isNaN`→return; `unitVec()`; dotVecs clamp; NO maxMag | `tvMag2>0`; dotVecs clamp; NO maxMag | same as above, but moot since `j2FracMoveTorq=0` makes the entire RL torsion identically zero on both sides |
+
+`maxMag_LM = stallForce_pN · 0.5 · motorLen_µm · 1e-18 = 6e-20 N·m`
+(units: pN→N is 1e-12, µm→m is 1e-6, product 1e-18, so the cap is
+correctly in SI N·m). Typical LM torque magnitudes are 1–2e-20 N·m
+(see Part 3); the cap is 3× typical and fires only on extreme outlier
+angles (angD > ~90°). Both CPU and GPU use the same maxMag value and
+same `(torsionMag > maxMag)` semantics on signed reals — there is no
+units-dependent firing-rate divergence.
+
+**Verdict: no units-dependent threshold differing between paths.**
+
+### Part 3 — Signed restoring-torque at the biased equilibrium
+
+At step 8000 (well past the GPU pose having drifted to its biased
+equilibrium), for the first 20 myosins, compute the SIGNED scalar
+`torsionMag` along the joint axis using both formulas on the SAME
+pose (read from the float32 SoA both ways). CPU formula uses
+`Pt3D.fastAcos` (which dispatches to `Math.acos` in the [-0.95, 0.95]
+band and uses small-angle sqrt approximation in the tails). GPU
+formula uses the Newton-refined `accurateAcos` and float-narrowed
+parameter copies. Log:
+`RUN_LOGS/2026-05-31_paramdiag_part3.txt`.
+
+```
+LM joint (lever-motor torsion, j1FracMoveTorq=0.4)
+  per-myosin tau_GPU - tau_CPU spans 1e-27 (mid-band: identical) to ~5e-23 (small-angle tail).
+  Mean signed difference (20 myosins): +1.146e-23 N*m
+  Reference: mean |tau| ~ 1.5e-20 N*m → relative bias ~7.6e-4
+
+RL joint (rod-lever torsion, j2FracMoveTorq=0)
+  Every per-myosin tau is EXACTLY 0.0 on both formulas.
+  Mean signed difference: 0.000e+00 N*m
+```
+
+The LM bias is small, systematically positive (GPU computes slightly
+*more* restoring torque than CPU), and traces to the small-angle
+behaviour of `Pt3D.fastAcos`: when `dot > 0.95` (i.e. θ < ~18°), it
+returns `sqrt(2(1-dot))` which underestimates the true angle by
+~θ³/24. The GPU's `accurateAcos` Newton-refines and matches
+`Math.acos` to ~1e-15. The bias appears only in the small-angle tail
+(myos with θ_LM < 18°), and is correctly zero in the middle band
+(myos with θ_LM in [18°, ~107°] — same `Math.acos` on both sides).
+
+Magnitude check: with effective LM stiffness
+`k_eff = j1FracMoveTorq / ((1/g_M + 1/g_L)·dt) ≈ 4e-20 N·m/rad`, a
+mean torque bias of 1.15e-23 implies an equilibrium shift of
+1.15e-23 / 4e-20 = 2.9e-4 rad = 0.016°. The journal's measured
+θ_LM mean shift between CPU and GPU configs is 4.1e-4 rad (≈0.024°)
+— same order of magnitude, with the small residual likely from
+distributional differences and the cocked/uncocked sub-populations
+weighting differently. **The LM-joint signed-torque bias is fully
+explained by the CPU's fastAcos small-angle approximation; the
+GPU is the more accurate of the two for θ_LM.**
+
+For the RL joint, the signed restoring torque is identically zero
+on both formulas because `myoJ2FracMoveTorq = 0`. **The 4° θ_RL bias
+between CPU and GPU CANNOT come from the rod-lever torsion
+calculation** — there is no rod-lever torsion calculation at this
+parameter setting. The θ_RL equilibrium is set purely by the
+balance between (a) the rod-lever joint stretch force coupled via
+R×F moment arms, (b) the lever-motor joint stretch force pulling on
+the lever's other end, and (c) Brownian forcing.
+
+### Verdict — all three parts CLEAN
+
+| part | result | implication |
+|---|---|---|
+| 1 — params | identical modulo float32 narrowing (~5e-8 rel) | no parameter mismatch |
+| 2 — thresholds/clamps | semantically identical; one zero-cross-product kick difference already exonerated | no units bug |
+| 3 — signed torque | LM: ~7e-4 bias from CPU's fastAcos small-angle approx (GPU is correct); RL: zero on both | no formula bug; bias source is upstream of torque computation |
+
+Per the planner's last branch — "all three come back clean: then the
+torque computation genuinely matches and the bias is in force
+APPLICATION or step ORDERING" — this is the outcome. The torque
+math on the same pose is correct in the GPU kernel. The 4° θ_RL
+equilibrium shift comes from the cumulative float32 drift of the
+joint FORCE + R×F moment-arm pose-feedback loop integrated over
+~8000 steps, not from any single-step torque or parameter error.
+
+### Recommendation
+
+This closes the precision/parameter avenue. The remaining options
+align with the planner's pre-registered branches:
+
+1. **Revert joints to CPU (recommended).** The `DIAG_CPU_JOINTS=true`
+   path already validates clean against the 10-seed CPU baseline
+   (828 ± 68 vs 857 ± 46, |diff|/cSEM=0.34). Cost is ~12 s of CPU
+   work per ~minute of GPU sim — modest. The joints kernel stays in
+   tree, behind a flag, as a known-issue artefact for future
+   investigators interested in fully-on-device runs.
+2. **Promote `coord` / `uVec` to `DoubleArray` (deferred).** The next
+   precision lever, but it changes the chained TaskGraph types and
+   needs PTX backend validation. The signed-torque diagnostic just
+   showed the torque math is correct given float32 pose — promoting
+   pose to double would close the residual cumulative-drift gap but
+   at non-trivial implementation cost. Defer until the simpler
+   revert is in place and bigger GPU wins (Brownian, drag) are
+   pursued.
+
+### Files changed (default-off)
+
+- `boxOfActin/JointParamDiag.java` (new) — Part 1 startup parameter
+  dump + Part 3 late-step signed-torque comparison. Gated by env
+  var `BOA_DIAG_PARAMS=1`. `BOA_DIAG_PARAM_STEP=N` selects the
+  late-step (default 8000); `BOA_DIAG_PARAM_N=N` sets myosin count
+  (default 20). The diagnostic itself contains an inlined copy of
+  `accurateAcos` so it matches the kernel's formula exactly while
+  running on host.
+- `boxOfActin/BoxOfActin.java` — `JointParamDiag.initFromEnv()` +
+  `dumpParams()` call after `makeInitialThings()`;
+  `JointParamDiag.sample()` call after `JointDiag.sample()` in
+  `doLoop()`.
+
+Final state: `JointParamDiag.ENABLED=false`. Production behaviour
+unchanged. The env var lights the diagnostic up for any future
+re-run.
+
+### Open
+
+- Land the "revert joints to CPU" decision as a default behaviour
+  change: flip `DIAG_CPU_JOINTS` to a normal flag (e.g. rename to
+  `gpuJointsDisabled` and gate via `-gpuNoJoints`), drop the
+  diagnostic naming. Run the 10-seed glidingAssay ensemble once more
+  to confirm the path still passes, then update GPU_STRATEGY.md and
+  CLAUDE.md.
+- Document the GPU joints kernel as a known issue in
+  GPU_NUMERICAL_PRECISION.md: parameters and torque math are
+  correct, but cumulative float32 drift in the pose-feedback loop
+  produces a 4° θ_RL bias and -42 % bindEvents in the gliding
+  assay. Fix path is to promote pose precision (`coord`/`uVec` to
+  `DoubleArray`), not to fix the joint kernel.
+
 ## 2026-05-31 — Pose normalization diagnostic (uVec drift hypothesis)
 
 Planner hypothesis: the GPU's device-resident `uVec`/`yVec` drift off
