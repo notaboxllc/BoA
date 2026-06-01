@@ -142,7 +142,18 @@ public class BoxOfActin {
 		}
 		System.err.println("[TELEPORT_DIAG] enabled=" + Env.myoMiniTeleportDiag
     + " threshold=" + Env.myoMiniTeleportThreshold);
-		
+
+		// 2026-05-31 conformation diagnostic: env-var hooks
+		// BOA_DIAG_JOINT_STATS=1     → enable conformation sampling (off by default)
+		// BOA_DIAG_CPU_JOINTS=1      → force CPU-double joint computation (DOUBLE config)
+		JointDiag.initFromEnv();
+		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
+		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
+		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
+			GPUMoveThing.DIAG_CPU_JOINTS = true;
+			System.err.println("[JOINT_DIAG] DIAG_CPU_JOINTS forced ON via env var");
+		}
+
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }
 
@@ -858,6 +869,9 @@ public class BoxOfActin {
 
 				updateCounters();
 
+				// 2026-05-31 conformation diagnostic — no-op when JointDiag.ENABLED=false.
+				JointDiag.sample();
+
 				// C3: safe-point — pause check (with inspect drain while waiting),
 				// kill check, then final inspect drain. Order: pause > kill > inspect.
 				while (Env.paused && !Env.terminating) {
@@ -1232,6 +1246,8 @@ public class BoxOfActin {
 		}
 		System.out.println("collisionTime = " + collisionTime);
 		System.out.println("myosinTime = " + myosinTime);
+		// 2026-05-31 conformation diagnostic: no-op when disabled.
+		JointDiag.dump();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);

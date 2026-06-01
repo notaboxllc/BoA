@@ -4,6 +4,192 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Joint conformation diagnostic: angle/position/energy distributions
+
+Follow-up to today's joint delta-buffer transport diagnostic, which
+isolated GPU-float32 joint COMPUTATION as the sole differentiator
+between PASS (DIAG_CPU_JOINTS, bindEvents ≈ 828) and FAIL (chained GPU
+float32, bindEvents ≈ 461) configs. Per-step relative drift was ~1e-5,
+but the mechanism connecting that to a 49% binding drop was unconfirmed.
+This entry measures the intermediate physical state (joint angles,
+head position, joint elastic energy) to identify the mechanism before
+landing the planned double-precision pose fix.
+
+### Instrumentation
+
+New `boxOfActin/JointDiag.java`: Welford accumulators for θ_LM, θ_RL,
+head_z, and E_joint over all (motor × sample) tuples. Every
+SAMPLE_INTERVAL = 50 steps the sampler iterates `Myosin.theMyosins[]`,
+casts the SoA pose floats to double, computes joint angles via
+`Math.acos` (instrumentation precision, not simulation precision), and
+updates the accumulators. E_joint per motor uses effective spring
+constants derived from the overdamped torsionMag formula:
+`effK = j*FracMoveTorq / ((1/g_a + 1/g_b)*dt)` in N·m/rad. Trend is
+tracked via the first/midpoint/last sample-mean of E_joint to detect
+monotonic drift.
+
+Gating: `JointDiag.ENABLED` (default false). Set via env var
+`BOA_DIAG_JOINT_STATS=1`. Separate env var `BOA_DIAG_CPU_JOINTS=1`
+forces `GPUMoveThing.DIAG_CPU_JOINTS=true` so DOUBLE/FLOAT32 configs
+can be selected without recompiling.
+
+Hooks: `BoxOfActin.begin()` calls `JointDiag.initFromEnv()` and applies
+env-var flag overrides; `BoxOfActin.doLoop()` calls `JointDiag.sample()`
+immediately after `updateCounters()`; end-of-run reporting calls
+`JointDiag.dump()` before the `[STATS]` lines.
+
+### Run protocol
+
+`glidingAssay500_val`, seed 1, GPU enabled, M=500, 10100 steps (runTime
+0.1s at dt=1e-5s). 202 sample events × 14000 motors = 2.83M tuples per
+quantity. Same seed both configs; only joint-force precision differs.
+
+```
+# DOUBLE
+BOA_DIAG_JOINT_STATS=1 BOA_DIAG_CPU_JOINTS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview ... \
+    BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val -seed 1
+
+# FLOAT32
+BOA_DIAG_JOINT_STATS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview ... \
+    BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val -seed 1
+```
+
+### Side-by-side dumps
+
+Full logs: `RUN_LOGS/2026-05-31_jointdiag_DOUBLE.log`,
+`RUN_LOGS/2026-05-31_jointdiag_FLOAT32.log`.
+
+```
+                              DOUBLE              FLOAT32       Δ
+samples (motor × time)        2,828,000           2,828,000     0
+theta_LM    mean (rad)        0.349763            0.349349     -4.1e-4
+            SD   (rad)        0.279287            0.278891     -4.0e-4
+theta_RL    mean (rad)        1.676320            1.602932     -7.3e-2   ← 4.2° shift
+            SD   (rad)        0.660175            0.681731     +2.2e-2   ← +3.3% wider
+head_z      mean (µm)        -0.038908           +0.015640     +5.5e-2   ← +54 nm shift
+            SD   (µm)         0.048679            0.084714     +3.6e-2   ← +74% wider
+E_joint     mean (J)          1.8278e-21          1.8287e-21   ~0 (0.05%)
+            SD   (J)          1.8844e-21          1.8830e-21   ~0
+E_joint trend: first→mid→last
+            DOUBLE:   1.0469e-21 → 1.0406e-21 → 1.9468e-21  (slope 8.95e-26/step)
+            FLOAT32:  1.0213e-21 → 1.0946e-21 → 1.9542e-21  (slope 9.28e-26/step)
+bindEvents                     586                512        -74
+glidingVelocity (µm/s)        7.87                6.45        -1.42
+```
+
+(Single-seed bindEvents are noisy — DOUBLE prior-journal seed 1 ran 1096;
+this run got 586. Both well inside the per-seed range 449–1163 from the
+2026-05-31 10-seed DOUBLE ensemble. The relative DOUBLE-vs-FLOAT32
+direction is what matters for the diagnostic, not the absolute.)
+
+### Interpretation — hypothesis selection
+
+Mapping back to the three pre-registered hypotheses:
+
+1. **Conformational bias.** θ_RL mean shifts by 73 mrad (~4°) — the
+   rod-lever joint settles at a measurably different equilibrium under
+   float32 forces. head_z mean shifts by 55 nm. θ_LM means match to
+   <1 part in 1000. **Partially confirmed (θ_RL, head_z).**
+2. **Numerical heating.** E_joint mean matches to 0.05%; E_joint SDs
+   match to 0.1%; E_joint trend slopes match within 4% (both rise from
+   1.04e-21 → 1.95e-21 J over the run). The upward trend exists in BOTH
+   configs and is interpretable as the system equilibrating from
+   well-aligned initial conditions toward the thermal/forced
+   equilibrium. **Rejected.** Float32 forces are NOT injecting net
+   elastic energy.
+3. **Mechanism downstream.** Distributions DO differ between configs
+   (head_z, θ_RL, head_z SD). **Rejected.** The mechanism is detectable
+   in conformation; binding drop has a measurable conformational
+   precursor.
+
+The most striking single statistic is the head_z SD: 49 nm (DOUBLE) vs
+85 nm (FLOAT32) — the FLOAT32 head position distribution is 74% wider
+than DOUBLE while sitting at a different mean. Motors are anchored at
+z = -0.05 µm; head length ≈ 0.020 µm. So the DOUBLE distribution
+(mean = -39 nm, SD = 49 nm) has heads pointing predominantly down or
+sideways relative to the anchor; the FLOAT32 distribution
+(mean = +16 nm, SD = 85 nm) has heads pointing up on average but with
+a much broader spread.
+
+Why broader head_z reduces binding: the GPU motor-binding kernel
+filters candidate filament voxels by distance to the head tip. A
+broader head_z distribution means a smaller fraction of heads are
+within capture range of the filament plane at any sample time. Mean
+shift alone doesn't tell us the direction — but the variance increase
+unambiguously reduces the peak density at any single height.
+
+### Mechanism summary
+
+The bias is **steady-state conformational, not energetic**. Float32
+joints introduce a small per-step force perturbation that:
+
+- shifts the equilibrium rod-lever angle (~4°),
+- shifts the equilibrium head height (~55 nm),
+- broadens the head_z distribution by 74%,
+- does NOT inject or remove net elastic energy.
+
+This is the signature of a non-conservative but bounded force noise:
+the perturbation pushes the system off the double-precision equilibrium
+to a different equilibrium, where the average energy is the same but
+the spatial distribution is shifted and broadened. The earlier kernel
+audit (this morning's torque-path diff) found no sign or order bug —
+the per-step bias is genuinely sub-1e-5 relative — but accumulated over
+the pose-joints feedback loop it shifts the equilibrium far enough to
+cost ~50% of binding events.
+
+### Decision: is the double-precision joint fix justified?
+
+**Yes, with a caveat.** The diagnostic shows the bias is in the
+conformational state, not in numerical heating, and the bias is
+detectable as a steady-state shift in measurable conformation. Promoting
+joint pose reads + joint arithmetic to double precision should close
+the equilibrium gap (the prior 2026-05-31 transport diagnostic already
+showed Part B's CPU-joints same-pose comparison reproduces ~5 sig figs
+when joints run in double).
+
+**Caveat:** the pose state on device is float32. Even with
+double-precision joints, the move kernel will continue to integrate
+pose in float32 and the joints kernel will continue to READ float32
+pose. Double-precision joint MATH won't fix the upstream float32 pose
+drift. The right scope is *both*: promote joint reads to double-cast
+locally inside the kernel, AND consider promoting pose state to
+double (or at minimum the orientation vectors `uVec`/`yVec`, which
+amplify through the rotational drag). The transport diagnostic
+explicitly flagged this two-axis fix.
+
+The conformation diagnostic now confirms the **mechanism is conformational
+equilibrium drift**, so the cheap fix (joint-math precision alone)
+addresses only the joint arithmetic's contribution. A clean fix
+requires promoting at least `uVec` to double-backed device state.
+
+### Files changed (all default-off)
+
+- `boxOfActin/JointDiag.java` (new) — Welford accumulators, env-var
+  gating, sample/dump entry points.
+- `boxOfActin/BoxOfActin.java` — `JointDiag.initFromEnv()` +
+  `BOA_DIAG_CPU_JOINTS` env-var hook in `begin()`; `JointDiag.sample()`
+  call after `updateCounters()` in `doLoop()`; `JointDiag.dump()` call
+  before the `[STATS]` lines in the post-loop reporting.
+
+Final state: `JointDiag.ENABLED = false`; `GPUMoveThing.DIAG_CPU_JOINTS
+= false`. Production behaviour unchanged. Both env vars are opt-in for
+future re-runs.
+
+### Open
+
+- The decision-confidence next step is a one-seed sanity run with `uVec`
+  promoted to `DoubleArray` (or a `FloatArray`-emulated double) to
+  confirm the conformation distributions narrow back to DOUBLE config
+  levels. Estimated half-day; gates the publication path.
+- The single-seed bindEvents=586 (DOUBLE) vs 512 (FLOAT32) here is much
+  closer than the 10-seed ensemble means (828 vs 461). The
+  conformation distributions ARE shifted measurably even when binding
+  events at a single seed look closer — meaning the bias is more
+  systematically detectable in θ_RL/head_z than in noisy seed-level
+  bindEvents.
+
 ## 2026-05-31 — Joint delta-buffer transport diagnostic
 
 Follow-up to today's chain of joint-kernel diagnostics. Planner's
