@@ -1,0 +1,90 @@
+## Single-myosin thermal characterization — CPU vs GPU
+##
+## Setup: ONE MyosinFixed at (0,0,-0.05), pointing +z. No filaments, no binding.
+##        Brownian + joints active. J2 = 0.00 (the original soft-joint configuration).
+##        500K steps × dt 1e-5 = 5.0 s simulated time. Sample every 10 steps → n=50010.
+##        Same seed (1), same parameter file (singleMyoDiag). Only difference:
+##        CPU uses BOA_DIAG_CPU_JOINTS=1 (per-Myosin double CPU dispatch);
+##        GPU runs the chained TaskGraph (jointsKernel + moveThing).
+##
+## Source logs: RUN_LOGS/2026-05-31_singleMyo_{CPU,GPU}.log
+
+=== SINGLE MYOSIN THERMAL CHARACTERIZATION ===
+                          CPU              GPU              diff
+theta_RL  mean        1.700741 rad     1.608809 rad     -0.0919  (-5.27 deg)
+theta_RL  SD          0.655236         0.677591         +0.0224
+theta_LM  mean        0.275604 rad     0.273180 rad     -0.0024  (-0.14 deg)
+theta_LM  SD          0.151780         0.142092         -0.0097
+
+rod   tilt mean       89.708 deg       87.087 deg       -2.62 deg
+rod   tilt SD         0.711534         0.676222         -0.0353
+lever tilt mean       90.453 deg       89.231 deg       -1.22 deg
+lever tilt SD         0.677424         0.679387         +0.0020
+motor tilt mean       90.496 deg       89.199 deg       -1.30 deg
+motor tilt SD         0.677573         0.678949         +0.0014
+
+head_x    mean       -0.000925 um     -0.479707 um     -0.4788   ★
+head_x    SD          0.045997         0.241386         +0.1954   ★
+head_y    mean        0.004296 um     -0.179089 um     -0.1834   ★
+head_y    SD          0.045955         0.116330         +0.0704   ★
+head_z    mean       -0.050119 um     -0.144789 um     -0.0947   ★
+head_z    SD          0.049296         0.234234         +0.1849   ★
+head_r    mean        0.061179 um      0.532898 um     +0.4717   ★
+head_r    SD          0.022451         0.223633         +0.2012   ★
+head_r    max         0.122287 um      1.046307 um     +0.9240   ★★ (head walks > 1 µm from anchor!)
+
+cocked fraction       0.0047           0.0006
+
+samples               n=50010          n=50010
+config                CPU joints       GPU joints kernel
+                      (DOUBLE)         (FLOAT32 + double joint math)
+
+## Key observations:
+##
+## 1. Internal joint angles MATCH well: theta_RL 5° gap (much smaller than
+##    head_r gap of half a micron), theta_LM agrees to 0.14°. The myosin's
+##    INTERNAL shape is statistically similar on both paths.
+##
+## 2. Head position is COMPLETELY DIFFERENT: GPU head wanders to a mean
+##    radial distance of 0.53 µm with max 1.05 µm. Rod length is 0.080 µm
+##    + lever 0.008 + motor 0.020 = 0.108 µm. The GPU head_r at 1.05 µm
+##    is 10× the assembly's total contour length — the whole myosin has
+##    drifted from its anchor.
+##
+## 3. CPU head stays close to the anchor: head_r mean 0.061, max 0.122 µm
+##    (consistent with thermal tumbling within one body length). head_z
+##    mean = -0.050, exactly the anchor z-value — the rod stays vertical-ish.
+##
+## 4. Absolute rod tilt is nearly isotropic on both paths (89° vs 87°
+##    mean, both with ~0.71 SD), so the assembly orientation distribution
+##    is similar in shape — the difference is that on GPU the assembly
+##    translates freely from its anchor.
+
+## ROOT CAUSE — identified during the diagnostic:
+##
+## MyosinFixed.jointConstraints() = super.jointConstraints() + applyRodFixedPtForce().
+## The second call is the rod-tail anchor spring (rod end1 pulled toward myFixedPt).
+##
+## On the GPU path, Myosin.MyosinThreads.divideAndConquer short-circuits the
+## per-Myosin CPU dispatch when `useGPU && !DIAG_CPU_JOINTS` (Myosin.java:77-88),
+## setting all jobDiv[i]=0. So MyosinFixed.jointConstraints() is NEVER called.
+## The GPU jointsKernel (GPUMoveThing.java:286+) only computes the 4 inter-segment
+## forces/torques (lever-motor force/torque, rod-lever force/torque) — it has
+## ZERO references to MyosinFixed, myFixedPt, or applyRodFixedPtForce. The
+## anchoring spring is silently dropped on the GPU path.
+##
+## Implication: in the production gliding-assay GPU run, 14000 MyosinFixed
+## myosins are NOT anchored. The CPU baseline runs through the per-Myosin
+## dispatch and DOES apply the rod-tail anchor. This explains:
+##   - the 55 nm head_z gap (CPU rod stays vertical, GPU rod drifts)
+##   - the -42% bindEvents drop (GPU motors drift away from filaments)
+##   - the ~24% gliding-velocity drop (fewer effective binding sites)
+##   - why the DIAG_CPU_JOINTS path passes (it routes through MyosinFixed
+##     and runs applyRodFixedPtForce as part of the CPU dispatch)
+##   - why Part B (CPU-side delta-add of GPU joint output) also failed
+##     (the per-Myosin CPU dispatch was also short-circuited there, so
+##     applyRodFixedPtForce was missing on Part B too)
+##
+## This is the minimal reproduction the prior seven joint diagnostics couldn't
+## see, because they all ran in the full gliding-assay topology where binding
+## physics partially compensates for the missing anchor.

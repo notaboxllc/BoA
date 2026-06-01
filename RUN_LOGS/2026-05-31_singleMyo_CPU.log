@@ -1,0 +1,1972 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+[SINGLE_MYO_DIAG] enabled (sample interval = 10 steps)
+[JOINT_DIAG] DIAG_CPU_JOINTS forced ON via env var
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/singleMyoDiag...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 5.0
+     Parameter assigned: toFileInterval set to 50000
+     Parameter assigned: remoteWriteInterval set to 1000000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 1.0
+     Parameter assigned: boxYDim set to 1.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: singleMyoDiag set to true
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: myoJ2FracMoveTorq set to 0.0
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 6; xBinWidth = 0.2 µm
+nYBins = 6; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 6 x 6 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=1024 myoCap=1024 moveBlock=64 jointBlock=64 runSeed=1791095845 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=61000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=62000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=63000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=64000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=65000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=66000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=67000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=68000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=69000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=70000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=71000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=72000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=73000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=74000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=75000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=76000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=77000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=78000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=79000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=80000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=81000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=82000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=83000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=84000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=85000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=86000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=87000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=88000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=89000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=90000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=91000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=92000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=93000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=94000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=95000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=96000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=97000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=98000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=99000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=100000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=101000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=102000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=103000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=104000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=105000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=106000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=107000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=108000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=109000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=110000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=111000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=112000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=113000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=114000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=115000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=116000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=117000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=118000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=119000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=120000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=121000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=122000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=123000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=124000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=125000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=126000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=127000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=128000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=129000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=130000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=131000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=132000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=133000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=134000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=135000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=136000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=137000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=138000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=139000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=140000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=141000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=142000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=143000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=144000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=145000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=146000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=147000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=148000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=149000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=150000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=151000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=152000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=153000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=154000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=155000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=156000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=157000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=158000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=159000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=160000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=161000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=162000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=163000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=164000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=165000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=166000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=167000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=168000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=169000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=170000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=171000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=172000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=173000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=174000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=175000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=176000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=177000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=178000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=179000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=180000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=181000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=182000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=183000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=184000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=185000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=186000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=187000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=188000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=189000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=190000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=191000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=192000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=193000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=194000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=195000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=196000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=197000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=198000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=199000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=200000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=201000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=202000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=203000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=204000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=205000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=206000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=207000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=208000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=209000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=210000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=211000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=212000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=213000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=214000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=215000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=216000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=217000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=218000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=219000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=220000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=221000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=222000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=223000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=224000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=225000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=226000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=227000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=228000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=229000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=230000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=231000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=232000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=233000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=234000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=235000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=236000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=237000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=238000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=239000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=240000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=241000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=242000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=243000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=244000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=245000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=246000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=247000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=248000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=249000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=250000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=251000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=252000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=253000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=254000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=255000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=256000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=257000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=258000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=259000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=260000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=261000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=262000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=263000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=264000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=265000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=266000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=267000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=268000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=269000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=270000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=271000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=272000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=273000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=274000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=275000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=276000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=277000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=278000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=279000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=280000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=281000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=282000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=283000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=284000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=285000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=286000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=287000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=288000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=289000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=290000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=291000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=292000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=293000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=294000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=295000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=296000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=297000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=298000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=299000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=300000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=301000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=302000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=303000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=304000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=305000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=306000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=307000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=308000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=309000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=310000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=311000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=312000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=313000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=314000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=315000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=316000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=317000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=318000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=319000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=320000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=321000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=322000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=323000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=324000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=325000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=326000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=327000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=328000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=329000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=330000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=331000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=332000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=333000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=334000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=335000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=336000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=337000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=338000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=339000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=340000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=341000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=342000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=343000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=344000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=345000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=346000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=347000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=348000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=349000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=350000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=351000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=352000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=353000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=354000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=355000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=356000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=357000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=358000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=359000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=360000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=361000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=362000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=363000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=364000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=365000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=366000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=367000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=368000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=369000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=370000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=371000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=372000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=373000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=374000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=375000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=376000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=377000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=378000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=379000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=380000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=381000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=382000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=383000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=384000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=385000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=386000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=387000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=388000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=389000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=390000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=391000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=392000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=393000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=394000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=395000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=396000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=397000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=398000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=399000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=400000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=401000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=402000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=403000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=404000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=405000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=406000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=407000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=408000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=409000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=410000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=411000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=412000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=413000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=414000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=415000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=416000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=417000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=418000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=419000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=420000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=421000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=422000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=423000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=424000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=425000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=426000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=427000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=428000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=429000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=430000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=431000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=432000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=433000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=434000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=435000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=436000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=437000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=438000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=439000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=440000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=441000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=442000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=443000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=444000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=445000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=446000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=447000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=448000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=449000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=450000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=451000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=452000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=453000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=454000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=455000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=456000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=457000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=458000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=459000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=460000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=461000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=462000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=463000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=464000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=465000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=466000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=467000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=468000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=469000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=470000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=471000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=472000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=473000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=474000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=475000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=476000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=477000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=478000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=479000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=480000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=481000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=482000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=483000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=484000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=485000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=486000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=487000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=488000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=489000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=490000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=491000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=492000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=493000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=494000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=495000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=496000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=497000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=498000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=499000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=500000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=501000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=502000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=503000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=504000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=505000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=506000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=507000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=508000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=509000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=510000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=511000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=512000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=513000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=514000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=515000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=516000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=517000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=518000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=519000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=520000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=521000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=522000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=523000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=524000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=525000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=526000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=527000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=528000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=529000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=530000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=531000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=532000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=533000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=534000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=535000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=536000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=537000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=538000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=539000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=540000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=541000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=542000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=543000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=544000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=545000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=546000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=547000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=548000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=549000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=550000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=551000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=552000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=553000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=554000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=555000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=556000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=557000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=558000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=559000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=560000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=561000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=562000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=563000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=564000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=565000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=566000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=567000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=568000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=569000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=570000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=571000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=572000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=573000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=574000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=575000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=576000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=577000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=578000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=579000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=580000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=581000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=582000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=583000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=584000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=585000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=586000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=587000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=588000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=589000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=590000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=591000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=592000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=593000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=594000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=595000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=596000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=597000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=598000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=599000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=600000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=601000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=602000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=603000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=604000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=605000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=606000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=607000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=608000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=609000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=610000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=611000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=612000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=613000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=614000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=615000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=616000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=617000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=618000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=619000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=620000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=621000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=622000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=623000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=624000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=625000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=626000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=627000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=628000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=629000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=630000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=631000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=632000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=633000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=634000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=635000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=636000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=637000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=638000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=639000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=640000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=641000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=642000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=643000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=644000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=645000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=646000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=647000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=648000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=649000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=650000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=651000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=652000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=653000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=654000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=655000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=656000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=657000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=658000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=659000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=660000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=661000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=662000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=663000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=664000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=665000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=666000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=667000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=668000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=669000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=670000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=671000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=672000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=673000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=674000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=675000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=676000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=677000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=678000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=679000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=680000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=681000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=682000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=683000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=684000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=685000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=686000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=687000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=688000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=689000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=690000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=691000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=692000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=693000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=694000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=695000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=696000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=697000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=698000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=699000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=700000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=701000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=702000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=703000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=704000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=705000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=706000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=707000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=708000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=709000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=710000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=711000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=712000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=713000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=714000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=715000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=716000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=717000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=718000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=719000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=720000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=721000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=722000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=723000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=724000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=725000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=726000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=727000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=728000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=729000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=730000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=731000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=732000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=733000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=734000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=735000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=736000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=737000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=738000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=739000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=740000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=741000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=742000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=743000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=744000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=745000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=746000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=747000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=748000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=749000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=750000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=751000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=752000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=753000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=754000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=755000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=756000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=757000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=758000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=759000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=760000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=761000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=762000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=763000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=764000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=765000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=766000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=767000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=768000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=769000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=770000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=771000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=772000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=773000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=774000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=775000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=776000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=777000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=778000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=779000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=780000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=781000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=782000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=783000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=784000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=785000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=786000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=787000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=788000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=789000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=790000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=791000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=792000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=793000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=794000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=795000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=796000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=797000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=798000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=799000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=800000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=801000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=802000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=803000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=804000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=805000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=806000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=807000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=808000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=809000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=810000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=811000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=812000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=813000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=814000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=815000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=816000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=817000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=818000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=819000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=820000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=821000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=822000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=823000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=824000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=825000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=826000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=827000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=828000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=829000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=830000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=831000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=832000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=833000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=834000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=835000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=836000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=837000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=838000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=839000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=840000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=841000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=842000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=843000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=844000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=845000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=846000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=847000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=848000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=849000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=850000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=851000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=852000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=853000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=854000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=855000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=856000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=857000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=858000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=859000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=860000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=861000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=862000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=863000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=864000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=865000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=866000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=867000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=868000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=869000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=870000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=871000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=872000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=873000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=874000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=875000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=876000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=877000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=878000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=879000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=880000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=881000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=882000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=883000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=884000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=885000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=886000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=887000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=888000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=889000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=890000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=891000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=892000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=893000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=894000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=895000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=896000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=897000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=898000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=899000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=900000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=901000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=902000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=903000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=904000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=905000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=906000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=907000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=908000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=909000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=910000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=911000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=912000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=913000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=914000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=915000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=916000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=917000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=918000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=919000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=920000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=921000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=922000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=923000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=924000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=925000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=926000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=927000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=928000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=929000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=930000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=931000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=932000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=933000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=934000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=935000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=936000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=937000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=938000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=939000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=940000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=941000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=942000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=943000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=944000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=945000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=946000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=947000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=948000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=949000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=950000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=951000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=952000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=953000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=954000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=955000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=956000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=957000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=958000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=959000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=960000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=961000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=962000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=963000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=964000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=965000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=966000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=967000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=968000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=969000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=970000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=971000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=972000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=973000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=974000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=975000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=976000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=977000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=978000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=979000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=980000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=981000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=982000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=983000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=984000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=985000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=986000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=987000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=988000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=989000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=990000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=991000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=992000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=993000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=994000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=995000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=996000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=997000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=998000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=999000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+[GATHER] call=1000000 totalDirty=0 maxThread=0 cumAvg=1.5 cumMaxPerThread=3
+collisionTime = 0.0
+myosinTime = 0.0
+
+=== SINGLE MYOSIN THERMAL CHARACTERIZATION [config: DOUBLE (CPU joints, double precision)] ===
+samples:           n=50010   interval=10 steps
+cocked fraction:   0.0047
+J2 (rod-lever):    0.0000   J1 (lever-motor): 0.4000
+
+theta_RL  mean   1.700741 rad   (= 97.445 deg)
+theta_RL  SD     0.655236
+theta_LM  mean   0.275604 rad   (= 15.791 deg)
+theta_LM  SD     0.151780
+
+rod   tilt  mean 1.565696 rad   (= 89.708 deg)   SD 0.711534
+lever tilt  mean 1.578708 rad   (= 90.453 deg)   SD 0.677424
+motor tilt  mean 1.579445 rad   (= 90.496 deg)   SD 0.677573
+
+head_x  mean -0.000925 um   SD 0.045997
+head_y  mean 0.004296 um   SD 0.045955
+head_z  mean -0.050119 um   SD 0.049296
+head_r  mean 0.061179 um   SD 0.022451   max 0.122287
+
+histogram theta_RL (deg, 1 deg bins, skipping empty):
+    0-  1 deg :          4  (0.0001)
+    1-  2 deg :          5  (0.0001)
+    2-  3 deg :         12  (0.0002)
+    3-  4 deg :         16  (0.0003)
+    4-  5 deg :         21  (0.0004)
+    5-  6 deg :         25  (0.0005)
+    6-  7 deg :         24  (0.0005)
+    7-  8 deg :         29  (0.0006)
+    8-  9 deg :         33  (0.0007)
+    9- 10 deg :         35  (0.0007)
+   10- 11 deg :         49  (0.0010)
+   11- 12 deg :         37  (0.0007)
+   12- 13 deg :         56  (0.0011)
+   13- 14 deg :         66  (0.0013)
+   14- 15 deg :         70  (0.0014)
+   15- 16 deg :         69  (0.0014)
+   16- 17 deg :         68  (0.0014)
+   17- 18 deg :         91  (0.0018)
+   18- 19 deg :         73  (0.0015)
+   19- 20 deg :         89  (0.0018)
+   20- 21 deg :         81  (0.0016)
+   21- 22 deg :        104  (0.0021)
+   22- 23 deg :        112  (0.0022)
+   23- 24 deg :         96  (0.0019)
+   24- 25 deg :        125  (0.0025)
+   25- 26 deg :        125  (0.0025)
+   26- 27 deg :        126  (0.0025)
+   27- 28 deg :        156  (0.0031)
+   28- 29 deg :        115  (0.0023)
+   29- 30 deg :        151  (0.0030)
+   30- 31 deg :        174  (0.0035)
+   31- 32 deg :        148  (0.0030)
+   32- 33 deg :        164  (0.0033)
+   33- 34 deg :        176  (0.0035)
+   34- 35 deg :        152  (0.0030)
+   35- 36 deg :        168  (0.0034)
+   36- 37 deg :        187  (0.0037)
+   37- 38 deg :        174  (0.0035)
+   38- 39 deg :        177  (0.0035)
+   39- 40 deg :        193  (0.0039)
+   40- 41 deg :        221  (0.0044)
+   41- 42 deg :        195  (0.0039)
+   42- 43 deg :        197  (0.0039)
+   43- 44 deg :        220  (0.0044)
+   44- 45 deg :        243  (0.0049)
+   45- 46 deg :        227  (0.0045)
+   46- 47 deg :        224  (0.0045)
+   47- 48 deg :        230  (0.0046)
+   48- 49 deg :        233  (0.0047)
+   49- 50 deg :        251  (0.0050)
+   50- 51 deg :        269  (0.0054)
+   51- 52 deg :        257  (0.0051)
+   52- 53 deg :        299  (0.0060)
+   53- 54 deg :        300  (0.0060)
+   54- 55 deg :        285  (0.0057)
+   55- 56 deg :        280  (0.0056)
+   56- 57 deg :        291  (0.0058)
+   57- 58 deg :        311  (0.0062)
+   58- 59 deg :        283  (0.0057)
+   59- 60 deg :        327  (0.0065)
+   60- 61 deg :        318  (0.0064)
+   61- 62 deg :        323  (0.0065)
+   62- 63 deg :        348  (0.0070)
+   63- 64 deg :        363  (0.0073)
+   64- 65 deg :        340  (0.0068)
+   65- 66 deg :        365  (0.0073)
+   66- 67 deg :        356  (0.0071)
+   67- 68 deg :        366  (0.0073)
+   68- 69 deg :        357  (0.0071)
+   69- 70 deg :        407  (0.0081)
+   70- 71 deg :        365  (0.0073)
+   71- 72 deg :        338  (0.0068)
+   72- 73 deg :        384  (0.0077)
+   73- 74 deg :        411  (0.0082)
+   74- 75 deg :        398  (0.0080)
+   75- 76 deg :        403  (0.0081)
+   76- 77 deg :        398  (0.0080)
+   77- 78 deg :        400  (0.0080)
+   78- 79 deg :        440  (0.0088)
+   79- 80 deg :        405  (0.0081)
+   80- 81 deg :        415  (0.0083)
+   81- 82 deg :        426  (0.0085)
+   82- 83 deg :        480  (0.0096)
+   83- 84 deg :        430  (0.0086)
+   84- 85 deg :        438  (0.0088)
+   85- 86 deg :        442  (0.0088)
+   86- 87 deg :        445  (0.0089)
+   87- 88 deg :        496  (0.0099)
+   88- 89 deg :        474  (0.0095)
+   89- 90 deg :        497  (0.0099)
+   90- 91 deg :        481  (0.0096)
+   91- 92 deg :        442  (0.0088)
+   92- 93 deg :        465  (0.0093)
+   93- 94 deg :        447  (0.0089)
+   94- 95 deg :        467  (0.0093)
+   95- 96 deg :        452  (0.0090)
+   96- 97 deg :        480  (0.0096)
+   97- 98 deg :        422  (0.0084)
+   98- 99 deg :        514  (0.0103)
+   99-100 deg :        454  (0.0091)
+  100-101 deg :        497  (0.0099)
+  101-102 deg :        471  (0.0094)
+  102-103 deg :        440  (0.0088)
+  103-104 deg :        469  (0.0094)
+  104-105 deg :        469  (0.0094)
+  105-106 deg :        481  (0.0096)
+  106-107 deg :        476  (0.0095)
+  107-108 deg :        448  (0.0090)
+  108-109 deg :        489  (0.0098)
+  109-110 deg :        490  (0.0098)
+  110-111 deg :        474  (0.0095)
+  111-112 deg :        449  (0.0090)
+  112-113 deg :        452  (0.0090)
+  113-114 deg :        496  (0.0099)
+  114-115 deg :        486  (0.0097)
+  115-116 deg :        475  (0.0095)
+  116-117 deg :        425  (0.0085)
+  117-118 deg :        441  (0.0088)
+  118-119 deg :        466  (0.0093)
+  119-120 deg :        443  (0.0089)
+  120-121 deg :        442  (0.0088)
+  121-122 deg :        391  (0.0078)
+  122-123 deg :        453  (0.0091)
+  123-124 deg :        423  (0.0085)
+  124-125 deg :        422  (0.0084)
+  125-126 deg :        404  (0.0081)
+  126-127 deg :        410  (0.0082)
+  127-128 deg :        462  (0.0092)
+  128-129 deg :        406  (0.0081)
+  129-130 deg :        417  (0.0083)
+  130-131 deg :        371  (0.0074)
+  131-132 deg :        420  (0.0084)
+  132-133 deg :        404  (0.0081)
+  133-134 deg :        349  (0.0070)
+  134-135 deg :        362  (0.0072)
+  135-136 deg :        357  (0.0071)
+  136-137 deg :        373  (0.0075)
+  137-138 deg :        343  (0.0069)
+  138-139 deg :        369  (0.0074)
+  139-140 deg :        346  (0.0069)
+  140-141 deg :        315  (0.0063)
+  141-142 deg :        310  (0.0062)
+  142-143 deg :        327  (0.0065)
+  143-144 deg :        319  (0.0064)
+  144-145 deg :        276  (0.0055)
+  145-146 deg :        320  (0.0064)
+  146-147 deg :        293  (0.0059)
+  147-148 deg :        295  (0.0059)
+  148-149 deg :        274  (0.0055)
+  149-150 deg :        262  (0.0052)
+  150-151 deg :        261  (0.0052)
+  151-152 deg :        260  (0.0052)
+  152-153 deg :        235  (0.0047)
+  153-154 deg :        251  (0.0050)
+  154-155 deg :        237  (0.0047)
+  155-156 deg :        228  (0.0046)
+  156-157 deg :        206  (0.0041)
+  157-158 deg :        210  (0.0042)
+  158-159 deg :        206  (0.0041)
+  159-160 deg :        197  (0.0039)
+  160-161 deg :        184  (0.0037)
+  161-162 deg :        181  (0.0036)
+  162-163 deg :        162  (0.0032)
+  163-164 deg :        167  (0.0033)
+  164-165 deg :        149  (0.0030)
+  165-166 deg :        134  (0.0027)
+  166-167 deg :        134  (0.0027)
+  167-168 deg :        119  (0.0024)
+  168-169 deg :        121  (0.0024)
+  169-170 deg :         89  (0.0018)
+  170-171 deg :         78  (0.0016)
+  171-172 deg :         89  (0.0018)
+  172-173 deg :         84  (0.0017)
+  173-174 deg :         59  (0.0012)
+  174-175 deg :         40  (0.0008)
+  175-176 deg :         31  (0.0006)
+  176-177 deg :         31  (0.0006)
+  177-178 deg :         18  (0.0004)
+  178-179 deg :         16  (0.0003)
+  179-180 deg :         10  (0.0002)
+histogram theta_LM (deg, 1 deg bins, skipping empty):
+    0-  1 deg :        144  (0.0029)
+    1-  2 deg :        475  (0.0095)
+    2-  3 deg :        722  (0.0144)
+    3-  4 deg :       1107  (0.0221)
+    4-  5 deg :       1355  (0.0271)
+    5-  6 deg :       1638  (0.0328)
+    6-  7 deg :       1791  (0.0358)
+    7-  8 deg :       1947  (0.0389)
+    8-  9 deg :       2194  (0.0439)
+    9- 10 deg :       2288  (0.0458)
+   10- 11 deg :       2318  (0.0464)
+   11- 12 deg :       2406  (0.0481)
+   12- 13 deg :       2467  (0.0493)
+   13- 14 deg :       2448  (0.0490)
+   14- 15 deg :       2430  (0.0486)
+   15- 16 deg :       2271  (0.0454)
+   16- 17 deg :       2224  (0.0445)
+   17- 18 deg :       2086  (0.0417)
+   18- 19 deg :       2007  (0.0401)
+   19- 20 deg :       1909  (0.0382)
+   20- 21 deg :       1664  (0.0333)
+   21- 22 deg :       1612  (0.0322)
+   22- 23 deg :       1340  (0.0268)
+   23- 24 deg :       1297  (0.0259)
+   24- 25 deg :       1145  (0.0229)
+   25- 26 deg :       1024  (0.0205)
+   26- 27 deg :        889  (0.0178)
+   27- 28 deg :        722  (0.0144)
+   28- 29 deg :        655  (0.0131)
+   29- 30 deg :        584  (0.0117)
+   30- 31 deg :        469  (0.0094)
+   31- 32 deg :        399  (0.0080)
+   32- 33 deg :        351  (0.0070)
+   33- 34 deg :        300  (0.0060)
+   34- 35 deg :        206  (0.0041)
+   35- 36 deg :        194  (0.0039)
+   36- 37 deg :        170  (0.0034)
+   37- 38 deg :         96  (0.0019)
+   38- 39 deg :         86  (0.0017)
+   39- 40 deg :         84  (0.0017)
+   40- 41 deg :         60  (0.0012)
+   41- 42 deg :         49  (0.0010)
+   42- 43 deg :         30  (0.0006)
+   43- 44 deg :         46  (0.0009)
+   44- 45 deg :         26  (0.0005)
+   45- 46 deg :         22  (0.0004)
+   46- 47 deg :         14  (0.0003)
+   47- 48 deg :         21  (0.0004)
+   48- 49 deg :         12  (0.0002)
+   49- 50 deg :         11  (0.0002)
+   50- 51 deg :         11  (0.0002)
+   51- 52 deg :          8  (0.0002)
+   52- 53 deg :          4  (0.0001)
+   53- 54 deg :          7  (0.0001)
+   54- 55 deg :          9  (0.0002)
+   55- 56 deg :          6  (0.0001)
+   56- 57 deg :          6  (0.0001)
+   57- 58 deg :         10  (0.0002)
+   58- 59 deg :          4  (0.0001)
+   59- 60 deg :          6  (0.0001)
+   60- 61 deg :          6  (0.0001)
+   61- 62 deg :          6  (0.0001)
+   62- 63 deg :          6  (0.0001)
+   63- 64 deg :          8  (0.0002)
+   64- 65 deg :         13  (0.0003)
+   65- 66 deg :          9  (0.0002)
+   66- 67 deg :          5  (0.0001)
+   67- 68 deg :          7  (0.0001)
+   68- 69 deg :         12  (0.0002)
+   69- 70 deg :          7  (0.0001)
+   70- 71 deg :          9  (0.0002)
+   71- 72 deg :          4  (0.0001)
+   73- 74 deg :          3  (0.0001)
+   74- 75 deg :          3  (0.0001)
+   75- 76 deg :          4  (0.0001)
+   76- 77 deg :          1  (0.0000)
+   77- 78 deg :          7  (0.0001)
+   78- 79 deg :          4  (0.0001)
+   79- 80 deg :          3  (0.0001)
+   80- 81 deg :          3  (0.0001)
+   81- 82 deg :          2  (0.0000)
+   82- 83 deg :          1  (0.0000)
+   83- 84 deg :          1  (0.0000)
+   84- 85 deg :          2  (0.0000)
+   85- 86 deg :          4  (0.0001)
+   86- 87 deg :          1  (0.0000)
+   87- 88 deg :          1  (0.0000)
+   89- 90 deg :          1  (0.0000)
+   94- 95 deg :          1  (0.0000)
+histogram rod_tilt (deg, 1 deg bins, skipping empty):
+    0-  1 deg :          3  (0.0001)
+    1-  2 deg :          9  (0.0002)
+    2-  3 deg :         21  (0.0004)
+    3-  4 deg :         38  (0.0008)
+    4-  5 deg :         46  (0.0009)
+    5-  6 deg :         51  (0.0010)
+    6-  7 deg :         56  (0.0011)
+    7-  8 deg :         63  (0.0013)
+    8-  9 deg :        100  (0.0020)
+    9- 10 deg :        106  (0.0021)
+   10- 11 deg :         86  (0.0017)
+   11- 12 deg :         86  (0.0017)
+   12- 13 deg :        112  (0.0022)
+   13- 14 deg :        116  (0.0023)
+   14- 15 deg :        121  (0.0024)
+   15- 16 deg :        141  (0.0028)
+   16- 17 deg :        153  (0.0031)
+   17- 18 deg :        147  (0.0029)
+   18- 19 deg :        169  (0.0034)
+   19- 20 deg :        190  (0.0038)
+   20- 21 deg :        192  (0.0038)
+   21- 22 deg :        198  (0.0040)
+   22- 23 deg :        192  (0.0038)
+   23- 24 deg :        188  (0.0038)
+   24- 25 deg :        223  (0.0045)
+   25- 26 deg :        260  (0.0052)
+   26- 27 deg :        212  (0.0042)
+   27- 28 deg :        229  (0.0046)
+   28- 29 deg :        263  (0.0053)
+   29- 30 deg :        244  (0.0049)
+   30- 31 deg :        252  (0.0050)
+   31- 32 deg :        234  (0.0047)
+   32- 33 deg :        292  (0.0058)
+   33- 34 deg :        262  (0.0052)
+   34- 35 deg :        279  (0.0056)
+   35- 36 deg :        256  (0.0051)
+   36- 37 deg :        272  (0.0054)
+   37- 38 deg :        314  (0.0063)
+   38- 39 deg :        301  (0.0060)
+   39- 40 deg :        305  (0.0061)
+   40- 41 deg :        288  (0.0058)
+   41- 42 deg :        317  (0.0063)
+   42- 43 deg :        309  (0.0062)
+   43- 44 deg :        308  (0.0062)
+   44- 45 deg :        353  (0.0071)
+   45- 46 deg :        342  (0.0068)
+   46- 47 deg :        351  (0.0070)
+   47- 48 deg :        325  (0.0065)
+   48- 49 deg :        343  (0.0069)
+   49- 50 deg :        320  (0.0064)
+   50- 51 deg :        329  (0.0066)
+   51- 52 deg :        348  (0.0070)
+   52- 53 deg :        341  (0.0068)
+   53- 54 deg :        340  (0.0068)
+   54- 55 deg :        332  (0.0066)
+   55- 56 deg :        363  (0.0073)
+   56- 57 deg :        318  (0.0064)
+   57- 58 deg :        362  (0.0072)
+   58- 59 deg :        390  (0.0078)
+   59- 60 deg :        364  (0.0073)
+   60- 61 deg :        335  (0.0067)
+   61- 62 deg :        376  (0.0075)
+   62- 63 deg :        384  (0.0077)
+   63- 64 deg :        408  (0.0082)
+   64- 65 deg :        361  (0.0072)
+   65- 66 deg :        370  (0.0074)
+   66- 67 deg :        364  (0.0073)
+   67- 68 deg :        394  (0.0079)
+   68- 69 deg :        361  (0.0072)
+   69- 70 deg :        370  (0.0074)
+   70- 71 deg :        369  (0.0074)
+   71- 72 deg :        394  (0.0079)
+   72- 73 deg :        369  (0.0074)
+   73- 74 deg :        384  (0.0077)
+   74- 75 deg :        355  (0.0071)
+   75- 76 deg :        337  (0.0067)
+   76- 77 deg :        365  (0.0073)
+   77- 78 deg :        378  (0.0076)
+   78- 79 deg :        384  (0.0077)
+   79- 80 deg :        360  (0.0072)
+   80- 81 deg :        384  (0.0077)
+   81- 82 deg :        379  (0.0076)
+   82- 83 deg :        394  (0.0079)
+   83- 84 deg :        356  (0.0071)
+   84- 85 deg :        413  (0.0083)
+   85- 86 deg :        424  (0.0085)
+   86- 87 deg :        396  (0.0079)
+   87- 88 deg :        394  (0.0079)
+   88- 89 deg :        412  (0.0082)
+   89- 90 deg :        387  (0.0077)
+   90- 91 deg :        390  (0.0078)
+   91- 92 deg :        402  (0.0080)
+   92- 93 deg :        393  (0.0079)
+   93- 94 deg :        392  (0.0078)
+   94- 95 deg :        366  (0.0073)
+   95- 96 deg :        358  (0.0072)
+   96- 97 deg :        401  (0.0080)
+   97- 98 deg :        411  (0.0082)
+   98- 99 deg :        380  (0.0076)
+   99-100 deg :        404  (0.0081)
+  100-101 deg :        380  (0.0076)
+  101-102 deg :        405  (0.0081)
+  102-103 deg :        380  (0.0076)
+  103-104 deg :        402  (0.0080)
+  104-105 deg :        390  (0.0078)
+  105-106 deg :        435  (0.0087)
+  106-107 deg :        406  (0.0081)
+  107-108 deg :        375  (0.0075)
+  108-109 deg :        386  (0.0077)
+  109-110 deg :        416  (0.0083)
+  110-111 deg :        403  (0.0081)
+  111-112 deg :        379  (0.0076)
+  112-113 deg :        427  (0.0085)
+  113-114 deg :        396  (0.0079)
+  114-115 deg :        406  (0.0081)
+  115-116 deg :        410  (0.0082)
+  116-117 deg :        359  (0.0072)
+  117-118 deg :        401  (0.0080)
+  118-119 deg :        414  (0.0083)
+  119-120 deg :        403  (0.0081)
+  120-121 deg :        383  (0.0077)
+  121-122 deg :        382  (0.0076)
+  122-123 deg :        379  (0.0076)
+  123-124 deg :        343  (0.0069)
+  124-125 deg :        365  (0.0073)
+  125-126 deg :        384  (0.0077)
+  126-127 deg :        370  (0.0074)
+  127-128 deg :        349  (0.0070)
+  128-129 deg :        357  (0.0071)
+  129-130 deg :        371  (0.0074)
+  130-131 deg :        330  (0.0066)
+  131-132 deg :        340  (0.0068)
+  132-133 deg :        322  (0.0064)
+  133-134 deg :        347  (0.0069)
+  134-135 deg :        337  (0.0067)
+  135-136 deg :        316  (0.0063)
+  136-137 deg :        356  (0.0071)
+  137-138 deg :        318  (0.0064)
+  138-139 deg :        322  (0.0064)
+  139-140 deg :        287  (0.0057)
+  140-141 deg :        288  (0.0058)
+  141-142 deg :        324  (0.0065)
+  142-143 deg :        256  (0.0051)
+  143-144 deg :        280  (0.0056)
+  144-145 deg :        266  (0.0053)
+  145-146 deg :        265  (0.0053)
+  146-147 deg :        286  (0.0057)
+  147-148 deg :        235  (0.0047)
+  148-149 deg :        248  (0.0050)
+  149-150 deg :        241  (0.0048)
+  150-151 deg :        240  (0.0048)
+  151-152 deg :        247  (0.0049)
+  152-153 deg :        197  (0.0039)
+  153-154 deg :        200  (0.0040)
+  154-155 deg :        227  (0.0045)
+  155-156 deg :        209  (0.0042)
+  156-157 deg :        187  (0.0037)
+  157-158 deg :        168  (0.0034)
+  158-159 deg :        190  (0.0038)
+  159-160 deg :        167  (0.0033)
+  160-161 deg :        154  (0.0031)
+  161-162 deg :        164  (0.0033)
+  162-163 deg :        146  (0.0029)
+  163-164 deg :        141  (0.0028)
+  164-165 deg :        123  (0.0025)
+  165-166 deg :         96  (0.0019)
+  166-167 deg :        109  (0.0022)
+  167-168 deg :        114  (0.0023)
+  168-169 deg :         86  (0.0017)
+  169-170 deg :         79  (0.0016)
+  170-171 deg :         76  (0.0015)
+  171-172 deg :         75  (0.0015)
+  172-173 deg :         59  (0.0012)
+  173-174 deg :         49  (0.0010)
+  174-175 deg :         30  (0.0006)
+  175-176 deg :         28  (0.0006)
+  176-177 deg :         24  (0.0005)
+  177-178 deg :         19  (0.0004)
+  178-179 deg :          6  (0.0001)
+  179-180 deg :          1  (0.0000)
+histogram lever_tilt (deg, 1 deg bins, skipping empty):
+    0-  1 deg :          6  (0.0001)
+    1-  2 deg :          5  (0.0001)
+    2-  3 deg :         19  (0.0004)
+    3-  4 deg :         23  (0.0005)
+    4-  5 deg :         30  (0.0006)
+    5-  6 deg :         33  (0.0007)
+    6-  7 deg :         49  (0.0010)
+    7-  8 deg :         63  (0.0013)
+    8-  9 deg :         72  (0.0014)
+    9- 10 deg :         63  (0.0013)
+   10- 11 deg :         82  (0.0016)
+   11- 12 deg :         95  (0.0019)
+   12- 13 deg :         93  (0.0019)
+   13- 14 deg :        114  (0.0023)
+   14- 15 deg :        102  (0.0020)
+   15- 16 deg :        118  (0.0024)
+   16- 17 deg :        115  (0.0023)
+   17- 18 deg :        112  (0.0022)
+   18- 19 deg :        121  (0.0024)
+   19- 20 deg :        122  (0.0024)
+   20- 21 deg :        155  (0.0031)
+   21- 22 deg :        165  (0.0033)
+   22- 23 deg :        153  (0.0031)
+   23- 24 deg :        166  (0.0033)
+   24- 25 deg :        179  (0.0036)
+   25- 26 deg :        174  (0.0035)
+   26- 27 deg :        173  (0.0035)
+   27- 28 deg :        180  (0.0036)
+   28- 29 deg :        177  (0.0035)
+   29- 30 deg :        221  (0.0044)
+   30- 31 deg :        216  (0.0043)
+   31- 32 deg :        237  (0.0047)
+   32- 33 deg :        231  (0.0046)
+   33- 34 deg :        232  (0.0046)
+   34- 35 deg :        261  (0.0052)
+   35- 36 deg :        255  (0.0051)
+   36- 37 deg :        212  (0.0042)
+   37- 38 deg :        249  (0.0050)
+   38- 39 deg :        246  (0.0049)
+   39- 40 deg :        269  (0.0054)
+   40- 41 deg :        261  (0.0052)
+   41- 42 deg :        302  (0.0060)
+   42- 43 deg :        292  (0.0058)
+   43- 44 deg :        307  (0.0061)
+   44- 45 deg :        307  (0.0061)
+   45- 46 deg :        294  (0.0059)
+   46- 47 deg :        295  (0.0059)
+   47- 48 deg :        312  (0.0062)
+   48- 49 deg :        321  (0.0064)
+   49- 50 deg :        314  (0.0063)
+   50- 51 deg :        323  (0.0065)
+   51- 52 deg :        350  (0.0070)
+   52- 53 deg :        309  (0.0062)
+   53- 54 deg :        366  (0.0073)
+   54- 55 deg :        358  (0.0072)
+   55- 56 deg :        340  (0.0068)
+   56- 57 deg :        339  (0.0068)
+   57- 58 deg :        359  (0.0072)
+   58- 59 deg :        345  (0.0069)
+   59- 60 deg :        377  (0.0075)
+   60- 61 deg :        376  (0.0075)
+   61- 62 deg :        359  (0.0072)
+   62- 63 deg :        384  (0.0077)
+   63- 64 deg :        390  (0.0078)
+   64- 65 deg :        431  (0.0086)
+   65- 66 deg :        393  (0.0079)
+   66- 67 deg :        397  (0.0079)
+   67- 68 deg :        372  (0.0074)
+   68- 69 deg :        433  (0.0087)
+   69- 70 deg :        427  (0.0085)
+   70- 71 deg :        415  (0.0083)
+   71- 72 deg :        406  (0.0081)
+   72- 73 deg :        436  (0.0087)
+   73- 74 deg :        434  (0.0087)
+   74- 75 deg :        422  (0.0084)
+   75- 76 deg :        440  (0.0088)
+   76- 77 deg :        409  (0.0082)
+   77- 78 deg :        431  (0.0086)
+   78- 79 deg :        452  (0.0090)
+   79- 80 deg :        456  (0.0091)
+   80- 81 deg :        435  (0.0087)
+   81- 82 deg :        463  (0.0093)
+   82- 83 deg :        416  (0.0083)
+   83- 84 deg :        474  (0.0095)
+   84- 85 deg :        466  (0.0093)
+   85- 86 deg :        418  (0.0084)
+   86- 87 deg :        456  (0.0091)
+   87- 88 deg :        420  (0.0084)
+   88- 89 deg :        466  (0.0093)
+   89- 90 deg :        446  (0.0089)
+   90- 91 deg :        416  (0.0083)
+   91- 92 deg :        449  (0.0090)
+   92- 93 deg :        457  (0.0091)
+   93- 94 deg :        414  (0.0083)
+   94- 95 deg :        444  (0.0089)
+   95- 96 deg :        432  (0.0086)
+   96- 97 deg :        471  (0.0094)
+   97- 98 deg :        467  (0.0093)
+   98- 99 deg :        459  (0.0092)
+   99-100 deg :        445  (0.0089)
+  100-101 deg :        423  (0.0085)
+  101-102 deg :        408  (0.0082)
+  102-103 deg :        453  (0.0091)
+  103-104 deg :        474  (0.0095)
+  104-105 deg :        478  (0.0096)
+  105-106 deg :        439  (0.0088)
+  106-107 deg :        443  (0.0089)
+  107-108 deg :        419  (0.0084)
+  108-109 deg :        441  (0.0088)
+  109-110 deg :        421  (0.0084)
+  110-111 deg :        393  (0.0079)
+  111-112 deg :        420  (0.0084)
+  112-113 deg :        385  (0.0077)
+  113-114 deg :        416  (0.0083)
+  114-115 deg :        397  (0.0079)
+  115-116 deg :        371  (0.0074)
+  116-117 deg :        386  (0.0077)
+  117-118 deg :        368  (0.0074)
+  118-119 deg :        366  (0.0073)
+  119-120 deg :        385  (0.0077)
+  120-121 deg :        346  (0.0069)
+  121-122 deg :        358  (0.0072)
+  122-123 deg :        368  (0.0074)
+  123-124 deg :        392  (0.0078)
+  124-125 deg :        346  (0.0069)
+  125-126 deg :        314  (0.0063)
+  126-127 deg :        344  (0.0069)
+  127-128 deg :        364  (0.0073)
+  128-129 deg :        351  (0.0070)
+  129-130 deg :        331  (0.0066)
+  130-131 deg :        316  (0.0063)
+  131-132 deg :        315  (0.0063)
+  132-133 deg :        342  (0.0068)
+  133-134 deg :        323  (0.0065)
+  134-135 deg :        335  (0.0067)
+  135-136 deg :        324  (0.0065)
+  136-137 deg :        305  (0.0061)
+  137-138 deg :        271  (0.0054)
+  138-139 deg :        304  (0.0061)
+  139-140 deg :        296  (0.0059)
+  140-141 deg :        265  (0.0053)
+  141-142 deg :        299  (0.0060)
+  142-143 deg :        262  (0.0052)
+  143-144 deg :        251  (0.0050)
+  144-145 deg :        284  (0.0057)
+  145-146 deg :        253  (0.0051)
+  146-147 deg :        242  (0.0048)
+  147-148 deg :        236  (0.0047)
+  148-149 deg :        221  (0.0044)
+  149-150 deg :        219  (0.0044)
+  150-151 deg :        224  (0.0045)
+  151-152 deg :        204  (0.0041)
+  152-153 deg :        201  (0.0040)
+  153-154 deg :        187  (0.0037)
+  154-155 deg :        204  (0.0041)
+  155-156 deg :        177  (0.0035)
+  156-157 deg :        181  (0.0036)
+  157-158 deg :        148  (0.0030)
+  158-159 deg :        151  (0.0030)
+  159-160 deg :        150  (0.0030)
+  160-161 deg :        146  (0.0029)
+  161-162 deg :        144  (0.0029)
+  162-163 deg :        127  (0.0025)
+  163-164 deg :        116  (0.0023)
+  164-165 deg :        116  (0.0023)
+  165-166 deg :        103  (0.0021)
+  166-167 deg :        100  (0.0020)
+  167-168 deg :        106  (0.0021)
+  168-169 deg :         87  (0.0017)
+  169-170 deg :         88  (0.0018)
+  170-171 deg :         70  (0.0014)
+  171-172 deg :         58  (0.0012)
+  172-173 deg :         53  (0.0011)
+  173-174 deg :         45  (0.0009)
+  174-175 deg :         41  (0.0008)
+  175-176 deg :         31  (0.0006)
+  176-177 deg :         27  (0.0005)
+  177-178 deg :         19  (0.0004)
+  178-179 deg :          6  (0.0001)
+  179-180 deg :          1  (0.0000)
+histogram motor_tilt (deg, 1 deg bins, skipping empty):
+    0-  1 deg :          4  (0.0001)
+    1-  2 deg :         12  (0.0002)
+    2-  3 deg :         20  (0.0004)
+    3-  4 deg :         21  (0.0004)
+    4-  5 deg :         41  (0.0008)
+    5-  6 deg :         48  (0.0010)
+    6-  7 deg :         43  (0.0009)
+    7-  8 deg :         47  (0.0009)
+    8-  9 deg :         56  (0.0011)
+    9- 10 deg :         86  (0.0017)
+   10- 11 deg :         80  (0.0016)
+   11- 12 deg :         83  (0.0017)
+   12- 13 deg :         66  (0.0013)
+   13- 14 deg :        102  (0.0020)
+   14- 15 deg :         96  (0.0019)
+   15- 16 deg :        111  (0.0022)
+   16- 17 deg :        140  (0.0028)
+   17- 18 deg :        115  (0.0023)
+   18- 19 deg :        133  (0.0027)
+   19- 20 deg :        122  (0.0024)
+   20- 21 deg :        145  (0.0029)
+   21- 22 deg :        151  (0.0030)
+   22- 23 deg :        169  (0.0034)
+   23- 24 deg :        176  (0.0035)
+   24- 25 deg :        188  (0.0038)
+   25- 26 deg :        182  (0.0036)
+   26- 27 deg :        212  (0.0042)
+   27- 28 deg :        198  (0.0040)
+   28- 29 deg :        190  (0.0038)
+   29- 30 deg :        206  (0.0041)
+   30- 31 deg :        186  (0.0037)
+   31- 32 deg :        235  (0.0047)
+   32- 33 deg :        230  (0.0046)
+   33- 34 deg :        239  (0.0048)
+   34- 35 deg :        218  (0.0044)
+   35- 36 deg :        229  (0.0046)
+   36- 37 deg :        248  (0.0050)
+   37- 38 deg :        288  (0.0058)
+   38- 39 deg :        307  (0.0061)
+   39- 40 deg :        281  (0.0056)
+   40- 41 deg :        279  (0.0056)
+   41- 42 deg :        266  (0.0053)
+   42- 43 deg :        252  (0.0050)
+   43- 44 deg :        269  (0.0054)
+   44- 45 deg :        278  (0.0056)
+   45- 46 deg :        299  (0.0060)
+   46- 47 deg :        296  (0.0059)
+   47- 48 deg :        274  (0.0055)
+   48- 49 deg :        333  (0.0067)
+   49- 50 deg :        334  (0.0067)
+   50- 51 deg :        318  (0.0064)
+   51- 52 deg :        340  (0.0068)
+   52- 53 deg :        341  (0.0068)
+   53- 54 deg :        309  (0.0062)
+   54- 55 deg :        335  (0.0067)
+   55- 56 deg :        343  (0.0069)
+   56- 57 deg :        349  (0.0070)
+   57- 58 deg :        333  (0.0067)
+   58- 59 deg :        363  (0.0073)
+   59- 60 deg :        392  (0.0078)
+   60- 61 deg :        359  (0.0072)
+   61- 62 deg :        373  (0.0075)
+   62- 63 deg :        396  (0.0079)
+   63- 64 deg :        372  (0.0074)
+   64- 65 deg :        420  (0.0084)
+   65- 66 deg :        374  (0.0075)
+   66- 67 deg :        390  (0.0078)
+   67- 68 deg :        414  (0.0083)
+   68- 69 deg :        413  (0.0083)
+   69- 70 deg :        425  (0.0085)
+   70- 71 deg :        426  (0.0085)
+   71- 72 deg :        443  (0.0089)
+   72- 73 deg :        416  (0.0083)
+   73- 74 deg :        402  (0.0080)
+   74- 75 deg :        449  (0.0090)
+   75- 76 deg :        424  (0.0085)
+   76- 77 deg :        438  (0.0088)
+   77- 78 deg :        407  (0.0081)
+   78- 79 deg :        423  (0.0085)
+   79- 80 deg :        463  (0.0093)
+   80- 81 deg :        433  (0.0087)
+   81- 82 deg :        432  (0.0086)
+   82- 83 deg :        464  (0.0093)
+   83- 84 deg :        463  (0.0093)
+   84- 85 deg :        465  (0.0093)
+   85- 86 deg :        482  (0.0096)
+   86- 87 deg :        457  (0.0091)
+   87- 88 deg :        421  (0.0084)
+   88- 89 deg :        476  (0.0095)
+   89- 90 deg :        444  (0.0089)
+   90- 91 deg :        431  (0.0086)
+   91- 92 deg :        480  (0.0096)
+   92- 93 deg :        436  (0.0087)
+   93- 94 deg :        458  (0.0092)
+   94- 95 deg :        478  (0.0096)
+   95- 96 deg :        462  (0.0092)
+   96- 97 deg :        442  (0.0088)
+   97- 98 deg :        452  (0.0090)
+   98- 99 deg :        426  (0.0085)
+   99-100 deg :        434  (0.0087)
+  100-101 deg :        426  (0.0085)
+  101-102 deg :        425  (0.0085)
+  102-103 deg :        461  (0.0092)
+  103-104 deg :        429  (0.0086)
+  104-105 deg :        404  (0.0081)
+  105-106 deg :        479  (0.0096)
+  106-107 deg :        428  (0.0086)
+  107-108 deg :        417  (0.0083)
+  108-109 deg :        407  (0.0081)
+  109-110 deg :        401  (0.0080)
+  110-111 deg :        399  (0.0080)
+  111-112 deg :        379  (0.0076)
+  112-113 deg :        428  (0.0086)
+  113-114 deg :        405  (0.0081)
+  114-115 deg :        387  (0.0077)
+  115-116 deg :        399  (0.0080)
+  116-117 deg :        385  (0.0077)
+  117-118 deg :        408  (0.0082)
+  118-119 deg :        367  (0.0073)
+  119-120 deg :        356  (0.0071)
+  120-121 deg :        367  (0.0073)
+  121-122 deg :        365  (0.0073)
+  122-123 deg :        383  (0.0077)
+  123-124 deg :        364  (0.0073)
+  124-125 deg :        370  (0.0074)
+  125-126 deg :        337  (0.0067)
+  126-127 deg :        376  (0.0075)
+  127-128 deg :        339  (0.0068)
+  128-129 deg :        338  (0.0068)
+  129-130 deg :        338  (0.0068)
+  130-131 deg :        349  (0.0070)
+  131-132 deg :        318  (0.0064)
+  132-133 deg :        291  (0.0058)
+  133-134 deg :        339  (0.0068)
+  134-135 deg :        331  (0.0066)
+  135-136 deg :        326  (0.0065)
+  136-137 deg :        301  (0.0060)
+  137-138 deg :        307  (0.0061)
+  138-139 deg :        310  (0.0062)
+  139-140 deg :        293  (0.0059)
+  140-141 deg :        278  (0.0056)
+  141-142 deg :        264  (0.0053)
+  142-143 deg :        286  (0.0057)
+  143-144 deg :        226  (0.0045)
+  144-145 deg :        280  (0.0056)
+  145-146 deg :        249  (0.0050)
+  146-147 deg :        240  (0.0048)
+  147-148 deg :        242  (0.0048)
+  148-149 deg :        208  (0.0042)
+  149-150 deg :        215  (0.0043)
+  150-151 deg :        222  (0.0044)
+  151-152 deg :        203  (0.0041)
+  152-153 deg :        201  (0.0040)
+  153-154 deg :        191  (0.0038)
+  154-155 deg :        179  (0.0036)
+  155-156 deg :        179  (0.0036)
+  156-157 deg :        168  (0.0034)
+  157-158 deg :        167  (0.0033)
+  158-159 deg :        196  (0.0039)
+  159-160 deg :        134  (0.0027)
+  160-161 deg :        146  (0.0029)
+  161-162 deg :        134  (0.0027)
+  162-163 deg :        116  (0.0023)
+  163-164 deg :        133  (0.0027)
+  164-165 deg :        101  (0.0020)
+  165-166 deg :        120  (0.0024)
+  166-167 deg :        103  (0.0021)
+  167-168 deg :         83  (0.0017)
+  168-169 deg :         91  (0.0018)
+  169-170 deg :         85  (0.0017)
+  170-171 deg :         73  (0.0015)
+  171-172 deg :         54  (0.0011)
+  172-173 deg :         56  (0.0011)
+  173-174 deg :         44  (0.0009)
+  174-175 deg :         49  (0.0010)
+  175-176 deg :         34  (0.0007)
+  176-177 deg :         22  (0.0004)
+  177-178 deg :         23  (0.0005)
+  178-179 deg :         12  (0.0002)
+  179-180 deg :          1  (0.0000)
+histogram head_z (um) (skipping empty):
+  [-0.17500, -0.17000) :          1  (0.0000)
+  [-0.17000, -0.16500) :          3  (0.0001)
+  [-0.16500, -0.16000) :         15  (0.0003)
+  [-0.16000, -0.15500) :         45  (0.0009)
+  [-0.15500, -0.15000) :        128  (0.0026)
+  [-0.15000, -0.14500) :        224  (0.0045)
+  [-0.14500, -0.14000) :        363  (0.0073)
+  [-0.14000, -0.13500) :        537  (0.0107)
+  [-0.13500, -0.13000) :        785  (0.0157)
+  [-0.13000, -0.12500) :        909  (0.0182)
+  [-0.12500, -0.12000) :       1039  (0.0208)
+  [-0.12000, -0.11500) :       1138  (0.0228)
+  [-0.11500, -0.11000) :       1346  (0.0269)
+  [-0.11000, -0.10500) :       1438  (0.0288)
+  [-0.10500, -0.10000) :       1541  (0.0308)
+  [-0.10000, -0.09500) :       1552  (0.0310)
+  [-0.09500, -0.09000) :       1601  (0.0320)
+  [-0.09000, -0.08500) :       1554  (0.0311)
+  [-0.08500, -0.08000) :       1641  (0.0328)
+  [-0.08000, -0.07500) :       1700  (0.0340)
+  [-0.07500, -0.07000) :       1742  (0.0348)
+  [-0.07000, -0.06500) :       1659  (0.0332)
+  [-0.06500, -0.06000) :       1561  (0.0312)
+  [-0.06000, -0.05500) :       1456  (0.0291)
+  [-0.05500, -0.05000) :       1443  (0.0289)
+  [-0.05000, -0.04500) :       1315  (0.0263)
+  [-0.04500, -0.04000) :       1429  (0.0286)
+  [-0.04000, -0.03500) :       1481  (0.0296)
+  [-0.03500, -0.03000) :       1489  (0.0298)
+  [-0.03000, -0.02500) :       1455  (0.0291)
+  [-0.02500, -0.02000) :       1514  (0.0303)
+  [-0.02000, -0.01500) :       1502  (0.0300)
+  [-0.01500, -0.01000) :       1549  (0.0310)
+  [-0.01000, -0.00500) :       1532  (0.0306)
+  [-0.00500,  0.00000) :       1523  (0.0305)
+  [ 0.00000,  0.00500) :       1561  (0.0312)
+  [ 0.00500,  0.01000) :       1538  (0.0308)
+  [ 0.01000,  0.01500) :       1456  (0.0291)
+  [ 0.01500,  0.02000) :       1175  (0.0235)
+  [ 0.02000,  0.02500) :       1074  (0.0215)
+  [ 0.02500,  0.03000) :        909  (0.0182)
+  [ 0.03000,  0.03500) :        667  (0.0133)
+  [ 0.03500,  0.04000) :        557  (0.0111)
+  [ 0.04000,  0.04500) :        377  (0.0075)
+  [ 0.04500,  0.05000) :        259  (0.0052)
+  [ 0.05000,  0.05500) :        141  (0.0028)
+  [ 0.05500,  0.06000) :         58  (0.0012)
+  [ 0.06000,  0.06500) :         25  (0.0005)
+  [ 0.06500,  0.07000) :          2  (0.0000)
+  [ 0.07000,  0.07500) :          1  (0.0000)
+histogram head_r (um) (skipping empty):
+  [ 0.00000,  0.00500) :        119  (0.0024)
+  [ 0.00500,  0.01000) :        418  (0.0084)
+  [ 0.01000,  0.01500) :        680  (0.0136)
+  [ 0.01500,  0.02000) :        898  (0.0180)
+  [ 0.02000,  0.02500) :       1212  (0.0242)
+  [ 0.02500,  0.03000) :       1547  (0.0309)
+  [ 0.03000,  0.03500) :       1929  (0.0386)
+  [ 0.03500,  0.04000) :       2258  (0.0452)
+  [ 0.04000,  0.04500) :       2811  (0.0562)
+  [ 0.04500,  0.05000) :       3411  (0.0682)
+  [ 0.05000,  0.05500) :       3892  (0.0778)
+  [ 0.05500,  0.06000) :       4194  (0.0839)
+  [ 0.06000,  0.06500) :       4267  (0.0853)
+  [ 0.06500,  0.07000) :       4123  (0.0824)
+  [ 0.07000,  0.07500) :       3896  (0.0779)
+  [ 0.07500,  0.08000) :       3425  (0.0685)
+  [ 0.08000,  0.08500) :       3087  (0.0617)
+  [ 0.08500,  0.09000) :       2651  (0.0530)
+  [ 0.09000,  0.09500) :       2074  (0.0415)
+  [ 0.09500,  0.10000) :       1515  (0.0303)
+  [ 0.10000,  0.10500) :        966  (0.0193)
+  [ 0.10500,  0.11000) :        458  (0.0092)
+  [ 0.11000,  0.11500) :        147  (0.0029)
+  [ 0.11500,  0.12000) :         28  (0.0006)
+  [ 0.12000,  0.12500) :          4  (0.0001)
+=== END SINGLE MYOSIN THERMAL CHARACTERIZATION ===
+[STATS] bindEvents=0
+[STATS] meanBoundMotors=0.000
+[STATS] gpuMoveThing total=242.870s calls=500101 slotPack=47.050s jointPack=0.012s exec=147.168s unpack=48.616s
+ThingStep Threads took 201.003000 seconds.
+ThingBrownian Threads took 44.041000 seconds.
+Myosin Threads took 43.245000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 44.630000 seconds.
+Ck Mesh Threads took 43.988000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 43.085000 seconds.
+Finished closing JSON plots!

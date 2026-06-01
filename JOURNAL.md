@@ -4,6 +4,200 @@ Last updated: 2026-06-01
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Single-myosin thermal characterization: CPU vs GPU conformational ensemble
+
+Planner pivot: after seven per-step joint diagnostics came back clean
+(parameters, thresholds, signed torques, delta buffers, pose normalization,
+double-precision arithmetic), abandon the per-step forensics and build the
+simplest possible reproduction. One anchored myosin, no filaments, no
+binding, thermal motion + joints on. If isolated-myosin distributions
+DIFFER → divergence is intrinsic to myosin dynamics. If they MATCH →
+divergence is created by binding or multi-body coupling.
+
+Sharpened target from the 2026-06-01 entry below: with θ_RL converged
+(1.3° gap) and θ_LM always converged, internal joint angles agree CPU
+vs GPU — yet head_z still differs by 55 nm. Only the **absolute** pose
+of the assembly (rod tilt in lab frame, anchor-point drift) can move
+the head while internal angles are fixed. This diagnostic measures
+absolute pose explicitly.
+
+### Setup
+
+- New parameter `singleMyoDiag` in `Env.java`. When active, makeInitialThings
+  creates exactly ONE MyosinFixed at (0,0,fixedMyosinZValue), pointing +z,
+  with no filaments. Mutually exclusive with glidingAssay setup.
+- New `boxOfActin/SingleMyoDiag.java` — Welford accumulators + histograms
+  for θ_RL, θ_LM, rod/lever/motor absolute tilt vs +z, head x/y/z, head
+  radial distance, cocked-state fraction. Gated by env var
+  `BOA_DIAG_SINGLE_MYO=1`; interval via `BOA_DIAG_SINGLE_MYO_INTERVAL=N`.
+- New parameter file `ParameterFiles/singleMyoDiag` — 5.0 s sim
+  (500K steps × dt 1e-5), J2 reverted to 0.00 via parameter override
+  (the original soft-joint configuration that all prior comparison data
+  used; the J2=0.1 + rest=96° edits remain in code but are nullified by
+  the parameter value of 0).
+- All three components default-off when unset; production behaviour unchanged.
+
+### Run
+
+```
+# CPU (DIAG_CPU_JOINTS)
+BOA_DIAG_SINGLE_MYO=1 BOA_DIAG_SINGLE_MYO_INTERVAL=10 BOA_DIAG_CPU_JOINTS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/singleMyoDiag -seed 1
+
+# GPU (default joints kernel)
+BOA_DIAG_SINGLE_MYO=1 BOA_DIAG_SINGLE_MYO_INTERVAL=10 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/singleMyoDiag -seed 1
+```
+
+J2 value reported: `J2 (rod-lever): 0.0000` (override active on both paths).
+J1 unchanged at 0.4. Seed 1, n=50010 samples per run.
+
+### Side-by-side (full table: `RUN_LOGS/2026-05-31_singleMyo_compare.txt`)
+
+```
+                       CPU                GPU                diff
+theta_RL  mean      1.700741 rad      1.608809 rad       -0.092 (-5.27°)
+theta_RL  SD        0.6552            0.6776             +0.022
+theta_LM  mean      0.275604 rad      0.273180 rad       -0.0024 (-0.14°)
+theta_LM  SD        0.1518            0.1421             -0.010
+
+rod   tilt mean     89.71°            87.09°             -2.62°
+rod   tilt SD       0.711534          0.676222           -0.035
+lever tilt mean     90.45°            89.23°             -1.22°
+motor tilt mean     90.50°            89.20°             -1.30°
+
+head_x  mean       -0.0009 µm        -0.4797 µm          -0.479  ★
+head_x  SD          0.0460            0.2414             +0.195  ★
+head_y  mean       +0.0043 µm        -0.1791 µm          -0.183  ★
+head_z  mean       -0.0501 µm        -0.1448 µm          -0.095  ★
+head_z  SD          0.0493            0.2342             +0.185  ★
+head_r  mean        0.0612 µm         0.5329 µm          +0.472  ★
+head_r  max         0.122 µm          1.046 µm           +0.924  ★★
+cocked fraction     0.0047            0.0006
+samples             n=50010           n=50010
+```
+
+### Verdict — distributions DIFFER, and dramatically
+
+The isolated myosin diverges between CPU and GPU. The divergence is
+INTRINSIC to a single myosin's dynamics — no binding required. This is
+the minimal reproduction the prior diagnostics could not find.
+
+The internal joint angles (θ_RL, θ_LM) agree well — a ~5° θ_RL gap is
+the same magnitude as the prior J2=0 conformation diagnostic. But the
+ABSOLUTE position of the assembly diverges by an entire body-length:
+
+- **GPU head walks > 1 µm from the anchor (max 1.046 µm)** — that's 10×
+  the assembly's total contour length (rod 80 + lever 8 + motor 20 nm
+  = 108 nm).
+- **CPU head stays within 0.122 µm**, consistent with thermal tumbling
+  about a fixed anchor.
+
+A myosin "anchored at the rod tail" that lets the rod tail travel a
+whole micron isn't anchored at all.
+
+### Root cause (identified during the diagnostic)
+
+`MyosinFixed.jointConstraints()` overrides `Myosin.jointConstraints()`:
+
+```java
+public void jointConstraints () {
+    super.jointConstraints();    // 4 inter-segment apply* methods
+    applyRodFixedPtForce();      // rod end1 ← Hookean spring → myFixedPt
+}
+```
+
+`applyRodFixedPtForce()` is the rod-tail anchor — a spring that pulls
+`myoRod.end1` toward `myFixedPt` (the original construction location).
+This is the entire reason the surface-anchored myosins of the gliding
+assay are anchored at all.
+
+On the GPU path, `Myosin.MyosinThreads.divideAndConquer` short-circuits
+the per-Myosin CPU dispatch (`Myosin.java:77-88`): when
+`useGPU && !DIAG_CPU_JOINTS`, it sets all `jobDiv[i] = 0`, so no thread
+processes any chunk. `MyosinFixed.jointConstraints()` is **never called**
+on the GPU path.
+
+The GPU `jointsKernel` (`GPUMoveThing.java:286+`) replicates only
+`super.jointConstraints()` — the four inter-segment apply* methods. A
+`grep -c "MyosinFixed\|myFixedPt\|applyRodFixed"` over `GPUMoveThing.java`
+returns **0**. The anchor spring is silently dropped on the GPU path.
+
+### Why this explains everything
+
+- **−42 % bindEvents (J2=0) and −24 % bindEvents (J2=0.1)** — GPU motors
+  drift away from filaments because nothing holds them at the surface.
+- **+55 nm head_z mean gap** — CPU rod stays vertical (tail pinned by
+  the spring); GPU rod falls over because there's no spring.
+- **Why head_z gap was unchanged between J2=0 and J2=0.1** — the
+  rod-lever stiffness was never the issue; the missing force is upstream
+  of any internal joint geometry.
+- **Why DIAG_CPU_JOINTS passed at bindEvents 828 ± 68 vs 856** — the
+  CPU per-Myosin dispatch was not short-circuited, so
+  `MyosinFixed.jointConstraints()` ran and the anchor spring was
+  applied.
+- **Why Part B (CPU-side delta-add of GPU joint output) failed at
+  439 ± 44 like the chained GPU** — Part B kept `useGPU=true` and
+  `DIAG_CPU_JOINTS=false`, so the per-Myosin dispatch was also
+  short-circuited and `applyRodFixedPtForce()` was missing there too.
+  The "delivery path" (CPU delta-add vs device delta) was a red herring;
+  what mattered was that the anchor spring was absent on both.
+- **Why pose-normalization, parameter-byte, signed-torque, and
+  double-precision-acos diagnostics all came back clean** — the missing
+  force is in a per-Myosin CPU method that those audits weren't looking
+  at; they were comparing torque math on the joints kernel reads.
+
+### Scope
+
+Per task scope: identify, do not fix. The fix is straightforward
+conceptually (add a parallel CPU dispatch for `MyosinFixed.applyRodFixedPtForce`
+on the GPU path, or extend the GPU kernel to read a per-myosin
+`myFixedPt` buffer and apply the rod-tail spring inside the joints
+kernel), but should be planned and validated against the gliding assay
+ensemble separately.
+
+### Files added / changed (all default-off in production)
+
+- `boxOfActin/Env.java` — `singleMyoDiag` parameter (BOOLEAN, default
+  inactive).
+- `boxOfActin/MyosinFixed.java` — `setUpSingleMyosinDiag()` method
+  creates one MyosinFixed at (0,0,fixedMyosinZValue), points +z.
+- `boxOfActin/BoxOfActin.java` — checks `singleMyoDiag` in
+  `makeInitialThings()` after the glidingAssay branch; calls
+  `SingleMyoDiag.initFromEnv()` / `.sample()` / `.dump()` alongside
+  the existing JointDiag hooks.
+- `boxOfActin/SingleMyoDiag.java` (new) — Welford + histograms for the
+  conformational ensemble; env-var gated.
+- `ParameterFiles/singleMyoDiag` — reusable standing diagnostic config.
+
+Compile (Java 21, TornadoVM 4.0.1-dev) clean. Production-mode runs
+(no env vars, no `singleMyoDiag` parameter) are unaffected. The
+parameter file ships J2=0.00 override so the diagnostic measures the
+historical soft-joint baseline.
+
+### Open
+
+- **The fix is the next planner decision.** Choice A: add a CPU
+  per-Myosin dispatch for MyosinFixed's anchor spring that runs even
+  on the GPU path (cheap; ~14k motors × one Hookean force each is
+  microseconds). Choice B: extend the GPU `jointsKernel` to take a
+  per-Myosin `fixedPt` buffer + `isFixed` flag and apply the anchor
+  spring inside the kernel (keeps the work on device). Either closes
+  the bindEvents gap.
+- **Validate the fix with the same minimal assay.** Once the anchor
+  spring is on the GPU path, re-running the singleMyoDiag should give
+  CPU-equivalent head_x/y/z distributions. This is now the cheapest
+  gate for the gliding-assay ensemble.
+- **Question for the planner**: should `MyosinFixed.applyRodFixedPtForce`
+  be reclassified as an *external* constraint (like membrane links or
+  ActA tethers) so it lands in `myoJoints2` rather than `myoJoints1`?
+  That places it categorically with other external couplings that the
+  GPU path doesn't yet handle, and is the right architectural box.
+
 ## 2026-06-01 — Rod-lever joint stiffness 0→0.1: biology + GPU numerical test
 
 Followup to the 2026-05-31 STOP entry. Planner chose rest angle = 96°
@@ -97,6 +291,27 @@ cause. The residual divergence has another source — most plausibly
 cumulative float32 drift in `coord`/`uVec` pose precision (the
 2026-05-31 paramdiag entry already showed the per-step torque math
 matches), or in the binding-side feedback path itself.
+
+### Key finding — head_z gap unchanged
+
+Comparing head_z mean (seed-1 pre-check) at the two J2 settings:
+
+```
+                            head_z(CPU)    head_z(GPU)    diff
+J2 = 0    (2026-05-31)      -0.038815 µm    +0.015898 µm   0.0547 µm
+J2 = 0.1, rest=96° (today)  -0.038544 µm    +0.016135 µm   0.0547 µm
+```
+
+Stiffening the rod-lever joint pulled θ_RL from a 4.2° gap to a
+1.3° gap — but the binding-relevant motor-head height gap stayed at
+~55 nm to two significant figures. With θ_RL converged AND θ_LM
+always converged (~4e-4 rad gap), the myosin's **internal shape** is
+nearly identical CPU vs GPU. The 55 nm head_z divergence therefore
+cannot be driven by an internal joint angle. The only remaining
+degree of freedom that moves the head while internal angles are
+fixed is the **absolute orientation/position** of the whole
+assembly — how the anchored rod tilts in lab frame. That points the
+next diagnostic at absolute pose, not joint angles.
 
 ### State left on disk
 

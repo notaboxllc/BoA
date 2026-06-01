@@ -146,7 +146,9 @@ public class BoxOfActin {
 		// 2026-05-31 conformation diagnostic: env-var hooks
 		// BOA_DIAG_JOINT_STATS=1     → enable conformation sampling (off by default)
 		// BOA_DIAG_CPU_JOINTS=1      → force CPU-double joint computation (DOUBLE config)
+		// BOA_DIAG_SINGLE_MYO=1      → enable single-myosin thermal characterization
 		JointDiag.initFromEnv();
+		SingleMyoDiag.initFromEnv();
 		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
 		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
 		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
@@ -879,6 +881,9 @@ public class BoxOfActin {
 				// 2026-05-31 joint param + signed-torque diagnostic — Part 3 late-step dump
 				// (no-op when BOA_DIAG_PARAMS unset).
 				JointParamDiag.sample();
+				// 2026-05-31 single-myosin thermal characterization — no-op when
+				// BOA_DIAG_SINGLE_MYO unset.
+				SingleMyoDiag.sample();
 
 				// C3: safe-point — pause check (with inspect drain while waiting),
 				// kill check, then final inspect drain. Order: pause > kill > inspect.
@@ -1256,6 +1261,7 @@ public class BoxOfActin {
 		System.out.println("myosinTime = " + myosinTime);
 		// 2026-05-31 conformation diagnostic: no-op when disabled.
 		JointDiag.dump();
+		SingleMyoDiag.dump();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
@@ -2022,7 +2028,14 @@ public class BoxOfActin {
 			if (Env.glidingAssay.isActive()) {
 				MyosinFixed.setUpGlidingAssay();
 			}
-			
+
+			// 2026-05-31: single-myosin thermal characterization mode (no filaments,
+			// no other populations). Mutually exclusive with the gliding assay setup.
+			if (Env.singleMyoDiag.isActive()) {
+				MyosinFixed.setUpSingleMyosinDiag();
+				return;
+			}
+
 			FilSegment.makeInitialFilaments();
 			MyoMiniFilament.makeInitialMyoMiniFils();
 			ProteinNode.makeInitialProteinNodes();

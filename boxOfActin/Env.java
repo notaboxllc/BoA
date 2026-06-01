@@ -780,6 +780,12 @@ public class Env {
 	static private final double glidingFilamentForce_init = 1; // force resisting gliding filament motion
 	static final Parameter glidingFilamentForce = new Parameter("glidingFilamentForce", " Force Working Against Gliding Motion",glidingFilamentForce_init, "pN");
 
+	// ** Single-myosin diagnostic mode (2026-05-31 pivot from per-step joint forensics).
+	// When active, makeInitialThings() creates exactly one MyosinFixed at the box centre,
+	// anchored at z=fixedMyosinZValue, pointing (0,0,1), with no filaments. Brownian + joints
+	// run normally. SingleMyoDiag accumulates the conformational ensemble.
+	static final Parameter singleMyoDiag = new Parameter("singleMyoDiag", " Single-myosin thermal characterization mode", 0, "", Parameter.BOOLEAN, false);
+
 	// ** Polymerization Criteria
 	static private final int capNumEnd1_init = 3;
 	static final Parameter capNumEnd1 = new Parameter("capNumEnd1"," Cap at End1", capNumEnd1_init, "atp monomers", Parameter.INT,false);

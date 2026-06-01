@@ -73,6 +73,18 @@ public class MyosinFixed extends Myosin {
 		fillPlaneWithFixedMyosins();
 		FilSegment.makeGlidingAssayFilament();
 	}
+
+	// 2026-05-31 pivot: minimal-system reproduction. Creates exactly one
+	// MyosinFixed anchored as in the gliding assay (rod tail at z = fixedMyosinZValue,
+	// initial pose pointing +z), with NO filaments. Used by the singleMyoDiag
+	// parameter mode to characterize an isolated myosin's thermal conformational
+	// ensemble for CPU vs GPU comparison.
+	public static void setUpSingleMyosinDiag () {
+		double zVal = Env.fixedMyosinZValue.getValue();
+		Pt3D myoLoc = new Pt3D(0, 0, zVal);
+		Pt3D myoDirection = new Pt3D(0, 0, 1);
+		new MyosinFixed(myoLoc, myoDirection);
+	}
 	
 	public static void fillPlaneWithFixedMyosins () {
 		double myoDensity = Env.fixedMyosinDensity.getValue(); // number per sq. micron
