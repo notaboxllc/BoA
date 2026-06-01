@@ -1,0 +1,42 @@
+2026-05-31 acos-fix 10-seed ensemble summary
+============================================
+Param file: ParameterFiles/glidingAssay500_val (M=500, ~10101 steps)
+Protocol:   10 GPU seeds (1..10) with branched fastAcosF + sin(fastAcosF)
+            moveCoeff chain. CPU baseline rows reused from iter2d (CPU
+            code unchanged; 2026-05-29).
+
+Observable comparison (cSEM gate < 2.0)
+---------------------------------------
+                     CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     460.80 ± 36.55 (115.57)         6.766  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       4.55 ±  0.33 (  1.05)         6.137  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.33 ±  0.16 (  0.49)         8.759  FAIL
+
+For comparison, the pre-fix (sqrt-identity) chained-GPU ensemble was:
+                                                  bindEvents 497.80 ± 38.23
+                                                  MBM         5.01 ± 0.36
+                                                  gV          6.32 ± 0.13
+
+Result: the math fix did NOT close the gap. GPU bindEvents 461 vs pre-fix
+498 is within noise (cSEM gate would pass between the two GPU runs).
+The 2026-05-31 diagnostic projected ~18 % recovery from swapping the
+sqrt-identity back to sin(fastAcos(x)); on real GPU that recovery did
+not materialise. Residual precision sources outside the joint-math
+scope (Wang-hash Brownian RNG, broader float32 integration drift) appear
+to dominate the bias rather than the joint kernel arithmetic.
+
+GPU per-seed moveThing timing (s/seed)
+--------------------------------------
+seed  total   slotPack  jointPack  exec    unpack
+  1   70.93   12.66      8.07     22.46   27.74
+  2   72.21   12.72      7.96     22.42   29.11
+  3   72.09   12.64      8.19     22.31   28.95
+  4   72.27   12.63      8.15     22.29   29.19
+  5   72.99   12.70      8.04     22.43   29.82
+  6   71.04   12.65      8.05     22.22   28.11
+  7   71.93   12.66      8.07     22.38   28.81
+
+Compared with the 2026-05-30 chained-ensemble timings (mean ~71 s/seed
+total, exec ~22.4 s/seed): timing essentially unchanged. The extra
+Math.sin call per moveCoeff site (4 per Myosin per step) doesn't show
+up at this scale.

@@ -161,18 +161,24 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // fastAcos approximation (Abramowitz & Stegun 4.4.46). Caller must clamp
-    // x to [-1, 1]. Max error ~5e-5 over [-1, 1]. Used by jointsKernel; the
-    // PTX backend can't lower Math.acos (ReinterpretNode unimplemented).
+    // fastAcos approximation matching CPU Pt3D.fastAcos: small-angle form
+    // sqrt(2(1-|x|)) outside the ±0.95 band (<0.6% error at threshold), and
+    // the Abramowitz & Stegun 4.4.46 polynomial in the middle. The original
+    // CPU code uses Math.acos in the middle band but PTX can't lower it
+    // (ReinterpretNode unimplemented). Caller must clamp x to [-1, 1].
     // -------------------------------------------------------------------------
     private static float fastAcosF(float x) {
-        float absx = (x < 0f) ? -x : x;
-        float poly = 1.5707288f
-                   + absx * (-0.2121144f
-                   + absx * ( 0.0742610f
-                   + absx * (-0.0187293f)));
-        float ret = poly * (float) Math.sqrt(1.0f - absx);
-        return (x < 0f) ? (3.14159265f - ret) : ret;
+        if (x > 0.95f) {
+            return (float) Math.sqrt(2.0f * (1.0f - x));
+        } else if (x < -0.95f) {
+            return 3.14159265f - (float) Math.sqrt(2.0f * (1.0f + x));
+        } else {
+            float ax = (x < 0f) ? -x : x;
+            float p = (-0.0187293f * ax + 0.0742610f) * ax - 0.2121144f;
+            p = (p * ax + 1.5707963f);
+            p = p * (float) Math.sqrt(1.0f - ax);
+            return (x < 0f) ? (3.14159265f - p) : p;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -278,8 +284,8 @@ public class GPUMoveThing {
                 float cosBh = -(mux * l1x + muy * l1y + muz * l1z);
                 if (cosBh > 1.0f)  cosBh = 1.0f;
                 if (cosBh < -1.0f) cosBh = -1.0f;
-                float cosAlphH2 = 1.0f - cosBh * cosBh;
-                if (cosAlphH2 < 0f) cosAlphH2 = 0f;
+                float cosAlphH  = (float) Math.sin(fastAcosF(cosBh));
+                float cosAlphH2 = cosAlphH * cosAlphH;
                 float lSqH     = 1.0e-12f * motorLen * motorLen;
                 float CxH      = cosBh * cosBh / mBTGx;
                 float CperpH   = cosAlphH2 / mBTGy;
@@ -289,8 +295,8 @@ public class GPUMoveThing {
                 float cosBt = lux * l2x + luy * l2y + luz * l2z;
                 if (cosBt > 1.0f)  cosBt = 1.0f;
                 if (cosBt < -1.0f) cosBt = -1.0f;
-                float cosAlphT2 = 1.0f - cosBt * cosBt;
-                if (cosAlphT2 < 0f) cosAlphT2 = 0f;
+                float cosAlphT  = (float) Math.sin(fastAcosF(cosBt));
+                float cosAlphT2 = cosAlphT * cosAlphT;
                 float lSqT     = 1.0e-12f * leverLen * leverLen;
                 float CxT      = cosBt * cosBt / lBTGx;
                 float CperpT   = cosAlphT2 / lBTGy;
@@ -362,8 +368,8 @@ public class GPUMoveThing {
                 float cosB1 = -(lux * l1x + luy * l1y + luz * l1z);
                 if (cosB1 > 1.0f)  cosB1 = 1.0f;
                 if (cosB1 < -1.0f) cosB1 = -1.0f;
-                float cosAlph1_2 = 1.0f - cosB1 * cosB1;
-                if (cosAlph1_2 < 0f) cosAlph1_2 = 0f;
+                float cosAlph1  = (float) Math.sin(fastAcosF(cosB1));
+                float cosAlph1_2 = cosAlph1 * cosAlph1;
                 float lSq1     = 1.0e-12f * leverLen * leverLen;
                 float Cx1      = cosB1 * cosB1 / lBTGx;
                 float Cperp1   = cosAlph1_2 / lBTGy;
@@ -373,8 +379,8 @@ public class GPUMoveThing {
                 float cosB2 = rux * l2x + ruy * l2y + ruz * l2z;
                 if (cosB2 > 1.0f)  cosB2 = 1.0f;
                 if (cosB2 < -1.0f) cosB2 = -1.0f;
-                float cosAlph2_2 = 1.0f - cosB2 * cosB2;
-                if (cosAlph2_2 < 0f) cosAlph2_2 = 0f;
+                float cosAlph2  = (float) Math.sin(fastAcosF(cosB2));
+                float cosAlph2_2 = cosAlph2 * cosAlph2;
                 float lSq2     = 1.0e-12f * rodLen * rodLen;
                 float Cx2      = cosB2 * cosB2 / rBTGx;
                 float Cperp2   = cosAlph2_2 / rBTGy;

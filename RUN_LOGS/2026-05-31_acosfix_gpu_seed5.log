@@ -1,0 +1,94 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay500_val...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=1572740806 nWorkers=16
+GPUMotorBinding: motorCap=500000 segCap=1000000 totalCells=3124 contentsCap=3124000 blockSize=64
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=7.8 cumMaxPerThread=11
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=9.4 cumMaxPerThread=12
+Sim. time=00.01....~55.25 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=9.8 cumMaxPerThread=13
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=10.3 cumMaxPerThread=13
+Sim. time=00.02....~51.15 minutes computation to simulate 1 sec, run finished in ~00.07 hours
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=10.4 cumMaxPerThread=13
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=11.1 cumMaxPerThread=14
+Sim. time=00.03....~51.02 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=11.7 cumMaxPerThread=14
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=11.8 cumMaxPerThread=14
+Sim. time=00.04....~50.97 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=11.9 cumMaxPerThread=14
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=11.8 cumMaxPerThread=14
+Sim. time=00.05....~51.29 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=11.7 cumMaxPerThread=14
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=11.5 cumMaxPerThread=14
+Sim. time=00.06....~51.16 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=11.3 cumMaxPerThread=14
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=11.0 cumMaxPerThread=14
+Sim. time=00.07....~51.29 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=11.0 cumMaxPerThread=14
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=10.9 cumMaxPerThread=14
+Sim. time=00.08....~51.03 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=10.8 cumMaxPerThread=14
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=10.7 cumMaxPerThread=14
+Sim. time=00.09....~51.13 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=10.6 cumMaxPerThread=14
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=10.5 cumMaxPerThread=14
+Sim. time=00.10....~50.89 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=592
+[STATS] meanBoundMotors=5.251
+[STATS] gpuMotorBinding total=72.978s calls=10101 pack=1.200s gridPack=0.089s exec=71.131s unpack=0.505s
+[STATS] gpuMoveThing total=72.994s calls=10101 slotPack=12.698s jointPack=8.041s exec=22.429s unpack=29.822s
+[STATS] glidingVelocity=6.6304
+ThingStep Threads took 53.869000 seconds.
+ThingBrownian Threads took 10.373000 seconds.
+Myosin Threads took 9.814000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 19.644000 seconds.
+Ck Mesh Threads took 8.858000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 8.224000 seconds.
+Finished closing JSON plots!

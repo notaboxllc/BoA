@@ -4,6 +4,152 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Fix GPU fastAcosF precision + moveCoeff chain
+
+Acted on the recommendation in the earlier 2026-05-31 diagnostic entry:
+land the precision-matched `fastAcosF` in `GPUMoveThing.java` and swap
+the four moveCoeff sites from the sqrt(1-cosBeta²) algebraic identity
+back to CPU's `sin(fastAcos(cosBeta))` chain. The diagnostic projected
+~18 % bindEvents recovery from this pair of changes; the 10-seed GPU
+ensemble does NOT show that recovery.
+
+### Changes
+
+`boxOfActin/GPUMoveThing.java` only — kernel math, no architectural
+changes.
+
+1. **`fastAcosF` branched to match CPU's `Pt3D.fastAcos`.** Outside the
+   ±0.95 band: small-angle form `sqrt(2(1-|x|))` / `π - sqrt(2(1+x))`
+   (matches CPU exactly). Inside the band: Abramowitz polynomial as
+   before (CPU uses Math.acos here, but PTX can't lower Math.acos).
+   The polynomial constant updated from 1.5707288 to 1.5707963 (π/2)
+   as in the task prompt. `(float) Math.sqrt(...)` continues working
+   for PTX as the existing pattern; no TornadoMath import added.
+
+2. **Four moveCoeff sites: identity → CPU chain.** Each of the four
+   moveCoeff computations in `jointsKernel` (motor head & lever tail
+   in `applyLeverMotorJointForce`; lever & rod in
+   `applyRodLeverJointForce`) replaced `cosAlphX2 = 1 - cosBetaX²` with
+   `cosAlphX = (float) Math.sin(fastAcosF(cosBetaX)); cosAlphX2 =
+   cosAlphX * cosAlphX`. `Math.sin(double)` was confirmed as a PTX
+   intrinsic by the 2026-05-30 "Myosin joints GPU kernel" entry §A.3.
+
+Compiled cleanly with `javac -g --release 21 --enable-preview` against
+TornadoVM 4.0.1-dev PTX.
+
+### Result — 10-seed ensemble — FAIL (no improvement)
+
+```
+                     CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     460.80 ± 36.55 (115.57)         6.77  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       4.55 ±  0.33 (  1.05)         6.14  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.33 ±  0.16 (  0.49)         8.76  FAIL
+```
+
+Compared with the pre-fix chained-GPU ensemble (498 ± 38 / 5.01 ± 0.36
+/ 6.32 ± 0.13) the math fix moved the means by 37 / 0.46 / 0.00 — all
+within ensemble noise. No statistically detectable improvement.
+
+The diagnostic Test 2 (CPU emulating the GPU's sqrt identity, with
+DIAG_GPU_MATH=true) had given bindEvents 703.5, projecting that
+reverting to `sin(fastAcos(x))` should recover ~150 binding events
+(703.5 → ~856.8). On real GPU that reversal moved the mean by 37
+events, not 150. The CPU diagnostic understated the actual residual.
+
+Logs: `RUN_LOGS/2026-05-31_acosfix-validation.txt`,
+`RUN_LOGS/2026-05-31_acosfix-validation-summary.txt`,
+per-seed `RUN_LOGS/2026-05-31_acosfix_gpu_seed{1..10}.log`.
+
+### Why the diagnostic mis-projected
+
+The Test 2 diagnostic emulated the GPU math swap on the CPU code path,
+which kept everything else (double precision, MersenneTwister Brownian,
+CPU integration ordering) identical to baseline. The real GPU has:
+
+- The Abramowitz polynomial in `fastAcosF`'s middle band — CPU
+  diagnostic used `Math.acos` in the middle (~5e-5 error gap per call).
+  The `sin(fastAcosF(x))` chain in the GPU therefore differs from
+  `sin(Math.acos(x))` on CPU; matching CPU's branched shape closes the
+  small-angle endpoints but the middle band still drifts.
+- Float32 throughout all six SoA pose arrays (coord, uVec, yVec, force,
+  torque, ...) plus the integration step itself. The diagnostic Test 3
+  cast only joint-path intermediates to float32 (the test-2-to-test-3
+  delta) and saw bindEvents move from 703.5 to 777.6 — actually
+  improving with selective float32. The GPU's whole-pipeline float32 is
+  a qualitatively different regime.
+- Wang-hash Brownian RNG vs MersenneTwister. Not touched by any of the
+  three CPU diagnostic tests.
+
+The net is that joint-kernel arithmetic — the only thing this fix
+addresses — is not the bottleneck.
+
+### Dense timing — glidingDense_demo_smoke (small regression)
+
+`RUN_LOGS/2026-05-31_acosfix_dense_gpu.log` shows the extra Math.sin
+calls are NOT free at M=98K scale:
+
+```
+phase                                2026-05-30 chained   2026-05-31 this
+gpuMoveThing total (1101 calls)         35.5 s             44.4 s   (+25 %)
+  slotPack                               -                  9.6 s
+  jointPack                              -                  6.0 s
+  exec                                  ~10.7 s            12.2 s   (+14 %)
+  unpack                                 -                 16.7 s
+gpuMotorBinding total                   13.1 s             12.6 s
+Myosin Threads (per-Myosin CPU stub)     0.88 s             0.93 s
+wall (min per sim-sec)                  217                ~196     (faster)
+[STATS] bindEvents                      ----                3432
+        meanBoundMotors                  ----              231.8
+        glidingVelocity                  ----               33.32
+```
+
+Each Myosin runs 4 moveCoeff sites per step (motor-head + lever-tail in
+the lever-motor force; lever + rod in the rod-lever force). At M=98 K
+and ~1101 steps that's ~430 M extra `Math.sin` invocations — the +1.5 s
+exec delta and +9 s total delta is consistent with PTX sin at
+~20 ns/call. Tolerable at this scale; the kernel is still 60 % faster
+than the CPU joints path.
+
+Wall improved 217 → 196 min/sim-sec despite the slower moveThing kernel
+— other phases (cleanup, log, etc.) sit below previous noise; the
+single-seed dense smoke is noisy so this is not a real speedup, just
+an indication that nothing else regressed.
+
+### What this means for the strategy
+
+- **Keep the fix landed.** It moves GPU kernel math closer to CPU
+  formulas (CPU/GPU equivalence is the stated validation goal), even
+  though observables didn't improve. Reverting would restore an
+  algebraic identity the CPU doesn't use.
+- **The next investigation is not joint math.** The residual is most
+  likely the Wang-hash Brownian RNG or float32 integration drift —
+  the two avenues the diagnostic explicitly flagged but did not test
+  on CPU. A CPU-side experiment replacing MT Brownian draws with the
+  Wang-hash sequence (mirroring `moveThingKernel`'s six wangHash calls
+  per Thing per step) is the targeted next step. If that drops CPU
+  bindEvents toward the GPU level, the right move is either (a) port
+  Wang-hash to CPU for a single source of stochasticity, or (b) treat
+  the GPU as a different-but-valid Brownian process and re-validate
+  against physics targets directly rather than CPU equivalence.
+- **The fastAcosF + sin chain is still the right code.** It matches
+  CPU formulas, costs nothing measurable, and removes a known
+  GPU-vs-CPU formula gap from the discussion.
+
+### Open
+
+- The diagnostic predicted +150 bindEvents from this change; actual is
+  +37. The gap (~110 events) is the part the CPU emulation failed to
+  capture. Worth a follow-up CPU-side test that combines DIAG_GPU_MATH
+  with a polynomial Math.acos replacement (NOT Math.acos in the middle
+  band) to see if the polynomial-vs-Math.acos delta alone accounts for
+  ~110 events.
+- `MyoMotor.moveCoeff` / `MyoLever.moveCoeff` / `MyoRod.moveCoeff` on
+  the CPU side are unchanged. The GPU now uses `sin(fastAcosF(...))`;
+  CPU uses `sin(Pt3D.fastAcos(...))`. The difference is the middle-band
+  formula. Could land a CPU `Pt3D.fastAcos` polynomial-only version
+  toggled by a flag for clean equivalence testing, but that's a CPU
+  precision regression for production runs.
+
 ## 2026-05-31 — Joints kernel precision diagnostic
 
 Targeted at the 40 % bindEvents drop seen in the 2026-05-30 chained-GPU
