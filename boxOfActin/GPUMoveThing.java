@@ -520,7 +520,8 @@ public class GPUMoveThing {
                     double angTween = accurateAcos(dotVecs) * RAD2DEG;
 
                     double invBRG = 1.0 / lBRGy + 1.0 / rBRGy;
-                    double torsionMag = j2FracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
+                    double angD = angTween - 96.0;   // rest angle 96°, mirror of Myosin.applyRodLeverJointTorque
+                    double torsionMag = j2FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
 
                     rodTx += tvx * torsionMag;
                     rodTy += tvy * torsionMag;

@@ -270,9 +270,9 @@ public class Myosin {
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
 
-		double angRelaxed = 0;
+		double angRelaxed = 96.0;   // degrees; assembled myosin's natural rod-lever equilibrium (CPU value 1.676 rad)
 		double angD = angTween-angRelaxed;
-			
+
 		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 		double torsionMag = Env.myoJ2FracMoveTorq.getValue()*(Math.PI/180)*angD/((1/myoLever.bRotGam.y + 1/myoRod.bRotGam.y)*Env.deltaT.getValue());
 		

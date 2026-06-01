@@ -152,7 +152,7 @@ public class Env {
 			" PAIRS Torque Arm Coeff: myosin rod-lever joint", 0.4, "");
 	static final Parameter myoJ2FracMoveTorq = new Parameter(
 			"myoJ2FracMoveTorq", " PAIRS Torque Coeff: myosin rod-lever joint",
-			0.00, "");
+			0.10, "");
 
 	static final Parameter myoDimerLeverFracMoveTorq = new Parameter(
 			"myoDimerLeverFracMoveTorq",

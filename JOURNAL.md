@@ -1,8 +1,118 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-01 — Rod-lever joint stiffness 0→0.1: biology + GPU numerical test
+
+Followup to the 2026-05-31 STOP entry. Planner chose rest angle = 96°
+(the simulation's natural θ_RL equilibrium, 1.676 rad on CPU) and asked
+for a single-value test of J2=0.1, rest=96°: conformation pre-check at
+seed 1, then 10-seed CPU + GPU gliding ensembles on
+`glidingAssay500_val`. Pass criterion for GPU = CPU: |diff|/cSEM < 2.0
+on bindEvents, meanBoundMotors, glidingVelocity. CPU result becomes the
+new reference (the physics changed for both paths).
+
+### Biological rationale
+
+The rod-lever joint represents the myosin neck–S2 junction: genuinely
+flexible (a low-stability coiled-coil hinge) but not a free swivel.
+The pre-existing `myoJ2FracMoveTorq = 0` was the extreme floppy limit;
+the lever-motor joint (the converter) sits at 0.4, so the S2 hinge
+should be softer than that but nonzero. 0.10 sits comfortably between.
+Rest = 96° is the joint's *current* equilibrium under the rest of the
+force balance (lever-motor torsion + R×F coupling + Brownian) — picking
+that as the spring's rest angle pins the soft DOF *at* its existing
+geometry rather than yanking the molecule toward the construction
+angle of 0°.
+
+### Edits
+
+Two CPU-side edits (the planner's instruction) plus one GPU kernel
+edit discovered at the pre-check.
+
+- `Env.java:153-155` — `myoJ2FracMoveTorq` default `0.00 → 0.10`.
+- `Myosin.java:273` — `angRelaxed = 0` → `angRelaxed = 96.0` (degrees);
+  drives the CPU rod-lever Hookean restoring torque toward 96°.
+- `GPUMoveThing.java:523` (discovered third edit) — the GPU joints
+  kernel used `angTween` directly with no rest-angle subtraction, i.e.
+  implicit rest = 0. The pre-check below caught this: with only the
+  CPU edits in place, the GPU actively restored the joint toward 0°
+  while CPU was pinned at 96° — a 72° conformation gap. Added
+  `angD = angTween - 96.0` and the gap collapsed.
+
+### Conformation pre-check (seed 1)
+
+```
+config                                  theta_LM         theta_RL         gap_RL
+CPU joints (DOUBLE)                     0.359855 rad     1.688898 rad     —
+GPU joints, kernel rest implicit 0      0.374246         0.427844         1.261 rad ≈ 72°  (FAIL)
+GPU joints, kernel rest=96° patch       0.361600         1.666540         0.022 rad ≈ 1.3° (PASS)
+```
+
+The 1.3° patched gap is the smallest the project has seen
+(J2=0 baseline was 4.2°). No "Crazy torque" warnings either side
+across any run. Pre-check threshold was 2°. PASS.
+
+### CPU 10-seed ensemble (BOA_DIAG_CPU_JOINTS=1)
+
+| metric | mean | SD | SEM | range |
+|---|---|---|---|---|
+| bindEvents | 732.2 | 137.2 | 43.4 | 471–890 |
+| meanBoundMotors | 6.357 | 1.211 | 0.383 | 4.16–7.51 |
+| **glidingVelocity** | **8.037 µm/s** | 0.519 | 0.164 | 6.91–8.95 |
+
+Reference: J2=0 CPU baseline glidingVelocity was 8.22 µm/s. New
+CPU J2=0.1 mean is 8.04, essentially unchanged (~−2%), still at
+the high end of the 5–8 µm/s biological range for skeletal myosin
+II. **Biological gliding behaviour preserved.**
+
+### GPU partial ensemble (n=6; user stopped at seed 7)
+
+| metric | CPU n=10 | GPU n=6 | diff | cSEM | \|diff\|/cSEM |
+|---|---|---|---|---|---|
+| bindEvents | 732.2 ± 43.4 | 559.0 ± 31.6 | −173.2 | 53.7 | **3.23** ✗ |
+| meanBoundMotors | 6.357 ± 0.383 | 5.399 ± 0.241 | −0.958 | 0.452 | **2.12** ✗ |
+| glidingVelocity | 8.037 ± 0.164 | 6.418 ± 0.113 | −1.620 | 0.199 | **8.13** ✗ |
+
+GPU glidingVelocity (~6.4 µm/s) is still biologically reasonable
+(within 5–8 µm/s) but systematically slower. None of the three metrics
+passes the |diff|/cSEM < 2.0 criterion. Direction matches the J2=0 GPU
+divergence (fewer binds, slower) at smaller magnitude — the J2=0 GPU
+baseline ran ~−42% on bindEvents, J2=0.1 narrowed it to ~−24%.
+Improvement, not closure.
+
+### Verdict
+
+- **(a) Biology preserved**: CPU glidingVelocity 8.04 µm/s vs 8.22
+  baseline — stiffening the S2 hinge did not break motor mechanics.
+- **(b) GPU = CPU**: **No.** Conformation gap pinned (4.2° → 1.3°),
+  but the downstream binding/velocity gap persists at
+  |diff|/cSEM ≈ 3–8.
+
+Implication: the binding-feedback amplification through the soft
+rod-lever DOF was *a* contributor to the GPU drop but not the sole
+cause. The residual divergence has another source — most plausibly
+cumulative float32 drift in `coord`/`uVec` pose precision (the
+2026-05-31 paramdiag entry already showed the per-step torque math
+matches), or in the binding-side feedback path itself.
+
+### State left on disk
+
+- All three edits retained, compile clean.
+- Per-seed numbers, conformation table, and pre-/post-patch GPU
+  pre-check stats: `RUN_LOGS/2026-06-01_J2_0.1_rest96_ensembles.txt`.
+- Raw logs: `/tmp/j2stiff_conf_{cpu,gpu,gpu2}.log`,
+  `/tmp/j2stiff_cpu_seed{1..10}.log`, `/tmp/j2stiff_gpu_seed{1..6}.log`.
+
+### Open
+
+- Planner is switching tactics on the CPU/GPU divergence hunt.
+- 4 GPU seeds left unrun (7–10); n=6 is good enough to read direction
+  but doesn't fully bound the SEM.
+- The J2=0.1, rest=96° edits stay in tree as a partial fix —
+  conformation aligned, residual ~24% binding-rate gap.
 
 ## 2026-05-31 — Rod-lever joint stiffness 0→0.1: STOP at rest-angle gate
 

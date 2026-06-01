@@ -1,0 +1,56 @@
+## Rod-lever joint stiffness J2=0.1, rest=96° — per-seed ensemble stats
+##
+## Edits in place:
+##   Env.java:153-155          myoJ2FracMoveTorq default 0.00 -> 0.10
+##   Myosin.java:273           angRelaxed 0 -> 96.0
+##   GPUMoveThing.java:523     angD = angTween - 96.0 added before scaling
+##
+## Param file: ParameterFiles/glidingAssay500_val
+## Run line:   BoxOfActin -r -gpu -pf ... -seed <N>
+## CPU path:   BOA_DIAG_CPU_JOINTS=1 env var set
+## GPU path:   default (no env var)
+## Stopped after GPU seed 6 per user request.
+
+## Conformation pre-check (seed 1, BOA_DIAG_JOINT_STATS=1)
+config                                            theta_LM       theta_RL       head_z         E_joint
+CPU joints (DOUBLE)                               0.359855 rad   1.688898 rad   -0.038544 um   2.58e-20 J
+GPU joints (FLOAT32), pre-patch kernel rest=0     0.374246       0.427844       0.013998       4.06e-21
+GPU joints (FLOAT32), post-patch kernel rest=96°  0.361600       1.666540       0.016135       2.52e-20
+## post-patch theta_RL gap = |1.6889 - 1.6665| = 0.0224 rad = 1.28 deg
+## Pre-check STOP threshold was 2 deg -> PASS.
+
+## CPU 10-seed ensemble (BOA_DIAG_CPU_JOINTS=1)
+seed  bindEvents  meanBoundMotors  glidingVelocity
+1     890         7.507            8.9525
+2     510         4.230            6.9105
+3     765         6.526            8.2432
+4     751         6.416            7.8586
+5     739         6.492            8.1960
+6     471         4.156            7.6594
+7     778         7.068            8.0367
+8     740         6.498            8.0591
+9     856         7.391            8.2712
+10    822         7.282            8.1872
+mean  732.2       6.357            8.0374
+SD    137.244     1.211            0.519
+SEM   43.400      0.383            0.164
+
+## GPU partial ensemble (6 seeds; user stopped at seed 7)
+seed  bindEvents  meanBoundMotors  glidingVelocity
+1     594         5.903            6.7134
+2     550         5.307            6.6168
+3     434         4.353            6.1572
+4     558         5.505            6.4679
+5     672         6.002            6.5438
+6     546         5.322            6.0070
+mean  559.0       5.399            6.4180
+SD    77.292      0.589            0.276
+SEM   31.554      0.241            0.113
+
+## CPU vs GPU comparison (CPU n=10, GPU n=6)
+metric            CPU mean   GPU mean   diff       cSEM       |diff|/cSEM   pass<2.0?
+bindEvents        732.2      559.0      -173.2     53.7       3.23          NO
+meanBoundMotors   6.357      5.399      -0.958     0.452      2.12          NO
+glidingVelocity   8.037      6.418      -1.620     0.199      8.13          NO
+
+## No "Crazy torque" messages appeared on either path during any seed.
