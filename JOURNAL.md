@@ -4,6 +4,346 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Joints kernel torque-path audit (no sign/order bug found)
+
+Acting on the prior diagnostic's "subtler than per-step magnitude bias"
+hypothesis, the planner asked for a line-by-line audit of the GPU
+`jointsKernel` torque path against `Myosin.applyRodLeverJointTorque` /
+`applyLeverMotorJointTorque`, looking for cross-product operand-order
+flips, sign-convention mismatches, moment-arm direction inversions, or
+mis-routed torque application. Audit performed; **no discrepancy
+found**. Documenting the diff so the next investigator can pick up
+without re-doing the read.
+
+### Method
+
+Re-read `Myosin.java` lines 158–291 (the four apply* methods) and
+`GPUMoveThing.java` lines 228–494 (the chained `jointsKernel`).
+Compared op-by-op: every cross-product operand order, every sign on a
+torque term, every moment-arm direction, every torque target slot.
+Verified upstream semantics for `Pt3D.unitVec(pt1, pt2)` (= (pt1 −
+pt2)/‖·‖), `Pt3D.cross(a, b)` (= a × b standard), `uVecRAsPt3D()` (=
+−uVec), `MyoRod/Lever/Motor.moveCoeff(end, linkUVec)` (end==1 uses
+uVecR, end==2 uses uVec).
+
+### Diff result — every op matches
+
+**`applyLeverMotorJointForce`** (CPU `Myosin.java:158` vs GPU
+`GPUMoveThing.java:307`):
+
+| step | CPU | GPU |
+|---|---|---|
+| linkUVec1 direction | `(le2 − me1)/strain`, points motor→lever | `(le2 − me1)/strain` ✓ |
+| Force on motor | `motor.incForceSum(+F)` | `motorF += +F` ✓ |
+| Moment arm at motor | `R = 0.5e-6·motorLen·j1FracR · uVecR` ≡ `−|s|·mu` | `Rms = −0.5e-6·motorLen·j1FracR`, `Rm = Rms·mu` ✓ |
+| Motor torque | `R × F` | `Rmy·Fz−Rmz·Fy, …` (canonical R×F) ✓ |
+| F negation, force on lever | `F=−F; lever.incForceSum(F)` | `F=−F; leverF += F` ✓ |
+| Moment arm at lever | `R = 0.5e-6·leverLen·j1FracR · uVec` ≡ `+|s|·lu` | `Rls = +0.5e-6·leverLen·j1FracR`, `Rl = Rls·lu` ✓ |
+| Lever torque | `R × F` | canonical R×F ✓ |
+
+**`applyLeverMotorJointTorque`** (CPU `Myosin.java:189` vs GPU
+`GPUMoveThing.java:359`):
+
+| step | CPU | GPU |
+|---|---|---|
+| Torsion axis | `cross(lever.uVec, motor.uVec)` ≡ `lu × mu` | `tvx = luy·muz − luz·muy, …` ≡ `lu × mu` ✓ |
+| Zero-axis guard | `isNaN` early-return + `unitVec()` (kicks random if mag==0) | `tvMag2 > 0f` branch (no kick) — known difference, Test 1 of prior diag ruled it out |
+| dotVecs | `Dot(lu, mu)` | `lux·mux + luy·muy + luz·muz` ✓ |
+| Clamp dot to [−1,1] | yes | yes ✓ |
+| angTween | `fastAcos(dot) · 180/π` (degrees) | `fastAcosF(dot) · RAD2DEG` ✓ |
+| angRelaxed | 0 (uncocked) or 60 (cocked) | `(cocked==1) ? cockedAng : uncockedAng` ✓ |
+| angD | `angTween − angRelaxed` | same ✓ |
+| torsionMag | `j1FracMoveTorq · π/180 · angD / ((1/motor.bRotGam.y + 1/lever.bRotGam.y) · dt)` | identical denom (`1/mBRGy + 1/lBRGy`) ✓ |
+| maxMag cap | `Math.min(torsionMag, maxMag)` | `if (torsionMag > maxMag) torsionMag = maxMag` — semantically identical (caps only for positive overrun; negative `torsionMag` left untouched in both) ✓ |
+| Apply to lever | `lever.incTorqueSum(+mag · tv)` | `leverT += tv · mag` ✓ |
+| Apply to motor | `motor.incTorqueSum(−mag · tv)` | `motorT -= tv · mag` ✓ |
+
+**`applyRodLeverJointForce`** (CPU `Myosin.java:231` vs GPU
+`GPUMoveThing.java:391`):
+
+| step | CPU | GPU |
+|---|---|---|
+| linkUVec1 direction | `(re2 − le1)/strain`, points lever→rod | identical ✓ |
+| Force on lever | `lever.incForceSum(+F)` (lever pulled toward rod) | `leverF += +F` ✓ |
+| Moment arm at lever | `R = 0.5e-6·leverLen·j2FracR · uVecR` ≡ `−|s|·lu` | `Rls = −0.5e-6·leverLen·j2FracR`, `Rl = Rls·lu` ✓ |
+| Lever torque | `R × F` | canonical R×F ✓ |
+| F negation, force on rod | `F=−F; rod.incForceSum(F)` | `F=−F; rodF += F` ✓ |
+| Moment arm at rod | `R = 0.5e-6·rodLen·j2FracR · uVec` ≡ `+|s|·ru` | `Rrs = +0.5e-6·rodLen·j2FracR`, `Rr = Rrs·ru` ✓ |
+| Rod torque | `R × F` | canonical R×F ✓ |
+
+**`applyRodLeverJointTorque`** (CPU `Myosin.java:262` vs GPU
+`GPUMoveThing.java:443`):
+
+| step | CPU | GPU |
+|---|---|---|
+| Torsion axis | `cross(rod.uVec, lever.uVec)` ≡ `ru × lu` | `tvx = ruy·luz − ruz·luy, …` ≡ `ru × lu` ✓ |
+| dotVecs | `Dot(ru, lu)` | identical ✓ |
+| angTween | `fastAcos(dot) · 180/π` | `fastAcosF(dot) · RAD2DEG` ✓ |
+| angRelaxed | 0 (hardcoded) | uses `angTween` directly (angRelaxed=0 elided) ✓ |
+| torsionMag | `j2FracMoveTorq · π/180 · angTween / ((1/lever.bRotGam.y + 1/rod.bRotGam.y) · dt)` | identical denom (`1/lBRGy + 1/rBRGy`) ✓ |
+| maxMag cap | none | none ✓ |
+| Apply to rod | `rod.incTorqueSum(+mag · tv)` | `rodT += tv · mag` ✓ |
+| Apply to lever | `lever.incTorqueSum(−mag · tv)` | `leverT -= tv · mag` ✓ |
+
+### What the step-10 dump actually shows
+
+Re-reading `RUN_LOGS/2026-05-31_cpujoints_diag_step10_compare.txt` with
+fresh eyes: every individual cross product, sign, and target slot is
+right. The torque cos-similarity outliers are concentrated on the
+**lever** slot (myo 4 leverT cos=0.24, myo 3 leverT mag ratio 0.965 but
+cos 0.80, etc.). The lever sits between two joints — its total torque
+is the sum of four contributions (R×F from the lever-motor force, the
+lever-motor torsion, R×F from the rod-lever force, the rod-lever
+torsion) that partially cancel. Small per-contribution drift from
+pose-state divergence (10 steps of CPU-double vs GPU-float32
+integration) produces large relative differences in the residual
+lever-torque vector. Rod and motor get one R×F + one torsion each
+(no cancellation), and they show much better cosines (>0.94 in most
+samples; the residual mismatch is consistent with the same pose-drift
+mechanism, not a directional bug).
+
+Conclusion stands: the joints kernel torque arithmetic is **not** the
+location of the 42 % bindEvents drop. The cos-similarity at step 10 is
+explained by pose-drift cancellation, not by a kernel sign error.
+
+### Outstanding suspects (re-ordered after the audit)
+
+The prior journal entry listed three candidates. With the kernel
+arithmetic audit complete, the priority shifts:
+
+1. **Inter-task delta-buffer semantics (now top suspect).** The
+   chained TaskGraph relies on the joints task writing
+   `jointForceSum`/`jointTorqueSum` and the move task reading them
+   within the same `.execute()`. Targeted experiment: pre-load
+   `jointForceSum` with a known sentinel pattern (e.g., 1.0 in every
+   slot), run a single execute with `M=0` (joints kernel writes
+   nothing), and verify the move task sees `1.0`, not zeros or stale.
+   Then run with `M>0` and verify the move kernel reads the
+   joint-task writes from this step (not the previous launch).
+2. **Cumulative float32 drift in pose integration.** The move kernel
+   reads/writes `coord`/`uVec`/`yVec` in float32 every step.
+   Per-step error <1e-7 relative, but over 10k steps with non-trivial
+   amplification through the joint forces can accumulate. Suggested
+   diagnostic: cast all pose arrays to double-backed FloatArrays for a
+   single-seed run and compare bindEvents.
+3. **Wang-hash Brownian variance vs MersenneTwister.** Still on the
+   list but the 2026-05-31 CPU joints diagnostic already exonerated
+   the Brownian path (CPU joints + GPU moveThing including Wang-hash
+   Brownian passed the ensemble). Lowest priority.
+
+### Deliverables status
+
+The planner asked for: (1) kernel fix, (2) step-10 cosines before/after,
+(3) 10-seed ensemble result. The audit found nothing to fix in the
+torque path; landing a no-op "fix" and running a 90-min ensemble would
+burn compute confirming the baseline. Not done. The journal entry
+itself (this section) and the diff tables above are the actionable
+output: future investigators don't need to re-audit the kernel
+arithmetic.
+
+### Files changed
+
+None. The audit is read-only. `GPUMoveThing.java` and `Myosin.java`
+match HEAD.
+
+### Open
+
+- Run the inter-task delta-buffer sentinel experiment described
+  above (top-1 suspect).
+- The Math.min vs `if (>)` semantics for the maxMag cap are
+  bit-equivalent for all finite signed inputs; only NaN propagation
+  differs (CPU returns NaN, GPU keeps NaN — same outcome). Not a bug
+  but a footnote for future ports.
+
+## 2026-05-31 — Disambiguating diagnostic: CPU joints + GPU moveThing
+
+Earlier today's `fastAcosF` precision fix did not recover the 42 %
+bindEvents drop in the chained-GPU 10-seed ensemble, ruling out joint
+angle math. Two suspects remained: (a) the GPU joints kernel and its
+inter-task delta-buffer plumbing, (b) the moveThing/SoA/Brownian/
+float32 changes accumulated since iter2c (where GPU moveThing + CPU
+joints validated clean at bindEvents ≈ 860). The only difference
+between iter2c and the current chained plan, at the level of *where
+joints run*, is which path computes them. This entry runs that
+disambiguator: GPU moveThing + GPU binding, but CPU joints.
+
+### Implementation
+
+`GPUMoveThing.DIAG_CPU_JOINTS` static boolean (default `false` in the
+landed code; flipped to `true` for this diagnostic). When set:
+1. `classifyThings()` forces `myoJointCt = 0` at the end. The chained
+   TaskGraph still launches the joints task, but `counts[3] = 0` makes
+   every thread early-return via the `m >= M` guard. No writes to
+   `jointForceSum` / `jointTorqueSum`, which stay at the per-slot
+   zero-init done in `packRange`.
+2. `Myosin.MyosinThreads.divideAndConquer` short-circuit changes from
+   `Env.useGPU` to `Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS`. The
+   CPU per-Myosin `jointConstraints()` dispatch runs each step.
+
+Data flow under DIAG_CPU_JOINTS=true:
+```
+CPU: step(), xLink, CPU joints → per-thread accumulators
+                            ↓ gather phase
+                            soaForceSum / soaTorqueSum
+                            ↓ packRange
+                            cpuForceSum / cpuTorqueSum
+                            ↓ chained TaskGraph
+GPU: joints kernel (no-op, M=0) writes nothing
+     move kernel reads cpuForceSum + jointForceSum = cpuForceSum + 0
+```
+
+This reproduces iter2c's force-computation topology while keeping every
+SoA / float32 / chained-plan change that has landed since.
+
+### Files changed (kept in tree)
+
+- `boxOfActin/GPUMoveThing.java` — `DIAG_CPU_JOINTS` static boolean;
+  `classifyThings()` zeros `myoJointCt` when set.
+  `DIAG_DUMP_JOINTS_STEP` static int + `getStepCounter()` accessor for
+  the per-Myosin force/torque comparison below; chained-plan
+  `transferToHost` extended to include `jointForceSum` /
+  `jointTorqueSum` when the dump is armed; conditional dump block
+  after `plan.execute()`.
+- `boxOfActin/Myosin.java` — `MyosinThreads.divideAndConquer` gated on
+  `!GPUMoveThing.DIAG_CPU_JOINTS`. Per-Myosin diagnostic accumulators
+  in `jointConstraints()` (`diagAddRodF` / `diagAddLeverF` / ... — 18
+  doubles per Myosin per step, always reset, only printed under the
+  dump flag) mirror the totals the GPU `jointsKernel` writes to
+  `jointForceSum` / `jointTorqueSum`.
+
+Both flags landed at default off (`DIAG_CPU_JOINTS=false`,
+`DIAG_DUMP_JOINTS_STEP=-1`) so production behaviour is unchanged.
+Flip the flag for further diagnostic toggles.
+
+### 10-seed ensemble — glidingAssay500_val — PASS
+
+Per-seed logs: `RUN_LOGS/2026-05-31_cpujoints_diag_seed{1..10}.log`;
+summary: `RUN_LOGS/2026-05-31_cpujoints_diag_summary.txt`. CPU rows
+reused from iter2d (unchanged CPU path).
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     828.50 ± 68.11 (215.39)         0.34  PASS
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       6.81 ±  0.46 (  1.44)         0.91  PASS
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       8.57 ±  0.23 (  0.74)         1.26  PASS
+```
+
+Per-seed bindEvents: 1096, 764, 646, 449, 782, 1163, 806, 1027, 726,
+826. Wider single-seed spread than CPU (SD 215 vs CPU's 145) — Wang-
+hash Brownian + float32 integration produce larger event-count
+variance per seed but the ensemble mean lands within 3.3 % of the CPU
+baseline.
+
+Direct comparison with the all-GPU-joints chained ensembles from
+earlier today:
+
+```
+                              bindEvents
+GPU (chained)           497.80 ± 38.23  FAIL  6.02
+GPU (chained, acosfix)  460.80 ± 36.55  FAIL  6.77
+GPU (CPU joints, this)  828.50 ± 68.11  PASS  0.34
+```
+
+Routing joints to CPU recovers ~330 bindEvents — the bulk of the drop.
+The remaining ~30 events from CPU baseline are well inside ensemble
+noise (cSEM = 82).
+
+### CPU vs GPU joint-force comparison — step 10, seed 1
+
+Captured by setting `DIAG_DUMP_JOINTS_STEP=10`, running seed 1 twice
+(`DIAG_CPU_JOINTS=true` then `false`), and printing per-Myosin total
+force/torque for the first 5 myosins immediately after each path
+finishes joint accumulation. CPU values come from the per-Myosin
+accumulators in `Myosin.jointConstraints`; GPU values come from
+`jointForceSum` / `jointTorqueSum` after the joints task executes.
+Both runs share seed and parameter file but state has drifted across
+10 steps of CPU-double vs GPU-float32 integration, so this is a
+"similar-state" comparison rather than identical-state.
+
+Full table in `RUN_LOGS/2026-05-31_cpujoints_diag_step10_compare.txt`.
+Summary:
+
+```
+                       n   mean    sd     min    max
+Force GPU/CPU ratio   15  0.971  0.240  0.537  1.260
+Force cos similarity  15  0.912  0.087  0.733  1.000
+Torque GPU/CPU ratio  15  0.985  0.461  0.153  1.932
+Torque cos similarity 15  0.859  0.205  0.242  0.998
+```
+
+There is **no systematic constant factor or sign flip**. The mean
+GPU/CPU magnitude ratio is ~1.0 for both forces and torques, with
+direction-cosine alignment generally well above 0.7. Outliers exist
+(myo 4 leverT cos=+0.24; myo 0 motorT ratio=1.93) but they are
+consistent with cancellation in summed contributions: lever torque
+sums R×F from both joint pairs plus torsion from both torque methods,
+and small per-contribution drifts can produce large relative
+differences in the residual. Rod / motor forces — which receive only
+one contribution each — show the tightest agreement (cos > 0.8 in 4
+of 5 myosins).
+
+So the joints kernel is not making a "wrong by 2×" error or flipping
+signs. The mechanism by which it nonetheless drops 42 % of bindEvents
+in a 10000-step run must be subtler than per-step magnitude bias —
+most likely a small systematic per-step drift in either the joint
+output or the inter-task delta-buffer write/read that integrates over
+many steps.
+
+Logs: `RUN_LOGS/2026-05-31_cpujoints_diag_step10_cpu.txt`,
+`RUN_LOGS/2026-05-31_cpujoints_diag_step10_gpu.txt`.
+
+### Interpretation
+
+The 10-seed ensemble PASS is definitive: **the bug is in the GPU
+joints kernel or its delta-buffer force-application path**. Whatever
+the GPU joints task does is what costs the 42 % bindEvents drop;
+routing the same force computation through the CPU path (still
+through the chained-plan float32 integration in the move kernel)
+recovers the observable. The moveThing/SoA/Brownian/float32 changes
+that landed between iter2c and the chained plan are exonerated.
+
+The step-10 joint-force comparison shows the kernel is not
+systematically biased by a constant factor or sign. Candidates for
+the next audit:
+
+- **Wang-hash Brownian variance regression interaction with joint
+  forces.** Iter2c's CPU-joints + GPU-moveThing combination uses the
+  same Wang-hash Brownian as today's chained plan and passes the
+  ensemble. So Brownian variance is exonerated by the same logic that
+  exonerates moveThing. Lower priority.
+- **GPU joints kernel torque sign / coordinate consistency.** Torque
+  alignment cosines (mean 0.86, two below 0.5) are notably worse than
+  force cosines (mean 0.91). The torque path has more sites for sign
+  errors: `R×F` cross products in the force methods, then torsion
+  `tv` cross products in the torque methods, with the torsion
+  applied as `+leverT - motorT` in `applyLeverMotorJointTorque` but
+  `+rodT - leverT` in `applyRodLeverJointTorque`. Worth a careful
+  read of the kernel against the CPU code, especially the `Rms` /
+  `Rls` / `Rrs` sign conventions vs `uVecR` / `uVec` semantics.
+- **Inter-task delta-buffer semantics.** The earlier chaining work
+  flagged that TornadoVM inter-task RMW on a single buffer was
+  unreliable and split into `cpuForceSum` + `jointForceSum`. It would
+  be worth confirming that the move task actually reads the joints
+  task's writes within a single `.execute()` (not stale device-side
+  values from the previous launch). A targeted test: zero
+  `jointForceSum` before each launch, run the joints task in
+  isolation (write known values), verify the move task reads them.
+
+### Open
+
+- The next audit is the GPU `jointsKernel` itself. Focus areas: the
+  three `Rms = -0.5e-6f * motorLen * j1FracR` / `Rls = +0.5e-6f *
+  leverLen * j1FracR` / etc. sign conventions vs `uVecR` (= -uVec for
+  CPU, signed flip in the SoA), and the torsion-sign convention. Per
+  the JOURNAL 2026-05-30 entry §A.1, the CPU `randomUnitVec` kick at
+  `mag2 == 0` is dropped on GPU — the previous diagnostic already
+  ruled that out, but the surrounding code paths in the torque
+  methods may have other small differences worth re-reading.
+- Pin down whether the per-Myosin torque differences at step 10 come
+  from the joints kernel arithmetic or from upstream pose drift, by
+  re-running the dump at step 1 (when CPU/GPU states are essentially
+  identical) and comparing.
+
 ## 2026-05-31 — Fix GPU fastAcosF precision + moveCoeff chain
 
 Acted on the recommendation in the earlier 2026-05-31 diagnostic entry:

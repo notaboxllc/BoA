@@ -51,6 +51,38 @@ public class GPUMoveThing {
     /** Per-kernel Wang-hash salt for cross-kernel seed namespace isolation. */
     public static final int KERNEL_ID = 2;
 
+    /**
+     * Diagnostic flag (2026-05-31). When true and Env.useGPU is true, the GPU
+     * joints kernel is reduced to a no-op (myoJointCt forced to 0 in
+     * classifyThings, so the joints task runs but every thread early-returns
+     * via the m >= M guard and writes nothing to jointForceSum/jointTorqueSum,
+     * which stay at the per-step zero-init from packRange). The CPU
+     * Myosin.MyosinThreads dispatch is re-enabled (it normally
+     * short-circuits when Env.useGPU is set), so CPU joints write into the
+     * per-thread accumulators → gather → soaForceSum → cpuForceSum (read by
+     * the move kernel). Net effect: iter2c topology (GPU moveThing + GPU
+     * binding + CPU joints), carried forward through the SoA/chained-plan
+     * infrastructure. Used to disambiguate whether the residual GPU
+     * bindEvents drop after the fastAcosF fix is in the joints kernel or in
+     * the moveThing/Brownian/float32 path.
+     */
+    public static boolean DIAG_CPU_JOINTS = false;
+
+    /**
+     * Diagnostic dump step (2026-05-31). When >= 0, the CPU joints path
+     * (Myosin.jointConstraints) and the GPU joints kernel path
+     * (GPUMoveThing.moveThings, post-.execute()) log per-Myosin joint
+     * force/torque outputs for myoIdx < DIAG_DUMP_MYO_LIMIT at the matching
+     * step. For the GPU path, this requires jointForceSum/jointTorqueSum to
+     * be in the chained plan's transferToHost list — gated on this flag at
+     * plan build time. -1 = off, no overhead.
+     */
+    public static int DIAG_DUMP_JOINTS_STEP = -1;
+    public static final int DIAG_DUMP_MYO_LIMIT = 5;
+
+    /** Public step counter for the CPU joint dump to align with the GPU dump. */
+    public static int getStepCounter() { return stepCounter; }
+
     private static final int runSeed = Env.mtRNG.nextInt();
 
     // Brownian-rule codes (cached per slot in classifyThings).
@@ -676,8 +708,16 @@ public class GPUMoveThing {
                   bTransGam, bRotGam,
                   brownianScales, velMask,
                   params, counts)
-            .transferToHost(DataTransferMode.EVERY_EXECUTION,
-                            coord, uVec, yVec);
+            ;
+
+        if (DIAG_DUMP_JOINTS_STEP >= 0) {
+            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                   coord, uVec, yVec,
+                                   jointForceSum, jointTorqueSum);
+        } else {
+            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                   coord, uVec, yVec);
+        }
 
         itg  = tg.snapshot();
         plan = new TornadoExecutionPlan(itg);
@@ -827,6 +867,15 @@ public class GPUMoveThing {
             mj++;
         }
         myoJointCt = mj;
+        // DIAG_CPU_JOINTS: force the GPU joints task to a no-op by zeroing
+        // the count the kernel reads (counts[3]). Pack is skipped (gated on
+        // myoJointCt > 0 in moveThings()). jointForceSum/jointTorqueSum
+        // remain at their per-slot zero-init from packRange so the move
+        // kernel reads cpuForceSum + 0 = cpuForceSum (which holds the CPU
+        // joint contributions from Myosin.MyosinThreads).
+        if (DIAG_CPU_JOINTS) {
+            myoJointCt = 0;
+        }
     }
 
     public static void onStepStart() {
@@ -1129,6 +1178,27 @@ public class GPUMoveThing {
             plan.withGridScheduler(gridScheduler).execute();
         }
         long execEnd = System.nanoTime();
+
+        if (DIAG_DUMP_JOINTS_STEP >= 0 && stepCounter == DIAG_DUMP_JOINTS_STEP) {
+            int n = Math.min(DIAG_DUMP_MYO_LIMIT, myoJointCt);
+            for (int mj = 0; mj < n; mj++) {
+                int rs = rodSlots.get(mj);
+                int ls = leverSlots.get(mj);
+                int ms = motorSlots.get(mj);
+                int rs3 = rs * 3, ls3 = ls * 3, ms3 = ms * 3;
+                int myoIdx = jointSlotToMyoIdx[mj];
+                System.err.printf("[DIAG_GPU_JOINT step=%d myoIdx=%d] rodF=(%.6e,%.6e,%.6e) leverF=(%.6e,%.6e,%.6e) motorF=(%.6e,%.6e,%.6e)%n",
+                    stepCounter, myoIdx,
+                    jointForceSum.get(rs3), jointForceSum.get(rs3 + 1), jointForceSum.get(rs3 + 2),
+                    jointForceSum.get(ls3), jointForceSum.get(ls3 + 1), jointForceSum.get(ls3 + 2),
+                    jointForceSum.get(ms3), jointForceSum.get(ms3 + 1), jointForceSum.get(ms3 + 2));
+                System.err.printf("[DIAG_GPU_JOINT step=%d myoIdx=%d] rodT=(%.6e,%.6e,%.6e) leverT=(%.6e,%.6e,%.6e) motorT=(%.6e,%.6e,%.6e)%n",
+                    stepCounter, myoIdx,
+                    jointTorqueSum.get(rs3), jointTorqueSum.get(rs3 + 1), jointTorqueSum.get(rs3 + 2),
+                    jointTorqueSum.get(ls3), jointTorqueSum.get(ls3 + 1), jointTorqueSum.get(ls3 + 2),
+                    jointTorqueSum.get(ms3), jointTorqueSum.get(ms3 + 1), jointTorqueSum.get(ms3 + 2));
+            }
+        }
 
         if (sc > 0) {
             dispatchAndWait(OP_UNPACK, sc);

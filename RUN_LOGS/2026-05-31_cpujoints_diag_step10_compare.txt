@@ -1,0 +1,46 @@
+# CPU vs GPU joint force/torque comparison at step 10 (glidingAssay500_val seed=1)
+# CPU column: from DIAG_CPU_JOINTS=true run.  GPU column: from DIAG_CPU_JOINTS=false run.
+# Both runs share seed and parameter file; state has drifted across 10 steps of
+# pose integration (CPU double vs GPU float32).
+
+myo      qty      CPU mag      GPU mag  GPU/CPU   cosine
+  0     rodF   1.5584e-12   1.4518e-12    0.932   +0.975
+  0   leverF   6.0452e-13   5.7500e-13    0.951   +0.909
+  0   motorF   1.4221e-12   1.4558e-12    1.024   +0.978
+  0     rodT   2.3781e-20   2.2145e-20    0.931   +0.973
+  0   leverT   1.1176e-20   1.8819e-20    1.684   +0.632
+  0   motorT   1.1655e-20   2.2520e-20    1.932   +0.888
+
+  1     rodF   1.2033e-12   1.0360e-12    0.861   +0.958
+  1   leverF   1.3713e-12   1.2233e-12    0.892   +1.000
+  1   motorF   1.1507e-12   1.2967e-12    1.127   +0.991
+  1     rodT   1.9227e-20   1.5776e-20    0.821   +0.992
+  1   leverT   8.2038e-21   5.2658e-21    0.642   +0.984
+  1   motorT   9.6622e-21   8.6594e-21    0.896   +0.988
+
+  2     rodF   1.7123e-12   1.1038e-12    0.645   +0.802
+  2   leverF   1.3630e-12   7.4796e-13    0.549   +0.871
+  2   motorF   6.8784e-13   8.1278e-13    1.182   +0.818
+  2     rodT   2.0382e-20   1.4538e-20    0.713   +0.680
+  2   leverT   8.0023e-21   6.0871e-21    0.761   +0.904
+  2   motorT   4.5595e-21   5.3992e-21    1.184   +0.905
+
+  3     rodF   1.0509e-12   1.3077e-12    1.244   +0.733
+  3   leverF   6.2338e-13   3.3450e-13    0.537   +0.966
+  3   motorF   1.1835e-12   1.4500e-12    1.225   +0.820
+  3     rodT   1.5877e-20   1.1078e-20    0.698   +0.938
+  3   leverT   7.8490e-21   7.5776e-21    0.965   +0.801
+  3   motorT   5.7298e-21   9.2442e-21    1.613   +0.962
+
+  4     rodF   2.8102e-12   3.0936e-12    1.101   +0.991
+  4   leverF   2.3177e-12   2.4018e-12    1.036   +0.999
+  4   motorF   6.1842e-13   7.7903e-13    1.260   +0.875
+  4     rodT   4.4963e-20   4.9131e-20    1.093   +0.998
+  4   leverT   3.4691e-21   5.3059e-22    0.153   +0.242
+  4   motorT   1.0058e-20   6.8551e-21    0.682   +0.994
+
+Summary:
+  Force GPU/CPU ratio: n=15 mean=0.971 sd=0.240 min=0.537 max=1.260
+  Force cos similarity: n=15 mean=0.912 sd=0.087 min=0.733 max=1.000
+  Torque GPU/CPU ratio: n=15 mean=0.985 sd=0.461 min=0.153 max=1.932
+  Torque cos similarity: n=15 mean=0.859 sd=0.205 min=0.242 max=0.998

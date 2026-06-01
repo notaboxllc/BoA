@@ -74,13 +74,17 @@ public class Myosin {
 			switch (jobId) {
 				case Env.myoJoints1Start:
 					if (myoCt == 0) return;
-					if (Env.useGPU) {
+					if (Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS) {
 						// GPU path: per-Myosin joints run as task 1 of the chained
 						// TaskGraph inside GPUMoveThing.moveThings() (joints kernel
 						// ADDS to forceSum/torqueSum on device, move kernel reads).
 						// Zero the chunks here so the spawned worker threads do no
 						// per-Myosin work in this wave; MyosinDimer.myoDimerThreads
 						// keeps its CPU dispatch.
+						// DIAG_CPU_JOINTS path: fall through to the CPU joint
+						// dispatch below — the GPU joints task is no-oped via
+						// myoJointCt=0 in GPUMoveThing.classifyThings, and CPU
+						// joint forces flow through soaForceSum → cpuForceSum.
 						for (int i=0; i <= numThreads; i++) { jobDiv[i] = 0; }
 					} else {
 						for (int i=0; i <= numThreads; i++) {
@@ -165,16 +169,20 @@ public class Myosin {
 		// forces and torques applied to myosin motor domain
 		F.scale(forceMag,linkUVec1);
 		myoMotor.incForceSum(F);
+		diagAddMotorF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoMotorLength.getValue()*myoJ1FracR,myoMotor.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoMotor.incTorqueSum(RcrossF);
+		diagAddMotorT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 		// forces and torques applied to myosin lever arm
 		F.scale(-1,F);
 		myoLever.incForceSum(F);
+		diagAddLeverF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ1FracR,myoLever.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
+		diagAddLeverT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 	}
 	
@@ -209,15 +217,17 @@ public class Myosin {
 		if (torsionVec.checkPt3D()) {
 			torsionVec.scale(torsionMag);
 			myoLever.incTorqueSum(torsionVec);
-		
+			diagAddLeverT(torsionVec.x, torsionVec.y, torsionVec.z);
+
 			torsionVec.scale(-1);
 			myoMotor.incTorqueSum(torsionVec);
+			diagAddMotorT(torsionVec.x, torsionVec.y, torsionVec.z);
 		} else {
 			System.out.println ("Crazy torque result in Myosin.applyLeverMotorJointTorque()");
 		}
 
 	}
-	
+
 	public void applyRodLeverJointForce () {
 		double dt = Env.deltaT.getValue();
 		double myoJ2FracR = Env.myoJ2FracR.getValue();
@@ -232,16 +242,20 @@ public class Myosin {
 		// forces and torques applied to myosin lever arm
 		F.scale(forceMag,linkUVec1);
 		myoLever.incForceSum(F);
+		diagAddLeverF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ2FracR,myoLever.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoLever.incTorqueSum(RcrossF);
+		diagAddLeverT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 		// forces and torques applied to myosin rod
 		F.scale(-1,F);
 		myoRod.incForceSum(F);
+		diagAddRodF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoRodLength.getValue()*myoJ2FracR,myoRod.uVecAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod.incTorqueSum(RcrossF);
+		diagAddRodT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 	}
 	
@@ -265,9 +279,11 @@ public class Myosin {
 		if (torsionVec.checkPt3D()) {
 			torsionVec.scale(torsionMag);
 			myoRod.incTorqueSum(torsionVec);
-		
+			diagAddRodT(torsionVec.x, torsionVec.y, torsionVec.z);
+
 			torsionVec.scale(-1);
 			myoLever.incTorqueSum(torsionVec);
+			diagAddLeverT(torsionVec.x, torsionVec.y, torsionVec.z);
 		} else {
 			System.out.println ("Crazy torque result in Myosin.applyRodLeverJointTorque()");
 		}
@@ -279,13 +295,56 @@ public class Myosin {
 			theMyosins[i].jointConstraints();
 		}
 	}
-	
+
+	// DIAG_DUMP: per-Myosin accumulators populated during the apply* methods
+	// when the diagnostic step matches. Read out at the end of jointConstraints.
+	// These mirror the per-Myosin totals the GPU jointsKernel writes to
+	// jointForceSum/jointTorqueSum.
+	private double diagMotorFx, diagMotorFy, diagMotorFz;
+	private double diagLeverFx, diagLeverFy, diagLeverFz;
+	private double diagRodFx, diagRodFy, diagRodFz;
+	private double diagMotorTx, diagMotorTy, diagMotorTz;
+	private double diagLeverTx, diagLeverTy, diagLeverTz;
+	private double diagRodTx, diagRodTy, diagRodTz;
+
+	private void diagAddMotorF(double x, double y, double z) { diagMotorFx += x; diagMotorFy += y; diagMotorFz += z; }
+	private void diagAddLeverF(double x, double y, double z) { diagLeverFx += x; diagLeverFy += y; diagLeverFz += z; }
+	private void diagAddRodF  (double x, double y, double z) { diagRodFx   += x; diagRodFy   += y; diagRodFz   += z; }
+	private void diagAddMotorT(double x, double y, double z) { diagMotorTx += x; diagMotorTy += y; diagMotorTz += z; }
+	private void diagAddLeverT(double x, double y, double z) { diagLeverTx += x; diagLeverTy += y; diagLeverTz += z; }
+	private void diagAddRodT  (double x, double y, double z) { diagRodTx   += x; diagRodTy   += y; diagRodTz   += z; }
+
 	public void jointConstraints() {
+		// Always reset diag accumulators so they don't grow unboundedly across
+		// steps. Cost is 18 double writes per Myosin per step.
+		diagMotorFx = diagMotorFy = diagMotorFz = 0;
+		diagLeverFx = diagLeverFy = diagLeverFz = 0;
+		diagRodFx   = diagRodFy   = diagRodFz   = 0;
+		diagMotorTx = diagMotorTy = diagMotorTz = 0;
+		diagLeverTx = diagLeverTy = diagLeverTz = 0;
+		diagRodTx   = diagRodTy   = diagRodTz   = 0;
+
 		applyLeverMotorJointForce();
 		applyLeverMotorJointTorque();
-		
+
 		applyRodLeverJointForce();
 		applyRodLeverJointTorque();
+
+		boolean diagOn = GPUMoveThing.DIAG_DUMP_JOINTS_STEP >= 0
+		              && GPUMoveThing.getStepCounter() == GPUMoveThing.DIAG_DUMP_JOINTS_STEP
+		              && myMyoNumber < GPUMoveThing.DIAG_DUMP_MYO_LIMIT;
+		if (diagOn) {
+			System.err.printf("[DIAG_CPU_JOINT step=%d myoIdx=%d] rodF=(%.6e,%.6e,%.6e) leverF=(%.6e,%.6e,%.6e) motorF=(%.6e,%.6e,%.6e)%n",
+				GPUMoveThing.getStepCounter(), myMyoNumber,
+				diagRodFx, diagRodFy, diagRodFz,
+				diagLeverFx, diagLeverFy, diagLeverFz,
+				diagMotorFx, diagMotorFy, diagMotorFz);
+			System.err.printf("[DIAG_CPU_JOINT step=%d myoIdx=%d] rodT=(%.6e,%.6e,%.6e) leverT=(%.6e,%.6e,%.6e) motorT=(%.6e,%.6e,%.6e)%n",
+				GPUMoveThing.getStepCounter(), myMyoNumber,
+				diagRodTx, diagRodTy, diagRodTz,
+				diagLeverTx, diagLeverTy, diagLeverTz,
+				diagMotorTx, diagMotorTy, diagMotorTz);
+		}
 	}
 	
 	public void setOwnerNode (ProteinNode node) {
