@@ -1,0 +1,49 @@
+# Same-pose CPU(dry-run) vs GPU(delta-buffer) joint output at step 10, seed 1
+# CPU computed via Myosin.DIAG_DRY_RUN=true inside GPUMoveThing.moveThings() BEFORE plan.execute()
+# GPU read from jointForceSum/jointTorqueSum after plan.execute()
+# pose state IDENTICAL: GPU upload happens after CPU dry-run reads (same Pt3D coord/uVec)
+
+myo  qty       CPU mag       GPU mag   GPU/CPU   cosine     reldiff
+  0   rodF   1.45187e-12   1.45183e-12  1.0000  +1.000000  2.976e-05
+  0 leverF   5.75011e-13   5.74999e-13  1.0000  +1.000000  4.947e-05
+  0 motorF   1.45583e-12   1.45581e-12  1.0000  +1.000000  1.149e-05
+  0   rodT   2.21456e-20   2.21450e-20  1.0000  +1.000000  2.957e-05
+  0 leverT   1.88163e-20   1.88191e-20  1.0001  +1.000000  1.546e-04
+  0 motorT   2.25169e-20   2.25196e-20  1.0001  +1.000000  1.273e-04
+  1   rodF   1.03602e-12   1.03601e-12  1.0000  +1.000000  1.081e-05
+  1 leverF   1.22341e-12   1.22338e-12  1.0000  +1.000000  2.733e-05
+  1 motorF   1.29676e-12   1.29672e-12  1.0000  +1.000000  2.866e-05
+  1   rodT   1.57759e-20   1.57757e-20  1.0000  +1.000000  1.032e-05
+  1 leverT   5.26555e-21   5.26573e-21  1.0000  +1.000000  3.642e-05
+  1 motorT   8.65945e-21   8.65950e-21  1.0000  +1.000000  1.012e-05
+  2   rodF   1.10386e-12   1.10380e-12  1.0000  +1.000000  4.973e-05
+  2 leverF   7.47981e-13   7.47944e-13  1.0000  +1.000000  5.427e-05
+  2 motorF   8.12810e-13   8.12786e-13  1.0000  +1.000000  2.972e-05
+  2   rodT   1.45385e-20   1.45377e-20  1.0000  +1.000000  4.937e-05
+  2 leverT   6.08674e-21   6.08706e-21  1.0001  +1.000000  6.662e-05
+  2 motorT   5.39890e-21   5.39921e-21  1.0001  +1.000000  8.281e-05
+  3   rodF   1.30777e-12   1.30770e-12  0.9999  +1.000000  5.497e-05
+  3 leverF   3.34581e-13   3.34561e-13  0.9999  +1.000000  5.842e-05
+  3 motorF   1.45007e-12   1.44999e-12  0.9999  +1.000000  5.607e-05
+  3   rodT   1.10785e-20   1.10779e-20  0.9999  +1.000000  5.509e-05
+  3 leverT   7.57951e-21   7.57773e-21  0.9998  +1.000000  2.361e-04
+  3 motorT   9.24587e-21   9.24400e-21  0.9998  +1.000000  2.032e-04
+  4   rodF   3.09364e-12   3.09357e-12  1.0000  +1.000000  2.454e-05
+  4 leverF   2.40186e-12   2.40181e-12  1.0000  +1.000000  1.960e-05
+  4 motorF   7.79066e-13   7.79032e-13  1.0000  +1.000000  4.357e-05
+  4   rodT   4.91321e-20   4.91309e-20  1.0000  +1.000000  2.449e-05
+  4 leverT   5.30208e-22   5.30542e-22  1.0006  +0.999999  1.598e-03
+  4 motorT   6.85621e-21   6.85515e-21  0.9998  +1.000000  1.553e-04
+
+mean GPU/CPU ratio = 0.99999
+min  GPU/CPU ratio = 0.99977
+max  GPU/CPU ratio = 1.00063
+mean cosine        = 1.000000
+min  cosine        = 0.999999
+max  cosine        = 1.000000
+max  reldiff       = 1.598e-03
+
+# Structural check (sparsity/indexing):
+[DIAG_DELTA_STRUCT step=10] slotCount=42011 myoJointCt=14000 expectedMyoSlots=42000
+[DIAG_DELTA_STRUCT step=10] myoSlots: F nonzero=42000 zero=0 (sqrt(sumF2)=2.646e-10 maxF=3.767e-12); T nonzero=42000 zero=0 (sqrt(sumT2)=2.715e-18 maxT=6.366e-20)
+[DIAG_DELTA_STRUCT step=10] otherSlots: F nonzero=0 (sqrt(sumF2)=0.000e+00 maxF=0.000e+00); T nonzero=0 (sqrt(sumT2)=0.000e+00 maxT=0.000e+00); firstOtherNonzero=-1

@@ -168,24 +168,24 @@ public class Myosin {
 
 		// forces and torques applied to myosin motor domain
 		F.scale(forceMag,linkUVec1);
-		myoMotor.incForceSum(F);
+		if (!DIAG_DRY_RUN) myoMotor.incForceSum(F);
 		diagAddMotorF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoMotorLength.getValue()*myoJ1FracR,myoMotor.uVecRAsPt3D());
 		RcrossF.cross(R,F);
-		myoMotor.incTorqueSum(RcrossF);
+		if (!DIAG_DRY_RUN) myoMotor.incTorqueSum(RcrossF);
 		diagAddMotorT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 		// forces and torques applied to myosin lever arm
 		F.scale(-1,F);
-		myoLever.incForceSum(F);
+		if (!DIAG_DRY_RUN) myoLever.incForceSum(F);
 		diagAddLeverF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ1FracR,myoLever.uVecAsPt3D());
 		RcrossF.cross(R,F);
-		myoLever.incTorqueSum(RcrossF);
+		if (!DIAG_DRY_RUN) myoLever.incTorqueSum(RcrossF);
 		diagAddLeverT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 	}
-	
+
 	public void applyLeverMotorJointTorque () {
 		torsionVec.cross(myoLever.uVecAsPt3D(),myoMotor.uVecAsPt3D());
 		// Float32 GPU uVecAsPt3D() updates occasionally produce NaN components (orientation
@@ -216,11 +216,11 @@ public class Myosin {
 		
 		if (torsionVec.checkPt3D()) {
 			torsionVec.scale(torsionMag);
-			myoLever.incTorqueSum(torsionVec);
+			if (!DIAG_DRY_RUN) myoLever.incTorqueSum(torsionVec);
 			diagAddLeverT(torsionVec.x, torsionVec.y, torsionVec.z);
 
 			torsionVec.scale(-1);
-			myoMotor.incTorqueSum(torsionVec);
+			if (!DIAG_DRY_RUN) myoMotor.incTorqueSum(torsionVec);
 			diagAddMotorT(torsionVec.x, torsionVec.y, torsionVec.z);
 		} else {
 			System.out.println ("Crazy torque result in Myosin.applyLeverMotorJointTorque()");
@@ -241,20 +241,20 @@ public class Myosin {
 
 		// forces and torques applied to myosin lever arm
 		F.scale(forceMag,linkUVec1);
-		myoLever.incForceSum(F);
+		if (!DIAG_DRY_RUN) myoLever.incForceSum(F);
 		diagAddLeverF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoLeverLength.getValue()*myoJ2FracR,myoLever.uVecRAsPt3D());
 		RcrossF.cross(R,F);
-		myoLever.incTorqueSum(RcrossF);
+		if (!DIAG_DRY_RUN) myoLever.incTorqueSum(RcrossF);
 		diagAddLeverT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 		// forces and torques applied to myosin rod
 		F.scale(-1,F);
-		myoRod.incForceSum(F);
+		if (!DIAG_DRY_RUN) myoRod.incForceSum(F);
 		diagAddRodF(F.x, F.y, F.z);
 		R.scale(0.5e-6*Env.myoRodLength.getValue()*myoJ2FracR,myoRod.uVecAsPt3D());
 		RcrossF.cross(R,F);
-		myoRod.incTorqueSum(RcrossF);
+		if (!DIAG_DRY_RUN) myoRod.incTorqueSum(RcrossF);
 		diagAddRodT(RcrossF.x, RcrossF.y, RcrossF.z);
 
 	}
@@ -278,11 +278,11 @@ public class Myosin {
 		
 		if (torsionVec.checkPt3D()) {
 			torsionVec.scale(torsionMag);
-			myoRod.incTorqueSum(torsionVec);
+			if (!DIAG_DRY_RUN) myoRod.incTorqueSum(torsionVec);
 			diagAddRodT(torsionVec.x, torsionVec.y, torsionVec.z);
 
 			torsionVec.scale(-1);
-			myoLever.incTorqueSum(torsionVec);
+			if (!DIAG_DRY_RUN) myoLever.incTorqueSum(torsionVec);
 			diagAddLeverT(torsionVec.x, torsionVec.y, torsionVec.z);
 		} else {
 			System.out.println ("Crazy torque result in Myosin.applyRodLeverJointTorque()");
@@ -300,6 +300,14 @@ public class Myosin {
 	// when the diagnostic step matches. Read out at the end of jointConstraints.
 	// These mirror the per-Myosin totals the GPU jointsKernel writes to
 	// jointForceSum/jointTorqueSum.
+	//
+	// DIAG_DRY_RUN (2026-05-31, delta-buffer transport diag): when true, the
+	// apply* methods compute joint forces and populate the diag accumulators
+	// but SKIP the incForceSum/incTorqueSum side effects on Motor/Lever/Rod.
+	// Used by GPUMoveThing.moveThings() at the dump step to compare CPU joints
+	// (same pose as GPU) against the GPU delta buffer without corrupting Thing
+	// force/torque state. Default off — no production impact.
+	public static boolean DIAG_DRY_RUN = false;
 	private double diagMotorFx, diagMotorFy, diagMotorFz;
 	private double diagLeverFx, diagLeverFy, diagLeverFz;
 	private double diagRodFx, diagRodFy, diagRodFz;

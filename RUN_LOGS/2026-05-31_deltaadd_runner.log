@@ -1,0 +1,10 @@
+seed=1 rc=0 bindEvents=428 meanBoundMotors=4.541 glidingVelocity=6.4021
+seed=2 rc=0 bindEvents=518 meanBoundMotors=4.670 glidingVelocity=6.5157
+seed=3 rc=0 bindEvents=676 meanBoundMotors=6.556 glidingVelocity=6.7114
+seed=4 rc=0 bindEvents=335 meanBoundMotors=3.557 glidingVelocity=5.9101
+seed=5 rc=0 bindEvents=519 meanBoundMotors=5.311 glidingVelocity=6.6307
+seed=6 rc=0 bindEvents=345 meanBoundMotors=4.174 glidingVelocity=5.5169
+seed=7 rc=0 bindEvents=470 meanBoundMotors=4.705 glidingVelocity=6.2293
+seed=8 rc=0 bindEvents=279 meanBoundMotors=3.003 glidingVelocity=6.2412
+seed=9 rc=0 bindEvents=580 meanBoundMotors=6.124 glidingVelocity=7.1678
+seed=10 rc=0 bindEvents=242 meanBoundMotors=2.999 glidingVelocity=5.6597

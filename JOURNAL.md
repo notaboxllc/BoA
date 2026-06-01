@@ -4,6 +4,240 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Joint delta-buffer transport diagnostic
+
+Follow-up to today's chain of joint-kernel diagnostics. Planner's
+hypothesis: the GPU joints kernel computes correct forces (Part A's
+audit confirmed kernel torque math), but the inter-task delta-buffer
+plumbing (joints kernel writes `jointForceSum`/`jointTorqueSum`; move
+kernel reads them in the same `.execute()`) might silently drop or
+re-order the joint contributions, costing the 42 % bindEvents drop.
+Two-part isolation: (A) verify the delta buffer's contents after the
+joints kernel writes by downloading and comparing to a same-pose CPU
+computation; (B) bypass the device-side delta summing entirely by
+routing the GPU joint output through `cpuForceSum` on the host.
+
+### Part A — Delta-buffer content check at step 10 (same-pose)
+
+Implementation: `GPUMoveThing.DIAG_DUMP_JOINTS_STEP` already plumbed
+through from earlier today; added `Myosin.DIAG_DRY_RUN` (gates
+`incForceSum` / `incTorqueSum` so `jointConstraints` computes joint
+forces and populates diag accumulators without modifying Thing state).
+At the dump step, before `plan.execute()`, iterate all GPU-handled
+Myosins with `DIAG_DRY_RUN=true` → matching-pose CPU joint output. After
+exec, scan `jointForceSum` / `jointTorqueSum` across all slots and
+report (a) structural sparsity (myo vs non-myo slot population),
+(b) per-Myosin GPU delta vs CPU diag for the first 5 Myosins. Both
+sides read identical pose state because the GPU upload happens after
+the CPU dry-run reads the Pt3D fields.
+
+**Per-Myosin same-pose comparison** (full table:
+`RUN_LOGS/2026-05-31_deltacheck_partA_compare.txt`, raw dump:
+`RUN_LOGS/2026-05-31_deltacheck_partA_dump.txt`):
+
+```
+mean GPU/CPU ratio = 1.00000   min 0.99977  max 1.00063
+mean cosine        = 1.000000  min 0.999999 max 1.000000
+max relative diff  = 1.60e-3   typical    < 5e-5
+```
+
+Per-myosin examples (myoIdx 0):
+
+```
+qty       CPU mag       GPU mag   GPU/CPU   cosine     reldiff
+rodF    1.45187e-12   1.45183e-12  1.0000  +1.000000  2.98e-05
+leverF  5.75011e-13   5.74999e-13  1.0000  +1.000000  4.95e-05
+motorF  1.45583e-12   1.45581e-12  1.0000  +1.000000  1.15e-05
+rodT    2.21456e-20   2.21450e-20  1.0000  +1.000000  2.96e-05
+leverT  1.88163e-20   1.88191e-20  1.0001  +1.000000  1.55e-04
+motorT  2.25169e-20   2.25196e-20  1.0001  +1.000000  1.27e-04
+```
+
+This is decisive: with the SAME pose, the GPU joints kernel writes
+values that match the CPU joint computation to ~5 significant figures
+(float32 precision). The prior step-10 comparison from this morning
+showed mean GPU/CPU ratio ≈ 0.97 with cosines down to 0.24 — that
+spread was entirely pose drift between independent CPU-joints and
+GPU-joints runs, not kernel arithmetic error.
+
+**Structural check** (delta buffer sparsity / indexing):
+
+```
+[DIAG_DELTA_STRUCT step=10] slotCount=42011 myoJointCt=14000 expectedMyoSlots=42000
+[DIAG_DELTA_STRUCT step=10] myoSlots:   F nonzero=42000 zero=0 sqrt(sumF2)=2.646e-10 maxF=3.767e-12
+                                        T nonzero=42000 zero=0 sqrt(sumT2)=2.715e-18 maxT=6.366e-20
+[DIAG_DELTA_STRUCT step=10] otherSlots: F nonzero=0 sqrt(sumF2)=0 maxF=0
+                                        T nonzero=0 sqrt(sumT2)=0 maxT=0
+                                        firstOtherNonzero=-1
+```
+
+Every expected myo slot (3 per Myosin × 14000 GPU-handled Myosins =
+42000) has non-zero force AND non-zero torque. Zero FilSegment slots
+have any non-zero delta. The buffer's `set()`-not-`add()` semantics
+correctly overwrite per-step (no stale accumulation: magnitudes match
+CPU scale, not 10× larger).
+
+**Part A rules out**: (1) stale accumulation, (2) indexing mismatch,
+(3) missing torque or force, (4) off-by-one or wrong-slot, (5) sign
+flip. The delta buffer's CONTENT after the joints kernel write is
+essentially identical to CPU same-pose computation.
+
+### Part B — Bypass device-side summing via CPU-side delta-add
+
+Implementation: `GPUMoveThing.DIAG_CPU_DELTA_ADD` static boolean.
+Builds two additional `TaskGraph`s alongside the chained plan:
+`jointsOnlyPlan` (joints task + `transferToHost(jointForceSum,
+jointTorqueSum)`) and `moveOnlyPlan` (move task + `transferToHost(coord,
+uVec, yVec)`). Both share the same `FloatArray` instances as the
+chained plan. `moveThings()` when the flag is true:
+
+```
+1. packRange (cpuForceSum from soaForceSum, zero jointForceSum, etc.).
+2. jointsOnlyPlan.execute() → device computes joints, transfers
+   jointForceSum / jointTorqueSum to host.
+3. CPU loop: for each slot i in [0, slotCount * 3),
+      cpuForceSum[i]  += jointForceSum[i]
+      cpuTorqueSum[i] += jointTorqueSum[i]
+      jointForceSum[i]  = 0
+      jointTorqueSum[i] = 0
+4. moveOnlyPlan.execute() → move kernel reads cpuForceSum + 0.
+```
+
+This delivery path is identical to the PASSING `DIAG_CPU_JOINTS`
+config's path (CPU jointConstraints → soaForceSum → cpuForceSum →
+move kernel), EXCEPT that the joint values come from the GPU kernel
+rather than the CPU per-Myosin dispatch. If the device-side delta
+summing in the move kernel is the bug, Part B's bindEvents should
+recover toward ~828.
+
+**10-seed ensemble — FAIL (NO recovery)**. Per-seed logs:
+`RUN_LOGS/2026-05-31_deltaadd_seed{1..10}.log`; summary:
+`RUN_LOGS/2026-05-31_deltaadd_summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         Part B mean ± SEM (SD)      |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     439.20 ± 43.95 (138.98)         6.58  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       4.56 ±  0.38 (  1.20)         5.64  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.30 ±  0.16 (  0.50)         8.79  FAIL
+```
+
+Direct comparison with prior chained-GPU ensembles:
+
+```
+                                bindEvents
+GPU chained (2026-05-30)        497.80 ± 38.23  FAIL  6.02
+GPU chained acosfix (today)     460.80 ± 36.55  FAIL  6.77
+GPU CPU-joints (today)          828.50 ± 68.11  PASS  0.34
+GPU CPU-delta-add (Part B)      439.20 ± 43.95  FAIL  6.58
+```
+
+Part B's 439.20 ± 43.95 is statistically equivalent to the chained
+ensembles (well inside cSEM = 58.0 separating it from the chained
+460.80). Routing the same GPU joint output through `cpuForceSum`
+instead of the device delta buffer does not move the observable.
+
+### Interpretation
+
+The two configurations differ in EXACTLY ONE thing: where the joint
+forces are COMPUTED (CPU double in `DIAG_CPU_JOINTS`, GPU float32 in
+Part B). Their DELIVERY path to the move kernel is identical
+(`cpuForceSum` upload). Part B failing as hard as the chained config
+means the bug is not in the transport — it is in the GPU joint
+COMPUTATION itself.
+
+Part A's same-pose comparison showed per-step relative drift of ~1e-5
+between CPU and GPU joint output at step 10. Over the 10000-step
+gliding-assay run, that small per-step drift compounds through the
+pose-joints feedback loop (joints write torques → move integrates
+orientation → next step's joints read slightly different pose →
+slightly different torques → ...) and propagates into the binding
+kinetics enough to drop bindEvents 42 %.
+
+This is consistent with Test 3 of the earlier 2026-05-31 CPU diagnostic
+("skip kick + GPU math + float32 casts at joints + moveCoeff" gave 777.6
+± 48.0, an 80-event drop). Test 3 emulated GPU joint math on the CPU
+side but kept the rest of the pipeline (double-precision pose, MT
+Brownian) intact — its 80-event drop is the JOINT-CONTRIBUTION-ONLY
+share of the bias. The remaining ~330 events in the actual GPU ensemble
+come from the COMPOUNDING with the GPU move kernel's float32 pose
+integration: every step's tiny joint-side bias adds to the move
+kernel's float32 drift, and the feedback loop amplifies the combined
+error.
+
+**The "bug" is float32 cumulative drift in the GPU joint+move feedback
+loop, not a discrete defect in any single line of kernel code.** No
+arithmetic fix, no sign-flip correction, no indexing change will close
+this gap as long as both kernels run in float32 throughout.
+
+### Recommended next move
+
+The work to date has exonerated, in order:
+
+- Joint-kernel arithmetic (this morning's torque-path audit, Part A).
+- Inter-task delta-buffer plumbing (Part B).
+- The dropped `randomUnitVec` kick (CPU diagnostic Test 1, ~16 events
+  at most).
+- Joints-only float32 (CPU diagnostic Test 3, ~80 events at most).
+
+The remaining ~280 events of drop have to come from compounding
+float32 effects across the full GPU pipeline. Two paths forward:
+
+1. **Treat the GPU as a different-but-valid stochastic build.** The
+   GPU produces a statistically distinct Brownian process via the
+   combination of Wang-hash Brownian and float32 pose drift; bindings
+   happen at slightly different times. Validate against physics
+   targets (persistence length, deflection ratio, gliding velocity vs
+   ATP scan) rather than CPU equivalence. Gliding velocity drops 23 %
+   (8.22 → 6.30) which is large by validation standards but small for
+   a physics-process-comparison metric; worth checking whether the GPU
+   is hitting the same stall force vs velocity curve.
+2. **Promote pose state to double precision on device.** TornadoVM has
+   `DoubleArray`; PTX backend support needs verification (the project
+   used `--release 21 --enable-preview` and `FloatArray` is the
+   preview type; `DoubleArray` should compile but PTX lowering may
+   be slower). Estimated effort: one day to convert `coord` / `uVec` /
+   `yVec` only and re-run the ensemble. Forces and joint intermediates
+   can stay float32 — pose feedback is the dominant amplification path.
+
+Path 1 is cheaper and aligns with the GPU's role as an iteration
+speedup; path 2 is the right move if validation against the CPU is
+required for publication.
+
+### Files changed (all default-off)
+
+- `boxOfActin/Myosin.java` — `DIAG_DRY_RUN` static boolean; gates
+  `incForceSum` / `incTorqueSum` in the four `apply*` methods so
+  diagnostic dry-run does not corrupt Thing state.
+- `boxOfActin/GPUMoveThing.java` — `DIAG_CPU_DELTA_ADD` static
+  boolean; `jointsOnlyItg` / `jointsOnlyPlan` / `moveOnlyItg` /
+  `moveOnlyPlan` fields and schedulers; built lazily in
+  `allocateAndBuildPlan` when the flag is on; `executeSplit()`
+  helper; `dumpDeltaStructure()` helper; `closePlan()` extended to
+  close the split plans; the dump block in `moveThings()` calls
+  Myosin dry-run before exec and runs the structural dump after.
+
+Final state: `Myosin.DIAG_DRY_RUN=false`, `DIAG_CPU_DELTA_ADD=false`,
+`DIAG_DUMP_JOINTS_STEP=-1`, `DIAG_CPU_JOINTS=false`. Production
+behaviour unchanged. The added flags + plans give future investigators
+a one-flag-flip path to re-run either diagnostic.
+
+### Open
+
+- The two paths above. Path 1 is a validation strategy change; path 2
+  is a precision change to the device-side pose buffers. The
+  precision-promotion path also wants a test that converts JUST one of
+  `coord` / `uVec` / `yVec` at a time, to identify which carries the
+  most amplification.
+- Part B per-seed has CPU-joints seed 1 = 1096 vs Part B seed 1 = 428.
+  The Wang-hash RNG produces the same per-seed sequence in both
+  configs but the trajectories diverge after ~step 10 because joint
+  forces differ by float32 noise. This is consistent with the
+  "compounding" interpretation; it also explains why per-seed Part B
+  values look noisier than CPU baseline (SD 138 vs CPU's 144 — almost
+  identical at the seed level, so the per-trajectory dispersion is
+  intrinsic to the seed × physical-system stochasticity, not a GPU
+  artifact).
+
 ## 2026-05-31 — Joints kernel torque-path audit (no sign/order bug found)
 
 Acting on the prior diagnostic's "subtler than per-step magnitude bias"

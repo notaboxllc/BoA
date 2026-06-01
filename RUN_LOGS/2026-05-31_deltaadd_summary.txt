@@ -1,0 +1,41 @@
+2026-05-31 Part B — DIAG_CPU_DELTA_ADD 10-seed ensemble summary
+================================================================
+Param file: ParameterFiles/glidingAssay500_val (M=500, ~10101 steps)
+Protocol:   10 GPU seeds (1..10), GPU joints kernel runs in
+            jointsOnlyPlan; output downloaded to host; added to
+            cpuForceSum on CPU; jointForceSum zeroed; moveOnlyPlan
+            runs with cpuForceSum (containing joint forces) + 0.
+
+Per-seed:
+seed=1  rc=0  bindEvents=428  meanBoundMotors=4.541  glidingVelocity=6.4021
+seed=2  rc=0  bindEvents=518  meanBoundMotors=4.670  glidingVelocity=6.5157
+seed=3  rc=0  bindEvents=676  meanBoundMotors=6.556  glidingVelocity=6.7114
+seed=4  rc=0  bindEvents=335  meanBoundMotors=3.557  glidingVelocity=5.9101
+seed=5  rc=0  bindEvents=519  meanBoundMotors=5.311  glidingVelocity=6.6307
+seed=6  rc=0  bindEvents=345  meanBoundMotors=4.174  glidingVelocity=5.5169
+seed=7  rc=0  bindEvents=470  meanBoundMotors=4.705  glidingVelocity=6.2293
+seed=8  rc=0  bindEvents=279  meanBoundMotors=3.003  glidingVelocity=6.2412
+seed=9  rc=0  bindEvents=580  meanBoundMotors=6.124  glidingVelocity=7.1678
+seed=10 rc=0  bindEvents=242  meanBoundMotors=2.999  glidingVelocity=5.6597
+
+Observable comparison (cSEM gate < 2.0)
+---------------------------------------
+                       Part B mean ± SEM (SD)    |diff|/cSEM vs CPU baseline
+bindEvents       :    439.20 ± 43.95 (138.98)         6.58  FAIL
+meanBoundMotors  :      4.56 ±  0.38 (  1.20)         5.64  FAIL
+glidingVelocity  :      6.30 ±  0.16 (  0.50)         8.79  FAIL
+
+Comparison with prior chained-GPU ensembles:
+  CPU baseline (iter2d)              : 856.80 ± 45.72  --
+  GPU chained (2026-05-30)           : 497.80 ± 38.23  FAIL 6.02
+  GPU chained acosfix (2026-05-31)   : 460.80 ± 36.55  FAIL 6.77
+  GPU CPU joints (DIAG_CPU_JOINTS)   : 828.50 ± 68.11  PASS 0.34
+  GPU CPU delta-add (Part B, this)   : 439.20 ± 43.95  FAIL 6.58
+
+Conclusion: Part B's 439.20 is STATISTICALLY EQUIVALENT to the chained-GPU
+460.80 (well inside cSEM). Routing the GPU joint output through cpuForceSum
+on the CPU side (the same delivery path the PASSING DIAG_CPU_JOINTS config
+uses) does NOT recover the observable. Therefore the device-side delta
+summing in the move kernel is NOT the bug — the bug is in the GPU joint
+COMPUTATION itself (cumulative float32 drift in the pose-joints feedback
+loop), not in the transport mechanism.

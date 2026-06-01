@@ -76,9 +76,33 @@ public class GPUMoveThing {
      * step. For the GPU path, this requires jointForceSum/jointTorqueSum to
      * be in the chained plan's transferToHost list — gated on this flag at
      * plan build time. -1 = off, no overhead.
+     *
+     * On the GPU dump path (with DIAG_CPU_JOINTS=false), the dump also runs
+     * Myosin.jointConstraints in DRY_RUN mode (Myosin.DIAG_DRY_RUN=true)
+     * over the SAME pose state visible to the GPU joints kernel — produces
+     * matching CPU joint values for direct per-Myosin comparison without
+     * corrupting Thing force/torque accumulators.
      */
     public static int DIAG_DUMP_JOINTS_STEP = -1;
     public static final int DIAG_DUMP_MYO_LIMIT = 5;
+
+    /**
+     * Diagnostic flag (2026-05-31 — delta-buffer transport isolation).
+     * When true and Env.useGPU is true:
+     *   1. GPU joints kernel still runs and writes jointForceSum / jointTorqueSum
+     *      on the device (jointsOnlyPlan).
+     *   2. jointForceSum / jointTorqueSum are downloaded to host between the
+     *      joints execution and the move execution.
+     *   3. Host adds the delta to cpuForceSum / cpuTorqueSum, then zeros the
+     *      delta buffer.
+     *   4. moveOnlyPlan runs the move kernel with the combined cpuForceSum
+     *      (which now contains the joint contributions) and zero jointForceSum.
+     *      Net effect: the move kernel sees the joint forces through the same
+     *      cpuForceSum path the PASSING DIAG_CPU_JOINTS config uses, instead
+     *      of through the device-side delta sum.
+     * Default off — no production impact.
+     */
+    public static boolean DIAG_CPU_DELTA_ADD = false;
 
     /** Public step counter for the CPU joint dump to align with the GPU dump. */
     public static int getStepCounter() { return stepCounter; }
@@ -142,6 +166,15 @@ public class GPUMoveThing {
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
     private static GridScheduler        gridScheduler;
+
+    // Split-plan execution for DIAG_CPU_DELTA_ADD. Built lazily when the flag
+    // is on; shares the same FloatArrays as the chained plan.
+    private static ImmutableTaskGraph   jointsOnlyItg;
+    private static TornadoExecutionPlan jointsOnlyPlan;
+    private static GridScheduler        jointsOnlyScheduler;
+    private static ImmutableTaskGraph   moveOnlyItg;
+    private static TornadoExecutionPlan moveOnlyPlan;
+    private static GridScheduler        moveOnlyScheduler;
 
     private static int stepCounter = 0;
 
@@ -730,6 +763,59 @@ public class GPUMoveThing {
         gridScheduler = new GridScheduler("chained.move", moveWorker);
         gridScheduler.addWorkerGrid("chained.joints", jointWorker);
 
+        if (DIAG_CPU_DELTA_ADD) {
+            // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,
+            // transfers them to host so CPU can add them to cpuForceSum.
+            TaskGraph jtg = new TaskGraph("jointsOnly")
+                .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                                  coord, uVec,
+                                  jointForceSum, jointTorqueSum,
+                                  rodSlots, leverSlots, motorSlots,
+                                  myoDrags, cockedFlags,
+                                  jointParams, counts)
+                .task("joints",
+                      GPUMoveThing::jointsKernel,
+                      coord, uVec,
+                      jointForceSum, jointTorqueSum,
+                      rodSlots, leverSlots, motorSlots,
+                      myoDrags, cockedFlags,
+                      jointParams, counts)
+                .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                jointForceSum, jointTorqueSum);
+            jointsOnlyItg = jtg.snapshot();
+            jointsOnlyPlan = new TornadoExecutionPlan(jointsOnlyItg);
+
+            // moveOnly: reads everything (including the CPU-zeroed jointForceSum),
+            // writes coord/uVec/yVec back to host.
+            TaskGraph mtg = new TaskGraph("moveOnly")
+                .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                                  coord, uVec, yVec,
+                                  cpuForceSum, cpuTorqueSum,
+                                  jointForceSum, jointTorqueSum,
+                                  bTransGam, bRotGam,
+                                  brownianScales, velMask,
+                                  params, counts)
+                .task("move",
+                      GPUMoveThing::moveThingKernel,
+                      coord, uVec, yVec,
+                      cpuForceSum, cpuTorqueSum,
+                      jointForceSum, jointTorqueSum,
+                      bTransGam, bRotGam,
+                      brownianScales, velMask,
+                      params, counts)
+                .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                coord, uVec, yVec);
+            moveOnlyItg = mtg.snapshot();
+            moveOnlyPlan = new TornadoExecutionPlan(moveOnlyItg);
+
+            WorkerGrid jOnlyWorker = new WorkerGrid1D(myoCap);
+            jOnlyWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
+            WorkerGrid mOnlyWorker = new WorkerGrid1D(slotCap);
+            mOnlyWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
+            jointsOnlyScheduler = new GridScheduler("jointsOnly.joints", jOnlyWorker);
+            moveOnlyScheduler = new GridScheduler("moveOnly.move", mOnlyWorker);
+        }
+
         topologyDirty = true;
         coordsDirty   = true;
 
@@ -753,6 +839,16 @@ public class GPUMoveThing {
             try { plan.close(); } catch (Exception e) { /* best effort */ }
             plan = null;
             itg  = null;
+        }
+        if (jointsOnlyPlan != null) {
+            try { jointsOnlyPlan.close(); } catch (Exception e) { /* best effort */ }
+            jointsOnlyPlan = null;
+            jointsOnlyItg  = null;
+        }
+        if (moveOnlyPlan != null) {
+            try { moveOnlyPlan.close(); } catch (Exception e) { /* best effort */ }
+            moveOnlyPlan = null;
+            moveOnlyItg  = null;
         }
     }
 
@@ -1114,6 +1210,100 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Part B — DIAG_CPU_DELTA_ADD execution path. Runs joints kernel,
+    // downloads delta to host, adds delta to cpuForceSum / cpuTorqueSum on
+    // CPU, zeros delta, then runs move kernel reading cpuForceSum + 0.
+    // -------------------------------------------------------------------------
+    private static void executeSplit() {
+        // Run the joints-only plan (or skip if no Myosin joints — buffers are
+        // already host-zeroed from packRange, so move sees the right inputs).
+        if (myoJointCt > 0) {
+            jointsOnlyPlan.withGridScheduler(jointsOnlyScheduler).execute();
+            // Sum joint delta into cpuForceSum/cpuTorqueSum on host; zero delta
+            // so the move kernel reads cpuForceSum + 0.
+            int n3 = slotCount * 3;
+            for (int i = 0; i < n3; i++) {
+                float jf = jointForceSum.get(i);
+                if (jf != 0f) {
+                    cpuForceSum.set(i, cpuForceSum.get(i) + jf);
+                    jointForceSum.set(i, 0f);
+                }
+                float jt = jointTorqueSum.get(i);
+                if (jt != 0f) {
+                    cpuTorqueSum.set(i, cpuTorqueSum.get(i) + jt);
+                    jointTorqueSum.set(i, 0f);
+                }
+            }
+        }
+        moveOnlyPlan.withGridScheduler(moveOnlyScheduler).execute();
+    }
+
+    // -------------------------------------------------------------------------
+    // Part A — Structural content check on the joint delta buffer.
+    // -------------------------------------------------------------------------
+    private static void dumpDeltaStructure() {
+        // Build the set of slots written by the joints kernel.
+        java.util.BitSet myoSlots = new java.util.BitSet(slotCount);
+        for (int mj = 0; mj < myoJointCt; mj++) {
+            myoSlots.set(rodSlots.get(mj));
+            myoSlots.set(leverSlots.get(mj));
+            myoSlots.set(motorSlots.get(mj));
+        }
+        int expectedMyoSlotCt = myoSlots.cardinality();
+
+        int myoNonzeroF = 0, myoZeroF = 0;
+        int myoNonzeroT = 0, myoZeroT = 0;
+        int otherNonzeroF = 0, otherNonzeroT = 0;
+        double sumMyoF2 = 0, sumMyoT2 = 0;
+        double sumOtherF2 = 0, sumOtherT2 = 0;
+        float maxMyoF = 0f, maxMyoT = 0f;
+        float maxOtherF = 0f, maxOtherT = 0f;
+        int firstOtherNonzero = -1;
+
+        for (int s = 0; s < slotCount; s++) {
+            int s3 = s * 3;
+            float fx = jointForceSum.get(s3);
+            float fy = jointForceSum.get(s3 + 1);
+            float fz = jointForceSum.get(s3 + 2);
+            float tx = jointTorqueSum.get(s3);
+            float ty = jointTorqueSum.get(s3 + 1);
+            float tz = jointTorqueSum.get(s3 + 2);
+            float fmag2 = fx * fx + fy * fy + fz * fz;
+            float tmag2 = tx * tx + ty * ty + tz * tz;
+            float fmag  = (float) Math.sqrt(fmag2);
+            float tmag  = (float) Math.sqrt(tmag2);
+            if (myoSlots.get(s)) {
+                sumMyoF2 += fmag2;
+                sumMyoT2 += tmag2;
+                if (fmag2 > 0f) myoNonzeroF++; else myoZeroF++;
+                if (tmag2 > 0f) myoNonzeroT++; else myoZeroT++;
+                if (fmag > maxMyoF) maxMyoF = fmag;
+                if (tmag > maxMyoT) maxMyoT = tmag;
+            } else {
+                sumOtherF2 += fmag2;
+                sumOtherT2 += tmag2;
+                if (fmag2 > 0f) {
+                    otherNonzeroF++;
+                    if (firstOtherNonzero < 0) firstOtherNonzero = s;
+                    if (fmag > maxOtherF) maxOtherF = fmag;
+                }
+                if (tmag2 > 0f) {
+                    otherNonzeroT++;
+                    if (tmag > maxOtherT) maxOtherT = tmag;
+                }
+            }
+        }
+        System.err.printf("[DIAG_DELTA_STRUCT step=%d] slotCount=%d myoJointCt=%d expectedMyoSlots=%d%n",
+            stepCounter, slotCount, myoJointCt, expectedMyoSlotCt);
+        System.err.printf("[DIAG_DELTA_STRUCT step=%d] myoSlots: F nonzero=%d zero=%d (sqrt(sumF2)=%.3e maxF=%.3e); T nonzero=%d zero=%d (sqrt(sumT2)=%.3e maxT=%.3e)%n",
+            stepCounter, myoNonzeroF, myoZeroF, Math.sqrt(sumMyoF2), maxMyoF,
+            myoNonzeroT, myoZeroT, Math.sqrt(sumMyoT2), maxMyoT);
+        System.err.printf("[DIAG_DELTA_STRUCT step=%d] otherSlots: F nonzero=%d (sqrt(sumF2)=%.3e maxF=%.3e); T nonzero=%d (sqrt(sumT2)=%.3e maxT=%.3e); firstOtherNonzero=%d%n",
+            stepCounter, otherNonzeroF, Math.sqrt(sumOtherF2), maxOtherF,
+            otherNonzeroT, Math.sqrt(sumOtherT2), maxOtherT, firstOtherNonzero);
+    }
+
+    // -------------------------------------------------------------------------
     // Public entry point — chained joints + move.
     // -------------------------------------------------------------------------
     public static void moveThings() {
@@ -1174,8 +1364,30 @@ public class GPUMoveThing {
 
         long packEnd = System.nanoTime();
 
+        // Before plan.execute(), run a CPU-side dry-run of joint computation
+        // over the SAME pose the GPU joints kernel will see — populates the
+        // Myosin diag accumulators so [DIAG_CPU_JOINT ...] lines print
+        // matching-pose CPU joint forces. Skipped when DIAG_CPU_JOINTS=true
+        // (CPU joints already ran with side effects in MyosinThreads).
+        boolean armDryRun = DIAG_DUMP_JOINTS_STEP >= 0
+                         && stepCounter == DIAG_DUMP_JOINTS_STEP
+                         && !DIAG_CPU_JOINTS
+                         && Env.useGPU;
+        if (armDryRun) {
+            Myosin.DIAG_DRY_RUN = true;
+            for (int mj = 0; mj < myoJointCt; mj++) {
+                Myosin myo = Myosin.theMyosins[jointSlotToMyoIdx[mj]];
+                if (myo != null) myo.jointConstraints();
+            }
+            Myosin.DIAG_DRY_RUN = false;
+        }
+
         if (slotCount > 0) {
-            plan.withGridScheduler(gridScheduler).execute();
+            if (DIAG_CPU_DELTA_ADD) {
+                executeSplit();
+            } else {
+                plan.withGridScheduler(gridScheduler).execute();
+            }
         }
         long execEnd = System.nanoTime();
 
@@ -1198,6 +1410,7 @@ public class GPUMoveThing {
                     jointTorqueSum.get(ls3), jointTorqueSum.get(ls3 + 1), jointTorqueSum.get(ls3 + 2),
                     jointTorqueSum.get(ms3), jointTorqueSum.get(ms3 + 1), jointTorqueSum.get(ms3 + 2));
             }
+            dumpDeltaStructure();
         }
 
         if (sc > 0) {
