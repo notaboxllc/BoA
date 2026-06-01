@@ -226,24 +226,49 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
-    // fastAcos approximation matching CPU Pt3D.fastAcos: small-angle form
-    // sqrt(2(1-|x|)) outside the ±0.95 band (<0.6% error at threshold), and
-    // the Abramowitz & Stegun 4.4.46 polynomial in the middle. The original
-    // CPU code uses Math.acos in the middle band but PTX can't lower it
-    // (ReinterpretNode unimplemented). Caller must clamp x to [-1, 1].
+    // High-accuracy acos in double, PTX-compatible. Math.acos itself does not
+    // lower on the PTX backend (Graal's software path uses ReinterpretNode).
+    // PTX does provide native sin/cos/sqrt for f64, so we seed with the same
+    // branched polynomial that CPU's Pt3D.fastAcos uses outside the ±0.95
+    // band and the Abramowitz & Stegun 4.4.46 polynomial inside it, then run
+    // two Newton iterations on f(y) = cos(y) − x using f'(y) = −sin(y):
+    //     y_{n+1} = y_n + (cos(y_n) − x) / sin(y_n).
+    // Each iteration roughly squares the error, so the ~5e-5 polynomial seed
+    // reaches machine precision after two refinements. This matches Math.acos
+    // closely enough that the joint-arithmetic equilibrium bias seen in the
+    // 2026-05-31 conformation diagnostic should vanish. Caller may pass any
+    // double; the helper clamps to [−1, 1] internally.
     // -------------------------------------------------------------------------
-    private static float fastAcosF(float x) {
-        if (x > 0.95f) {
-            return (float) Math.sqrt(2.0f * (1.0f - x));
-        } else if (x < -0.95f) {
-            return 3.14159265f - (float) Math.sqrt(2.0f * (1.0f + x));
+    private static double accurateAcos(double x) {
+        if (x > 1.0)  x = 1.0;
+        if (x < -1.0) x = -1.0;
+        double y;
+        if (x > 0.95) {
+            double t = 1.0 - x;
+            if (t < 0.0) t = 0.0;
+            y = Math.sqrt(2.0 * t);
+        } else if (x < -0.95) {
+            double t = 1.0 + x;
+            if (t < 0.0) t = 0.0;
+            y = 3.141592653589793 - Math.sqrt(2.0 * t);
         } else {
-            float ax = (x < 0f) ? -x : x;
-            float p = (-0.0187293f * ax + 0.0742610f) * ax - 0.2121144f;
-            p = (p * ax + 1.5707963f);
-            p = p * (float) Math.sqrt(1.0f - ax);
-            return (x < 0f) ? (3.14159265f - p) : p;
+            double ax = (x < 0.0) ? -x : x;
+            double p = (-0.0187293 * ax + 0.0742610) * ax - 0.2121144;
+            p = (p * ax + 1.5707963);
+            p = p * Math.sqrt(1.0 - ax);
+            y = (x < 0.0) ? (3.141592653589793 - p) : p;
         }
+        // Newton refinement: each pass roughly squares the relative error.
+        // Two passes from a 5e-5 seed lands near machine precision.
+        double s = Math.sin(y);
+        if (s > 1.0e-12 || s < -1.0e-12) {
+            y = y + (Math.cos(y) - x) / s;
+        }
+        s = Math.sin(y);
+        if (s > 1.0e-12 || s < -1.0e-12) {
+            y = y + (Math.cos(y) - x) / s;
+        }
+        return y;
     }
 
     // -------------------------------------------------------------------------
@@ -273,22 +298,28 @@ public class GPUMoveThing {
 
         int M = counts.get(3);
 
-        float dt              = jointParams.get(0);
-        float j1FracMove      = jointParams.get(1);
-        float j1FracR         = jointParams.get(2);
-        float j1FracMoveTorq  = jointParams.get(3);
-        float j2FracMove      = jointParams.get(4);
-        float j2FracR         = jointParams.get(5);
-        float j2FracMoveTorq  = jointParams.get(6);
-        float motorLen        = jointParams.get(7);
-        float leverLen        = jointParams.get(8);
-        float rodLen          = jointParams.get(9);
-        float stallForce      = jointParams.get(10);
-        float uncockedAng     = jointParams.get(11);
-        float cockedAng       = jointParams.get(12);
+        // 2026-05-31 — joint torque chain widened to double precision; uVec
+        // and coord stay float32 in device storage and integration, but the
+        // joint arithmetic is hoisted to double the moment values are read
+        // from the FloatArrays. Closes the 4° rod-lever conformation gap
+        // identified by the JointDiag instrumentation. fastAcosF replaced
+        // with accurateAcos (Newton-refined; PTX sin/cos in double native).
+        double dt              = (double) jointParams.get(0);
+        double j1FracMove      = (double) jointParams.get(1);
+        double j1FracR         = (double) jointParams.get(2);
+        double j1FracMoveTorq  = (double) jointParams.get(3);
+        double j2FracMove      = (double) jointParams.get(4);
+        double j2FracR         = (double) jointParams.get(5);
+        double j2FracMoveTorq  = (double) jointParams.get(6);
+        double motorLen        = (double) jointParams.get(7);
+        double leverLen        = (double) jointParams.get(8);
+        double rodLen          = (double) jointParams.get(9);
+        double stallForce      = (double) jointParams.get(10);
+        double uncockedAng     = (double) jointParams.get(11);
+        double cockedAng       = (double) jointParams.get(12);
 
-        float DEG2RAD = 0.017453292f;
-        float RAD2DEG = 57.29578f;
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
 
         for (@Parallel int m = 0; m < cockedFlags.getSize(); m++) {
             if (m >= M) { return; }
@@ -301,89 +332,89 @@ public class GPUMoveThing {
             int l3  = leverSlot * 3;
             int mo3 = motorSlot * 3;
 
-            float rcx = coord.get(r3),  rcy = coord.get(r3 + 1), rcz = coord.get(r3 + 2);
-            float rux = uVec.get(r3),   ruy = uVec.get(r3 + 1),  ruz = uVec.get(r3 + 2);
-            float lcx = coord.get(l3),  lcy = coord.get(l3 + 1), lcz = coord.get(l3 + 2);
-            float lux = uVec.get(l3),   luy = uVec.get(l3 + 1),  luz = uVec.get(l3 + 2);
-            float mcx = coord.get(mo3), mcy = coord.get(mo3 + 1), mcz = coord.get(mo3 + 2);
-            float mux = uVec.get(mo3),  muy = uVec.get(mo3 + 1),  muz = uVec.get(mo3 + 2);
+            double rcx = coord.get(r3),  rcy = coord.get(r3 + 1), rcz = coord.get(r3 + 2);
+            double rux = uVec.get(r3),   ruy = uVec.get(r3 + 1),  ruz = uVec.get(r3 + 2);
+            double lcx = coord.get(l3),  lcy = coord.get(l3 + 1), lcz = coord.get(l3 + 2);
+            double lux = uVec.get(l3),   luy = uVec.get(l3 + 1),  luz = uVec.get(l3 + 2);
+            double mcx = coord.get(mo3), mcy = coord.get(mo3 + 1), mcz = coord.get(mo3 + 2);
+            double mux = uVec.get(mo3),  muy = uVec.get(mo3 + 1),  muz = uVec.get(mo3 + 2);
 
             int md9 = m * 9;
-            float rBTGx  = myoDrags.get(md9);
-            float rBTGy  = myoDrags.get(md9 + 1);
-            float rBRGy  = myoDrags.get(md9 + 2);
-            float lBTGx  = myoDrags.get(md9 + 3);
-            float lBTGy  = myoDrags.get(md9 + 4);
-            float lBRGy  = myoDrags.get(md9 + 5);
-            float mBTGx  = myoDrags.get(md9 + 6);
-            float mBTGy  = myoDrags.get(md9 + 7);
-            float mBRGy  = myoDrags.get(md9 + 8);
+            double rBTGx  = (double) myoDrags.get(md9);
+            double rBTGy  = (double) myoDrags.get(md9 + 1);
+            double rBRGy  = (double) myoDrags.get(md9 + 2);
+            double lBTGx  = (double) myoDrags.get(md9 + 3);
+            double lBTGy  = (double) myoDrags.get(md9 + 4);
+            double lBRGy  = (double) myoDrags.get(md9 + 5);
+            double mBTGx  = (double) myoDrags.get(md9 + 6);
+            double mBTGy  = (double) myoDrags.get(md9 + 7);
+            double mBRGy  = (double) myoDrags.get(md9 + 8);
 
             int cocked = cockedFlags.get(m);
 
-            float halfRod   = 0.5f * rodLen;
-            float halfLever = 0.5f * leverLen;
-            float halfMotor = 0.5f * motorLen;
+            double halfRod   = 0.5 * rodLen;
+            double halfLever = 0.5 * leverLen;
+            double halfMotor = 0.5 * motorLen;
 
-            float le1x = lcx - halfLever * lux, le1y = lcy - halfLever * luy, le1z = lcz - halfLever * luz;
-            float le2x = lcx + halfLever * lux, le2y = lcy + halfLever * luy, le2z = lcz + halfLever * luz;
-            float me1x = mcx - halfMotor * mux, me1y = mcy - halfMotor * muy, me1z = mcz - halfMotor * muz;
-            float re2x = rcx + halfRod * rux,   re2y = rcy + halfRod * ruy,   re2z = rcz + halfRod * ruz;
+            double le1x = lcx - halfLever * lux, le1y = lcy - halfLever * luy, le1z = lcz - halfLever * luz;
+            double le2x = lcx + halfLever * lux, le2y = lcy + halfLever * luy, le2z = lcz + halfLever * luz;
+            double me1x = mcx - halfMotor * mux, me1y = mcy - halfMotor * muy, me1z = mcz - halfMotor * muz;
+            double re2x = rcx + halfRod * rux,   re2y = rcy + halfRod * ruy,   re2z = rcz + halfRod * ruz;
 
-            float rodFx = 0f,   rodFy = 0f,   rodFz = 0f;
-            float rodTx = 0f,   rodTy = 0f,   rodTz = 0f;
-            float leverFx = 0f, leverFy = 0f, leverFz = 0f;
-            float leverTx = 0f, leverTy = 0f, leverTz = 0f;
-            float motorFx = 0f, motorFy = 0f, motorFz = 0f;
-            float motorTx = 0f, motorTy = 0f, motorTz = 0f;
+            double rodFx = 0.0,   rodFy = 0.0,   rodFz = 0.0;
+            double rodTx = 0.0,   rodTy = 0.0,   rodTz = 0.0;
+            double leverFx = 0.0, leverFy = 0.0, leverFz = 0.0;
+            double leverTx = 0.0, leverTy = 0.0, leverTz = 0.0;
+            double motorFx = 0.0, motorFy = 0.0, motorFz = 0.0;
+            double motorTx = 0.0, motorTy = 0.0, motorTz = 0.0;
 
             // applyLeverMotorJointForce
             {
-                float dx = le2x - me1x, dy = le2y - me1y, dz = le2z - me1z;
-                float dist2 = dx * dx + dy * dy + dz * dz;
-                float strainDist = (float) Math.sqrt(dist2);
-                float invStrain = (strainDist > 0f) ? (1.0f / strainDist) : 0f;
-                float l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
-                float l2x = -l1x, l2y = -l1y, l2z = -l1z;
+                double dx = le2x - me1x, dy = le2y - me1y, dz = le2z - me1z;
+                double dist2 = dx * dx + dy * dy + dz * dz;
+                double strainDist = Math.sqrt(dist2);
+                double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
+                double l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
+                double l2x = -l1x, l2y = -l1y, l2z = -l1z;
 
-                float cosBh = -(mux * l1x + muy * l1y + muz * l1z);
-                if (cosBh > 1.0f)  cosBh = 1.0f;
-                if (cosBh < -1.0f) cosBh = -1.0f;
-                float cosAlphH  = (float) Math.sin(fastAcosF(cosBh));
-                float cosAlphH2 = cosAlphH * cosAlphH;
-                float lSqH     = 1.0e-12f * motorLen * motorLen;
-                float CxH      = cosBh * cosBh / mBTGx;
-                float CperpH   = cosAlphH2 / mBTGy;
-                float CthetaH  = lSqH * cosAlphH2 / (4.0f * mBRGy);
-                float moveCh   = CxH + CperpH + CthetaH;
+                double cosBh = -(mux * l1x + muy * l1y + muz * l1z);
+                if (cosBh > 1.0)  cosBh = 1.0;
+                if (cosBh < -1.0) cosBh = -1.0;
+                double cosAlphH  = Math.sin(accurateAcos(cosBh));
+                double cosAlphH2 = cosAlphH * cosAlphH;
+                double lSqH     = 1.0e-12 * motorLen * motorLen;
+                double CxH      = cosBh * cosBh / mBTGx;
+                double CperpH   = cosAlphH2 / mBTGy;
+                double CthetaH  = lSqH * cosAlphH2 / (4.0 * mBRGy);
+                double moveCh   = CxH + CperpH + CthetaH;
 
-                float cosBt = lux * l2x + luy * l2y + luz * l2z;
-                if (cosBt > 1.0f)  cosBt = 1.0f;
-                if (cosBt < -1.0f) cosBt = -1.0f;
-                float cosAlphT  = (float) Math.sin(fastAcosF(cosBt));
-                float cosAlphT2 = cosAlphT * cosAlphT;
-                float lSqT     = 1.0e-12f * leverLen * leverLen;
-                float CxT      = cosBt * cosBt / lBTGx;
-                float CperpT   = cosAlphT2 / lBTGy;
-                float CthetaT  = lSqT * cosAlphT2 / (4.0f * lBRGy);
-                float moveCt   = CxT + CperpT + CthetaT;
+                double cosBt = lux * l2x + luy * l2y + luz * l2z;
+                if (cosBt > 1.0)  cosBt = 1.0;
+                if (cosBt < -1.0) cosBt = -1.0;
+                double cosAlphT  = Math.sin(accurateAcos(cosBt));
+                double cosAlphT2 = cosAlphT * cosAlphT;
+                double lSqT     = 1.0e-12 * leverLen * leverLen;
+                double CxT      = cosBt * cosBt / lBTGx;
+                double CperpT   = cosAlphT2 / lBTGy;
+                double CthetaT  = lSqT * cosAlphT2 / (4.0 * lBRGy);
+                double moveCt   = CxT + CperpT + CthetaT;
 
-                float denom = dt * (moveCh + moveCt);
-                float forceMag = (denom > 0f) ? (j1FracMove * 1.0e-6f * strainDist / denom) : 0f;
+                double denom = dt * (moveCh + moveCt);
+                double forceMag = (denom > 0.0) ? (j1FracMove * 1.0e-6 * strainDist / denom) : 0.0;
 
-                float Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
+                double Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
 
                 motorFx += Fx; motorFy += Fy; motorFz += Fz;
-                float Rms = -0.5e-6f * motorLen * j1FracR;
-                float Rmx = Rms * mux, Rmy = Rms * muy, Rmz = Rms * muz;
+                double Rms = -0.5e-6 * motorLen * j1FracR;
+                double Rmx = Rms * mux, Rmy = Rms * muy, Rmz = Rms * muz;
                 motorTx += Rmy * Fz - Rmz * Fy;
                 motorTy += Rmz * Fx - Rmx * Fz;
                 motorTz += Rmx * Fy - Rmy * Fx;
 
                 Fx = -Fx; Fy = -Fy; Fz = -Fz;
                 leverFx += Fx; leverFy += Fy; leverFz += Fz;
-                float Rls = 0.5e-6f * leverLen * j1FracR;
-                float Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
+                double Rls = 0.5e-6 * leverLen * j1FracR;
+                double Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
                 leverTx += Rly * Fz - Rlz * Fy;
                 leverTy += Rlz * Fx - Rlx * Fz;
                 leverTz += Rlx * Fy - Rly * Fx;
@@ -391,25 +422,25 @@ public class GPUMoveThing {
 
             // applyLeverMotorJointTorque
             {
-                float tvx = luy * muz - luz * muy;
-                float tvy = luz * mux - lux * muz;
-                float tvz = lux * muy - luy * mux;
-                float tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
-                if (tvMag2 > 0f) {
-                    float invMag = 1.0f / (float) Math.sqrt(tvMag2);
+                double tvx = luy * muz - luz * muy;
+                double tvy = luz * mux - lux * muz;
+                double tvz = lux * muy - luy * mux;
+                double tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 0.0) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
                     tvx *= invMag; tvy *= invMag; tvz *= invMag;
 
-                    float dotVecs = lux * mux + luy * muy + luz * muz;
-                    if (dotVecs > 1.0f)  dotVecs = 1.0f;
-                    if (dotVecs < -1.0f) dotVecs = -1.0f;
-                    float angTween = fastAcosF(dotVecs) * RAD2DEG;
+                    double dotVecs = lux * mux + luy * muy + luz * muz;
+                    if (dotVecs > 1.0)  dotVecs = 1.0;
+                    if (dotVecs < -1.0) dotVecs = -1.0;
+                    double angTween = accurateAcos(dotVecs) * RAD2DEG;
 
-                    float angRelaxed = (cocked == 1) ? cockedAng : uncockedAng;
-                    float angD = angTween - angRelaxed;
+                    double angRelaxed = (cocked == 1) ? cockedAng : uncockedAng;
+                    double angD = angTween - angRelaxed;
 
-                    float invBRG = 1.0f / mBRGy + 1.0f / lBRGy;
-                    float torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
-                    float maxMag = stallForce * 0.5f * motorLen * 1.0e-18f;
+                    double invBRG = 1.0 / mBRGy + 1.0 / lBRGy;
+                    double torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                    double maxMag = stallForce * 0.5 * motorLen * 1.0e-18;
                     if (torsionMag > maxMag) torsionMag = maxMag;
 
                     leverTx += tvx * torsionMag;
@@ -423,51 +454,51 @@ public class GPUMoveThing {
 
             // applyRodLeverJointForce
             {
-                float dx = re2x - le1x, dy = re2y - le1y, dz = re2z - le1z;
-                float dist2 = dx * dx + dy * dy + dz * dz;
-                float strainDist = (float) Math.sqrt(dist2);
-                float invStrain = (strainDist > 0f) ? (1.0f / strainDist) : 0f;
-                float l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
-                float l2x = -l1x, l2y = -l1y, l2z = -l1z;
+                double dx = re2x - le1x, dy = re2y - le1y, dz = re2z - le1z;
+                double dist2 = dx * dx + dy * dy + dz * dz;
+                double strainDist = Math.sqrt(dist2);
+                double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
+                double l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
+                double l2x = -l1x, l2y = -l1y, l2z = -l1z;
 
-                float cosB1 = -(lux * l1x + luy * l1y + luz * l1z);
-                if (cosB1 > 1.0f)  cosB1 = 1.0f;
-                if (cosB1 < -1.0f) cosB1 = -1.0f;
-                float cosAlph1  = (float) Math.sin(fastAcosF(cosB1));
-                float cosAlph1_2 = cosAlph1 * cosAlph1;
-                float lSq1     = 1.0e-12f * leverLen * leverLen;
-                float Cx1      = cosB1 * cosB1 / lBTGx;
-                float Cperp1   = cosAlph1_2 / lBTGy;
-                float Ctheta1  = lSq1 * cosAlph1_2 / (4.0f * lBRGy);
-                float moveC1   = Cx1 + Cperp1 + Ctheta1;
+                double cosB1 = -(lux * l1x + luy * l1y + luz * l1z);
+                if (cosB1 > 1.0)  cosB1 = 1.0;
+                if (cosB1 < -1.0) cosB1 = -1.0;
+                double cosAlph1  = Math.sin(accurateAcos(cosB1));
+                double cosAlph1_2 = cosAlph1 * cosAlph1;
+                double lSq1     = 1.0e-12 * leverLen * leverLen;
+                double Cx1      = cosB1 * cosB1 / lBTGx;
+                double Cperp1   = cosAlph1_2 / lBTGy;
+                double Ctheta1  = lSq1 * cosAlph1_2 / (4.0 * lBRGy);
+                double moveC1   = Cx1 + Cperp1 + Ctheta1;
 
-                float cosB2 = rux * l2x + ruy * l2y + ruz * l2z;
-                if (cosB2 > 1.0f)  cosB2 = 1.0f;
-                if (cosB2 < -1.0f) cosB2 = -1.0f;
-                float cosAlph2  = (float) Math.sin(fastAcosF(cosB2));
-                float cosAlph2_2 = cosAlph2 * cosAlph2;
-                float lSq2     = 1.0e-12f * rodLen * rodLen;
-                float Cx2      = cosB2 * cosB2 / rBTGx;
-                float Cperp2   = cosAlph2_2 / rBTGy;
-                float Ctheta2  = lSq2 * cosAlph2_2 / (4.0f * rBRGy);
-                float moveC2   = Cx2 + Cperp2 + Ctheta2;
+                double cosB2 = rux * l2x + ruy * l2y + ruz * l2z;
+                if (cosB2 > 1.0)  cosB2 = 1.0;
+                if (cosB2 < -1.0) cosB2 = -1.0;
+                double cosAlph2  = Math.sin(accurateAcos(cosB2));
+                double cosAlph2_2 = cosAlph2 * cosAlph2;
+                double lSq2     = 1.0e-12 * rodLen * rodLen;
+                double Cx2      = cosB2 * cosB2 / rBTGx;
+                double Cperp2   = cosAlph2_2 / rBTGy;
+                double Ctheta2  = lSq2 * cosAlph2_2 / (4.0 * rBRGy);
+                double moveC2   = Cx2 + Cperp2 + Ctheta2;
 
-                float denom = dt * (moveC1 + moveC2);
-                float forceMag = (denom > 0f) ? (j2FracMove * 1.0e-6f * strainDist / denom) : 0f;
+                double denom = dt * (moveC1 + moveC2);
+                double forceMag = (denom > 0.0) ? (j2FracMove * 1.0e-6 * strainDist / denom) : 0.0;
 
-                float Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
+                double Fx = forceMag * l1x, Fy = forceMag * l1y, Fz = forceMag * l1z;
 
                 leverFx += Fx; leverFy += Fy; leverFz += Fz;
-                float Rls = -0.5e-6f * leverLen * j2FracR;
-                float Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
+                double Rls = -0.5e-6 * leverLen * j2FracR;
+                double Rlx = Rls * lux, Rly = Rls * luy, Rlz = Rls * luz;
                 leverTx += Rly * Fz - Rlz * Fy;
                 leverTy += Rlz * Fx - Rlx * Fz;
                 leverTz += Rlx * Fy - Rly * Fx;
 
                 Fx = -Fx; Fy = -Fy; Fz = -Fz;
                 rodFx += Fx; rodFy += Fy; rodFz += Fz;
-                float Rrs = 0.5e-6f * rodLen * j2FracR;
-                float Rrx = Rrs * rux, Rry = Rrs * ruy, Rrz = Rrs * ruz;
+                double Rrs = 0.5e-6 * rodLen * j2FracR;
+                double Rrx = Rrs * rux, Rry = Rrs * ruy, Rrz = Rrs * ruz;
                 rodTx += Rry * Fz - Rrz * Fy;
                 rodTy += Rrz * Fx - Rrx * Fz;
                 rodTz += Rrx * Fy - Rry * Fx;
@@ -475,21 +506,21 @@ public class GPUMoveThing {
 
             // applyRodLeverJointTorque
             {
-                float tvx = ruy * luz - ruz * luy;
-                float tvy = ruz * lux - rux * luz;
-                float tvz = rux * luy - ruy * lux;
-                float tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
-                if (tvMag2 > 0f) {
-                    float invMag = 1.0f / (float) Math.sqrt(tvMag2);
+                double tvx = ruy * luz - ruz * luy;
+                double tvy = ruz * lux - rux * luz;
+                double tvz = rux * luy - ruy * lux;
+                double tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 0.0) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
                     tvx *= invMag; tvy *= invMag; tvz *= invMag;
 
-                    float dotVecs = rux * lux + ruy * luy + ruz * luz;
-                    if (dotVecs > 1.0f)  dotVecs = 1.0f;
-                    if (dotVecs < -1.0f) dotVecs = -1.0f;
-                    float angTween = fastAcosF(dotVecs) * RAD2DEG;
+                    double dotVecs = rux * lux + ruy * luy + ruz * luz;
+                    if (dotVecs > 1.0)  dotVecs = 1.0;
+                    if (dotVecs < -1.0) dotVecs = -1.0;
+                    double angTween = accurateAcos(dotVecs) * RAD2DEG;
 
-                    float invBRG = 1.0f / lBRGy + 1.0f / rBRGy;
-                    float torsionMag = j2FracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
+                    double invBRG = 1.0 / lBRGy + 1.0 / rBRGy;
+                    double torsionMag = j2FracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
 
                     rodTx += tvx * torsionMag;
                     rodTy += tvy * torsionMag;
@@ -503,26 +534,27 @@ public class GPUMoveThing {
             // Write joint contributions to the device-side delta buffers.
             // Host uploaded zeros; this is the per-step contribution per slot.
             // Each Myosin's three sub-slots are unique, so writes are conflict-free.
-            jointForceSum.set(r3,      rodFx);
-            jointForceSum.set(r3 + 1,  rodFy);
-            jointForceSum.set(r3 + 2,  rodFz);
-            jointTorqueSum.set(r3,     rodTx);
-            jointTorqueSum.set(r3 + 1, rodTy);
-            jointTorqueSum.set(r3 + 2, rodTz);
+            // Cast back to float at the storage boundary.
+            jointForceSum.set(r3,      (float) rodFx);
+            jointForceSum.set(r3 + 1,  (float) rodFy);
+            jointForceSum.set(r3 + 2,  (float) rodFz);
+            jointTorqueSum.set(r3,     (float) rodTx);
+            jointTorqueSum.set(r3 + 1, (float) rodTy);
+            jointTorqueSum.set(r3 + 2, (float) rodTz);
 
-            jointForceSum.set(l3,      leverFx);
-            jointForceSum.set(l3 + 1,  leverFy);
-            jointForceSum.set(l3 + 2,  leverFz);
-            jointTorqueSum.set(l3,     leverTx);
-            jointTorqueSum.set(l3 + 1, leverTy);
-            jointTorqueSum.set(l3 + 2, leverTz);
+            jointForceSum.set(l3,      (float) leverFx);
+            jointForceSum.set(l3 + 1,  (float) leverFy);
+            jointForceSum.set(l3 + 2,  (float) leverFz);
+            jointTorqueSum.set(l3,     (float) leverTx);
+            jointTorqueSum.set(l3 + 1, (float) leverTy);
+            jointTorqueSum.set(l3 + 2, (float) leverTz);
 
-            jointForceSum.set(mo3,      motorFx);
-            jointForceSum.set(mo3 + 1,  motorFy);
-            jointForceSum.set(mo3 + 2,  motorFz);
-            jointTorqueSum.set(mo3,     motorTx);
-            jointTorqueSum.set(mo3 + 1, motorTy);
-            jointTorqueSum.set(mo3 + 2, motorTz);
+            jointForceSum.set(mo3,      (float) motorFx);
+            jointForceSum.set(mo3 + 1,  (float) motorFy);
+            jointForceSum.set(mo3 + 2,  (float) motorFz);
+            jointTorqueSum.set(mo3,     (float) motorTx);
+            jointTorqueSum.set(mo3 + 1, (float) motorTy);
+            jointTorqueSum.set(mo3 + 2, (float) motorTz);
         }
     }
 

@@ -4,6 +4,169 @@ Last updated: 2026-05-31
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-05-31 — Double-precision joint arithmetic + accurate acos (no conformational recovery)
+
+Planner: widen the GPU jointsKernel's torque/force chain to double
+precision and replace the Abramowitz polynomial `fastAcosF` with a
+Newton-refined `accurateAcos`, while leaving uVec/coord storage and
+integration in float32. Hypothesis: the conformation diagnostic's 4°
+θ_RL bias + 74 % head_z SD widening were caused by float32 arithmetic
+inside the joint kernel + the polynomial acos's ~5e-5 middle-band
+error, and recasting the joint math in double should close the gap.
+
+### Implementation — `boxOfActin/GPUMoveThing.java`
+
+1. New `accurateAcos(double x)`. Branched seed identical to CPU
+   `Pt3D.fastAcos` outside the ±0.95 band (small-angle sqrt form);
+   Abramowitz & Stegun 4.4.46 polynomial inside the band as the seed
+   value `y`. Two Newton iterations on `f(y) = cos(y) − x`,
+   `y_{n+1} = y_n + (cos(y_n) − x) / sin(y_n)`, each roughly squaring
+   the relative error. PTX has native f64 sin/cos/sqrt (confirmed by
+   2026-05-30 §A.3 for sin; the existing Brownian RNG in
+   `moveThingKernel` already calls `Math.cos(double)` and
+   `Math.sqrt(double)` in production, so all three intrinsics are
+   PTX-compatible without any TornadoMath ceremony).
+2. `jointsKernel` rewritten so every read from `coord`/`uVec`/`myoDrags`
+   widens immediately to `double` and the entire torque chain (dot
+   products, cross products, strain, moveCoeff, torsionMag, R×F moment
+   arms) is double. Cast back to `float` only at the four
+   `jointForceSum.set(...)` / `jointTorqueSum.set(...)` writes per Myosin.
+3. The four moveCoeff sites use `Math.sin(accurateAcos(cosBeta))` —
+   now precise — matching the CPU's `sin(fastAcos(cosBeta))` chain
+   exactly inside the central band.
+4. `DEG2RAD` / `RAD2DEG` promoted to `Math.PI/180.0` / `180.0/Math.PI`
+   double constants. `fastAcosF(float)` helper removed (no remaining
+   callers).
+
+`uVec`/`yVec`/`coord` device storage and the move-kernel integration
+stay float32. The intent was the cheap fix isolated to joint
+arithmetic, leaving the upstream-pose precision question to a
+follow-up.
+
+Compiles clean with `javac -g --release 21 --enable-preview` on aorus
+against TornadoVM 4.0.1-dev PTX.
+
+### Conformation pre-check — STOP signal
+
+Re-ran the JointDiag instrumentation single-seed
+(`BOA_DIAG_JOINT_STATS=1`, `glidingAssay500_val`, seed 1, GPU, no
+`DIAG_CPU_JOINTS`) on the new double-arithmetic kernel and compared
+against the two pre-existing references from this morning's
+conformation diagnostic.
+
+Log: `RUN_LOGS/2026-05-31_dblejoint_confcheck_FLOAT32_DOUBLEJOINTS.log`.
+
+```
+                              DOUBLE         FLOAT32        FLOAT32+
+                            (CPU joints)   (GPU kernel)    DBL JOINTS
+samples (motor x time)      2,828,000       2,828,000      2,828,000
+theta_LM    mean (rad)      0.349763        0.349349       0.349461
+            SD              0.279287        0.278891       0.279291
+theta_RL    mean (rad)      1.676320        1.602932       1.602571   ← unchanged
+            SD              0.660175        0.681731       0.682027   ← unchanged
+head_z      mean (µm)       -0.038908       +0.015640      +0.015710  ← unchanged
+            SD              0.048679        0.084714       0.084243   ← unchanged
+E_joint     mean (J)        1.8278e-21      1.8287e-21     1.8272e-21
+            slope (J/step)  8.95e-26        9.28e-26       9.34e-26
+bindEvents                  586             512            532
+glidingVelocity (µm/s)      7.87            6.45           5.96
+```
+
+**θ_RL did NOT move back toward the DOUBLE reference.** The new
+double-arithmetic, Newton-refined acos joint kernel produces a
+conformation distribution statistically indistinguishable from the
+prior FLOAT32 GPU kernel — θ_RL 1.6026 vs 1.6029, head_z mean
++15.7 nm vs +15.6 nm, head_z SD 84.2 nm vs 84.7 nm. The polynomial
+acos middle-band error and float32 joint arithmetic are NOT the
+dominant source of the conformational bias.
+
+Per the planner's stop criterion ("If the conformation pre-check shows
+θ_RL does NOT move back toward 1.676 after the double fix: stop and
+report"), the 10-seed ensemble and dense timing checks were skipped.
+
+### Interpretation — the bias is upstream of joint computation
+
+The 2026-05-31 conformation entry already flagged this in its caveat:
+
+> the pose state on device is float32. Even with double-precision
+> joints, the move kernel will continue to integrate pose in float32
+> and the joints kernel will continue to READ float32 pose.
+> Double-precision joint MATH won't fix the upstream float32 pose
+> drift.
+
+This run confirms it empirically. The biased equilibrium arrives at
+the joint kernel through the float32 `uVec` / `coord` it reads from
+device memory each step. The kernel can then compute torques in
+arbitrary precision — it produces correct torques for a biased pose,
+not unbiased torques. The pose-joints feedback loop continues to
+settle at the float32-equilibrium-of-the-move-kernel rather than the
+double-equilibrium-of-the-CPU.
+
+Two physical confirmations of this:
+
+1. θ_RL is set by the balance between rod-lever torsion force and
+   Brownian forcing on the lever. If joint torque magnitudes were
+   responsible for the bias, the equilibrium would shift when joint
+   math precision improved. It didn't.
+2. head_z and head_z SD reflect the projected position of the motor
+   head in lab frame, which is `motor.end1 = motor.coord −
+   halfMotor·motor.uVec`. The bias in head_z mean and the widening of
+   head_z SD are inherited directly from `coord` and `uVec` — the
+   move kernel's float32 output — independent of how joint torques
+   were computed this step.
+
+### What this rules out
+
+- Joint kernel arithmetic precision (forces, torques, dot/cross
+  products) as the dominant source of the bindEvents / θ_RL / head_z
+  drift.
+- The Abramowitz polynomial's middle-band 5e-5 error in `acos` as the
+  dominant source.
+
+### What it implicates
+
+The float32 pose integration itself. Specifically: the move kernel's
+`uVec` / `yVec` updates (Gram-Schmidt-style renormalisation each
+step), the float32 storage of `coord`, and possibly the float32
+Brownian forcing inside the move kernel. The next cut should promote
+at least `uVec` to double-backed device state and re-run the same
+JointDiag pre-check before committing to a full 10-seed ensemble. The
+prior journal entry already pointed at this as the right scope; this
+run elevates it from "likely" to "necessary".
+
+### Dense timing — skipped
+
+Not run because the conformation pre-check killed the change before
+the ensemble validation. The new code is on disk and compiles; if a
+future investigator wants the joint kernel in double precision as a
+non-load-bearing change (e.g. for CPU/GPU equivalence on small
+configurations where double pose is feasible), it's there. If pose
+state is promoted to double in a follow-up, the joint kernel can
+stay in double or be reverted to float32 — neither matters because
+the conformational equilibrium is set by the pose-state precision.
+
+### Files changed
+
+- `boxOfActin/GPUMoveThing.java` — `fastAcosF` removed;
+  `accurateAcos(double)` added (branched seed + 2-step Newton
+  refinement); `jointsKernel` widened to double throughout with float
+  casts only at the final delta-buffer writes; constants `DEG2RAD` /
+  `RAD2DEG` promoted to double.
+
+The change is landed (not reverted) — it does no harm, removes the
+known polynomial-acos mismatch with CPU's `Math.acos`, and aligns
+joint arithmetic with the CPU formulas. But on its own it does not
+move observables.
+
+### Open — recommended next step
+
+Promote `uVec` (most likely the dominant amplifier through the
+rotational drag path) to a double-backed device buffer and re-run the
+JointDiag pre-check. If θ_RL recovers toward 1.676 with just `uVec`
+in double, the cheap path is one-axis precision promotion. If not,
+extend to `coord` and `yVec`. The conformation diagnostic gives a
+fast (single-seed, ~5 min) signal before any 10-seed ensemble.
+
 ## 2026-05-31 — Joint conformation diagnostic: angle/position/energy distributions
 
 Follow-up to today's joint delta-buffer transport diagnostic, which
