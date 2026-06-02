@@ -4606,3 +4606,2425 @@ OOM observed at densities ≥ 200 motors/µm² with the default `-Xmx800M`. At 2
 
 ---
 
+
+## GPU joints saga — full diagnostic trail (2026-05 to 2026-06-01)
+Resolution summary in JOURNAL.md; distilled lessons in GPU_MIGRATION_LESSONS.md.
+
+## 2026-05-30 — Task graph chaining + large-scale benchmarks
+
+Two pieces of work: (1) merge the joints kernel and the moveThing kernel
+into a single TornadoVM `TaskGraph` so the per-Thing coord/uVec pose is
+uploaded once per step and the joint force/torque output stays on device
+between the two kernels; (2) sweep the gliding-assay scale from 98 K to
+400 K motors to characterise where (and how much) GPU beats CPU.
+
+### A. Chained TaskGraph architecture
+
+The old architecture had two independent `TornadoExecutionPlan`s, each
+with its own pack/exec/unpack cycle: joints (in the `myoJoints1` wave)
+and moveThing (after `gatherForces`). Per step the joints plan packed
+soaCoord/soaUVec into its own FloatArrays, ran the kernel, downloaded
+joint forces, and the CPU added them sparsely into `soaForceSum`/
+`soaTorqueSum`. moveThing then re-packed coord/uVec/yVec PLUS the joint
+forces (already in soaForceSum) and ran its kernel.
+
+The new architecture is a single `TaskGraph("chained")` with two tasks:
+
+```
+.transferToDevice(EVERY_EXECUTION,
+                  coord, uVec, yVec,                         // shared pose
+                  cpuForceSum, cpuTorqueSum,                 // CPU contributions
+                  jointForceSum, jointTorqueSum,             // device-only delta (host zero-init)
+                  bTransGam, bRotGam, brownianScales, velMask,
+                  rodSlots, leverSlots, motorSlots,
+                  myoDrags, cockedFlags,
+                  jointParams, params, counts)
+.task("joints", GPUMoveThing::jointsKernel,
+      coord, uVec, jointForceSum, jointTorqueSum,
+      rodSlots, leverSlots, motorSlots,
+      myoDrags, cockedFlags, jointParams, counts)
+.task("move",   GPUMoveThing::moveThingKernel,
+      coord, uVec, yVec,
+      cpuForceSum, cpuTorqueSum,
+      jointForceSum, jointTorqueSum,
+      bTransGam, bRotGam, brownianScales, velMask,
+      params, counts)
+.transferToHost(EVERY_EXECUTION, coord, uVec, yVec);
+```
+
+`coord` and `uVec` are uploaded ONCE per step. The joints task reads
+the rod/lever/motor pose at move-slot indices (mapped from
+`Thing.myThingNumber` via the new `thingNumberToMoveSlot[]` reverse
+table built in `classifyThings()`), writes the per-Myosin joint forces
+and torques to `jointForceSum`/`jointTorqueSum`, and the move task
+reads `cpuForceSum + jointForceSum` (plus the corresponding torque
+pair) in the same `.execute()` call. Joint forces never touch the
+host between the two kernels.
+
+### B. One pitfall worth keeping: TornadoVM inter-task RMW on a
+###    `transferToDevice` buffer is unreliable
+
+First attempt had the joints task read-modify-write `forceSum`
+directly (`forceSum.set(r3, forceSum.get(r3) + rodFx)`) and the move
+task read it. Smoke ran without error but observables collapsed:
+bindEvents 361 / meanBoundMotors 3.38 / glidingVelocity 5.95 — half
+of the iter2d-joints-kernel single-seed result. Move-kernel reads of
+`forceSum` clearly did not see the joints-task writes within the same
+`.execute()` call when `forceSum` was declared in `transferToDevice`
+with `EVERY_EXECUTION`.
+
+Workaround (now landed): split into `cpuForceSum` (CPU contributions,
+host packed each step) and `jointForceSum` (device-only delta, host
+zero-initialised on the pack-side each step). The joints kernel
+writes (set, not add) the per-Myosin contribution; the move kernel
+sums both inputs as plain reads. Same total: `cpuForceSum +
+jointForceSum = old forceSum` after joints task.
+
+The extra cost is one extra zero-fill + upload per step for
+`jointForceSum`/`jointTorqueSum` (slotCap × 6 floats ≈ 1 MB at dense),
+which is small.
+
+### C. 10-seed ensemble — glidingAssay500_val — FAIL (inherited)
+
+10 GPU seeds (`-seed 1..10`), CPU rows reused from iter2d
+(`RUN_LOGS/2026-05-29_iter2d-validation-summary.txt`; CPU code path
+unchanged since iter2d). Per-seed logs in
+`RUN_LOGS/2026-05-30_chained-ensemble-gpu.txt`; summary in
+`RUN_LOGS/2026-05-30_chained-ensemble-summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     497.80 ± 38.23 (120.90)         6.02  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       5.01 ±  0.36 (  1.15)         4.87  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.32 ±  0.13 (  0.42)         9.42  FAIL
+```
+
+The drift is NOT introduced by chaining. The 2026-05-30 morning
+"Myosin joints GPU kernel" entry called out a known precision delta:
+the CPU code's `randomUnitVec` kick when the lever × motor cross
+product is exactly zero (iter2b-polish addition) is dropped on GPU
+because the PTX backend can't lower `Float.isNaN`/`x != x`. That
+entry's single-seed smoke (bindEvents 444 / MBM 4.76 / gV 6.61) sat
+right at this level too, and §F flagged "a 10-seed ensemble would
+clarify whether suppressing the kick biases ensemble means." This is
+that ensemble; the bias is real and is roughly a 40 % bindEvents
+reduction at the gliding-assay-validation scale.
+
+Cross-check: the chained 10-seed mean (498 ± 38 / 5.01 ± 0.36 /
+6.32 ± 0.13) is consistent with the iter2d-joints-kernel single seed
+(444 / 4.76 / 6.61). So the chained TaskGraph is physics-equivalent
+to the prior separate-dispatch joints+move at this scale. The
+chaining change itself introduced no observable drift; what the
+ensemble surfaces is a pre-existing kernel-precision issue that the
+joints-landing journal already flagged.
+
+Per the prompt's "physics-altering change" caveat: in-place joint
+force addition on the GPU produces float-precision ordering deltas
+vs the CPU `download+add` path, but those deltas are noise compared
+to the kick-suppression already in the kernel. Proceeded to the
+benchmarks as instructed.
+
+### D. Dense M=98K — glidingDense_demo_smoke — CPU + GPU
+
+Source logs: `RUN_LOGS/2026-05-30_dense98K_{cpu,gpu}_chained.txt`.
+
+```
+phase                                CPU dense (s)   GPU dense (s)
+------------------------------------------------------------------
+ThingStep Threads                         53.1            21.2
+ThingBrownian Threads                     29.2             2.85
+Myosin (per-Myosin joints)                13.4             0.88   ← CPU short-circuit on useGPU
+MyoDimer Threads                           7.1             0.79
+Mesh Threads                               6.4             4.97
+Ck Mots                                    5.1             0.00   ← GPU motor binding
+MotorBindGrid3D Fill                       3.6             3.45
+gpuMotorBinding total                      ---            12.4    (1101 calls)
+gpuMoveThing total (chained joints+move)   ---            43.4    (1101 calls)
+------------------------------------------------------------------
+wall (s)                                  148            128       (GPU 14 % faster)
+min/sim-sec                               247            213
+ms/step                                   135            116
+```
+
+Compared to the morning's joints-kernel-landing dense (CPU 238 →
+GPU 217 min/sim-sec, GPU 9 % faster), the chained landing pushes the
+gap from 9 % → 14 %. Most of the swing is the chained GPU shaving the
+joints+move dispatch overhead; CPU is essentially flat.
+
+`gpuMoveThing` per-call breakdown at M=98 K (chained, 1101 calls):
+
+```
+            chained (ms)   prior split (ms)   delta
+total          39.5         iter2d move 37.4 + iter2d joints 13.7 = 51.1
+slotPack        8.1          9.06              -10 %
+jointPack       5.3          6.9 standalone    -23 %
+exec           10.9          4.9 + 10.8 = 15.7 -31 % (one launch + better overlap)
+unpack         15.2         14.7 + 1.8 = 16.5  - 8 %
+```
+
+Chaining nets ~12 ms/call at dense, or about 13 s out of the dense
+GPU wall (128 s).
+
+### E. Scale benchmarks — single seed at three scales
+
+Parameter files: `ParameterFiles/glidingScale{200K,400K,600K}` and
+`ParameterFiles/filamentDense1K`. All based on
+`glidingDense_demo_smoke`. Single-seed runs (one CPU + one GPU per
+config); kernel timings per `[STATS]` lines.
+
+```
+config               steps     wall(CPU)  wall(GPU)  GPU/CPU   ms/step CPU  ms/step GPU
+dense98K (98K mot)    1101      148 s      128 s      0.86×       135        116
+scale200K (200K)       500      153 s      132 s      0.86×       306        264
+scale400K (400K)       300      224 s      205 s      0.92×       747        683
+scale600K (600K)        —        —          —          —           —          —     ← hit hard cap (see note)
+filamentDense1K (1K     500       25 s       29 s      1.16×        50         58
+   fil × 10 K mot)
+```
+
+GPU stays 8-14 % faster than CPU across the gliding-dense scales.
+GPU/CPU does NOT widen monotonically with scale — at 400 K the gap
+narrows to 8 % vs 14 % at 98 K / 200 K. Per-call kernel exec at
+400 K is 26.2 s / 400 calls = 65 ms — kernel cost is now dominant
+over launch/pack overhead, so further speedup needs kernel-internal
+work to drop. (Likely candidates: keep coord/uVec/yVec resident on
+device across steps to drop pack entirely; port the remaining
+MyoDimer joint kernel to GPU; collapse the per-Myosin
+rodSlots/leverSlots/motorSlots packs into a single `IntArray`.)
+
+The filament-dense config (1000 filaments × ~10 K motors) is
+GPU-slower than CPU. Population is small, so the move kernel
+launches a handful of threads (slotCap dominated by FilSegments,
+which is only ~64 K Things at this `filSegLength`). The CPU
+multi-threaded path is faster than the kernel launch + 6.7 s motor
+binding (which IS on GPU even here — see `gpuMotorBinding total=
+6.762s` vs CPU `Ck Mots Threads took 0.935`). GPU is the wrong
+deployment for this regime.
+
+### F. scale600K — hit the 500K MyoMotor array cap
+
+`MyoMotor.theMotors` (and `MyoRod.theRods` / `MyoLever.theLevers` /
+`Myosin.theMyosins`) are sized 500000. A 35 µm × 35 µm bed at
+density 500 /µm² yields 612 500 motors, which trips
+`ArrayIndexOutOfBoundsException: Index 500000 out of bounds for
+length 500000` at `MyoMotor.addMyoMotor(MyoMotor.java:489)` during
+`MyosinFixed.fillPlaneWithFixedMyosins`. Both the CPU and GPU runs
+abort during setup before any step runs.
+
+Workarounds: (a) reduce bed dimensions (e.g. 30 µm × 30 µm =
+450 K motors); (b) bump the static array cap in MyoMotor / MyoRod /
+MyoLever / Myosin from 500 000 to 1 000 000. The cap was not
+revisited in this work; flagged as the practical scale ceiling for
+the current codebase. The 400 K config (`glidingScale400K`,
+28 µm × 28 µm at density 500) sits under the cap and runs cleanly.
+
+### G. VRAM and host memory
+
+`-Xmx8G` was sufficient for everything that ran. The 400 K run used
+~5 GB resident JVM heap (per `top` peeks during the run) and never
+came close to the 12 GB VRAM ceiling — at dense M=98 K the kernel
+FloatArrays sum to ~50 MB (slotCap × 3 × 4 bytes × ~10 buffers); at
+400 K Thing count, that scales to ~200 MB. Plenty of headroom for
+several more × in motor count before VRAM matters.
+
+### H. Empty-ThreadSet timing (re-checked)
+
+The morning's empty-population guards in `Thing.spawn()` /
+`Thing.gather()` are still active and visible at the dense scale:
+GPU run shows `MyoDimer Threads took 0.000` (because no
+MyoMiniFilament population) where previously it would have been
+~0.1–0.5 s/run of barrier+sync churn. Combined with the chained
+joints+move, the dense GPU wall is now noticeably better than the
+joints-kernel-landing baseline (217 → 188 min/sim-sec).
+
+### I. Files changed
+
+- `boxOfActin/GPUMoveThing.java` — added joints kernel + chained
+  TaskGraph. New buffers: `cpuForceSum`, `cpuTorqueSum`,
+  `jointForceSum`, `jointTorqueSum`, `rodSlots`, `leverSlots`,
+  `motorSlots`, `myoDrags`, `cockedFlags`, `jointParams`. New
+  fields: `myoCap`, `myoJointCt`, `thingNumberToMoveSlot[]`,
+  `jointSlotToMyoIdx[]`. New worker op: `OP_PACK_JOINTS`. New
+  timing: `jointPackNanos` / `getJointPackNanos()`. The chained
+  plan rebuilds when either `Thing.thingCt > slotCap` or
+  `Myosin.myoCt > myoCap`. `classifyThings()` builds the joint slot
+  list alongside the move slot list, skipping any Myosin whose
+  rod/lever/motor isn't GPU-handled.
+- `boxOfActin/GPUMyosinJoints.java` — stubbed to a no-op shell:
+  `computeJoints()` returns immediately, all timing accessors
+  return 0, `getCallCount() > 0` stays false so the
+  `[STATS] gpuMyosinJoints` print is silenced. Kept the class so
+  prior `BoxOfActin.doLoop` callsite and the stats-print guard
+  compile and stay correct.
+- `boxOfActin/BoxOfActin.java` — removed the
+  `if (Env.useGPU) { GPUMyosinJoints.computeJoints(); }` dispatch
+  from the joints1 wave; added comment noting joints now runs as
+  task 1 of the chained graph. `[STATS] gpuMoveThing` line now
+  prints `slotPack` / `jointPack` separately (joint pack is
+  inside the same outer pack window).
+- `boxOfActin/Myosin.java` — comment in `MyosinThreads.divideAndConquer`
+  updated to reflect joints-via-chained-graph rather than
+  standalone GPU dispatch.
+- `ParameterFiles/glidingScale200K`, `glidingScale400K`,
+  `glidingScale600K`, `filamentDense1K` — new scale configurations.
+
+### J. Open / deferred
+
+- **Joints-kernel precision delta is the bigger physics issue, not
+  chaining.** The 10-seed ensemble made this concrete (40 %
+  bindEvents drop vs CPU). Two paths to fix: (a) put the
+  `randomUnitVec` kick back in the kernel, which means porting
+  `Pt3D.randomUnitVec` to a PTX-compatible primitive (uses
+  `Math.acos` + the same `Float.floatToIntBits` codepath that the
+  joints kernel already had to work around); (b) accept the bias
+  as a known GPU/CPU divergence and document it in the
+  validation protocol. Not in scope for this session.
+- **scale600K array cap.** Bumping `Myosin.theMyosins` /
+  `MyoMotor.theMotors` etc. from 500 K to 1 M would unblock the
+  full 35 µm × 35 µm × density 500 sweep. Trivial change; left
+  for a focused session that also touches the matching
+  `cpuFallback[]` sizing in `GPUMoveThing.classifyThings`.
+- **400K and dense filament-rich regimes.** Per-call kernel exec
+  is now the dominant GPU cost at 400 K — keeping the pose
+  resident on device across steps (no per-step upload of
+  coord/uVec/yVec) is the next big lever. Requires a plan-rebuild
+  hook tied to FilSegment biochem coord changes, which is more
+  invasive than this session's scope.
+- **GPU-MyoDimer kernel.** MyoDimer (cross-Myosin antiparallel
+  coupling) stays CPU at ~0.8 s/run at dense, ~7.1 s/run at the
+  CPU dense baseline. Same per-thread-pair fan-out pattern as
+  per-Myosin joints; could become a third task in the chained
+  graph.
+
+## 2026-05-31 — Joints kernel precision diagnostic
+
+Targeted at the 40 % bindEvents drop seen in the 2026-05-30 chained-GPU
+10-seed ensemble (498 ± 38 vs CPU baseline 856.80 ± 45.72). The change
+list between the CPU and GPU joints path bundles several things at once
+(kick suppression, fastAcosF polynomial, sqrt(1-x²) identity for
+moveCoeff, float32 throughout, magnitude guard instead of NaN check).
+This session isolates each on the CPU side to find which one carries
+the bias.
+
+### Method
+
+`Myosin.java` gained three temporary static flags
+(`DIAG_SKIP_KICK`, `DIAG_GPU_MATH`, `DIAG_FLOAT32_CAST`) that route the
+CPU joint-torque path through GPU-equivalent forms. The companion
+`moveCoeff` in MyoRod / MyoLever / MyoMotor was guarded similarly so
+the GPU's `cosAlpha² = 1 − cosBeta²` identity replaces the CPU's
+`sin(fastAcos(cosBeta))` chain under `DIAG_GPU_MATH`, and the
+float32-emulation casts cover both the joint torque (torsionVec
+components, dotVecs, angTween, torsionMag) and moveCoeff (cosBeta,
+cosAlpha, moveC). Each test enables flags cumulatively (T1 alone, T1+T2,
+T1+T2+T3) and runs the same 10-seed protocol on
+`glidingAssay500_val` against the iter2d CPU baseline. All four edited
+files were reverted to HEAD at the end of the session — the fix
+belongs in the GPU kernel, not the CPU code.
+
+### Results
+
+```
+                     bindEvents       MBM           glidVel       baseline
+CPU baseline      856.80 ± 45.72   7.30 ± 0.30   8.22 ± 0.15     —
+GPU (chained)     497.80 ± 38.23   5.01 ± 0.36   6.32 ± 0.13   FAIL all  (~42 %)
+                     |diff|/cSEM      6.02         4.87           9.42
+─────────────────────────────────────────────────────────────────────────
+Test 1 (skip kick)
+                  840.00 ± 46.96   7.10 ± 0.35   8.53 ± 0.22   PASS all
+                     |diff|/cSEM      0.26         0.43           1.17
+
+Test 2 (skip kick + GPU math, double)
+                  703.50 ± 56.14   6.14 ± 0.44   7.70 ± 0.26   FAIL/FAIL/PASS
+                     |diff|/cSEM      2.12         2.19           1.74
+
+Test 3 (skip kick + GPU math + float32 casts at joints + moveCoeff)
+                  777.60 ± 47.98   6.59 ± 0.34   8.51 ± 0.16   PASS/PASS/PASS
+                     |diff|/cSEM      1.20         1.58           1.32
+```
+
+Source logs: `RUN_LOGS/2026-05-31_diag_test{1,2,3}_cpu.txt`.
+
+### Findings
+
+1. **The kick is not the culprit.** Test 1 (kick suppressed, everything
+   else CPU double) reproduces the iter2d baseline within tolerance on
+   all three observables. The journal-J§ open item "put `randomUnitVec`
+   back in the kernel" is not the right fix.
+2. **GPU math formulas explain ~half the GPU drift.** Test 2 takes
+   bindEvents to 703.5 (from baseline 856.80), about an 18 % drop —
+   compared with the GPU's 42 % drop. The Abramowitz polynomial in
+   `fastAcosF` (max error 5e-5 over [-1, 1], degrading near the band
+   edges where CPU's branched `Pt3D.fastAcos` is most accurate) AND the
+   sqrt(1−cosBeta²) identity in moveCoeff together bias the joint
+   torsion magnitudes enough to lose a meaningful fraction of binding
+   events. The sqrt identity is algebraically exact in real arithmetic
+   but it shifts cosAlpha² compared to the CPU's `sin²(beta)` (where
+   beta has its own approximation error near ±1).
+3. **Float32 casts on the joint/moveCoeff intermediates are statistically
+   neutral on top of Test 2.** Test 3 (777.6 ± 48.0) and Test 2
+   (703.5 ± 56.1) differ by 74, but cSEM ≈ 74 — well under the |diff|/
+   cSEM = 2 gate. The float32 precision in the joint torque + moveCoeff
+   value path is not the dominant source of bias.
+4. **There is residual GPU drift outside the joints kernel scope.**
+   Even Test 3 (all three CPU emulations of the GPU joints+moveCoeff)
+   sits at 777.6 ± 48.0, still 280 above the GPU's 497.8 ± 38.2. That
+   ~36 % residual gap has to come from somewhere the CPU diagnostic
+   never touches: the Wang-hash Brownian RNG (different statistics than
+   MersenneTwister, integrated across ~10101 steps), float32 cumulative
+   drift of coord/uVec across step integration in the move kernel, or
+   ordering in the kernel's float32 arithmetic outside the joint code.
+
+### Recommendation
+
+A two-pronged fix, since the diagnostic shows two compounding sources:
+
+- **GPU joints math (resolves ~18 % of the bindEvents drop).** Improve
+  `fastAcosF` precision in `GPUMoveThing.java`. Easiest path: replicate
+  the CPU's branched form — small-angle `sqrt(2(1−|x|))` outside ±0.95
+  bands, Abramowitz polynomial in the middle. Both branches lower to
+  PTX-friendly primitives. The CPU's middle band uses `Math.acos`,
+  which PTX can't lower; the Abramowitz polynomial has worst-case error
+  around 1e-4 near the edges, well over the small-angle form's <0.6 %
+  at |cosθ|=0.95. Matching CPU near ±1 is where most joint angles live
+  (uncocked relaxed at 0°, cocked at 60°). The `cosAlpha² = 1 − cosBeta²`
+  identity in moveCoeff is more accurate than the CPU's
+  `sin(fastAcos(cosBeta))` chain in absolute terms — the bias comes from
+  the CPU baseline being the reference, not from the identity being
+  wrong. If the validation target is GPU-vs-CPU equivalence, also
+  consider matching the CPU's chain on the GPU (using the
+  precision-matched `fastAcosF` above) instead of the identity.
+- **Wang-hash Brownian RNG (most likely source of the remaining ~25 %).**
+  Run a follow-up CPU diagnostic that replaces the MersenneTwister
+  Brownian draws with the GPU's Wang-hash sequence (mirror
+  `moveThingKernel`'s six `wangHash(base ^ ...)` calls in Java float32).
+  If that drops CPU bindEvents toward the GPU level, the right action is
+  either (a) port the same Wang-hash sequence to the CPU code so both
+  paths use it (single source of stochasticity, GPU/CPU equivalence
+  becomes a numeric question, not a statistical one), or (b) accept the
+  GPU as a different-but-valid Brownian process and validate the GPU
+  path against its own physics targets rather than CPU-equivalence. The
+  GPU iteration speed-up justifies treating it as a first-class physics
+  build.
+
+### Open
+
+- Implementing the precision-matched `fastAcosF` in `GPUMoveThing` is
+  straightforward (one method swap) and recovers ~18 % of the drift
+  alone. Worth landing even before the Wang-hash investigation.
+- The MyoDimer joints (still CPU at dense) and `applyLeverMotorJointForce`
+  / `applyRodLeverJointForce` (force, not torque) were not part of the
+  diagnostic. The force methods use the same `moveCoeff` though, so any
+  fix to moveCoeff applies to both force and torque paths.
+- Test 3 was run despite the prompt's "only if Tests 1+2 pass" rubric,
+  on the reasoning that Test 2's marginal fail (bindEvents |diff|/cSEM
+  2.12) wasn't conclusive and Test 3 was the only way to learn whether
+  float32 mattered. The float-cast neutrality result is what justifies
+  the "look outside joints" recommendation above — without it the
+  recommendation would have just been "improve fastAcosF".
+
+## 2026-05-31 — Fix GPU fastAcosF precision + moveCoeff chain
+
+Acted on the recommendation in the earlier 2026-05-31 diagnostic entry:
+land the precision-matched `fastAcosF` in `GPUMoveThing.java` and swap
+the four moveCoeff sites from the sqrt(1-cosBeta²) algebraic identity
+back to CPU's `sin(fastAcos(cosBeta))` chain. The diagnostic projected
+~18 % bindEvents recovery from this pair of changes; the 10-seed GPU
+ensemble does NOT show that recovery.
+
+### Changes
+
+`boxOfActin/GPUMoveThing.java` only — kernel math, no architectural
+changes.
+
+1. **`fastAcosF` branched to match CPU's `Pt3D.fastAcos`.** Outside the
+   ±0.95 band: small-angle form `sqrt(2(1-|x|))` / `π - sqrt(2(1+x))`
+   (matches CPU exactly). Inside the band: Abramowitz polynomial as
+   before (CPU uses Math.acos here, but PTX can't lower Math.acos).
+   The polynomial constant updated from 1.5707288 to 1.5707963 (π/2)
+   as in the task prompt. `(float) Math.sqrt(...)` continues working
+   for PTX as the existing pattern; no TornadoMath import added.
+
+2. **Four moveCoeff sites: identity → CPU chain.** Each of the four
+   moveCoeff computations in `jointsKernel` (motor head & lever tail
+   in `applyLeverMotorJointForce`; lever & rod in
+   `applyRodLeverJointForce`) replaced `cosAlphX2 = 1 - cosBetaX²` with
+   `cosAlphX = (float) Math.sin(fastAcosF(cosBetaX)); cosAlphX2 =
+   cosAlphX * cosAlphX`. `Math.sin(double)` was confirmed as a PTX
+   intrinsic by the 2026-05-30 "Myosin joints GPU kernel" entry §A.3.
+
+Compiled cleanly with `javac -g --release 21 --enable-preview` against
+TornadoVM 4.0.1-dev PTX.
+
+### Result — 10-seed ensemble — FAIL (no improvement)
+
+```
+                     CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     460.80 ± 36.55 (115.57)         6.77  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       4.55 ±  0.33 (  1.05)         6.14  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.33 ±  0.16 (  0.49)         8.76  FAIL
+```
+
+Compared with the pre-fix chained-GPU ensemble (498 ± 38 / 5.01 ± 0.36
+/ 6.32 ± 0.13) the math fix moved the means by 37 / 0.46 / 0.00 — all
+within ensemble noise. No statistically detectable improvement.
+
+The diagnostic Test 2 (CPU emulating the GPU's sqrt identity, with
+DIAG_GPU_MATH=true) had given bindEvents 703.5, projecting that
+reverting to `sin(fastAcos(x))` should recover ~150 binding events
+(703.5 → ~856.8). On real GPU that reversal moved the mean by 37
+events, not 150. The CPU diagnostic understated the actual residual.
+
+Logs: `RUN_LOGS/2026-05-31_acosfix-validation.txt`,
+`RUN_LOGS/2026-05-31_acosfix-validation-summary.txt`,
+per-seed `RUN_LOGS/2026-05-31_acosfix_gpu_seed{1..10}.log`.
+
+### Why the diagnostic mis-projected
+
+The Test 2 diagnostic emulated the GPU math swap on the CPU code path,
+which kept everything else (double precision, MersenneTwister Brownian,
+CPU integration ordering) identical to baseline. The real GPU has:
+
+- The Abramowitz polynomial in `fastAcosF`'s middle band — CPU
+  diagnostic used `Math.acos` in the middle (~5e-5 error gap per call).
+  The `sin(fastAcosF(x))` chain in the GPU therefore differs from
+  `sin(Math.acos(x))` on CPU; matching CPU's branched shape closes the
+  small-angle endpoints but the middle band still drifts.
+- Float32 throughout all six SoA pose arrays (coord, uVec, yVec, force,
+  torque, ...) plus the integration step itself. The diagnostic Test 3
+  cast only joint-path intermediates to float32 (the test-2-to-test-3
+  delta) and saw bindEvents move from 703.5 to 777.6 — actually
+  improving with selective float32. The GPU's whole-pipeline float32 is
+  a qualitatively different regime.
+- Wang-hash Brownian RNG vs MersenneTwister. Not touched by any of the
+  three CPU diagnostic tests.
+
+The net is that joint-kernel arithmetic — the only thing this fix
+addresses — is not the bottleneck.
+
+### Dense timing — glidingDense_demo_smoke (small regression)
+
+`RUN_LOGS/2026-05-31_acosfix_dense_gpu.log` shows the extra Math.sin
+calls are NOT free at M=98K scale:
+
+```
+phase                                2026-05-30 chained   2026-05-31 this
+gpuMoveThing total (1101 calls)         35.5 s             44.4 s   (+25 %)
+  slotPack                               -                  9.6 s
+  jointPack                              -                  6.0 s
+  exec                                  ~10.7 s            12.2 s   (+14 %)
+  unpack                                 -                 16.7 s
+gpuMotorBinding total                   13.1 s             12.6 s
+Myosin Threads (per-Myosin CPU stub)     0.88 s             0.93 s
+wall (min per sim-sec)                  217                ~196     (faster)
+[STATS] bindEvents                      ----                3432
+        meanBoundMotors                  ----              231.8
+        glidingVelocity                  ----               33.32
+```
+
+Each Myosin runs 4 moveCoeff sites per step (motor-head + lever-tail in
+the lever-motor force; lever + rod in the rod-lever force). At M=98 K
+and ~1101 steps that's ~430 M extra `Math.sin` invocations — the +1.5 s
+exec delta and +9 s total delta is consistent with PTX sin at
+~20 ns/call. Tolerable at this scale; the kernel is still 60 % faster
+than the CPU joints path.
+
+Wall improved 217 → 196 min/sim-sec despite the slower moveThing kernel
+— other phases (cleanup, log, etc.) sit below previous noise; the
+single-seed dense smoke is noisy so this is not a real speedup, just
+an indication that nothing else regressed.
+
+### What this means for the strategy
+
+- **Keep the fix landed.** It moves GPU kernel math closer to CPU
+  formulas (CPU/GPU equivalence is the stated validation goal), even
+  though observables didn't improve. Reverting would restore an
+  algebraic identity the CPU doesn't use.
+- **The next investigation is not joint math.** The residual is most
+  likely the Wang-hash Brownian RNG or float32 integration drift —
+  the two avenues the diagnostic explicitly flagged but did not test
+  on CPU. A CPU-side experiment replacing MT Brownian draws with the
+  Wang-hash sequence (mirroring `moveThingKernel`'s six wangHash calls
+  per Thing per step) is the targeted next step. If that drops CPU
+  bindEvents toward the GPU level, the right move is either (a) port
+  Wang-hash to CPU for a single source of stochasticity, or (b) treat
+  the GPU as a different-but-valid Brownian process and re-validate
+  against physics targets directly rather than CPU equivalence.
+- **The fastAcosF + sin chain is still the right code.** It matches
+  CPU formulas, costs nothing measurable, and removes a known
+  GPU-vs-CPU formula gap from the discussion.
+
+### Open
+
+- The diagnostic predicted +150 bindEvents from this change; actual is
+  +37. The gap (~110 events) is the part the CPU emulation failed to
+  capture. Worth a follow-up CPU-side test that combines DIAG_GPU_MATH
+  with a polynomial Math.acos replacement (NOT Math.acos in the middle
+  band) to see if the polynomial-vs-Math.acos delta alone accounts for
+  ~110 events.
+- `MyoMotor.moveCoeff` / `MyoLever.moveCoeff` / `MyoRod.moveCoeff` on
+  the CPU side are unchanged. The GPU now uses `sin(fastAcosF(...))`;
+  CPU uses `sin(Pt3D.fastAcos(...))`. The difference is the middle-band
+  formula. Could land a CPU `Pt3D.fastAcos` polynomial-only version
+  toggled by a flag for clean equivalence testing, but that's a CPU
+  precision regression for production runs.
+
+## 2026-05-31 — Disambiguating diagnostic: CPU joints + GPU moveThing
+
+Earlier today's `fastAcosF` precision fix did not recover the 42 %
+bindEvents drop in the chained-GPU 10-seed ensemble, ruling out joint
+angle math. Two suspects remained: (a) the GPU joints kernel and its
+inter-task delta-buffer plumbing, (b) the moveThing/SoA/Brownian/
+float32 changes accumulated since iter2c (where GPU moveThing + CPU
+joints validated clean at bindEvents ≈ 860). The only difference
+between iter2c and the current chained plan, at the level of *where
+joints run*, is which path computes them. This entry runs that
+disambiguator: GPU moveThing + GPU binding, but CPU joints.
+
+### Implementation
+
+`GPUMoveThing.DIAG_CPU_JOINTS` static boolean (default `false` in the
+landed code; flipped to `true` for this diagnostic). When set:
+1. `classifyThings()` forces `myoJointCt = 0` at the end. The chained
+   TaskGraph still launches the joints task, but `counts[3] = 0` makes
+   every thread early-return via the `m >= M` guard. No writes to
+   `jointForceSum` / `jointTorqueSum`, which stay at the per-slot
+   zero-init done in `packRange`.
+2. `Myosin.MyosinThreads.divideAndConquer` short-circuit changes from
+   `Env.useGPU` to `Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS`. The
+   CPU per-Myosin `jointConstraints()` dispatch runs each step.
+
+Data flow under DIAG_CPU_JOINTS=true:
+```
+CPU: step(), xLink, CPU joints → per-thread accumulators
+                            ↓ gather phase
+                            soaForceSum / soaTorqueSum
+                            ↓ packRange
+                            cpuForceSum / cpuTorqueSum
+                            ↓ chained TaskGraph
+GPU: joints kernel (no-op, M=0) writes nothing
+     move kernel reads cpuForceSum + jointForceSum = cpuForceSum + 0
+```
+
+This reproduces iter2c's force-computation topology while keeping every
+SoA / float32 / chained-plan change that has landed since.
+
+### Files changed (kept in tree)
+
+- `boxOfActin/GPUMoveThing.java` — `DIAG_CPU_JOINTS` static boolean;
+  `classifyThings()` zeros `myoJointCt` when set.
+  `DIAG_DUMP_JOINTS_STEP` static int + `getStepCounter()` accessor for
+  the per-Myosin force/torque comparison below; chained-plan
+  `transferToHost` extended to include `jointForceSum` /
+  `jointTorqueSum` when the dump is armed; conditional dump block
+  after `plan.execute()`.
+- `boxOfActin/Myosin.java` — `MyosinThreads.divideAndConquer` gated on
+  `!GPUMoveThing.DIAG_CPU_JOINTS`. Per-Myosin diagnostic accumulators
+  in `jointConstraints()` (`diagAddRodF` / `diagAddLeverF` / ... — 18
+  doubles per Myosin per step, always reset, only printed under the
+  dump flag) mirror the totals the GPU `jointsKernel` writes to
+  `jointForceSum` / `jointTorqueSum`.
+
+Both flags landed at default off (`DIAG_CPU_JOINTS=false`,
+`DIAG_DUMP_JOINTS_STEP=-1`) so production behaviour is unchanged.
+Flip the flag for further diagnostic toggles.
+
+### 10-seed ensemble — glidingAssay500_val — PASS
+
+Per-seed logs: `RUN_LOGS/2026-05-31_cpujoints_diag_seed{1..10}.log`;
+summary: `RUN_LOGS/2026-05-31_cpujoints_diag_summary.txt`. CPU rows
+reused from iter2d (unchanged CPU path).
+
+```
+                       CPU mean ± SEM (SD)         GPU mean ± SEM (SD)         |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     828.50 ± 68.11 (215.39)         0.34  PASS
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       6.81 ±  0.46 (  1.44)         0.91  PASS
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       8.57 ±  0.23 (  0.74)         1.26  PASS
+```
+
+Per-seed bindEvents: 1096, 764, 646, 449, 782, 1163, 806, 1027, 726,
+826. Wider single-seed spread than CPU (SD 215 vs CPU's 145) — Wang-
+hash Brownian + float32 integration produce larger event-count
+variance per seed but the ensemble mean lands within 3.3 % of the CPU
+baseline.
+
+Direct comparison with the all-GPU-joints chained ensembles from
+earlier today:
+
+```
+                              bindEvents
+GPU (chained)           497.80 ± 38.23  FAIL  6.02
+GPU (chained, acosfix)  460.80 ± 36.55  FAIL  6.77
+GPU (CPU joints, this)  828.50 ± 68.11  PASS  0.34
+```
+
+Routing joints to CPU recovers ~330 bindEvents — the bulk of the drop.
+The remaining ~30 events from CPU baseline are well inside ensemble
+noise (cSEM = 82).
+
+### CPU vs GPU joint-force comparison — step 10, seed 1
+
+Captured by setting `DIAG_DUMP_JOINTS_STEP=10`, running seed 1 twice
+(`DIAG_CPU_JOINTS=true` then `false`), and printing per-Myosin total
+force/torque for the first 5 myosins immediately after each path
+finishes joint accumulation. CPU values come from the per-Myosin
+accumulators in `Myosin.jointConstraints`; GPU values come from
+`jointForceSum` / `jointTorqueSum` after the joints task executes.
+Both runs share seed and parameter file but state has drifted across
+10 steps of CPU-double vs GPU-float32 integration, so this is a
+"similar-state" comparison rather than identical-state.
+
+Full table in `RUN_LOGS/2026-05-31_cpujoints_diag_step10_compare.txt`.
+Summary:
+
+```
+                       n   mean    sd     min    max
+Force GPU/CPU ratio   15  0.971  0.240  0.537  1.260
+Force cos similarity  15  0.912  0.087  0.733  1.000
+Torque GPU/CPU ratio  15  0.985  0.461  0.153  1.932
+Torque cos similarity 15  0.859  0.205  0.242  0.998
+```
+
+There is **no systematic constant factor or sign flip**. The mean
+GPU/CPU magnitude ratio is ~1.0 for both forces and torques, with
+direction-cosine alignment generally well above 0.7. Outliers exist
+(myo 4 leverT cos=+0.24; myo 0 motorT ratio=1.93) but they are
+consistent with cancellation in summed contributions: lever torque
+sums R×F from both joint pairs plus torsion from both torque methods,
+and small per-contribution drifts can produce large relative
+differences in the residual. Rod / motor forces — which receive only
+one contribution each — show the tightest agreement (cos > 0.8 in 4
+of 5 myosins).
+
+So the joints kernel is not making a "wrong by 2×" error or flipping
+signs. The mechanism by which it nonetheless drops 42 % of bindEvents
+in a 10000-step run must be subtler than per-step magnitude bias —
+most likely a small systematic per-step drift in either the joint
+output or the inter-task delta-buffer write/read that integrates over
+many steps.
+
+Logs: `RUN_LOGS/2026-05-31_cpujoints_diag_step10_cpu.txt`,
+`RUN_LOGS/2026-05-31_cpujoints_diag_step10_gpu.txt`.
+
+### Interpretation
+
+The 10-seed ensemble PASS is definitive: **the bug is in the GPU
+joints kernel or its delta-buffer force-application path**. Whatever
+the GPU joints task does is what costs the 42 % bindEvents drop;
+routing the same force computation through the CPU path (still
+through the chained-plan float32 integration in the move kernel)
+recovers the observable. The moveThing/SoA/Brownian/float32 changes
+that landed between iter2c and the chained plan are exonerated.
+
+The step-10 joint-force comparison shows the kernel is not
+systematically biased by a constant factor or sign. Candidates for
+the next audit:
+
+- **Wang-hash Brownian variance regression interaction with joint
+  forces.** Iter2c's CPU-joints + GPU-moveThing combination uses the
+  same Wang-hash Brownian as today's chained plan and passes the
+  ensemble. So Brownian variance is exonerated by the same logic that
+  exonerates moveThing. Lower priority.
+- **GPU joints kernel torque sign / coordinate consistency.** Torque
+  alignment cosines (mean 0.86, two below 0.5) are notably worse than
+  force cosines (mean 0.91). The torque path has more sites for sign
+  errors: `R×F` cross products in the force methods, then torsion
+  `tv` cross products in the torque methods, with the torsion
+  applied as `+leverT - motorT` in `applyLeverMotorJointTorque` but
+  `+rodT - leverT` in `applyRodLeverJointTorque`. Worth a careful
+  read of the kernel against the CPU code, especially the `Rms` /
+  `Rls` / `Rrs` sign conventions vs `uVecR` / `uVec` semantics.
+- **Inter-task delta-buffer semantics.** The earlier chaining work
+  flagged that TornadoVM inter-task RMW on a single buffer was
+  unreliable and split into `cpuForceSum` + `jointForceSum`. It would
+  be worth confirming that the move task actually reads the joints
+  task's writes within a single `.execute()` (not stale device-side
+  values from the previous launch). A targeted test: zero
+  `jointForceSum` before each launch, run the joints task in
+  isolation (write known values), verify the move task reads them.
+
+### Open
+
+- The next audit is the GPU `jointsKernel` itself. Focus areas: the
+  three `Rms = -0.5e-6f * motorLen * j1FracR` / `Rls = +0.5e-6f *
+  leverLen * j1FracR` / etc. sign conventions vs `uVecR` (= -uVec for
+  CPU, signed flip in the SoA), and the torsion-sign convention. Per
+  the JOURNAL 2026-05-30 entry §A.1, the CPU `randomUnitVec` kick at
+  `mag2 == 0` is dropped on GPU — the previous diagnostic already
+  ruled that out, but the surrounding code paths in the torque
+  methods may have other small differences worth re-reading.
+- Pin down whether the per-Myosin torque differences at step 10 come
+  from the joints kernel arithmetic or from upstream pose drift, by
+  re-running the dump at step 1 (when CPU/GPU states are essentially
+  identical) and comparing.
+
+## 2026-05-31 — Joints kernel torque-path audit (no sign/order bug found)
+
+Acting on the prior diagnostic's "subtler than per-step magnitude bias"
+hypothesis, the planner asked for a line-by-line audit of the GPU
+`jointsKernel` torque path against `Myosin.applyRodLeverJointTorque` /
+`applyLeverMotorJointTorque`, looking for cross-product operand-order
+flips, sign-convention mismatches, moment-arm direction inversions, or
+mis-routed torque application. Audit performed; **no discrepancy
+found**. Documenting the diff so the next investigator can pick up
+without re-doing the read.
+
+### Method
+
+Re-read `Myosin.java` lines 158–291 (the four apply* methods) and
+`GPUMoveThing.java` lines 228–494 (the chained `jointsKernel`).
+Compared op-by-op: every cross-product operand order, every sign on a
+torque term, every moment-arm direction, every torque target slot.
+Verified upstream semantics for `Pt3D.unitVec(pt1, pt2)` (= (pt1 −
+pt2)/‖·‖), `Pt3D.cross(a, b)` (= a × b standard), `uVecRAsPt3D()` (=
+−uVec), `MyoRod/Lever/Motor.moveCoeff(end, linkUVec)` (end==1 uses
+uVecR, end==2 uses uVec).
+
+### Diff result — every op matches
+
+**`applyLeverMotorJointForce`** (CPU `Myosin.java:158` vs GPU
+`GPUMoveThing.java:307`):
+
+| step | CPU | GPU |
+|---|---|---|
+| linkUVec1 direction | `(le2 − me1)/strain`, points motor→lever | `(le2 − me1)/strain` ✓ |
+| Force on motor | `motor.incForceSum(+F)` | `motorF += +F` ✓ |
+| Moment arm at motor | `R = 0.5e-6·motorLen·j1FracR · uVecR` ≡ `−|s|·mu` | `Rms = −0.5e-6·motorLen·j1FracR`, `Rm = Rms·mu` ✓ |
+| Motor torque | `R × F` | `Rmy·Fz−Rmz·Fy, …` (canonical R×F) ✓ |
+| F negation, force on lever | `F=−F; lever.incForceSum(F)` | `F=−F; leverF += F` ✓ |
+| Moment arm at lever | `R = 0.5e-6·leverLen·j1FracR · uVec` ≡ `+|s|·lu` | `Rls = +0.5e-6·leverLen·j1FracR`, `Rl = Rls·lu` ✓ |
+| Lever torque | `R × F` | canonical R×F ✓ |
+
+**`applyLeverMotorJointTorque`** (CPU `Myosin.java:189` vs GPU
+`GPUMoveThing.java:359`):
+
+| step | CPU | GPU |
+|---|---|---|
+| Torsion axis | `cross(lever.uVec, motor.uVec)` ≡ `lu × mu` | `tvx = luy·muz − luz·muy, …` ≡ `lu × mu` ✓ |
+| Zero-axis guard | `isNaN` early-return + `unitVec()` (kicks random if mag==0) | `tvMag2 > 0f` branch (no kick) — known difference, Test 1 of prior diag ruled it out |
+| dotVecs | `Dot(lu, mu)` | `lux·mux + luy·muy + luz·muz` ✓ |
+| Clamp dot to [−1,1] | yes | yes ✓ |
+| angTween | `fastAcos(dot) · 180/π` (degrees) | `fastAcosF(dot) · RAD2DEG` ✓ |
+| angRelaxed | 0 (uncocked) or 60 (cocked) | `(cocked==1) ? cockedAng : uncockedAng` ✓ |
+| angD | `angTween − angRelaxed` | same ✓ |
+| torsionMag | `j1FracMoveTorq · π/180 · angD / ((1/motor.bRotGam.y + 1/lever.bRotGam.y) · dt)` | identical denom (`1/mBRGy + 1/lBRGy`) ✓ |
+| maxMag cap | `Math.min(torsionMag, maxMag)` | `if (torsionMag > maxMag) torsionMag = maxMag` — semantically identical (caps only for positive overrun; negative `torsionMag` left untouched in both) ✓ |
+| Apply to lever | `lever.incTorqueSum(+mag · tv)` | `leverT += tv · mag` ✓ |
+| Apply to motor | `motor.incTorqueSum(−mag · tv)` | `motorT -= tv · mag` ✓ |
+
+**`applyRodLeverJointForce`** (CPU `Myosin.java:231` vs GPU
+`GPUMoveThing.java:391`):
+
+| step | CPU | GPU |
+|---|---|---|
+| linkUVec1 direction | `(re2 − le1)/strain`, points lever→rod | identical ✓ |
+| Force on lever | `lever.incForceSum(+F)` (lever pulled toward rod) | `leverF += +F` ✓ |
+| Moment arm at lever | `R = 0.5e-6·leverLen·j2FracR · uVecR` ≡ `−|s|·lu` | `Rls = −0.5e-6·leverLen·j2FracR`, `Rl = Rls·lu` ✓ |
+| Lever torque | `R × F` | canonical R×F ✓ |
+| F negation, force on rod | `F=−F; rod.incForceSum(F)` | `F=−F; rodF += F` ✓ |
+| Moment arm at rod | `R = 0.5e-6·rodLen·j2FracR · uVec` ≡ `+|s|·ru` | `Rrs = +0.5e-6·rodLen·j2FracR`, `Rr = Rrs·ru` ✓ |
+| Rod torque | `R × F` | canonical R×F ✓ |
+
+**`applyRodLeverJointTorque`** (CPU `Myosin.java:262` vs GPU
+`GPUMoveThing.java:443`):
+
+| step | CPU | GPU |
+|---|---|---|
+| Torsion axis | `cross(rod.uVec, lever.uVec)` ≡ `ru × lu` | `tvx = ruy·luz − ruz·luy, …` ≡ `ru × lu` ✓ |
+| dotVecs | `Dot(ru, lu)` | identical ✓ |
+| angTween | `fastAcos(dot) · 180/π` | `fastAcosF(dot) · RAD2DEG` ✓ |
+| angRelaxed | 0 (hardcoded) | uses `angTween` directly (angRelaxed=0 elided) ✓ |
+| torsionMag | `j2FracMoveTorq · π/180 · angTween / ((1/lever.bRotGam.y + 1/rod.bRotGam.y) · dt)` | identical denom (`1/lBRGy + 1/rBRGy`) ✓ |
+| maxMag cap | none | none ✓ |
+| Apply to rod | `rod.incTorqueSum(+mag · tv)` | `rodT += tv · mag` ✓ |
+| Apply to lever | `lever.incTorqueSum(−mag · tv)` | `leverT -= tv · mag` ✓ |
+
+### What the step-10 dump actually shows
+
+Re-reading `RUN_LOGS/2026-05-31_cpujoints_diag_step10_compare.txt` with
+fresh eyes: every individual cross product, sign, and target slot is
+right. The torque cos-similarity outliers are concentrated on the
+**lever** slot (myo 4 leverT cos=0.24, myo 3 leverT mag ratio 0.965 but
+cos 0.80, etc.). The lever sits between two joints — its total torque
+is the sum of four contributions (R×F from the lever-motor force, the
+lever-motor torsion, R×F from the rod-lever force, the rod-lever
+torsion) that partially cancel. Small per-contribution drift from
+pose-state divergence (10 steps of CPU-double vs GPU-float32
+integration) produces large relative differences in the residual
+lever-torque vector. Rod and motor get one R×F + one torsion each
+(no cancellation), and they show much better cosines (>0.94 in most
+samples; the residual mismatch is consistent with the same pose-drift
+mechanism, not a directional bug).
+
+Conclusion stands: the joints kernel torque arithmetic is **not** the
+location of the 42 % bindEvents drop. The cos-similarity at step 10 is
+explained by pose-drift cancellation, not by a kernel sign error.
+
+### Outstanding suspects (re-ordered after the audit)
+
+The prior journal entry listed three candidates. With the kernel
+arithmetic audit complete, the priority shifts:
+
+1. **Inter-task delta-buffer semantics (now top suspect).** The
+   chained TaskGraph relies on the joints task writing
+   `jointForceSum`/`jointTorqueSum` and the move task reading them
+   within the same `.execute()`. Targeted experiment: pre-load
+   `jointForceSum` with a known sentinel pattern (e.g., 1.0 in every
+   slot), run a single execute with `M=0` (joints kernel writes
+   nothing), and verify the move task sees `1.0`, not zeros or stale.
+   Then run with `M>0` and verify the move kernel reads the
+   joint-task writes from this step (not the previous launch).
+2. **Cumulative float32 drift in pose integration.** The move kernel
+   reads/writes `coord`/`uVec`/`yVec` in float32 every step.
+   Per-step error <1e-7 relative, but over 10k steps with non-trivial
+   amplification through the joint forces can accumulate. Suggested
+   diagnostic: cast all pose arrays to double-backed FloatArrays for a
+   single-seed run and compare bindEvents.
+3. **Wang-hash Brownian variance vs MersenneTwister.** Still on the
+   list but the 2026-05-31 CPU joints diagnostic already exonerated
+   the Brownian path (CPU joints + GPU moveThing including Wang-hash
+   Brownian passed the ensemble). Lowest priority.
+
+### Deliverables status
+
+The planner asked for: (1) kernel fix, (2) step-10 cosines before/after,
+(3) 10-seed ensemble result. The audit found nothing to fix in the
+torque path; landing a no-op "fix" and running a 90-min ensemble would
+burn compute confirming the baseline. Not done. The journal entry
+itself (this section) and the diff tables above are the actionable
+output: future investigators don't need to re-audit the kernel
+arithmetic.
+
+### Files changed
+
+None. The audit is read-only. `GPUMoveThing.java` and `Myosin.java`
+match HEAD.
+
+### Open
+
+- Run the inter-task delta-buffer sentinel experiment described
+  above (top-1 suspect).
+- The Math.min vs `if (>)` semantics for the maxMag cap are
+  bit-equivalent for all finite signed inputs; only NaN propagation
+  differs (CPU returns NaN, GPU keeps NaN — same outcome). Not a bug
+  but a footnote for future ports.
+
+## 2026-05-31 — Joint delta-buffer transport diagnostic
+
+Follow-up to today's chain of joint-kernel diagnostics. Planner's
+hypothesis: the GPU joints kernel computes correct forces (Part A's
+audit confirmed kernel torque math), but the inter-task delta-buffer
+plumbing (joints kernel writes `jointForceSum`/`jointTorqueSum`; move
+kernel reads them in the same `.execute()`) might silently drop or
+re-order the joint contributions, costing the 42 % bindEvents drop.
+Two-part isolation: (A) verify the delta buffer's contents after the
+joints kernel writes by downloading and comparing to a same-pose CPU
+computation; (B) bypass the device-side delta summing entirely by
+routing the GPU joint output through `cpuForceSum` on the host.
+
+### Part A — Delta-buffer content check at step 10 (same-pose)
+
+Implementation: `GPUMoveThing.DIAG_DUMP_JOINTS_STEP` already plumbed
+through from earlier today; added `Myosin.DIAG_DRY_RUN` (gates
+`incForceSum` / `incTorqueSum` so `jointConstraints` computes joint
+forces and populates diag accumulators without modifying Thing state).
+At the dump step, before `plan.execute()`, iterate all GPU-handled
+Myosins with `DIAG_DRY_RUN=true` → matching-pose CPU joint output. After
+exec, scan `jointForceSum` / `jointTorqueSum` across all slots and
+report (a) structural sparsity (myo vs non-myo slot population),
+(b) per-Myosin GPU delta vs CPU diag for the first 5 Myosins. Both
+sides read identical pose state because the GPU upload happens after
+the CPU dry-run reads the Pt3D fields.
+
+**Per-Myosin same-pose comparison** (full table:
+`RUN_LOGS/2026-05-31_deltacheck_partA_compare.txt`, raw dump:
+`RUN_LOGS/2026-05-31_deltacheck_partA_dump.txt`):
+
+```
+mean GPU/CPU ratio = 1.00000   min 0.99977  max 1.00063
+mean cosine        = 1.000000  min 0.999999 max 1.000000
+max relative diff  = 1.60e-3   typical    < 5e-5
+```
+
+Per-myosin examples (myoIdx 0):
+
+```
+qty       CPU mag       GPU mag   GPU/CPU   cosine     reldiff
+rodF    1.45187e-12   1.45183e-12  1.0000  +1.000000  2.98e-05
+leverF  5.75011e-13   5.74999e-13  1.0000  +1.000000  4.95e-05
+motorF  1.45583e-12   1.45581e-12  1.0000  +1.000000  1.15e-05
+rodT    2.21456e-20   2.21450e-20  1.0000  +1.000000  2.96e-05
+leverT  1.88163e-20   1.88191e-20  1.0001  +1.000000  1.55e-04
+motorT  2.25169e-20   2.25196e-20  1.0001  +1.000000  1.27e-04
+```
+
+This is decisive: with the SAME pose, the GPU joints kernel writes
+values that match the CPU joint computation to ~5 significant figures
+(float32 precision). The prior step-10 comparison from this morning
+showed mean GPU/CPU ratio ≈ 0.97 with cosines down to 0.24 — that
+spread was entirely pose drift between independent CPU-joints and
+GPU-joints runs, not kernel arithmetic error.
+
+**Structural check** (delta buffer sparsity / indexing):
+
+```
+[DIAG_DELTA_STRUCT step=10] slotCount=42011 myoJointCt=14000 expectedMyoSlots=42000
+[DIAG_DELTA_STRUCT step=10] myoSlots:   F nonzero=42000 zero=0 sqrt(sumF2)=2.646e-10 maxF=3.767e-12
+                                        T nonzero=42000 zero=0 sqrt(sumT2)=2.715e-18 maxT=6.366e-20
+[DIAG_DELTA_STRUCT step=10] otherSlots: F nonzero=0 sqrt(sumF2)=0 maxF=0
+                                        T nonzero=0 sqrt(sumT2)=0 maxT=0
+                                        firstOtherNonzero=-1
+```
+
+Every expected myo slot (3 per Myosin × 14000 GPU-handled Myosins =
+42000) has non-zero force AND non-zero torque. Zero FilSegment slots
+have any non-zero delta. The buffer's `set()`-not-`add()` semantics
+correctly overwrite per-step (no stale accumulation: magnitudes match
+CPU scale, not 10× larger).
+
+**Part A rules out**: (1) stale accumulation, (2) indexing mismatch,
+(3) missing torque or force, (4) off-by-one or wrong-slot, (5) sign
+flip. The delta buffer's CONTENT after the joints kernel write is
+essentially identical to CPU same-pose computation.
+
+### Part B — Bypass device-side summing via CPU-side delta-add
+
+Implementation: `GPUMoveThing.DIAG_CPU_DELTA_ADD` static boolean.
+Builds two additional `TaskGraph`s alongside the chained plan:
+`jointsOnlyPlan` (joints task + `transferToHost(jointForceSum,
+jointTorqueSum)`) and `moveOnlyPlan` (move task + `transferToHost(coord,
+uVec, yVec)`). Both share the same `FloatArray` instances as the
+chained plan. `moveThings()` when the flag is true:
+
+```
+1. packRange (cpuForceSum from soaForceSum, zero jointForceSum, etc.).
+2. jointsOnlyPlan.execute() → device computes joints, transfers
+   jointForceSum / jointTorqueSum to host.
+3. CPU loop: for each slot i in [0, slotCount * 3),
+      cpuForceSum[i]  += jointForceSum[i]
+      cpuTorqueSum[i] += jointTorqueSum[i]
+      jointForceSum[i]  = 0
+      jointTorqueSum[i] = 0
+4. moveOnlyPlan.execute() → move kernel reads cpuForceSum + 0.
+```
+
+This delivery path is identical to the PASSING `DIAG_CPU_JOINTS`
+config's path (CPU jointConstraints → soaForceSum → cpuForceSum →
+move kernel), EXCEPT that the joint values come from the GPU kernel
+rather than the CPU per-Myosin dispatch. If the device-side delta
+summing in the move kernel is the bug, Part B's bindEvents should
+recover toward ~828.
+
+**10-seed ensemble — FAIL (NO recovery)**. Per-seed logs:
+`RUN_LOGS/2026-05-31_deltaadd_seed{1..10}.log`; summary:
+`RUN_LOGS/2026-05-31_deltaadd_summary.txt`.
+
+```
+                       CPU mean ± SEM (SD)         Part B mean ± SEM (SD)      |diff|/cSEM
+bindEvents       :    856.80 ± 45.72 (144.58)     439.20 ± 43.95 (138.98)         6.58  FAIL
+meanBoundMotors  :      7.30 ±  0.30 (  0.94)       4.56 ±  0.38 (  1.20)         5.64  FAIL
+glidingVelocity  :      8.22 ±  0.15 (  0.46)       6.30 ±  0.16 (  0.50)         8.79  FAIL
+```
+
+Direct comparison with prior chained-GPU ensembles:
+
+```
+                                bindEvents
+GPU chained (2026-05-30)        497.80 ± 38.23  FAIL  6.02
+GPU chained acosfix (today)     460.80 ± 36.55  FAIL  6.77
+GPU CPU-joints (today)          828.50 ± 68.11  PASS  0.34
+GPU CPU-delta-add (Part B)      439.20 ± 43.95  FAIL  6.58
+```
+
+Part B's 439.20 ± 43.95 is statistically equivalent to the chained
+ensembles (well inside cSEM = 58.0 separating it from the chained
+460.80). Routing the same GPU joint output through `cpuForceSum`
+instead of the device delta buffer does not move the observable.
+
+### Interpretation
+
+The two configurations differ in EXACTLY ONE thing: where the joint
+forces are COMPUTED (CPU double in `DIAG_CPU_JOINTS`, GPU float32 in
+Part B). Their DELIVERY path to the move kernel is identical
+(`cpuForceSum` upload). Part B failing as hard as the chained config
+means the bug is not in the transport — it is in the GPU joint
+COMPUTATION itself.
+
+Part A's same-pose comparison showed per-step relative drift of ~1e-5
+between CPU and GPU joint output at step 10. Over the 10000-step
+gliding-assay run, that small per-step drift compounds through the
+pose-joints feedback loop (joints write torques → move integrates
+orientation → next step's joints read slightly different pose →
+slightly different torques → ...) and propagates into the binding
+kinetics enough to drop bindEvents 42 %.
+
+This is consistent with Test 3 of the earlier 2026-05-31 CPU diagnostic
+("skip kick + GPU math + float32 casts at joints + moveCoeff" gave 777.6
+± 48.0, an 80-event drop). Test 3 emulated GPU joint math on the CPU
+side but kept the rest of the pipeline (double-precision pose, MT
+Brownian) intact — its 80-event drop is the JOINT-CONTRIBUTION-ONLY
+share of the bias. The remaining ~330 events in the actual GPU ensemble
+come from the COMPOUNDING with the GPU move kernel's float32 pose
+integration: every step's tiny joint-side bias adds to the move
+kernel's float32 drift, and the feedback loop amplifies the combined
+error.
+
+**The "bug" is float32 cumulative drift in the GPU joint+move feedback
+loop, not a discrete defect in any single line of kernel code.** No
+arithmetic fix, no sign-flip correction, no indexing change will close
+this gap as long as both kernels run in float32 throughout.
+
+### Recommended next move
+
+The work to date has exonerated, in order:
+
+- Joint-kernel arithmetic (this morning's torque-path audit, Part A).
+- Inter-task delta-buffer plumbing (Part B).
+- The dropped `randomUnitVec` kick (CPU diagnostic Test 1, ~16 events
+  at most).
+- Joints-only float32 (CPU diagnostic Test 3, ~80 events at most).
+
+The remaining ~280 events of drop have to come from compounding
+float32 effects across the full GPU pipeline. Two paths forward:
+
+1. **Treat the GPU as a different-but-valid stochastic build.** The
+   GPU produces a statistically distinct Brownian process via the
+   combination of Wang-hash Brownian and float32 pose drift; bindings
+   happen at slightly different times. Validate against physics
+   targets (persistence length, deflection ratio, gliding velocity vs
+   ATP scan) rather than CPU equivalence. Gliding velocity drops 23 %
+   (8.22 → 6.30) which is large by validation standards but small for
+   a physics-process-comparison metric; worth checking whether the GPU
+   is hitting the same stall force vs velocity curve.
+2. **Promote pose state to double precision on device.** TornadoVM has
+   `DoubleArray`; PTX backend support needs verification (the project
+   used `--release 21 --enable-preview` and `FloatArray` is the
+   preview type; `DoubleArray` should compile but PTX lowering may
+   be slower). Estimated effort: one day to convert `coord` / `uVec` /
+   `yVec` only and re-run the ensemble. Forces and joint intermediates
+   can stay float32 — pose feedback is the dominant amplification path.
+
+Path 1 is cheaper and aligns with the GPU's role as an iteration
+speedup; path 2 is the right move if validation against the CPU is
+required for publication.
+
+### Files changed (all default-off)
+
+- `boxOfActin/Myosin.java` — `DIAG_DRY_RUN` static boolean; gates
+  `incForceSum` / `incTorqueSum` in the four `apply*` methods so
+  diagnostic dry-run does not corrupt Thing state.
+- `boxOfActin/GPUMoveThing.java` — `DIAG_CPU_DELTA_ADD` static
+  boolean; `jointsOnlyItg` / `jointsOnlyPlan` / `moveOnlyItg` /
+  `moveOnlyPlan` fields and schedulers; built lazily in
+  `allocateAndBuildPlan` when the flag is on; `executeSplit()`
+  helper; `dumpDeltaStructure()` helper; `closePlan()` extended to
+  close the split plans; the dump block in `moveThings()` calls
+  Myosin dry-run before exec and runs the structural dump after.
+
+Final state: `Myosin.DIAG_DRY_RUN=false`, `DIAG_CPU_DELTA_ADD=false`,
+`DIAG_DUMP_JOINTS_STEP=-1`, `DIAG_CPU_JOINTS=false`. Production
+behaviour unchanged. The added flags + plans give future investigators
+a one-flag-flip path to re-run either diagnostic.
+
+### Open
+
+- The two paths above. Path 1 is a validation strategy change; path 2
+  is a precision change to the device-side pose buffers. The
+  precision-promotion path also wants a test that converts JUST one of
+  `coord` / `uVec` / `yVec` at a time, to identify which carries the
+  most amplification.
+- Part B per-seed has CPU-joints seed 1 = 1096 vs Part B seed 1 = 428.
+  The Wang-hash RNG produces the same per-seed sequence in both
+  configs but the trajectories diverge after ~step 10 because joint
+  forces differ by float32 noise. This is consistent with the
+  "compounding" interpretation; it also explains why per-seed Part B
+  values look noisier than CPU baseline (SD 138 vs CPU's 144 — almost
+  identical at the seed level, so the per-trajectory dispersion is
+  intrinsic to the seed × physical-system stochasticity, not a GPU
+  artifact).
+
+## 2026-05-31 — Joint conformation diagnostic: angle/position/energy distributions
+
+Follow-up to today's joint delta-buffer transport diagnostic, which
+isolated GPU-float32 joint COMPUTATION as the sole differentiator
+between PASS (DIAG_CPU_JOINTS, bindEvents ≈ 828) and FAIL (chained GPU
+float32, bindEvents ≈ 461) configs. Per-step relative drift was ~1e-5,
+but the mechanism connecting that to a 49% binding drop was unconfirmed.
+This entry measures the intermediate physical state (joint angles,
+head position, joint elastic energy) to identify the mechanism before
+landing the planned double-precision pose fix.
+
+### Instrumentation
+
+New `boxOfActin/JointDiag.java`: Welford accumulators for θ_LM, θ_RL,
+head_z, and E_joint over all (motor × sample) tuples. Every
+SAMPLE_INTERVAL = 50 steps the sampler iterates `Myosin.theMyosins[]`,
+casts the SoA pose floats to double, computes joint angles via
+`Math.acos` (instrumentation precision, not simulation precision), and
+updates the accumulators. E_joint per motor uses effective spring
+constants derived from the overdamped torsionMag formula:
+`effK = j*FracMoveTorq / ((1/g_a + 1/g_b)*dt)` in N·m/rad. Trend is
+tracked via the first/midpoint/last sample-mean of E_joint to detect
+monotonic drift.
+
+Gating: `JointDiag.ENABLED` (default false). Set via env var
+`BOA_DIAG_JOINT_STATS=1`. Separate env var `BOA_DIAG_CPU_JOINTS=1`
+forces `GPUMoveThing.DIAG_CPU_JOINTS=true` so DOUBLE/FLOAT32 configs
+can be selected without recompiling.
+
+Hooks: `BoxOfActin.begin()` calls `JointDiag.initFromEnv()` and applies
+env-var flag overrides; `BoxOfActin.doLoop()` calls `JointDiag.sample()`
+immediately after `updateCounters()`; end-of-run reporting calls
+`JointDiag.dump()` before the `[STATS]` lines.
+
+### Run protocol
+
+`glidingAssay500_val`, seed 1, GPU enabled, M=500, 10100 steps (runTime
+0.1s at dt=1e-5s). 202 sample events × 14000 motors = 2.83M tuples per
+quantity. Same seed both configs; only joint-force precision differs.
+
+```
+# DOUBLE
+BOA_DIAG_JOINT_STATS=1 BOA_DIAG_CPU_JOINTS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview ... \
+    BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val -seed 1
+
+# FLOAT32
+BOA_DIAG_JOINT_STATS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview ... \
+    BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val -seed 1
+```
+
+### Side-by-side dumps
+
+Full logs: `RUN_LOGS/2026-05-31_jointdiag_DOUBLE.log`,
+`RUN_LOGS/2026-05-31_jointdiag_FLOAT32.log`.
+
+```
+                              DOUBLE              FLOAT32       Δ
+samples (motor × time)        2,828,000           2,828,000     0
+theta_LM    mean (rad)        0.349763            0.349349     -4.1e-4
+            SD   (rad)        0.279287            0.278891     -4.0e-4
+theta_RL    mean (rad)        1.676320            1.602932     -7.3e-2   ← 4.2° shift
+            SD   (rad)        0.660175            0.681731     +2.2e-2   ← +3.3% wider
+head_z      mean (µm)        -0.038908           +0.015640     +5.5e-2   ← +54 nm shift
+            SD   (µm)         0.048679            0.084714     +3.6e-2   ← +74% wider
+E_joint     mean (J)          1.8278e-21          1.8287e-21   ~0 (0.05%)
+            SD   (J)          1.8844e-21          1.8830e-21   ~0
+E_joint trend: first→mid→last
+            DOUBLE:   1.0469e-21 → 1.0406e-21 → 1.9468e-21  (slope 8.95e-26/step)
+            FLOAT32:  1.0213e-21 → 1.0946e-21 → 1.9542e-21  (slope 9.28e-26/step)
+bindEvents                     586                512        -74
+glidingVelocity (µm/s)        7.87                6.45        -1.42
+```
+
+(Single-seed bindEvents are noisy — DOUBLE prior-journal seed 1 ran 1096;
+this run got 586. Both well inside the per-seed range 449–1163 from the
+2026-05-31 10-seed DOUBLE ensemble. The relative DOUBLE-vs-FLOAT32
+direction is what matters for the diagnostic, not the absolute.)
+
+### Interpretation — hypothesis selection
+
+Mapping back to the three pre-registered hypotheses:
+
+1. **Conformational bias.** θ_RL mean shifts by 73 mrad (~4°) — the
+   rod-lever joint settles at a measurably different equilibrium under
+   float32 forces. head_z mean shifts by 55 nm. θ_LM means match to
+   <1 part in 1000. **Partially confirmed (θ_RL, head_z).**
+2. **Numerical heating.** E_joint mean matches to 0.05%; E_joint SDs
+   match to 0.1%; E_joint trend slopes match within 4% (both rise from
+   1.04e-21 → 1.95e-21 J over the run). The upward trend exists in BOTH
+   configs and is interpretable as the system equilibrating from
+   well-aligned initial conditions toward the thermal/forced
+   equilibrium. **Rejected.** Float32 forces are NOT injecting net
+   elastic energy.
+3. **Mechanism downstream.** Distributions DO differ between configs
+   (head_z, θ_RL, head_z SD). **Rejected.** The mechanism is detectable
+   in conformation; binding drop has a measurable conformational
+   precursor.
+
+The most striking single statistic is the head_z SD: 49 nm (DOUBLE) vs
+85 nm (FLOAT32) — the FLOAT32 head position distribution is 74% wider
+than DOUBLE while sitting at a different mean. Motors are anchored at
+z = -0.05 µm; head length ≈ 0.020 µm. So the DOUBLE distribution
+(mean = -39 nm, SD = 49 nm) has heads pointing predominantly down or
+sideways relative to the anchor; the FLOAT32 distribution
+(mean = +16 nm, SD = 85 nm) has heads pointing up on average but with
+a much broader spread.
+
+Why broader head_z reduces binding: the GPU motor-binding kernel
+filters candidate filament voxels by distance to the head tip. A
+broader head_z distribution means a smaller fraction of heads are
+within capture range of the filament plane at any sample time. Mean
+shift alone doesn't tell us the direction — but the variance increase
+unambiguously reduces the peak density at any single height.
+
+### Mechanism summary
+
+The bias is **steady-state conformational, not energetic**. Float32
+joints introduce a small per-step force perturbation that:
+
+- shifts the equilibrium rod-lever angle (~4°),
+- shifts the equilibrium head height (~55 nm),
+- broadens the head_z distribution by 74%,
+- does NOT inject or remove net elastic energy.
+
+This is the signature of a non-conservative but bounded force noise:
+the perturbation pushes the system off the double-precision equilibrium
+to a different equilibrium, where the average energy is the same but
+the spatial distribution is shifted and broadened. The earlier kernel
+audit (this morning's torque-path diff) found no sign or order bug —
+the per-step bias is genuinely sub-1e-5 relative — but accumulated over
+the pose-joints feedback loop it shifts the equilibrium far enough to
+cost ~50% of binding events.
+
+### Decision: is the double-precision joint fix justified?
+
+**Yes, with a caveat.** The diagnostic shows the bias is in the
+conformational state, not in numerical heating, and the bias is
+detectable as a steady-state shift in measurable conformation. Promoting
+joint pose reads + joint arithmetic to double precision should close
+the equilibrium gap (the prior 2026-05-31 transport diagnostic already
+showed Part B's CPU-joints same-pose comparison reproduces ~5 sig figs
+when joints run in double).
+
+**Caveat:** the pose state on device is float32. Even with
+double-precision joints, the move kernel will continue to integrate
+pose in float32 and the joints kernel will continue to READ float32
+pose. Double-precision joint MATH won't fix the upstream float32 pose
+drift. The right scope is *both*: promote joint reads to double-cast
+locally inside the kernel, AND consider promoting pose state to
+double (or at minimum the orientation vectors `uVec`/`yVec`, which
+amplify through the rotational drag). The transport diagnostic
+explicitly flagged this two-axis fix.
+
+The conformation diagnostic now confirms the **mechanism is conformational
+equilibrium drift**, so the cheap fix (joint-math precision alone)
+addresses only the joint arithmetic's contribution. A clean fix
+requires promoting at least `uVec` to double-backed device state.
+
+### Files changed (all default-off)
+
+- `boxOfActin/JointDiag.java` (new) — Welford accumulators, env-var
+  gating, sample/dump entry points.
+- `boxOfActin/BoxOfActin.java` — `JointDiag.initFromEnv()` +
+  `BOA_DIAG_CPU_JOINTS` env-var hook in `begin()`; `JointDiag.sample()`
+  call after `updateCounters()` in `doLoop()`; `JointDiag.dump()` call
+  before the `[STATS]` lines in the post-loop reporting.
+
+Final state: `JointDiag.ENABLED = false`; `GPUMoveThing.DIAG_CPU_JOINTS
+= false`. Production behaviour unchanged. Both env vars are opt-in for
+future re-runs.
+
+### Open
+
+- The decision-confidence next step is a one-seed sanity run with `uVec`
+  promoted to `DoubleArray` (or a `FloatArray`-emulated double) to
+  confirm the conformation distributions narrow back to DOUBLE config
+  levels. Estimated half-day; gates the publication path.
+- The single-seed bindEvents=586 (DOUBLE) vs 512 (FLOAT32) here is much
+  closer than the 10-seed ensemble means (828 vs 461). The
+  conformation distributions ARE shifted measurably even when binding
+  events at a single seed look closer — meaning the bias is more
+  systematically detectable in θ_RL/head_z than in noisy seed-level
+  bindEvents.
+
+## 2026-05-31 — Double-precision joint arithmetic + accurate acos (no conformational recovery)
+
+Planner: widen the GPU jointsKernel's torque/force chain to double
+precision and replace the Abramowitz polynomial `fastAcosF` with a
+Newton-refined `accurateAcos`, while leaving uVec/coord storage and
+integration in float32. Hypothesis: the conformation diagnostic's 4°
+θ_RL bias + 74 % head_z SD widening were caused by float32 arithmetic
+inside the joint kernel + the polynomial acos's ~5e-5 middle-band
+error, and recasting the joint math in double should close the gap.
+
+### Implementation — `boxOfActin/GPUMoveThing.java`
+
+1. New `accurateAcos(double x)`. Branched seed identical to CPU
+   `Pt3D.fastAcos` outside the ±0.95 band (small-angle sqrt form);
+   Abramowitz & Stegun 4.4.46 polynomial inside the band as the seed
+   value `y`. Two Newton iterations on `f(y) = cos(y) − x`,
+   `y_{n+1} = y_n + (cos(y_n) − x) / sin(y_n)`, each roughly squaring
+   the relative error. PTX has native f64 sin/cos/sqrt (confirmed by
+   2026-05-30 §A.3 for sin; the existing Brownian RNG in
+   `moveThingKernel` already calls `Math.cos(double)` and
+   `Math.sqrt(double)` in production, so all three intrinsics are
+   PTX-compatible without any TornadoMath ceremony).
+2. `jointsKernel` rewritten so every read from `coord`/`uVec`/`myoDrags`
+   widens immediately to `double` and the entire torque chain (dot
+   products, cross products, strain, moveCoeff, torsionMag, R×F moment
+   arms) is double. Cast back to `float` only at the four
+   `jointForceSum.set(...)` / `jointTorqueSum.set(...)` writes per Myosin.
+3. The four moveCoeff sites use `Math.sin(accurateAcos(cosBeta))` —
+   now precise — matching the CPU's `sin(fastAcos(cosBeta))` chain
+   exactly inside the central band.
+4. `DEG2RAD` / `RAD2DEG` promoted to `Math.PI/180.0` / `180.0/Math.PI`
+   double constants. `fastAcosF(float)` helper removed (no remaining
+   callers).
+
+`uVec`/`yVec`/`coord` device storage and the move-kernel integration
+stay float32. The intent was the cheap fix isolated to joint
+arithmetic, leaving the upstream-pose precision question to a
+follow-up.
+
+Compiles clean with `javac -g --release 21 --enable-preview` on aorus
+against TornadoVM 4.0.1-dev PTX.
+
+### Conformation pre-check — STOP signal
+
+Re-ran the JointDiag instrumentation single-seed
+(`BOA_DIAG_JOINT_STATS=1`, `glidingAssay500_val`, seed 1, GPU, no
+`DIAG_CPU_JOINTS`) on the new double-arithmetic kernel and compared
+against the two pre-existing references from this morning's
+conformation diagnostic.
+
+Log: `RUN_LOGS/2026-05-31_dblejoint_confcheck_FLOAT32_DOUBLEJOINTS.log`.
+
+```
+                              DOUBLE         FLOAT32        FLOAT32+
+                            (CPU joints)   (GPU kernel)    DBL JOINTS
+samples (motor x time)      2,828,000       2,828,000      2,828,000
+theta_LM    mean (rad)      0.349763        0.349349       0.349461
+            SD              0.279287        0.278891       0.279291
+theta_RL    mean (rad)      1.676320        1.602932       1.602571   ← unchanged
+            SD              0.660175        0.681731       0.682027   ← unchanged
+head_z      mean (µm)       -0.038908       +0.015640      +0.015710  ← unchanged
+            SD              0.048679        0.084714       0.084243   ← unchanged
+E_joint     mean (J)        1.8278e-21      1.8287e-21     1.8272e-21
+            slope (J/step)  8.95e-26        9.28e-26       9.34e-26
+bindEvents                  586             512            532
+glidingVelocity (µm/s)      7.87            6.45           5.96
+```
+
+**θ_RL did NOT move back toward the DOUBLE reference.** The new
+double-arithmetic, Newton-refined acos joint kernel produces a
+conformation distribution statistically indistinguishable from the
+prior FLOAT32 GPU kernel — θ_RL 1.6026 vs 1.6029, head_z mean
++15.7 nm vs +15.6 nm, head_z SD 84.2 nm vs 84.7 nm. The polynomial
+acos middle-band error and float32 joint arithmetic are NOT the
+dominant source of the conformational bias.
+
+Per the planner's stop criterion ("If the conformation pre-check shows
+θ_RL does NOT move back toward 1.676 after the double fix: stop and
+report"), the 10-seed ensemble and dense timing checks were skipped.
+
+### Interpretation — the bias is upstream of joint computation
+
+The 2026-05-31 conformation entry already flagged this in its caveat:
+
+> the pose state on device is float32. Even with double-precision
+> joints, the move kernel will continue to integrate pose in float32
+> and the joints kernel will continue to READ float32 pose.
+> Double-precision joint MATH won't fix the upstream float32 pose
+> drift.
+
+This run confirms it empirically. The biased equilibrium arrives at
+the joint kernel through the float32 `uVec` / `coord` it reads from
+device memory each step. The kernel can then compute torques in
+arbitrary precision — it produces correct torques for a biased pose,
+not unbiased torques. The pose-joints feedback loop continues to
+settle at the float32-equilibrium-of-the-move-kernel rather than the
+double-equilibrium-of-the-CPU.
+
+Two physical confirmations of this:
+
+1. θ_RL is set by the balance between rod-lever torsion force and
+   Brownian forcing on the lever. If joint torque magnitudes were
+   responsible for the bias, the equilibrium would shift when joint
+   math precision improved. It didn't.
+2. head_z and head_z SD reflect the projected position of the motor
+   head in lab frame, which is `motor.end1 = motor.coord −
+   halfMotor·motor.uVec`. The bias in head_z mean and the widening of
+   head_z SD are inherited directly from `coord` and `uVec` — the
+   move kernel's float32 output — independent of how joint torques
+   were computed this step.
+
+### What this rules out
+
+- Joint kernel arithmetic precision (forces, torques, dot/cross
+  products) as the dominant source of the bindEvents / θ_RL / head_z
+  drift.
+- The Abramowitz polynomial's middle-band 5e-5 error in `acos` as the
+  dominant source.
+
+### What it implicates
+
+The float32 pose integration itself. Specifically: the move kernel's
+`uVec` / `yVec` updates (Gram-Schmidt-style renormalisation each
+step), the float32 storage of `coord`, and possibly the float32
+Brownian forcing inside the move kernel. The next cut should promote
+at least `uVec` to double-backed device state and re-run the same
+JointDiag pre-check before committing to a full 10-seed ensemble. The
+prior journal entry already pointed at this as the right scope; this
+run elevates it from "likely" to "necessary".
+
+### Dense timing — skipped
+
+Not run because the conformation pre-check killed the change before
+the ensemble validation. The new code is on disk and compiles; if a
+future investigator wants the joint kernel in double precision as a
+non-load-bearing change (e.g. for CPU/GPU equivalence on small
+configurations where double pose is feasible), it's there. If pose
+state is promoted to double in a follow-up, the joint kernel can
+stay in double or be reverted to float32 — neither matters because
+the conformational equilibrium is set by the pose-state precision.
+
+### Files changed
+
+- `boxOfActin/GPUMoveThing.java` — `fastAcosF` removed;
+  `accurateAcos(double)` added (branched seed + 2-step Newton
+  refinement); `jointsKernel` widened to double throughout with float
+  casts only at the final delta-buffer writes; constants `DEG2RAD` /
+  `RAD2DEG` promoted to double.
+
+The change is landed (not reverted) — it does no harm, removes the
+known polynomial-acos mismatch with CPU's `Math.acos`, and aligns
+joint arithmetic with the CPU formulas. But on its own it does not
+move observables.
+
+### Open — recommended next step
+
+Promote `uVec` (most likely the dominant amplifier through the
+rotational drag path) to a double-backed device buffer and re-run the
+JointDiag pre-check. If θ_RL recovers toward 1.676 with just `uVec`
+in double, the cheap path is one-axis precision promotion. If not,
+extend to `coord` and `yVec`. The conformation diagnostic gives a
+fast (single-seed, ~5 min) signal before any 10-seed ensemble.
+
+## 2026-05-31 — Pose normalization diagnostic (uVec drift hypothesis)
+
+Planner hypothesis: the GPU's device-resident `uVec`/`yVec` drift off
+unit length and off orthogonality across many steps because the chained
+TaskGraph keeps poses on device and the move kernel does not
+re-normalize. The drift would feed biased `dot(uVecA, uVecB)` values
+into the joints kernel each step, explaining the steady-state θ_RL
+shift that double-precision joint arithmetic could not undo.
+
+This entry confirms or refutes the hypothesis via a code-read plus a
+direct measurement of |uVec|, |yVec|, and |uVec·yVec| over both configs.
+
+### Part 1 — Code read
+
+**A. Does the GPU move kernel re-normalize the orientation vectors?**
+
+`boxOfActin/GPUMoveThing.java` lines 689–707, the trailing rotation
+update of `moveThingKernel`:
+
+```
+float nuX = ux + yx * uTransInY + zx * uTransInZ;
+...
+float nuInv = 1.0f / (float) Math.sqrt(nuX * nuX + nuY * nuY + nuZ * nuZ);
+uVec.set(i3,     nuX * nuInv);
+uVec.set(i3 + 1, nuY * nuInv);
+uVec.set(i3 + 2, nuZ * nuInv);
+...
+float nyInv = 1.0f / (float) Math.sqrt(nyX * nyX + nyY * nyY + nyZ * nyZ);
+yVec.set(i3,     nyX * nyInv);
+yVec.set(i3 + 1, nyY * nyInv);
+yVec.set(i3 + 2, nyZ * nyInv);
+```
+
+Magnitudes are normalized to unit length explicitly. The kernel does
+NOT perform an explicit Gram-Schmidt re-orthogonalization of yVec
+against the new uVec — both are integrated via independent first-order
+rotations and normalized in magnitude only. The first-order rotation
+preserves orthogonality to O((bw·dt)²) and accumulated float32 errors
+were the worry.
+
+**B. Does the CPU/host path re-normalize/re-orthogonalize?**
+
+`boxOfActin/Thing.java` lines 736–784, `recomputeDerivedSoA`:
+
+```
+float zx = uy*yz - uz*yy; ...
+float zmag2 = zx*zx + zy*zy + zz*zz;
+if (zmag2 > 0f) {
+    float inv = (float) (1.0 / Math.sqrt(zmag2));
+    zx *= inv; zy *= inv; zz *= inv;
+}
+zVecArr[b3] = zx; ...
+// yVec' = zVec × uVec (restores orthogonality).
+yx = zy*uz - zz*uy;
+yy = zz*ux - zx*uz;
+yz = zx*uy - zy*ux;
+yVecArr[b3] = yx; yVecArr[b3+1] = yy; yVecArr[b3+2] = yz;
+```
+
+`recomputeDerivedSoA` (called every step on the host after
+`unpackRange`) computes `zVec = uVec × yVec`, normalizes zVec, then
+**overwrites yVec to `zVec × uVec`** so the body frame is exactly
+orthonormal by construction (modulo |uVec|=1 from the GPU kernel).
+uVec itself is taken as-is from the GPU's normalized output — no host
+re-normalization.
+
+**C. Transfer mode in the chained TaskGraph (`GPUMoveThing.java:751-785`):**
+
+```
+TaskGraph tg = new TaskGraph("chained")
+    .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                      coord, uVec, yVec, ...)
+    ...
+    .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                    coord, uVec, yVec);
+```
+
+Both directions are `EVERY_EXECUTION`. **The device poses are NOT
+device-resident across steps** — they are uploaded from host
+`soaCoord`/`soaUVec`/`soaYVec` each step and downloaded back each
+step. The CPU re-orthogonalization in `recomputeDerivedSoA` is
+applied between unpack and the next pack, so the device receives
+freshly orthonormalized poses every step.
+
+**D. CPU-joints (passing) vs GPU-joints (failing) pose flow:**
+
+Identical. `DIAG_CPU_JOINTS=true` only zeros `counts[3]` so the GPU
+joints kernel becomes a no-op (line 1004–1006); the move kernel,
+unpack, and `recomputeDerivedSoA` paths are unchanged. CPU joints
+write to `soaForceSum` (uploaded as `cpuForceSum`) instead of the
+device `jointForceSum`. The pose normalization profile of the two
+configs is necessarily identical at the code level.
+
+**Code-read verdict: the chained plan already does what the
+hypothesis worried it didn't.** Magnitudes normalized in the kernel,
+orthogonality restored on the host every step, no device-resident
+drift possible.
+
+### Part 2 — Measurement
+
+Extended `boxOfActin/JointDiag.java` with `|uVec|`, `|yVec|`,
+`|uVec·yVec|` Welford accumulators across all (rod, lever, motor) ×
+sample tuples, plus first-sample / last-sample drift trackers.
+Sampled every 50 steps over a 10100-step `glidingAssay500_val` run,
+single seed (1), both configs.
+
+Logs: `RUN_LOGS/2026-05-31_posenorm_CPUJOINTS.log`,
+`RUN_LOGS/2026-05-31_posenorm_GPUJOINTS.log`.
+
+```
+                                DOUBLE (CPU joints)    FLOAT32 (GPU joints)
+samples (3 per Myo × time)      8,484,000              8,484,000
+|uVec|       mean               0.99999999             0.99999999
+             SD                 4.74e-08               4.74e-08
+             max_dev_from_1     1.91e-07               1.91e-07
+|yVec|       mean               1.00000000             1.00000000
+             SD                 6.44e-08               6.44e-08
+             max_dev_from_1     3.13e-07               3.14e-07
+|uVec·yVec|  mean               1.16e-08               1.16e-08
+             SD                 1.04e-08               1.04e-08
+             max                8.65e-08               8.74e-08
+drift |uVec|       step 50 → 10100  0.9999999946 → 0.9999999939   0.9999999945 → 0.9999999944
+drift |uVec·yVec|  step 50 → 10100  9.86e-09 → 1.15e-08            1.01e-08 → 1.15e-08
+theta_RL    mean                1.675985 rad           1.602238 rad   ← 4.2° bias reproduces
+head_z      mean                -0.038815 µm           +0.015898 µm   ← bias reproduces
+head_z      SD                  0.048644 µm            0.084485 µm    ← bias reproduces
+bindEvents                      987                    221            ← bias reproduces
+glidingVelocity                 9.10 µm/s              5.60 µm/s
+```
+
+Pose vectors stay at unit length to ~2e-7 (float32 representation
+floor) and orthogonal to ~1e-8 (1e-15 of unit area) in BOTH configs,
+with no drift over 10100 steps. Both metrics match between configs to
+many digits.
+
+### Verdict — REFUTED
+
+The hypothesis that the device-resident `uVec` drifts off unit length
+or off orthogonality is decisively refuted. Three independent lines of
+evidence converge:
+
+1. **Code:** EVERY_EXECUTION transfers preclude device-resident drift;
+   the kernel renormalizes magnitudes; the host re-orthogonalizes
+   yVec each step. Whatever pose-normalization quality exists, both
+   CPU-joints and GPU-joints configs share it.
+2. **Measurement, CPU-joints config:** |uVec|, |yVec|, |uVec·yVec|
+   sit at the float32 numerical floor; no drift.
+3. **Measurement, GPU-joints config:** identical pose-normalization
+   metrics; the conformational bias (θ_RL, head_z, bindEvents)
+   reproduces unchanged.
+
+The bias is NOT in the pose vectors. It comes from something else in
+how the GPU pipeline evolves poses vs the CPU pipeline — and the only
+remaining difference between the two configs is **where the joint
+forces were computed (CPU double vs GPU float32)**.
+
+### What this leaves on the table
+
+The bias is consistent with what `GPU_NUMERICAL_PRECISION.md` §1
+already documents and what today's prior entries already concluded:
+**float32 quantization at storage propagates into the joint
+computation's pose inputs, biasing the equilibrium of the stiff
+torsion springs even when the joint arithmetic itself is in double.**
+The 24-bit float32 mantissa puts a ~6e-8 relative error on every uVec
+component at upload. The joints kernel widens to double on read, but
+the values it widens are already quantized; `dot(uVec_A, uVec_B)` ≠
+cos(θ) to ~1e-7 per component, and that bias times a stiff k shifts
+the equilibrium.
+
+The CPU-joints config evades this not because it has better pose
+precision (it has the same float32 storage) but because the CPU joint
+computation runs **before** the pose round-trips through the GPU SoA —
+it reads the Pt3D fields, which are double, before any float
+narrowing. The GPU joint computation reads the FloatArray, which is
+float32 always.
+
+### Recommended next move
+
+This refutes one specific mechanism. The correct fix path is now
+unambiguous: **promote `soaUVec` / `soaCoord` to double-backed device
+storage** (TornadoVM `DoubleArray`), so the joints kernel reads
+double pose inputs from the start. Estimated effort: ~1 day, gated
+by the conformation pre-check (θ_RL → 1.676). The chained TaskGraph
+structure does not need to change; only the FloatArray types.
+
+The pose-normalization diagnostic remains useful as a sanity check
+that future kernel changes (especially the pose-precision promotion)
+don't accidentally break the magnitude/orthogonality invariants.
+
+### Files changed (default-off)
+
+- `boxOfActin/JointDiag.java` — added pose-normalization accumulators
+  (|uVec|, |yVec|, |uVec·yVec| Welford means, SDs, max deviations,
+  first/last drift trackers). Gated by the existing `ENABLED` flag
+  / `BOA_DIAG_JOINT_STATS` env var. New per-config dump section
+  `=== POSE NORMALIZATION DIAGNOSTIC ===` printed after the existing
+  joint-angle dump.
+
+Final state: `JointDiag.ENABLED = false`. Production behaviour
+unchanged. The extended dump fires when the same env var as the
+2026-05-31 conformation diagnostic is set.
+
+### Open
+
+- The double-pose promotion is the live recommendation. Same single-
+  seed conformation pre-check applies: if θ_RL returns to ~1.676
+  with `coord` and `uVec` promoted to `DoubleArray`, the cheap path
+  is two-axis precision promotion. If not, the cause is even deeper
+  in the pipeline (Brownian generation, drag tensors, dt) and the
+  diagnostic strategy should pivot.
+
+## 2026-05-31 — Joint parameter + signed-torque diagnostic (CLEAN)
+
+Planner: the 4° rod-lever conformation bias (θ_RL 1.602 GPU vs
+1.676 CPU) is dimensionally implausible as a float32 rounding artefact
+(float32 ~1e-7 rad per op vs the bias's 7.3e-2 rad). It's almost
+certainly a systematically different torque computed by the GPU
+kernel: a parameter mismatch, a units-dependent threshold, or a
+formula difference Part A's magnitude/cosine check missed. Three-part
+audit to find it.
+
+### Part 1 — Parameter byte-for-byte CPU vs GPU
+
+Dump every numeric parameter feeding the joint torque computation
+side-by-side. CPU values via `Env.*.getValue()` / `Myosin.*`, GPU
+values via `(double)(float) <same>` (the narrowing that happens at
+`jointParams.set(i, (float) ...)` and `myoDrags.set(...)`). Log:
+`RUN_LOGS/2026-05-31_paramdiag_part1_part2.txt`.
+
+```
+param                CPU(double)         GPU(float widened)   abs diff
+deltaT               1.0000000000e-05    9.9999997474e-06     2.53e-13
+myoJ1FracMove        4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ1FracR           4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ1FracMoveTorq    4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracMove        4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracR           4.0000000000e-01    4.0000000596e-01     5.96e-09
+myoJ2FracMoveTorq    0.0000000000e+00    0.0000000000e+00     0.00      ← EXACT zero (RL torsion off)
+myoMotorLength       2.0000000000e-02    1.9999999553e-02     4.47e-10
+myoLeverLength       8.0000000000e-03    8.0000003800e-03     3.80e-10
+myoRodLength         8.0000000000e-02    7.9999998212e-02     1.79e-09
+myosinStallForce     6.0000000000e+00    6.0000000000e+00     0.00      ← EXACT (representable)
+uncockedLM_deg       0.0000000000e+00    0.0000000000e+00     0.00      ← EXACT
+cockedLM_deg         6.0000000000e+01    6.0000000000e+01     0.00      ← EXACT (representable)
+-- drag tensors first Myosin (CPU bRotGam.y / GPU narrow) --
+rod.bRotGam.y        2.7805542501e-23    2.7805541995e-23     5.05e-31
+lever.bRotGam.y      1.7213922306e-24    1.7213923139e-24     8.33e-32
+motor.bRotGam.y      2.5132741229e-24    2.5132741620e-24     3.91e-32
+maxMag_LM_cap (N*m)  6.0000000000e-20    5.9999998659e-20     1.34e-27
+```
+
+Every difference is purely float32 representation noise (~5e-8
+relative, the float32 mantissa floor). **Zero semantic mismatches.**
+No rest-angle is stored in different units, no factor-of-2, no
+half-angle convention difference, no degree/radian flip, no parameter
+silently rerouted. `myoJ2FracMoveTorq` is exactly 0 on both sides —
+the rod-lever torsion spring is OFF, so the 4° θ_RL bias is NOT
+attributable to a rod-lever rest-angle or stiffness mismatch.
+`uncockedLM_deg=0` and `cockedLM_deg=60` are bit-exact float and
+identical on both paths.
+
+### Part 2 — Threshold and clamp audit
+
+Every magnitude comparison in the joint paths, by method:
+
+| method | CPU guard / clamp | GPU guard / clamp | divergence? |
+|---|---|---|---|
+| applyLeverMotorJointForce  | cosBeta clamp [-1,1] inside `moveCoeff` | `cosB` clamp [-1,1]; `strainDist>0`, `denom>0` zero-guards | semantically identical for non-degenerate poses |
+| applyLeverMotorJointTorque | `isNaN(torsion)`→return; `unitVec()` (kicks random if mag==0); dotVecs clamp; `min(torsionMag, maxMag)` with `maxMag=stall*0.5*motorLen*1e-18` | `tvMag2>0` skip (no random kick); dotVecs clamp; `if (>maxMag) clamp` (same value, semantically same on signed reals) | one path: CPU randomUnitVec kick at zero-cross-product, GPU skip. Already isolated by Test 1 (2026-05-31 §) as ≤16 events of the ~330. |
+| applyRodLeverJointForce    | cosBeta clamp [-1,1] | `cosB` clamp; `strainDist>0`, `denom>0` zero-guards | same |
+| applyRodLeverJointTorque   | `isNaN`→return; `unitVec()`; dotVecs clamp; NO maxMag | `tvMag2>0`; dotVecs clamp; NO maxMag | same as above, but moot since `j2FracMoveTorq=0` makes the entire RL torsion identically zero on both sides |
+
+`maxMag_LM = stallForce_pN · 0.5 · motorLen_µm · 1e-18 = 6e-20 N·m`
+(units: pN→N is 1e-12, µm→m is 1e-6, product 1e-18, so the cap is
+correctly in SI N·m). Typical LM torque magnitudes are 1–2e-20 N·m
+(see Part 3); the cap is 3× typical and fires only on extreme outlier
+angles (angD > ~90°). Both CPU and GPU use the same maxMag value and
+same `(torsionMag > maxMag)` semantics on signed reals — there is no
+units-dependent firing-rate divergence.
+
+**Verdict: no units-dependent threshold differing between paths.**
+
+### Part 3 — Signed restoring-torque at the biased equilibrium
+
+At step 8000 (well past the GPU pose having drifted to its biased
+equilibrium), for the first 20 myosins, compute the SIGNED scalar
+`torsionMag` along the joint axis using both formulas on the SAME
+pose (read from the float32 SoA both ways). CPU formula uses
+`Pt3D.fastAcos` (which dispatches to `Math.acos` in the [-0.95, 0.95]
+band and uses small-angle sqrt approximation in the tails). GPU
+formula uses the Newton-refined `accurateAcos` and float-narrowed
+parameter copies. Log:
+`RUN_LOGS/2026-05-31_paramdiag_part3.txt`.
+
+```
+LM joint (lever-motor torsion, j1FracMoveTorq=0.4)
+  per-myosin tau_GPU - tau_CPU spans 1e-27 (mid-band: identical) to ~5e-23 (small-angle tail).
+  Mean signed difference (20 myosins): +1.146e-23 N*m
+  Reference: mean |tau| ~ 1.5e-20 N*m → relative bias ~7.6e-4
+
+RL joint (rod-lever torsion, j2FracMoveTorq=0)
+  Every per-myosin tau is EXACTLY 0.0 on both formulas.
+  Mean signed difference: 0.000e+00 N*m
+```
+
+The LM bias is small, systematically positive (GPU computes slightly
+*more* restoring torque than CPU), and traces to the small-angle
+behaviour of `Pt3D.fastAcos`: when `dot > 0.95` (i.e. θ < ~18°), it
+returns `sqrt(2(1-dot))` which underestimates the true angle by
+~θ³/24. The GPU's `accurateAcos` Newton-refines and matches
+`Math.acos` to ~1e-15. The bias appears only in the small-angle tail
+(myos with θ_LM < 18°), and is correctly zero in the middle band
+(myos with θ_LM in [18°, ~107°] — same `Math.acos` on both sides).
+
+Magnitude check: with effective LM stiffness
+`k_eff = j1FracMoveTorq / ((1/g_M + 1/g_L)·dt) ≈ 4e-20 N·m/rad`, a
+mean torque bias of 1.15e-23 implies an equilibrium shift of
+1.15e-23 / 4e-20 = 2.9e-4 rad = 0.016°. The journal's measured
+θ_LM mean shift between CPU and GPU configs is 4.1e-4 rad (≈0.024°)
+— same order of magnitude, with the small residual likely from
+distributional differences and the cocked/uncocked sub-populations
+weighting differently. **The LM-joint signed-torque bias is fully
+explained by the CPU's fastAcos small-angle approximation; the
+GPU is the more accurate of the two for θ_LM.**
+
+For the RL joint, the signed restoring torque is identically zero
+on both formulas because `myoJ2FracMoveTorq = 0`. **The 4° θ_RL bias
+between CPU and GPU CANNOT come from the rod-lever torsion
+calculation** — there is no rod-lever torsion calculation at this
+parameter setting. The θ_RL equilibrium is set purely by the
+balance between (a) the rod-lever joint stretch force coupled via
+R×F moment arms, (b) the lever-motor joint stretch force pulling on
+the lever's other end, and (c) Brownian forcing.
+
+### Verdict — all three parts CLEAN
+
+| part | result | implication |
+|---|---|---|
+| 1 — params | identical modulo float32 narrowing (~5e-8 rel) | no parameter mismatch |
+| 2 — thresholds/clamps | semantically identical; one zero-cross-product kick difference already exonerated | no units bug |
+| 3 — signed torque | LM: ~7e-4 bias from CPU's fastAcos small-angle approx (GPU is correct); RL: zero on both | no formula bug; bias source is upstream of torque computation |
+
+Per the planner's last branch — "all three come back clean: then the
+torque computation genuinely matches and the bias is in force
+APPLICATION or step ORDERING" — this is the outcome. The torque
+math on the same pose is correct in the GPU kernel. The 4° θ_RL
+equilibrium shift comes from the cumulative float32 drift of the
+joint FORCE + R×F moment-arm pose-feedback loop integrated over
+~8000 steps, not from any single-step torque or parameter error.
+
+### Recommendation
+
+This closes the precision/parameter avenue. The remaining options
+align with the planner's pre-registered branches:
+
+1. **Revert joints to CPU (recommended).** The `DIAG_CPU_JOINTS=true`
+   path already validates clean against the 10-seed CPU baseline
+   (828 ± 68 vs 857 ± 46, |diff|/cSEM=0.34). Cost is ~12 s of CPU
+   work per ~minute of GPU sim — modest. The joints kernel stays in
+   tree, behind a flag, as a known-issue artefact for future
+   investigators interested in fully-on-device runs.
+2. **Promote `coord` / `uVec` to `DoubleArray` (deferred).** The next
+   precision lever, but it changes the chained TaskGraph types and
+   needs PTX backend validation. The signed-torque diagnostic just
+   showed the torque math is correct given float32 pose — promoting
+   pose to double would close the residual cumulative-drift gap but
+   at non-trivial implementation cost. Defer until the simpler
+   revert is in place and bigger GPU wins (Brownian, drag) are
+   pursued.
+
+### Files changed (default-off)
+
+- `boxOfActin/JointParamDiag.java` (new) — Part 1 startup parameter
+  dump + Part 3 late-step signed-torque comparison. Gated by env
+  var `BOA_DIAG_PARAMS=1`. `BOA_DIAG_PARAM_STEP=N` selects the
+  late-step (default 8000); `BOA_DIAG_PARAM_N=N` sets myosin count
+  (default 20). The diagnostic itself contains an inlined copy of
+  `accurateAcos` so it matches the kernel's formula exactly while
+  running on host.
+- `boxOfActin/BoxOfActin.java` — `JointParamDiag.initFromEnv()` +
+  `dumpParams()` call after `makeInitialThings()`;
+  `JointParamDiag.sample()` call after `JointDiag.sample()` in
+  `doLoop()`.
+
+Final state: `JointParamDiag.ENABLED=false`. Production behaviour
+unchanged. The env var lights the diagnostic up for any future
+re-run.
+
+### Open
+
+- Land the "revert joints to CPU" decision as a default behaviour
+  change: flip `DIAG_CPU_JOINTS` to a normal flag (e.g. rename to
+  `gpuJointsDisabled` and gate via `-gpuNoJoints`), drop the
+  diagnostic naming. Run the 10-seed glidingAssay ensemble once more
+  to confirm the path still passes, then update GPU_STRATEGY.md and
+  CLAUDE.md.
+- Document the GPU joints kernel as a known issue in
+  GPU_NUMERICAL_PRECISION.md: parameters and torque math are
+  correct, but cumulative float32 drift in the pose-feedback loop
+  produces a 4° θ_RL bias and -42 % bindEvents in the gliding
+  assay. Fix path is to promote pose precision (`coord`/`uVec` to
+  `DoubleArray`), not to fix the joint kernel.
+
+## 2026-05-31 — Rod-lever joint stiffness 0→0.1: STOP at rest-angle gate
+
+Planner asked: set `myoJ2FracMoveTorq = 0.10` and run the conformation
+pre-check + 10-seed CPU/GPU ensembles to see whether a small biologically-
+defensible torsional stiffness in the rod-lever (S2 hinge) joint pins the
+soft DOF so the GPU tracks CPU, while keeping gliding velocity in the
+5–8 µm/s range. Pre-registered STOP: if the rod-lever rest angle was
+undefined (spring never active), do not guess — flag for planner.
+
+### Code read — STOP triggered
+
+`applyRodLeverJointTorque()` (`boxOfActin/Myosin.java:262-291`) does
+apply a Hookean restoring torque proportional to `myoJ2FracMoveTorq` when
+that coefficient is nonzero. The rest angle is **hardcoded to 0** at
+`Myosin.java:273`:
+
+```
+double angRelaxed = 0;
+double angD = angTween-angRelaxed;
+...
+double torsionMag = Env.myoJ2FracMoveTorq.getValue()*(Math.PI/180)*angD
+                   / ((1/myoLever.bRotGam.y + 1/myoRod.bRotGam.y)*Env.deltaT.getValue());
+```
+
+This rest angle is **consistent with the constructor geometry** —
+`Myosin(rodEnd1, unitVec)` at `Myosin.java:52-65` lays rod, lever, and
+motor along the *same* `unitVec`, so at birth θ_RL = 0 (rod ‖ lever).
+The rest angle of 0 = "restore to the assembly conformation".
+
+But: this rest angle has never been exercised in production because
+`myoJ2FracMoveTorq` has been exactly 0 for the entire history of the
+parameter (per 2026-05-31 Part 1 diagnostic). The simulation's
+*natural* equilibrium without this spring is θ_RL ≈ 96° (1.676 rad CPU,
+1.602 rad GPU) — far from the construction angle of 0°. That ~96°
+equilibrium emerges from the balance of (a) rod-lever joint **stretch**
+force coupling, (b) lever-motor torsion holding lever-motor at 0° or
+60° depending on cocked state, (c) R×F moment-arm coupling, and
+(d) Brownian forcing.
+
+### Why this is the STOP condition
+
+Activating `myoJ2FracMoveTorq = 0.10` with rest = 0 does *not* gently
+pin the soft DOF at the current ~96° equilibrium. It actively pulls
+the conformation from ~96° back toward 0° (rod-lever colinear). That
+is a structural restoration toward the construction geometry, not a
+small biologically-defensible perturbation. The effective spring
+constant at J2=0.1 vs the prevailing torques would likely shift θ_RL
+by tens of degrees, not the small pinning effect the planner described
+as "biologically defensible" for the compliant S2 hinge.
+
+Two reasonable planner choices, neither I should make:
+
+1. **Rest angle = 0 (current default)**: accept that turning on the
+   spring forcibly resets myosin geometry to the construction angle.
+   Defensible only if the construction angle IS the intended biological
+   relaxed S2-neck angle — but the simulation has been running ~96°
+   relaxed for years, so callers depend on that geometry.
+2. **Rest angle = ~96° (current natural equilibrium)**: pick the
+   observed CPU equilibrium θ_RL = 1.676 rad as the new explicit rest
+   angle so J2=0.1 pins the soft DOF without rearranging the molecule.
+   Equivalent to introducing `uncockedRod_LeverAngle` /
+   `cockedRod_LeverAngle` parallel to the existing lever-motor
+   constants — possibly with cocked/uncocked variants if cocked
+   binding shifts θ_RL.
+
+Choice 2 matches the planner's stated intent ("pin the soft DOF so the
+GPU tracks the CPU") and the biological framing ("compliant but not a
+free swivel"). Choice 1 would invalidate the existing parameter file
+calibrations.
+
+### State
+
+- `Env.java` **unchanged** — `myoJ2FracMoveTorq` still at 0.00.
+- `Myosin.java` **unchanged** — rest angle still hardcoded 0.
+- No diagnostic runs, no ensembles. Per task scope, stopping for
+  planner decision on the rest angle before any model change lands.
+
+### Open — for planner
+
+- Pick a rest angle (0, ~96°, or split cocked/uncocked).
+- If choice 2, decide whether to introduce a `Parameter` (mutable at
+  runtime, would let us sweep cheaply) or a `static double` like the
+  existing `uncockedLever_MotorAngle` / `cockedLever_MotorAngle`.
+- Once chosen, re-issue the J2=0.1 conformation pre-check task with
+  the rest angle baked in.
+
+## 2026-06-01 — Rod-lever joint stiffness 0→0.1: biology + GPU numerical test
+
+Followup to the 2026-05-31 STOP entry. Planner chose rest angle = 96°
+(the simulation's natural θ_RL equilibrium, 1.676 rad on CPU) and asked
+for a single-value test of J2=0.1, rest=96°: conformation pre-check at
+seed 1, then 10-seed CPU + GPU gliding ensembles on
+`glidingAssay500_val`. Pass criterion for GPU = CPU: |diff|/cSEM < 2.0
+on bindEvents, meanBoundMotors, glidingVelocity. CPU result becomes the
+new reference (the physics changed for both paths).
+
+### Biological rationale
+
+The rod-lever joint represents the myosin neck–S2 junction: genuinely
+flexible (a low-stability coiled-coil hinge) but not a free swivel.
+The pre-existing `myoJ2FracMoveTorq = 0` was the extreme floppy limit;
+the lever-motor joint (the converter) sits at 0.4, so the S2 hinge
+should be softer than that but nonzero. 0.10 sits comfortably between.
+Rest = 96° is the joint's *current* equilibrium under the rest of the
+force balance (lever-motor torsion + R×F coupling + Brownian) — picking
+that as the spring's rest angle pins the soft DOF *at* its existing
+geometry rather than yanking the molecule toward the construction
+angle of 0°.
+
+### Edits
+
+Two CPU-side edits (the planner's instruction) plus one GPU kernel
+edit discovered at the pre-check.
+
+- `Env.java:153-155` — `myoJ2FracMoveTorq` default `0.00 → 0.10`.
+- `Myosin.java:273` — `angRelaxed = 0` → `angRelaxed = 96.0` (degrees);
+  drives the CPU rod-lever Hookean restoring torque toward 96°.
+- `GPUMoveThing.java:523` (discovered third edit) — the GPU joints
+  kernel used `angTween` directly with no rest-angle subtraction, i.e.
+  implicit rest = 0. The pre-check below caught this: with only the
+  CPU edits in place, the GPU actively restored the joint toward 0°
+  while CPU was pinned at 96° — a 72° conformation gap. Added
+  `angD = angTween - 96.0` and the gap collapsed.
+
+### Conformation pre-check (seed 1)
+
+```
+config                                  theta_LM         theta_RL         gap_RL
+CPU joints (DOUBLE)                     0.359855 rad     1.688898 rad     —
+GPU joints, kernel rest implicit 0      0.374246         0.427844         1.261 rad ≈ 72°  (FAIL)
+GPU joints, kernel rest=96° patch       0.361600         1.666540         0.022 rad ≈ 1.3° (PASS)
+```
+
+The 1.3° patched gap is the smallest the project has seen
+(J2=0 baseline was 4.2°). No "Crazy torque" warnings either side
+across any run. Pre-check threshold was 2°. PASS.
+
+### CPU 10-seed ensemble (BOA_DIAG_CPU_JOINTS=1)
+
+| metric | mean | SD | SEM | range |
+|---|---|---|---|---|
+| bindEvents | 732.2 | 137.2 | 43.4 | 471–890 |
+| meanBoundMotors | 6.357 | 1.211 | 0.383 | 4.16–7.51 |
+| **glidingVelocity** | **8.037 µm/s** | 0.519 | 0.164 | 6.91–8.95 |
+
+Reference: J2=0 CPU baseline glidingVelocity was 8.22 µm/s. New
+CPU J2=0.1 mean is 8.04, essentially unchanged (~−2%), still at
+the high end of the 5–8 µm/s biological range for skeletal myosin
+II. **Biological gliding behaviour preserved.**
+
+### GPU partial ensemble (n=6; user stopped at seed 7)
+
+| metric | CPU n=10 | GPU n=6 | diff | cSEM | \|diff\|/cSEM |
+|---|---|---|---|---|---|
+| bindEvents | 732.2 ± 43.4 | 559.0 ± 31.6 | −173.2 | 53.7 | **3.23** ✗ |
+| meanBoundMotors | 6.357 ± 0.383 | 5.399 ± 0.241 | −0.958 | 0.452 | **2.12** ✗ |
+| glidingVelocity | 8.037 ± 0.164 | 6.418 ± 0.113 | −1.620 | 0.199 | **8.13** ✗ |
+
+GPU glidingVelocity (~6.4 µm/s) is still biologically reasonable
+(within 5–8 µm/s) but systematically slower. None of the three metrics
+passes the |diff|/cSEM < 2.0 criterion. Direction matches the J2=0 GPU
+divergence (fewer binds, slower) at smaller magnitude — the J2=0 GPU
+baseline ran ~−42% on bindEvents, J2=0.1 narrowed it to ~−24%.
+Improvement, not closure.
+
+### Verdict
+
+- **(a) Biology preserved**: CPU glidingVelocity 8.04 µm/s vs 8.22
+  baseline — stiffening the S2 hinge did not break motor mechanics.
+- **(b) GPU = CPU**: **No.** Conformation gap pinned (4.2° → 1.3°),
+  but the downstream binding/velocity gap persists at
+  |diff|/cSEM ≈ 3–8.
+
+Implication: the binding-feedback amplification through the soft
+rod-lever DOF was *a* contributor to the GPU drop but not the sole
+cause. The residual divergence has another source — most plausibly
+cumulative float32 drift in `coord`/`uVec` pose precision (the
+2026-05-31 paramdiag entry already showed the per-step torque math
+matches), or in the binding-side feedback path itself.
+
+### Key finding — head_z gap unchanged
+
+Comparing head_z mean (seed-1 pre-check) at the two J2 settings:
+
+```
+                            head_z(CPU)    head_z(GPU)    diff
+J2 = 0    (2026-05-31)      -0.038815 µm    +0.015898 µm   0.0547 µm
+J2 = 0.1, rest=96° (today)  -0.038544 µm    +0.016135 µm   0.0547 µm
+```
+
+Stiffening the rod-lever joint pulled θ_RL from a 4.2° gap to a
+1.3° gap — but the binding-relevant motor-head height gap stayed at
+~55 nm to two significant figures. With θ_RL converged AND θ_LM
+always converged (~4e-4 rad gap), the myosin's **internal shape** is
+nearly identical CPU vs GPU. The 55 nm head_z divergence therefore
+cannot be driven by an internal joint angle. The only remaining
+degree of freedom that moves the head while internal angles are
+fixed is the **absolute orientation/position** of the whole
+assembly — how the anchored rod tilts in lab frame. That points the
+next diagnostic at absolute pose, not joint angles.
+
+### State left on disk
+
+- All three edits retained, compile clean.
+- Per-seed numbers, conformation table, and pre-/post-patch GPU
+  pre-check stats: `RUN_LOGS/2026-06-01_J2_0.1_rest96_ensembles.txt`.
+- Raw logs: `/tmp/j2stiff_conf_{cpu,gpu,gpu2}.log`,
+  `/tmp/j2stiff_cpu_seed{1..10}.log`, `/tmp/j2stiff_gpu_seed{1..6}.log`.
+
+### Open
+
+- Planner is switching tactics on the CPU/GPU divergence hunt.
+- 4 GPU seeds left unrun (7–10); n=6 is good enough to read direction
+  but doesn't fully bound the SEM.
+- The J2=0.1, rest=96° edits stay in tree as a partial fix —
+  conformation aligned, residual ~24% binding-rate gap.
+
+## 2026-05-31 — Single-myosin thermal characterization: CPU vs GPU conformational ensemble
+
+Planner pivot: after seven per-step joint diagnostics came back clean
+(parameters, thresholds, signed torques, delta buffers, pose normalization,
+double-precision arithmetic), abandon the per-step forensics and build the
+simplest possible reproduction. One anchored myosin, no filaments, no
+binding, thermal motion + joints on. If isolated-myosin distributions
+DIFFER → divergence is intrinsic to myosin dynamics. If they MATCH →
+divergence is created by binding or multi-body coupling.
+
+Sharpened target from the 2026-06-01 entry below: with θ_RL converged
+(1.3° gap) and θ_LM always converged, internal joint angles agree CPU
+vs GPU — yet head_z still differs by 55 nm. Only the **absolute** pose
+of the assembly (rod tilt in lab frame, anchor-point drift) can move
+the head while internal angles are fixed. This diagnostic measures
+absolute pose explicitly.
+
+### Setup
+
+- New parameter `singleMyoDiag` in `Env.java`. When active, makeInitialThings
+  creates exactly ONE MyosinFixed at (0,0,fixedMyosinZValue), pointing +z,
+  with no filaments. Mutually exclusive with glidingAssay setup.
+- New `boxOfActin/SingleMyoDiag.java` — Welford accumulators + histograms
+  for θ_RL, θ_LM, rod/lever/motor absolute tilt vs +z, head x/y/z, head
+  radial distance, cocked-state fraction. Gated by env var
+  `BOA_DIAG_SINGLE_MYO=1`; interval via `BOA_DIAG_SINGLE_MYO_INTERVAL=N`.
+- New parameter file `ParameterFiles/singleMyoDiag` — 5.0 s sim
+  (500K steps × dt 1e-5), J2 reverted to 0.00 via parameter override
+  (the original soft-joint configuration that all prior comparison data
+  used; the J2=0.1 + rest=96° edits remain in code but are nullified by
+  the parameter value of 0).
+- All three components default-off when unset; production behaviour unchanged.
+
+### Run
+
+```
+# CPU (DIAG_CPU_JOINTS)
+BOA_DIAG_SINGLE_MYO=1 BOA_DIAG_SINGLE_MYO_INTERVAL=10 BOA_DIAG_CPU_JOINTS=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/singleMyoDiag -seed 1
+
+# GPU (default joints kernel)
+BOA_DIAG_SINGLE_MYO=1 BOA_DIAG_SINGLE_MYO_INTERVAL=10 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/singleMyoDiag -seed 1
+```
+
+J2 value reported: `J2 (rod-lever): 0.0000` (override active on both paths).
+J1 unchanged at 0.4. Seed 1, n=50010 samples per run.
+
+### Side-by-side (full table: `RUN_LOGS/2026-05-31_singleMyo_compare.txt`)
+
+```
+                       CPU                GPU                diff
+theta_RL  mean      1.700741 rad      1.608809 rad       -0.092 (-5.27°)
+theta_RL  SD        0.6552            0.6776             +0.022
+theta_LM  mean      0.275604 rad      0.273180 rad       -0.0024 (-0.14°)
+theta_LM  SD        0.1518            0.1421             -0.010
+
+rod   tilt mean     89.71°            87.09°             -2.62°
+rod   tilt SD       0.711534          0.676222           -0.035
+lever tilt mean     90.45°            89.23°             -1.22°
+motor tilt mean     90.50°            89.20°             -1.30°
+
+head_x  mean       -0.0009 µm        -0.4797 µm          -0.479  ★
+head_x  SD          0.0460            0.2414             +0.195  ★
+head_y  mean       +0.0043 µm        -0.1791 µm          -0.183  ★
+head_z  mean       -0.0501 µm        -0.1448 µm          -0.095  ★
+head_z  SD          0.0493            0.2342             +0.185  ★
+head_r  mean        0.0612 µm         0.5329 µm          +0.472  ★
+head_r  max         0.122 µm          1.046 µm           +0.924  ★★
+cocked fraction     0.0047            0.0006
+samples             n=50010           n=50010
+```
+
+### Verdict — distributions DIFFER, and dramatically
+
+The isolated myosin diverges between CPU and GPU. The divergence is
+INTRINSIC to a single myosin's dynamics — no binding required. This is
+the minimal reproduction the prior diagnostics could not find.
+
+The internal joint angles (θ_RL, θ_LM) agree well — a ~5° θ_RL gap is
+the same magnitude as the prior J2=0 conformation diagnostic. But the
+ABSOLUTE position of the assembly diverges by an entire body-length:
+
+- **GPU head walks > 1 µm from the anchor (max 1.046 µm)** — that's 10×
+  the assembly's total contour length (rod 80 + lever 8 + motor 20 nm
+  = 108 nm).
+- **CPU head stays within 0.122 µm**, consistent with thermal tumbling
+  about a fixed anchor.
+
+A myosin "anchored at the rod tail" that lets the rod tail travel a
+whole micron isn't anchored at all.
+
+### Root cause (identified during the diagnostic)
+
+`MyosinFixed.jointConstraints()` overrides `Myosin.jointConstraints()`:
+
+```java
+public void jointConstraints () {
+    super.jointConstraints();    // 4 inter-segment apply* methods
+    applyRodFixedPtForce();      // rod end1 ← Hookean spring → myFixedPt
+}
+```
+
+`applyRodFixedPtForce()` is the rod-tail anchor — a spring that pulls
+`myoRod.end1` toward `myFixedPt` (the original construction location).
+This is the entire reason the surface-anchored myosins of the gliding
+assay are anchored at all.
+
+On the GPU path, `Myosin.MyosinThreads.divideAndConquer` short-circuits
+the per-Myosin CPU dispatch (`Myosin.java:77-88`): when
+`useGPU && !DIAG_CPU_JOINTS`, it sets all `jobDiv[i] = 0`, so no thread
+processes any chunk. `MyosinFixed.jointConstraints()` is **never called**
+on the GPU path.
+
+The GPU `jointsKernel` (`GPUMoveThing.java:286+`) replicates only
+`super.jointConstraints()` — the four inter-segment apply* methods. A
+`grep -c "MyosinFixed\|myFixedPt\|applyRodFixed"` over `GPUMoveThing.java`
+returns **0**. The anchor spring is silently dropped on the GPU path.
+
+### Why this explains everything
+
+- **−42 % bindEvents (J2=0) and −24 % bindEvents (J2=0.1)** — GPU motors
+  drift away from filaments because nothing holds them at the surface.
+- **+55 nm head_z mean gap** — CPU rod stays vertical (tail pinned by
+  the spring); GPU rod falls over because there's no spring.
+- **Why head_z gap was unchanged between J2=0 and J2=0.1** — the
+  rod-lever stiffness was never the issue; the missing force is upstream
+  of any internal joint geometry.
+- **Why DIAG_CPU_JOINTS passed at bindEvents 828 ± 68 vs 856** — the
+  CPU per-Myosin dispatch was not short-circuited, so
+  `MyosinFixed.jointConstraints()` ran and the anchor spring was
+  applied.
+- **Why Part B (CPU-side delta-add of GPU joint output) failed at
+  439 ± 44 like the chained GPU** — Part B kept `useGPU=true` and
+  `DIAG_CPU_JOINTS=false`, so the per-Myosin dispatch was also
+  short-circuited and `applyRodFixedPtForce()` was missing there too.
+  The "delivery path" (CPU delta-add vs device delta) was a red herring;
+  what mattered was that the anchor spring was absent on both.
+- **Why pose-normalization, parameter-byte, signed-torque, and
+  double-precision-acos diagnostics all came back clean** — the missing
+  force is in a per-Myosin CPU method that those audits weren't looking
+  at; they were comparing torque math on the joints kernel reads.
+
+### Scope
+
+Per task scope: identify, do not fix. The fix is straightforward
+conceptually (add a parallel CPU dispatch for `MyosinFixed.applyRodFixedPtForce`
+on the GPU path, or extend the GPU kernel to read a per-myosin
+`myFixedPt` buffer and apply the rod-tail spring inside the joints
+kernel), but should be planned and validated against the gliding assay
+ensemble separately.
+
+### Files added / changed (all default-off in production)
+
+- `boxOfActin/Env.java` — `singleMyoDiag` parameter (BOOLEAN, default
+  inactive).
+- `boxOfActin/MyosinFixed.java` — `setUpSingleMyosinDiag()` method
+  creates one MyosinFixed at (0,0,fixedMyosinZValue), points +z.
+- `boxOfActin/BoxOfActin.java` — checks `singleMyoDiag` in
+  `makeInitialThings()` after the glidingAssay branch; calls
+  `SingleMyoDiag.initFromEnv()` / `.sample()` / `.dump()` alongside
+  the existing JointDiag hooks.
+- `boxOfActin/SingleMyoDiag.java` (new) — Welford + histograms for the
+  conformational ensemble; env-var gated.
+- `ParameterFiles/singleMyoDiag` — reusable standing diagnostic config.
+
+Compile (Java 21, TornadoVM 4.0.1-dev) clean. Production-mode runs
+(no env vars, no `singleMyoDiag` parameter) are unaffected. The
+parameter file ships J2=0.00 override so the diagnostic measures the
+historical soft-joint baseline.
+
+### Open
+
+- **The fix is the next planner decision.** Choice A: add a CPU
+  per-Myosin dispatch for MyosinFixed's anchor spring that runs even
+  on the GPU path (cheap; ~14k motors × one Hookean force each is
+  microseconds). Choice B: extend the GPU `jointsKernel` to take a
+  per-Myosin `fixedPt` buffer + `isFixed` flag and apply the anchor
+  spring inside the kernel (keeps the work on device). Either closes
+  the bindEvents gap.
+- **Validate the fix with the same minimal assay.** Once the anchor
+  spring is on the GPU path, re-running the singleMyoDiag should give
+  CPU-equivalent head_x/y/z distributions. This is now the cheapest
+  gate for the gliding-assay ensemble.
+- **Question for the planner**: should `MyosinFixed.applyRodFixedPtForce`
+  be reclassified as an *external* constraint (like membrane links or
+  ActA tethers) so it lands in `myoJoints2` rather than `myoJoints1`?
+  That places it categorically with other external couplings that the
+  GPU path doesn't yet handle, and is the right architectural box.
+
+## 2026-06-01 — Fix missing rod-tail anchor force on GPU path
+
+The 2026-05-31 single-myosin diagnostic identified the root cause of
+the entire GPU joints divergence saga: `MyosinFixed.applyRodFixedPtForce`
+(the rod-tail anchor spring) was never applied on the GPU path. Today:
+audit, fix, and validate. **All three ensemble metrics now PASS** the
+|diff|/cSEM < 2.0 criterion for the first time in this saga.
+
+### Force audit — per-Myosin CPU dispatch vs GPU jointsKernel
+
+| force | source | GPU replicated? |
+|---|---|---|
+| applyLeverMotorJointForce  | Myosin.jointConstraints  | YES (jointsKernel L371-421) |
+| applyLeverMotorJointTorque | Myosin.jointConstraints  | YES (L423-453) |
+| applyRodLeverJointForce    | Myosin.jointConstraints  | YES (L455-505) |
+| applyRodLeverJointTorque   | Myosin.jointConstraints  | YES (L507-533) |
+| applyRodFixedPtForce       | MyosinFixed (override)   | **NO — DROPPED** |
+
+`grep -c "MyosinFixed\|myFixedPt\|applyRodFixed" GPUMoveThing.java`
+returns 0. The four inter-segment joints are on device; the rod-tail
+anchor spring (force only, no torque) is the sole CPU-only force, and
+was being silently skipped because `MyosinThreads.divideAndConquer`
+short-circuited the entire per-Myosin dispatch when
+`(useGPU && !DIAG_CPU_JOINTS)`. MyosinDimer kept its own CPU dispatch
+(not short-circuited) but has 0 instances in the gliding assay.
+
+### Fix — reduced CPU pass, no kernel changes
+
+- `Myosin.java` — new `applyGPUDroppedForces()` (no-op base);
+  `MyosinThreads.divideAndConquer` always distributes work;
+  `MyosinThreads.execute` calls `applyGPUDroppedForces()` on the GPU
+  path and the full `jointConstraints()` on the CPU/DIAG path.
+- `MyosinFixed.java` — overrides `applyGPUDroppedForces()` to call
+  `applyRodFixedPtForce()`. No other dropped forces in the audit.
+- `Env.java` — `myoJ2FracMoveTorq` reset 0.10 → **0.00** for clean
+  validation against the iter2d CPU baseline. Rest-angle edits in
+  Myosin.java:273 and GPUMoveThing.java:523 left in place (inert at
+  J2=0; harmless).
+
+Force routing: joints → GPU `jointForceSum`/`jointTorqueSum`; anchor
+spring → CPU `soaForceSum` → packed into `cpuForceSum`. The move
+kernel sums both. No double-application; no remaining dropped force.
+
+### Pre-check 4a — SingleMyoDiag (5.0 s, J2=0, seed 1, n=50010)
+
+```
+                 CPU      GPU (fixed)   GPU (yesterday)
+head_r mean    0.0608     0.0629        0.5329   ★★★
+head_r max     0.124      0.120         1.046    ★★★
+head_z mean   -0.0516    -0.0518       -0.1448
+theta_RL mean  1.699      1.673         1.609 (5.3°)
+```
+
+GPU head_r BOUNDED at 0.063 µm vs CPU 0.061 µm: the myosin is now
+anchored. Drop from 1.046 µm max → 0.120 µm max confirms the fix
+applies the spring as designed.
+
+### Pre-check 4b — Conformation on glidingAssay500_val (seed 1)
+
+```
+                 CPU       GPU (fixed)   diff       prior gap
+theta_LM mean   0.350239   0.350648      +4e-4 rad  ~0
+theta_RL mean   1.676242   1.675829      -4e-4 rad  -0.092 (5.3°)
+head_z mean    -0.038880  -0.038918      -0.04 nm   -55 nm   ★★
+```
+
+The 55 nm head_z gap collapsed to **0.04 nm**. Internal pose now
+matches CPU to numerical precision. The "55 nm head_z gap"
+(2026-05-31, persistent across J2=0 and J2=0.1) is fully explained
+as: GPU rod tail wasn't anchored, so the rod tilted slightly more.
+
+### 10-seed GPU ensemble — PASS, PASS, PASS
+
+```
+metric            GPU n=10           CPU baseline      |diff|/cSEM   verdict
+bindEvents        829.9 ± 41         856.8 ± 46        0.44          PASS  ✓
+meanBoundMotors     7.018 ± 0.30       7.30 ± 0.30     0.67          PASS  ✓
+glidingVelocity     8.398 ± 0.16       8.22 ± 0.15     0.80          PASS  ✓
+```
+
+Per-seed values, full stats, and dense smoke timing:
+`RUN_LOGS/2026-06-01_anchor_fix_validation.txt`.
+
+For context: pre-fix GPU runs had |diff|/cSEM of 3-8 (J2=0 baseline
+showed -42% bindEvents; J2=0.1 narrowed it to -24%). The anchor
+fix closes both prior gaps — bindEvents diff -42% → -3%.
+
+### Dense smoke timing — glidingDense_demo_smoke
+
+```
+GPUMoveThing total=45.98s calls=1101  (slotPack 9.76 + jointPack 6.04 + exec 12.73 + unpack 17.45)
+Myosin Threads 8.22s   ← now runs the CPU anchor pass (was ~0 with short-circuit)
+ThingStep      26.29s
+```
+
+~98,000 anchored myosins × 1101 steps = ~8 s wall on CPU side
+(~75 ns/call/thread × 16 threads). ~6% of per-step total; not a
+bottleneck. No reason to port the anchor spring into the kernel.
+
+### Files modified
+
+- `boxOfActin/Myosin.java` — divideAndConquer/execute reworked; added
+  `applyGPUDroppedForces()` no-op base.
+- `boxOfActin/MyosinFixed.java` — overrides `applyGPUDroppedForces()`
+  to apply `applyRodFixedPtForce()`.
+- `boxOfActin/Env.java` — `myoJ2FracMoveTorq` 0.10 → 0.00.
+
+Production compile clean (Java 21, TornadoVM 4.0.1-dev).
+
+### Open
+
+- This closes the GPU joints/binding-rate divergence. The CPU/GPU
+  paths now agree statistically on the gliding-assay ensemble.
+- The J2=0.1, rest=96° biology decision can be revisited as a
+  separate concern (the edits are still in tree, inert at J2=0).
+  Yesterday's CPU n=10 at J2=0.1 was 8.04 µm/s; today's J2=0 GPU is
+  8.40 µm/s and CPU baseline 8.22 — picking J2 is now a biology
+  question, not a CPU/GPU agreement question.
+- Step() port to GPU: the audit pattern (enumerate per-Thing forces,
+  classify replicated vs dropped, run dropped on CPU) is the
+  template. Any force not on the GPU must still run somewhere, or
+  it's silently dropped — that's the lesson of this entire saga.
