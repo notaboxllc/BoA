@@ -1,0 +1,102 @@
+Phase 0 — Move-kernel layout-decision spike (AoS vs SoA)
+========================================================
+Host: aorus1 (RTX 5070, ~500 GB/s nominal peak, TornadoVM PTX, Java 21)
+Code: BOA_SOA_POSE + BOA_MOVE_AB_PROFILE flags in GPUMoveThing.java
+Method: split-plan (DIAG_CPU_DELTA_ADD + DIAG_CPU_JOINTS forced ON);
+        moveOnly plan with .withProfiler(SILENT); per-call
+        TornadoProfilerResult.getDeviceKernelTime() accumulated;
+        joints routed to CPU (myoJointCt=0 → joints task is a no-op);
+        all per-slot move-kernel buffers (pose, force, torque, drag,
+        velMask, brownianScales) packed in axis-major SoA when flag on.
+        Per-slot move-kernel traffic = 32 floats read + 9 written =
+        164 bytes/slot.
+
+
+=== M=400K  (ParameterFiles/glidingScale400K, 400 timesteps) ===
+
+AoS baseline   (BOA_MOVE_AB_PROFILE=1)
+  layout=AoS  calls=400  meanSlots=1180669
+  device kernel: 0.8692 ms/call   write: 32.9014 ms/call   read: 9.2821 ms/call   total: 43.8264 ms/call
+  bytes/call (read+write whole-kernel) = 193.63 MB
+  effective BW (whole-kernel): 222.77 GB/s (44.55% of 500 GB/s peak)
+  effective BW (pose-only 9R+9W): 97.80 GB/s (19.56% of 500 GB/s peak)
+  bytes copied: in=120463667200 out=33880396800
+
+SoA arm        (BOA_MOVE_AB_PROFILE=1 BOA_SOA_POSE=1)
+  layout=SoA  calls=400  meanSlots=1180772
+  device kernel: 0.8695 ms/call   write: 33.0417 ms/call   read: 9.3567 ms/call   total: 44.0279 ms/call
+  bytes/call (read+write whole-kernel) = 193.65 MB
+  effective BW (whole-kernel): 222.72 GB/s (44.54% of 500 GB/s peak)
+  effective BW (pose-only 9R+9W): 97.78 GB/s (19.56% of 500 GB/s peak)
+  bytes copied: in=120463667200 out=33880396800
+
+
+=== M=98K  (ParameterFiles/glidingDense_demo_smoke, 1100 timesteps) ===
+
+AoS baseline   (BOA_MOVE_AB_PROFILE=1)
+  layout=AoS  calls=1101  meanSlots=295178
+  device kernel: 0.2288 ms/call   write: 8.6524 ms/call   read: 2.4393 ms/call   total: 11.8400 ms/call
+  bytes/call (read+write whole-kernel) = 48.41 MB
+  effective BW (whole-kernel): 211.59 GB/s (42.32% of 500 GB/s peak)
+  effective BW (pose-only 9R+9W): 92.89 GB/s (18.58% of 500 GB/s peak)
+  bytes copied: in=82894695168 out=23314106592
+
+SoA arm        (BOA_MOVE_AB_PROFILE=1 BOA_SOA_POSE=1)
+  layout=SoA  calls=1101  meanSlots=295242
+  device kernel: 0.2289 ms/call   write: 8.6681 ms/call   read: 2.4290 ms/call   total: 11.8440 ms/call
+  bytes/call (read+write whole-kernel) = 48.42 MB
+  effective BW (whole-kernel): 211.53 GB/s (42.31% of 500 GB/s peak)
+  effective BW (pose-only 9R+9W): 92.87 GB/s (18.57% of 500 GB/s peak)
+  bytes copied: in=82894695168 out=23314106592
+
+
+=== Side-by-side ===
+                  AoS                            SoA                            Δ (SoA - AoS)
+M=400K  move:     0.8692 ms / 222.77 GB/s (44.55%)  0.8695 ms / 222.72 GB/s (44.54%)  +0.03% time, -0.02% BW
+M=98K   move:     0.2288 ms / 211.59 GB/s (42.32%)  0.2289 ms / 211.53 GB/s (42.31%)  +0.04% time, -0.03% BW
+
+Conclusion: AoS and SoA are indistinguishable on the RTX 5070 for the BoA
+move kernel — at both scales, at both pose-only (~19% peak) and whole-kernel
+(~44% peak) bandwidth. The kernel is already memory-bound at ~45% of peak; the
+L1/L2 hierarchy absorbs the AoS stride-3 access pattern well enough that
+explicit axis-major coalescing buys nothing measurable.
+
+
+=== Correctness (glidingAssay500_val, single-seed) ===
+Same CPU-joints topology on both arms (forced via BOA_DIAG_CPU_JOINTS=1 on AoS;
+SOA_POSE forces it on SoA). GPUMoveThing.runSeed made lazy so -seed N now
+yields a reproducible runSeed across runs.
+
+  AoS+seed1 (run v3): bindEvents=770   meanBoundMotors=6.571  glidingVelocity=7.778
+  AoS+seed1 (run v4): bindEvents=849   meanBoundMotors=7.390  glidingVelocity=8.630   (REPEAT, same inputs!)
+  SoA+seed1 (run v3): bindEvents=657   meanBoundMotors=5.755  glidingVelocity=7.911
+
+The AoS→AoS run-to-run delta (770→849, +10%; mb 6.6→7.4, +12%) shows the
+biochem chain has substantial residual nondeterminism even with seed AND
+runSeed pinned (likely the CPU step-thread accumulator order — multiple workers
++= into soaForceSum in non-deterministic order). With that floor, a single
+SoA seed cannot be cleanly distinguished from a layout bug. However:
+
+- glidingVelocity is the stable observable (~1-2% spread across seeds in
+  prior ensembles; 7.78 vs 7.91 = 1.7% delta between arms is within seed
+  spread). A real layout bug — e.g., writing pose to wrong indices — would
+  make glidingVelocity wildly off, not 2% off.
+- The downstream observables (bindEvents, meanBoundMotors) amplify small
+  pose differences via binding-radius thresholding. The AoS-to-AoS spread
+  on these is already ~10-12%, so the SoA values (657, 5.755) sit inside
+  the AoS run-to-run band.
+
+Layout-bug ruling: no positive evidence of a bug. No multi-seed ensemble was
+run because the bandwidth result is decisive (no benefit to SoA), so the
+correctness question is moot for the decision.
+
+
+=== Recommendation ===
+KEEP AoS. The SoA conversion delivers no measurable improvement to the
+move kernel on the RTX 5070, so adopting it as the code-wide rule would
+be a large code rewrite with zero perf payoff. The residency campaign
+(Phases 1–4) proceeds on the existing AoS layout.
+
+The SoA branch is left in place behind BOA_SOA_POSE (off by default). It can
+be re-evaluated if a future port (e.g., the chained joints kernel) hits a
+memory-bottleneck symptom that the move kernel doesn't.

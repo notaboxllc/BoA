@@ -1304,6 +1304,7 @@ public class BoxOfActin {
 			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d slotPack=%.3fs jointPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk - jpk, jpk, ex, un);
 		}
+		GPUMoveThing.reportMoveAB();
 		if (Env.useGPU && GPUMyosinJoints.getCallCount() > 0) {
 			int    calls = GPUMyosinJoints.getCallCount();
 			double tot   = GPUMyosinJoints.getTotalNanos()  / 1.0e9;

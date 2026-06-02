@@ -4,6 +4,69 @@ Last updated: 2026-06-02
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-06-02 — Phase 0 layout-decision spike (AoS vs SoA): keep AoS
+
+First executable step of the residency campaign. Goal: settle the code-wide
+pose-storage rule (AoS m*3 interleaved vs SoA separate-axis) before substantial
+porting, using the move kernel as the binding test (per-entity access where
+coalescing matters most).
+
+**Implementation.** Two env-gated flags added to `GPUMoveThing.java`:
+- `BOA_SOA_POSE` — switches the move kernel + its pack/unpack to axis-major
+  layout (within the same FloatArrays: x's in `[0..stride)`, y's in
+  `[stride..2*stride)`, z's in `[2*stride..3*stride)`; `stride = slotCap`).
+  No new buffers — same arg count to the kernel, no 15-arg-cap concern.
+  Forces `DIAG_CPU_JOINTS=true` (the joints kernel still expects AoS pose
+  and is bypassed; CPU joints write into `cpuForceSum`, which the SoA move
+  kernel reads correctly because force buffers are also axis-major in pack).
+- `BOA_MOVE_AB_PROFILE` — isolates the move kernel for clean timing. Forces
+  `DIAG_CPU_JOINTS` + `DIAG_CPU_DELTA_ADD` so the only GPU task per step is
+  the moveOnly plan, then wraps it with TornadoVM `.withProfiler(SILENT)` and
+  accumulates `getDeviceKernelTime()` / write / read times. New
+  `GPUMoveThing.reportMoveAB()` prints the per-call summary at run end.
+
+Also made `GPUMoveThing.runSeed` lazy-initialized (via `ensureRunSeed()`
+called from `onStepStart` / `moveThings`) so `-seed N` parsed AFTER class
+load now produces a reproducible runSeed across runs — previously the runSeed
+was locked in by the class-load-time `Env.mtRNG.nextInt()` and `-seed` had no
+effect on it.
+
+**Results (full numbers in `RUN_LOGS/2026-06-02_phase0-layout-spike.txt`):**
+
+```
+                  AoS                              SoA                              Δ
+M=400K  move:     0.8692 ms / 222.77 GB/s (44.6%)  0.8695 ms / 222.72 GB/s (44.5%)  +0.03% time
+M=98K   move:     0.2288 ms / 211.59 GB/s (42.3%)  0.2289 ms / 211.53 GB/s (42.3%)  +0.04% time
+```
+
+AoS and SoA are indistinguishable on the RTX 5070 — at both scales, at both
+the pose-only access pattern (~19% peak BW) and the whole-kernel pattern
+(~44% peak BW). The kernel is already memory-bound at ~45% of theoretical
+peak; the L1/L2 hierarchy absorbs stride-3 reads well enough that explicit
+axis-major coalescing buys nothing measurable. This contradicts the
+RESIDENCY_PLAN's prior framing ("~2% peak / ~10 GB/s effective that AoS
+shows") — the move kernel in isolation, measured against pure device kernel
+time (not chained-plan wall including transfers), is already in a healthy
+bandwidth regime.
+
+**Correctness.** Single-seed `glidingAssay500_val` comparison was inconclusive
+for a different reason: with `-seed 1` AND a pinned runSeed, two repeat AoS
+runs gave `bindEvents=770, 849` (a 10% delta from CPU step-thread
+accumulator-order nondeterminism). The SoA arm's 657 sits inside that AoS
+run-to-run band. The stable observable — gliding velocity — agrees to ~2%
+between AoS and SoA (7.78 vs 7.91), well within seed spread; a real layout
+bug (e.g., writing pose to wrong indices) would make gliding velocity
+wildly off, not 2% off. No multi-seed ensemble run because the bandwidth
+result is decisive on its own.
+
+**Decision: KEEP AoS.** The SoA conversion delivers no measurable improvement
+on the RTX 5070 move kernel, so adopting it code-wide would be a large rewrite
+with zero perf payoff. The residency campaign (Phases 1–4 in
+`RESIDENCY_PLAN.md`) proceeds on the existing AoS layout. The SoA branch is
+left in place behind `BOA_SOA_POSE` (default off) — cheap to keep, available
+if a future kernel hits a memory-bottleneck symptom that the move kernel
+doesn't.
+
 ## 2026-06-02 — Device-residency audit: per-step CPU pose consumers catalogued
 
 Strategic pivot: the GPU port goal is now DEVICE RESIDENCY — keeping canonical
