@@ -74,22 +74,21 @@ public class Myosin {
 			switch (jobId) {
 				case Env.myoJoints1Start:
 					if (myoCt == 0) return;
-					if (Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS) {
-						// GPU path: per-Myosin joints run as task 1 of the chained
-						// TaskGraph inside GPUMoveThing.moveThings() (joints kernel
-						// ADDS to forceSum/torqueSum on device, move kernel reads).
-						// Zero the chunks here so the spawned worker threads do no
-						// per-Myosin work in this wave; MyosinDimer.myoDimerThreads
-						// keeps its CPU dispatch.
-						// DIAG_CPU_JOINTS path: fall through to the CPU joint
-						// dispatch below — the GPU joints task is no-oped via
-						// myoJointCt=0 in GPUMoveThing.classifyThings, and CPU
-						// joint forces flow through soaForceSum → cpuForceSum.
-						for (int i=0; i <= numThreads; i++) { jobDiv[i] = 0; }
-					} else {
-						for (int i=0; i <= numThreads; i++) {
-							jobDiv[i] = i*myoCt/numThreads;	// divide the job amongst threads
-						}
+					// Always distribute work across threads. On the CPU path,
+					// execute() calls the full Myosin.jointConstraints() (four
+					// inter-segment joint apply* methods, plus MyosinFixed's
+					// applyRodFixedPtForce anchor spring via its override). On
+					// the GPU path, execute() calls applyGPUDroppedForces()
+					// which runs ONLY the per-Myosin forces the GPU jointsKernel
+					// does not replicate — currently just MyosinFixed's
+					// rod-tail anchor spring. The four inter-segment joints
+					// are computed on device and would double-apply if also
+					// dispatched here. See JOURNAL 2026-06-01 "Fix missing
+					// rod-tail anchor force on GPU path".
+					// MyosinDimer.myoDimerThreads keeps its own full CPU
+					// dispatch (cross-Myosin coupling — not in jointsKernel).
+					for (int i=0; i <= numThreads; i++) {
+						jobDiv[i] = i*myoCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
 			}
@@ -103,12 +102,19 @@ public class Myosin {
 					gather(); break;
 			}
 		}
-		
+
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.myoJoints1Start:
-					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-						theMyosins[i].jointConstraints(); 
+					boolean gpuPath = Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS;
+					if (gpuPath) {
+						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+							theMyosins[i].applyGPUDroppedForces();
+						}
+					} else {
+						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+							theMyosins[i].jointConstraints();
+						}
 					}
 					break;
 			}
@@ -295,6 +301,17 @@ public class Myosin {
 			theMyosins[i].jointConstraints();
 		}
 	}
+
+	// GPU-path reduced pass. The GPU jointsKernel replicates the four
+	// inter-segment apply* methods inside jointConstraints() but NOT any
+	// per-subclass extras (e.g. MyosinFixed's rod-tail anchor spring).
+	// MyosinThreads.execute() calls this instead of jointConstraints()
+	// when (useGPU && !DIAG_CPU_JOINTS) so the dropped forces still apply
+	// on the CPU side and land in soaForceSum (which the move kernel reads
+	// as cpuForceSum + jointForceSum, with the joints kernel writing to a
+	// separate delta buffer). Base implementation is a no-op for plain
+	// Myosin; MyosinFixed overrides to apply applyRodFixedPtForce().
+	public void applyGPUDroppedForces() {}
 
 	// DIAG_DUMP: per-Myosin accumulators populated during the apply* methods
 	// when the diagnostic step matches. Read out at the end of jointConstraints.

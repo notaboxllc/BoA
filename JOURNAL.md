@@ -4,6 +4,129 @@ Last updated: 2026-06-01
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-06-01 — Fix missing rod-tail anchor force on GPU path
+
+The 2026-05-31 single-myosin diagnostic identified the root cause of
+the entire GPU joints divergence saga: `MyosinFixed.applyRodFixedPtForce`
+(the rod-tail anchor spring) was never applied on the GPU path. Today:
+audit, fix, and validate. **All three ensemble metrics now PASS** the
+|diff|/cSEM < 2.0 criterion for the first time in this saga.
+
+### Force audit — per-Myosin CPU dispatch vs GPU jointsKernel
+
+| force | source | GPU replicated? |
+|---|---|---|
+| applyLeverMotorJointForce  | Myosin.jointConstraints  | YES (jointsKernel L371-421) |
+| applyLeverMotorJointTorque | Myosin.jointConstraints  | YES (L423-453) |
+| applyRodLeverJointForce    | Myosin.jointConstraints  | YES (L455-505) |
+| applyRodLeverJointTorque   | Myosin.jointConstraints  | YES (L507-533) |
+| applyRodFixedPtForce       | MyosinFixed (override)   | **NO — DROPPED** |
+
+`grep -c "MyosinFixed\|myFixedPt\|applyRodFixed" GPUMoveThing.java`
+returns 0. The four inter-segment joints are on device; the rod-tail
+anchor spring (force only, no torque) is the sole CPU-only force, and
+was being silently skipped because `MyosinThreads.divideAndConquer`
+short-circuited the entire per-Myosin dispatch when
+`(useGPU && !DIAG_CPU_JOINTS)`. MyosinDimer kept its own CPU dispatch
+(not short-circuited) but has 0 instances in the gliding assay.
+
+### Fix — reduced CPU pass, no kernel changes
+
+- `Myosin.java` — new `applyGPUDroppedForces()` (no-op base);
+  `MyosinThreads.divideAndConquer` always distributes work;
+  `MyosinThreads.execute` calls `applyGPUDroppedForces()` on the GPU
+  path and the full `jointConstraints()` on the CPU/DIAG path.
+- `MyosinFixed.java` — overrides `applyGPUDroppedForces()` to call
+  `applyRodFixedPtForce()`. No other dropped forces in the audit.
+- `Env.java` — `myoJ2FracMoveTorq` reset 0.10 → **0.00** for clean
+  validation against the iter2d CPU baseline. Rest-angle edits in
+  Myosin.java:273 and GPUMoveThing.java:523 left in place (inert at
+  J2=0; harmless).
+
+Force routing: joints → GPU `jointForceSum`/`jointTorqueSum`; anchor
+spring → CPU `soaForceSum` → packed into `cpuForceSum`. The move
+kernel sums both. No double-application; no remaining dropped force.
+
+### Pre-check 4a — SingleMyoDiag (5.0 s, J2=0, seed 1, n=50010)
+
+```
+                 CPU      GPU (fixed)   GPU (yesterday)
+head_r mean    0.0608     0.0629        0.5329   ★★★
+head_r max     0.124      0.120         1.046    ★★★
+head_z mean   -0.0516    -0.0518       -0.1448
+theta_RL mean  1.699      1.673         1.609 (5.3°)
+```
+
+GPU head_r BOUNDED at 0.063 µm vs CPU 0.061 µm: the myosin is now
+anchored. Drop from 1.046 µm max → 0.120 µm max confirms the fix
+applies the spring as designed.
+
+### Pre-check 4b — Conformation on glidingAssay500_val (seed 1)
+
+```
+                 CPU       GPU (fixed)   diff       prior gap
+theta_LM mean   0.350239   0.350648      +4e-4 rad  ~0
+theta_RL mean   1.676242   1.675829      -4e-4 rad  -0.092 (5.3°)
+head_z mean    -0.038880  -0.038918      -0.04 nm   -55 nm   ★★
+```
+
+The 55 nm head_z gap collapsed to **0.04 nm**. Internal pose now
+matches CPU to numerical precision. The "55 nm head_z gap"
+(2026-05-31, persistent across J2=0 and J2=0.1) is fully explained
+as: GPU rod tail wasn't anchored, so the rod tilted slightly more.
+
+### 10-seed GPU ensemble — PASS, PASS, PASS
+
+```
+metric            GPU n=10           CPU baseline      |diff|/cSEM   verdict
+bindEvents        829.9 ± 41         856.8 ± 46        0.44          PASS  ✓
+meanBoundMotors     7.018 ± 0.30       7.30 ± 0.30     0.67          PASS  ✓
+glidingVelocity     8.398 ± 0.16       8.22 ± 0.15     0.80          PASS  ✓
+```
+
+Per-seed values, full stats, and dense smoke timing:
+`RUN_LOGS/2026-06-01_anchor_fix_validation.txt`.
+
+For context: pre-fix GPU runs had |diff|/cSEM of 3-8 (J2=0 baseline
+showed -42% bindEvents; J2=0.1 narrowed it to -24%). The anchor
+fix closes both prior gaps — bindEvents diff -42% → -3%.
+
+### Dense smoke timing — glidingDense_demo_smoke
+
+```
+GPUMoveThing total=45.98s calls=1101  (slotPack 9.76 + jointPack 6.04 + exec 12.73 + unpack 17.45)
+Myosin Threads 8.22s   ← now runs the CPU anchor pass (was ~0 with short-circuit)
+ThingStep      26.29s
+```
+
+~98,000 anchored myosins × 1101 steps = ~8 s wall on CPU side
+(~75 ns/call/thread × 16 threads). ~6% of per-step total; not a
+bottleneck. No reason to port the anchor spring into the kernel.
+
+### Files modified
+
+- `boxOfActin/Myosin.java` — divideAndConquer/execute reworked; added
+  `applyGPUDroppedForces()` no-op base.
+- `boxOfActin/MyosinFixed.java` — overrides `applyGPUDroppedForces()`
+  to apply `applyRodFixedPtForce()`.
+- `boxOfActin/Env.java` — `myoJ2FracMoveTorq` 0.10 → 0.00.
+
+Production compile clean (Java 21, TornadoVM 4.0.1-dev).
+
+### Open
+
+- This closes the GPU joints/binding-rate divergence. The CPU/GPU
+  paths now agree statistically on the gliding-assay ensemble.
+- The J2=0.1, rest=96° biology decision can be revisited as a
+  separate concern (the edits are still in tree, inert at J2=0).
+  Yesterday's CPU n=10 at J2=0.1 was 8.04 µm/s; today's J2=0 GPU is
+  8.40 µm/s and CPU baseline 8.22 — picking J2 is now a biology
+  question, not a CPU/GPU agreement question.
+- Step() port to GPU: the audit pattern (enumerate per-Thing forces,
+  classify replicated vs dropped, run dropped on CPU) is the
+  template. Any force not on the GPU must still run somewhere, or
+  it's silently dropped — that's the lesson of this entire saga.
+
 ## 2026-05-31 — Single-myosin thermal characterization: CPU vs GPU conformational ensemble
 
 Planner pivot: after seven per-step joint diagnostics came back clean

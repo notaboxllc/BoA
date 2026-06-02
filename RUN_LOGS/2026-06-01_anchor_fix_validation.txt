@@ -1,0 +1,91 @@
+Anchor-fix validation — 2026-06-01
+
+Fix: MyosinThreads.divideAndConquer no longer short-circuits the CPU
+per-Myosin pass on the GPU path. Instead, every worker runs a reduced
+"GPU dropped forces" pass that calls Myosin.applyGPUDroppedForces()
+(no-op for base Myosin; MyosinFixed override applies applyRodFixedPtForce).
+Joint forces remain on the GPU (jointsKernel) — no double-application.
+
+J2 reset to 0.00 in Env.java for clean validation. The rest=96°
+edits in Myosin.java:273 and GPUMoveThing.java:523 remain in place
+(inert at J2=0).
+
+----------------------------------------------------------------------
+Pre-check 4a — SingleMyoDiag (5.0s, J2=0, seed 1, n=50010)
+----------------------------------------------------------------------
+metric          CPU (DIAG_CPU_JOINTS)  GPU (fixed)  GPU (yesterday, broken)
+head_x mean    -0.003590 µm            -0.001288    -0.4797 ★★
+head_y mean     0.001579                0.003317    -0.1791 ★★
+head_z mean    -0.051569               -0.051798    -0.1448 ★
+head_r mean     0.060826                0.062850     0.5329 ★★★
+head_r max      0.124190                0.119840     1.046  ★★★
+theta_RL mean   1.699344 rad            1.672800    1.608809 (5.3°)
+theta_LM mean   0.273483                0.272693    0.273180
+
+VERDICT: GPU head_r BOUNDED at 0.063 µm (target ~0.06, CPU 0.061) —
+anchor force IS now being applied on the GPU path. The 0.53 → 0.06 µm
+drop confirms the fix.
+
+----------------------------------------------------------------------
+Pre-check 4b — Conformation on glidingAssay500_val (seed 1)
+----------------------------------------------------------------------
+metric                CPU (DIAG_CPU_JOINTS)  GPU (fixed)   diff       prior gap
+theta_LM mean         0.350239 rad           0.350648      +0.000409  ~0
+theta_RL mean         1.676242               1.675829      -0.000413  -0.092 (5.3°)
+head_z mean          -0.038880 µm           -0.038918      -0.038 nm  -55 nm ★★
+samples (motor x t)   2828000                2828000
+bindEvents (1-seed)   963                    790                       (1-seed noise)
+glidingVelocity       8.65                   8.21
+
+VERDICT: head_z gap collapsed from 55 nm to 0.04 nm — 3 orders of
+magnitude tighter. theta_RL/theta_LM aligned at the 0.02° level.
+Internal pose now matches CPU to numerical precision.
+
+----------------------------------------------------------------------
+10-seed GPU ensemble — glidingAssay500_val, J2=0, anchor fix
+----------------------------------------------------------------------
+seed   bindEvents   meanBoundMotors   glidingVelocity
+1       873         7.287             8.7007
+2       762         6.705             8.4480
+3       612         5.032             7.1327
+4       852         7.407             8.2142
+5       769         7.408             8.4397
+6      1039         8.049             8.8220
+7       922         7.924             8.8385
+8       980         7.629             8.4920
+9       792         6.861             8.8170
+10      698         5.883             8.0780
+
+metric            GPU n=10        SD       SEM      CPU baseline      diff      cSEM     |diff|/cSEM   verdict
+bindEvents        829.900        129.84    41.06    856.80 ± 45.72   +26.90    61.45    0.44          PASS
+meanBoundMotors     7.018          0.94     0.30      7.30 ± 0.30    +0.282     0.423   0.67          PASS
+glidingVelocity     8.398          0.52     0.16      8.22 ± 0.15    -0.178     0.222   0.80          PASS
+
+VERDICT: ALL THREE PASS for the first time in the entire GPU joints
+saga. Pre-fix GPU runs had |diff|/cSEM of 3-8 on bindEvents and
+glidingVelocity (and -42% to -24% bindEvents drops).
+
+CPU baseline (iter2d, J2=0): bindEvents 856.80 ± 45.72,
+                              meanBoundMotors 7.30 ± 0.30,
+                              glidingVelocity 8.22 ± 0.15.
+
+----------------------------------------------------------------------
+Dense smoke timing — glidingDense_demo_smoke (1101 steps, 500 myo/µm²)
+----------------------------------------------------------------------
+GPUMoveThing total=45.982s calls=1101
+  slotPack=9.755s  jointPack=6.045s  exec=12.731s  unpack=17.450s
+ThingStep Threads     26.294s
+Myosin Threads         8.219s  ← now runs the CPU anchor pass (was 0 with short-circuit)
+ThingBrownian Threads  2.904s
+Mesh Threads           5.791s
+MotorBindGrid3D Fill   3.843s
+
+The CPU anchor pass at 500 myo/µm² × 196 µm² ≈ 98,000 anchored myosins
+over 1101 steps cost ~8s wall, which is ~6% of the per-step wall time
+on this smoke config. Acceptable; no need to port into kernel.
+
+Raw logs:
+  /tmp/anchorfix_singleMyo_cpu.log, /tmp/anchorfix_singleMyo_gpu.log
+  /tmp/anchorfix_conf_cpu.log,      /tmp/anchorfix_conf_gpu.log
+  /tmp/anchorfix_gpu_seed{1..10}.log
+  /tmp/anchorfix_dense_smoke.log

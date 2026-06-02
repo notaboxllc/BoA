@@ -24,6 +24,14 @@ public class MyosinFixed extends Myosin {
 		super.jointConstraints();
 		applyRodFixedPtForce();
 	}
+
+	// GPU-path reduced pass — see Myosin.applyGPUDroppedForces().
+	// Applies ONLY the rod-tail anchor spring; the four inter-segment joint
+	// forces/torques are computed by GPUMoveThing.jointsKernel on device and
+	// would double-apply if also run here.
+	public void applyGPUDroppedForces () {
+		applyRodFixedPtForce();
+	}
 	
 	public void applyRodFixedPtForce () {
 		double strainDist = Pt3D.ptDist(myoRod.end1AsPt3D(), myFixedPt);
