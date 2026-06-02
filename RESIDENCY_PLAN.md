@@ -42,28 +42,25 @@ step is where the transfer cost disappears.
 
 ## Phase sequence (gliding-assay slice)
 
-### Phase 0 — Layout decision (the spike) — settle AoS vs SoA before substantial porting
-Determine the code-wide pose-storage rule: keep AoS m*3 interleaving (`[x0,y0,z0,x1,…]`,
-current) or switch to SoA separate-axis arrays (`[x0,x1,…][y0,y1,…][z0,z1,…]`). Made late,
-this forces rewriting every kernel; made first, everything downstream is written once in the
-right layout.
-- **Vehicle:** the move kernel (pure per-entity integration). Per-entity access is where the
-  layouts differ most — AoS reads are stride-3 (uncoalesced, ~3× transactions); SoA reads
-  are contiguous (coalesced). Gather/scatter (grid, neighbor reads) is scattered in both
-  layouts, so it is layout-insensitive and does not drive the decision. The move kernel is
-  the binding test.
-- **Method:** convert the move kernel's pose arrays (coord/uVec/yVec) to SoA separate-axis
-  FloatArrays, rewrite its indexing, and A/B against AoS at 400K scale (where coalescing
-  bites; 98K for comparison). Measure effective bandwidth and per-call wall.
-- **Decision:** if SoA materially pulls the move kernel toward memory-bound (away from the
-  ~2% peak / ~10 GB/s effective that AoS shows), adopt SoA code-wide and KEEP the converted
-  kernel as the foundation (not throwaway). If SoA does not materially help, keep AoS — it's
-  simpler and avoids a code-wide rewrite.
-- **Correctness:** pure layout change — results must match AoS modulo float-add order
-  (smoke seed, observables unchanged).
-- **Note:** start with the move kernel; only extend the A/B to the chained joints kernel if
-  the move-kernel result is marginal/inconclusive.
-- This is the v2-branch-gate signal: the layout chosen here is v2's representation.
+### Phase 0 — Layout decision (the spike) — DONE (2026-06-02): keep AoS
+**Outcome: keep AoS code-wide.** The move-kernel A/B showed AoS and SoA within 0.03–0.04%
+at both M=400K (0.869 ms/call, 223 GB/s, ~45% peak) and M=98K (0.229 ms/call, 212 GB/s,
+~42% peak). The pure move kernel is already memory-bound at ~45% of the RTX 5070's peak; the
+cache hierarchy absorbs the stride-3 AoS access, so explicit axis-major coalescing buys
+nothing measurable. The SoA branch is kept behind `BOA_SOA_POSE` (off) for any future
+gather-heavy kernel, but the storage rule is AoS.
+
+**Important correction this produced:** the kernel is at ~45% peak, NOT the ~2% figure
+previously cited — that 2% was the *chained plan including transfers*, not pure device-kernel
+time. This confirms the residency thesis: the compute is efficient; the per-step transfer is
+what drags effective throughput to 2%. Residency targets exactly that gap, and it is large.
+
+Original decision criteria (retained for the record):
+Determine the code-wide pose-storage rule: keep AoS m*3 interleaving (`[x0,y0,z0,x1,…]`) or
+switch to SoA separate-axis arrays. The move kernel (pure per-entity integration) is the
+decisive vehicle — per-entity access is where the layouts differ most (AoS stride-3
+uncoalesced vs SoA contiguous coalesced); gather/scatter is scattered in both layouts and
+does not drive the decision.
 
 ### Phase 1 — Anchor spring (A7.b) — establishes the pattern
 Move `MyosinFixed.applyRodFixedPtForce` to a device kernel (per-myosin anchor spring; reads
@@ -176,6 +173,7 @@ one.
   / smoke) gates the expensive ensemble; the ensemble runs once to confirm, not to localize.
 
 ## The one-line state of the campaign
-Audit complete; layout decision pending. Next executable step: **Phase 0 — the
-layout-decision spike (move kernel AoS vs SoA at 400K scale)** — to set the code-wide storage
-rule before substantial porting. Then Phase 1 (anchor spring → device kernel).
+Phase 0 done — layout is AoS (no rewrite). Next executable step: **Phase 1 — port
+`MyosinFixed.applyRodFixedPtForce` (the anchor spring) to a device kernel on the AoS layout**
+— lowest-risk port, establishes the pattern and the force-coverage discipline, and clears
+the last known anchor CPU pose-read on the GPU path.
