@@ -1,8 +1,44 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-02 — Device-residency audit: per-step CPU pose consumers catalogued
+
+Strategic pivot: the GPU port goal is now DEVICE RESIDENCY — keeping canonical
+pose state (`coord` / `uVec` / `yVec` + derived fields) on the GPU across
+steps, downloading only at output frames. Per-step transfer is eliminated only
+when NO per-step CPU computation needs to read poses, so the planner needs the
+COMPLETE set of per-step CPU pose consumers before scoping.
+
+Catalogue produced in **`RESIDENCY_AUDIT.md`** (Parts 1–5). Highlights:
+
+- **{must port} blocking set** is explicit and per-config (gliding /
+  Listeria / membrane / chamber-fixed / node-tethered). For the gliding-assay
+  slice, it includes: pre-step `fillSoaArrays` (A1.a/A1.b), `MotorBindGrid3D`
+  fill + `GPUMotorBinding` pack (A3.a/A3.c), the `MyosinFixed` anchor spring
+  (A7.b — the live anchor-lesson residue on the GPU path today), `FilSegment`
+  step forces F1/F3/F4 and `MyoFilLink` F8/F9/F10, plus benchmark-mode-only
+  force injection and pin restoration.
+- **Binding detection** (Part 3) still reads CPU pose every step in TWO
+  places on the `-gpu` path — the CPU FillThreads grid build AND the
+  `GPUMotorBinding` SoA pack — even though the kernel runs on the device.
+  Full residency requires moving the grid build to the device.
+- **General collision** (Part 4): `Thing.step()` itself has no broad-phase
+  pairwise force (all F1–F12 are per-entity-vs-boundary or fixed-topology
+  pointer pairs). But the per-step loop AS A WHOLE has three broad-phase
+  spatial queries: meshColl FilLink-creation, meshColl
+  membrane-fil-collision, and motor-binding. These three are the only places
+  a device-side grid is genuinely needed — they collapse to one shared grid
+  if FilLink-creation cadence can stay aligned with binding detection.
+- F2 / F11 / F13 clarifications: F2 = filament–bug pairwise (Listeria, in
+  step). F11 = ActA tether — dispatched in `actAStart` (= xLinkStart wave),
+  NOT in `Thing.step()`; ActA is not a `Thing`. F13 doesn't exist as a step
+  force; StickyNode inherits ProteinNode.step (= F12) and its membrane-tether
+  forces run in `membraneLinksStart`.
+
+Audit is read-only — no code changes. Feeds residency campaign scoping.
 
 ## 2026-06-01 — Pre-port characterization: step() force profiling + bending benchmark GPU baselines
 
