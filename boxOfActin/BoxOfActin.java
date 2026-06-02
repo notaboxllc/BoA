@@ -156,6 +156,16 @@ public class BoxOfActin {
 			GPUMoveThing.DIAG_CPU_JOINTS = true;
 			System.err.println("[JOINT_DIAG] DIAG_CPU_JOINTS forced ON via env var");
 		}
+		// BOA_DIAG_CPU_ANCHOR=1 → skip the device anchor-spring kernel
+		// contribution and run MyosinFixed.applyGPUDroppedForces on CPU
+		// (the pre-Phase-1 behaviour). Default off — device kernel applies
+		// the anchor. See JOURNAL "Phase 1 — anchor spring ported to device".
+		String cpuAnchorEnv = System.getenv("BOA_DIAG_CPU_ANCHOR");
+		if (cpuAnchorEnv != null && !cpuAnchorEnv.isEmpty()
+		    && !cpuAnchorEnv.equals("0") && !cpuAnchorEnv.equalsIgnoreCase("false")) {
+			GPUMoveThing.DIAG_CPU_ANCHOR = true;
+			System.err.println("[ANCHOR_DIAG] DIAG_CPU_ANCHOR forced ON via env var");
+		}
 
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }

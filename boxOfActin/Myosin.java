@@ -108,8 +108,20 @@ public class Myosin {
 				case Env.myoJoints1Start:
 					boolean gpuPath = Env.useGPU && !GPUMoveThing.DIAG_CPU_JOINTS;
 					if (gpuPath) {
-						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-							theMyosins[i].applyGPUDroppedForces();
+						// Phase 1 (2026-06-02): the MyosinFixed rod-tail anchor
+						// spring is now applied on device by the joints kernel,
+						// so applyGPUDroppedForces() — whose only contribution
+						// is that anchor — must NOT also run here or it would
+						// double-apply. DIAG_CPU_ANCHOR=true flips this back:
+						// the device kernel zeros its anchor write (anchoredFlags
+						// is forced 0 in packJointsRange) and the CPU pass runs.
+						// Any future override that adds a NON-anchor dropped
+						// force will need its own gating — see force-coverage
+						// audit in JOURNAL "Phase 1 — anchor spring".
+						if (GPUMoveThing.DIAG_CPU_ANCHOR) {
+							for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+								theMyosins[i].applyGPUDroppedForces();
+							}
 						}
 					} else {
 						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {

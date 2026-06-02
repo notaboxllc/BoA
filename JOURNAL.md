@@ -4,6 +4,266 @@ Last updated: 2026-06-02
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-06-02 — Phase 1: anchor spring ported to device kernel (A7.b)
+
+The last CPU pose consumer inside `myoJoints1` on the `-gpu` path
+(`MyosinFixed.applyRodFixedPtForce`, the rod-tail anchor spring) is now
+computed on device. This was the "anchor lesson" residue —
+`Myosin.MyosinThreads.execute()` short-circuited the full per-Myosin
+dispatch on the GPU path but kept the anchor force as a reduced CPU pass
+that read `myoRod.end1AsPt3D()` every step. With the device kernel now
+covering the anchor, that CPU read is gone (and gated back on for A/B via
+the new `DIAG_CPU_ANCHOR` flag).
+
+Status: implemented, compiles clean under Java 21 + TornadoVM 4.0.1-dev
+(`javac -g --release 21 --enable-preview …`). NOT YET RUN — jba runs the
+SingleMyoDiag A/B and the gliding ensemble gates manually (commands below).
+
+### Step 1 — Survey findings (locks the pattern for downstream Phase-2+ ports)
+
+1. **Rod slot indexing.** `GPUMoveThing.classifyThings()` populates the
+   per-Myosin slot arrays via `rodSlots.set(mj, thingNumberToMoveSlot[
+   myo.myoRod.myThingNumber])`, with `jointSlotToMyoIdx[mj] = m` as the
+   reverse map back to `Myosin.theMyosins[m]`. The anchor uses the SAME
+   per-Myosin-index keying — anchor data at index `mj` belongs to the
+   Myosin whose rod is at slot `rodSlots.get(mj)`. No new index buffer.
+
+2. **`myoRod.end1` on device.** `Thing.recomputeDerivedSoA()` derives
+   `end1 = coord − (length/2)·uVec` (`Thing.java:777–779`). In-kernel this
+   is `re1x = rcx − halfRod·rux` etc. where `halfRod = 0.5 * jointParams.get(9)`
+   (already computed at the top of the joints kernel as `halfRod`). The
+   existing joints code derives `re2x = rcx + halfRod·rux` for the rod–lever
+   joint; the anchor is the symmetric end. No new pose plumbing.
+
+3. **`moveCoeff(2, dir)` on device.** Reproduces `MyoRod.moveCoeff(2, linkUVec)`
+   exactly:
+   ```
+   cosBeta  = dot(rod.uVec, linkUVec)            // (clamped to [-1,1])
+   cosAlpha = sin(acos(cosBeta))                 // == sqrt(1 - cosBeta^2)
+   lSq      = 1e-12 * rodLen^2
+   Cx       = cosBeta^2 / bTransGam.x
+   Cperp    = cosAlpha^2 / bTransGam.y
+   Ctheta   = lSq * cosAlpha^2 / (4 * bRotGam.y)
+   moveC    = Cx + Cperp + Ctheta
+   ```
+   The three rod drag entries (`bTransGam.x`, `bTransGam.y`, `bRotGam.y`)
+   are ALREADY on device — they're the first three entries of the per-Myosin
+   `myoDrags` 9-tuple (`myoDrags[md9..md9+2]`, packed in `packJointsRange`).
+   So the anchor kernel reuses the existing drag buffer; no new
+   FIRST_EXECUTION drag buffer needed. `accurateAcos` (PTX-safe, Newton-
+   refined) is the same helper the joints kernel uses for its own `acos`
+   chain — so the anchor matches the CPU `fastAcos` closely (and matches
+   the joints kernel's own band, which is itself the CPU comparison
+   baseline).
+
+4. **Force-sum write target.** The joints kernel writes per-Myosin joint
+   contributions into `jointForceSum`/`jointTorqueSum` (move-slot indexed),
+   and the move kernel reads `cpuForceSum + jointForceSum` per slot. The
+   anchor force is added to the rod's per-Myosin accumulator
+   (`rodFx += forceMagA * l2x`, etc.) BEFORE the kernel writes
+   `jointForceSum.set(r3, rodFx)`. Same accumulator the move kernel
+   already consumes; no second accumulation path. Conflict-free because
+   each Myosin's three sub-slots are unique (preexisting joints-kernel
+   invariant).
+
+5. **Arg budget / fold vs separate task.** The pre-port jointsKernel had
+   11 parameters. Adding `anchorPts` (FloatArray, `myoCap*3`) +
+   `anchoredFlags` (IntArray, `myoCap`) brings it to 13 — under the
+   TornadoVM 15-arg cap. **Decision: fold into the existing joints task.**
+   Same per-Myosin slot map, same pose reads (`coord`/`uVec`), same drag
+   buffer (`myoDrags`), same output buffer (`jointForceSum`). A separate
+   task would have re-uploaded the slot maps and pose buffers redundantly.
+
+   *Discretion noted (handled silently per the port spec's bail-out
+   matrix):* anchor buffers are EVERY_EXECUTION (matching `rodSlots`,
+   `myoDrags`, `cockedFlags`) rather than the spec's suggested
+   FIRST_EXECUTION. Reason: the existing pack pipeline already runs every
+   step via `OP_PACK_JOINTS`; folding `anchorPts`/`anchoredFlags` into that
+   pack avoids restructuring plan-invalidation around the per-classify
+   slot re-shuffle. Buffer is small (`myoCap*3` floats + `myoCap` ints ≈
+   16 bytes/Myosin), pack is cheap. If transfer profiling later flags it,
+   moving to FIRST_EXECUTION + a classify-driven plan invalidation hook
+   is a localized change.
+
+### Step 2 — What was implemented
+
+- **`anchorPts`** (`FloatArray[myoCap*3]`) and **`anchoredFlags`**
+  (`IntArray[myoCap]`) declared, allocated in `allocateAndBuildPlan`,
+  wired into the chained TaskGraph's `transferToDevice` block and into
+  both `.task("joints", …)` argument lists (chained plan and the
+  `DIAG_CPU_DELTA_ADD` jointsOnly plan).
+- **`packJointsRange`** extended: for each per-Myosin slot, if `myo
+  instanceof MyosinFixed`, packs `myFixedPt.{x,y,z}` and sets
+  `anchoredFlags[mj] = 1`. Otherwise zeros and `anchoredFlags[mj] = 0`.
+  The `DIAG_CPU_ANCHOR` flag is read once at the top of the call and
+  forces `anchoredFlags[mj] = 0` for every Myosin — pack-side gating so
+  the kernel-side path is uniform.
+- **`jointsKernel`** signature extended (+2 args; total 13, under cap).
+  After the four existing apply* blocks, an anchor block runs gated on
+  `anchoredFlags.get(m) == 1`. Computes rod end1 from device pose
+  (`re1x = rcx − halfRod·rux`), `strainDist`/`linkUVec1` from
+  `end1 − anchorPt`, `linkUVec2 = −linkUVec1`, `moveC2` via the
+  moveCoeff(2) recipe above using `myoDrags[md9..md9+2]`, then
+  `forceMag = (j2FracMove · 1e-6 · strainDist) / (deltaT · moveC2)`.
+  Adds `forceMag · linkUVec2` into `rodFx/y/z` (i.e. the same
+  `−forceMag · linkUVec1` direction the CPU applies). **Force only — no
+  torque contribution.** Mirrors the CPU exactly: the rod torque lines
+  in `MyosinFixed.applyRodFixedPtForce` are commented out, and the kernel
+  does not "complete" them (Lesson 2 — faithful port, do not extend
+  physics in the migration).
+- **`Myosin.MyosinThreads.execute()`** GPU-path branch now skips the
+  `applyGPUDroppedForces()` dispatch entirely unless
+  `DIAG_CPU_ANCHOR=true`. Previously this dispatch ran every step (its
+  only contribution was the anchor); leaving it on would double-apply.
+  A comment in that branch reminds future ports that any new
+  `applyGPUDroppedForces` override contributing a NON-anchor dropped
+  force needs its own gating.
+- **`BOA_DIAG_CPU_ANCHOR=1` env-var hook** added in `BoxOfActin.begin()`,
+  alongside the existing `BOA_DIAG_CPU_JOINTS` hook. Sets
+  `GPUMoveThing.DIAG_CPU_ANCHOR = true`.
+- **PTX safety.** Anchor block uses only sub/dot/sqrt/`Math.sin`/
+  `accurateAcos` — all PTX-lowerable per Appendix A of
+  `GPU_MIGRATION_LESSONS.md`. No `isNaN`, no `Math.acos` direct, no
+  unsupported intrinsics.
+
+### Step 3 — `DIAG_CPU_ANCHOR` validation flag
+
+| Flag state | Device anchor kernel | CPU `applyGPUDroppedForces` (anchor pass) | Anchor applied |
+|---|---|---|---|
+| **OFF (default)** | active (per-Myosin) | skipped on `-gpu` | exactly once (device) |
+| **ON** | per-Myosin `anchoredFlags`=0 → no contribution | dispatched on `-gpu` | exactly once (CPU) |
+| CPU-only run (no `-gpu`) | — | — | once via `MyosinFixed.jointConstraints → applyRodFixedPtForce`, unaffected by either flag |
+
+Gate semantics live at two places that are consistent by construction:
+the pack side (`packJointsRange` zeroes `anchoredFlags`) and the CPU
+dispatch side (`MyosinThreads.execute` runs anchor pass iff
+`DIAG_CPU_ANCHOR`). They cannot disagree mid-step because both read the
+same static flag once per step in their respective paths.
+
+### Step 4 — Force-coverage audit (Lesson 2)
+
+For the gliding-assay validation config (only `MyosinFixed` populations;
+`MyosinDimer` and other Myosin subclasses absent), the only Myosin force
+the GPU joints kernel did NOT previously replicate was the anchor spring,
+applied by `MyosinFixed.applyGPUDroppedForces → applyRodFixedPtForce`.
+
+| Force | Pre-Phase-1 (CPU) | Pre-Phase-1 (GPU path) | Phase-1 default (`DIAG_CPU_ANCHOR=false`) | Phase-1 with `DIAG_CPU_ANCHOR=true` | Applied exactly once? |
+|---|---|---|---|---|---|
+| Lever–motor joint force/torque | full jointConstraints | device joints kernel | device joints kernel | device joints kernel | ✓ |
+| Rod–lever joint force/torque | full jointConstraints | device joints kernel | device joints kernel | device joints kernel | ✓ |
+| **Anchor spring (A7.b)** | via `jointConstraints` override (MyosinFixed) | CPU reduced pass (`applyGPUDroppedForces`) | **device kernel** (anchor block in joints) | CPU reduced pass | **✓ in both flag states** |
+| CPU-only Myosins (none in gliding assay) | jointConstraints | — | — | — | n/a |
+
+In prose:
+
+- **`DIAG_CPU_ANCHOR=false` (default):** device anchor kernel fires for
+  every `MyosinFixed`; `MyosinThreads.execute()` does NOT dispatch
+  `applyGPUDroppedForces()` on the GPU path. Net: each MyosinFixed's
+  anchor spring lands in `jointForceSum[rodSlot]` once, the move kernel
+  reads it, no CPU contribution. Other Myosin subclasses (none in the
+  gliding config) with no override contribute zero.
+- **`DIAG_CPU_ANCHOR=true`:** pack side zeroes `anchoredFlags` for every
+  Myosin, so the kernel's anchor block early-returns and writes nothing
+  into the rod accumulator. `MyosinThreads.execute()` dispatches
+  `applyGPUDroppedForces()`, which for MyosinFixed lands the anchor
+  force in `soaForceSum[myThingNumber*3]` → `cpuForceSum[rodSlot]` via
+  the next pack — same destination the move kernel reads. Net: anchor
+  applied once on CPU.
+- **CPU-only run (no `-gpu`):**
+  `gpuPath = Env.useGPU && !DIAG_CPU_JOINTS` is false;
+  `MyosinThreads.execute()` runs the full `jointConstraints()`, which
+  for `MyosinFixed` is
+  `super.jointConstraints() + applyRodFixedPtForce()`. Anchor applied
+  once. Phase-1 changes do not touch this path.
+
+**Confirmed: in the gliding-assay validation config, MyosinFixed is the
+ONLY Myosin subclass with an `applyGPUDroppedForces` override**
+(`grep -rn applyGPUDroppedForces boxOfActin/`). `MyosinDimer` is not a
+Myosin subclass; its cross-Myosin coupling lives in `MyoDimerThreads`
+(still A7.c — CPU only, not in scope for Phase 1). No other override
+contributes a "dropped force" today, so gating the entire CPU dispatch
+off by default does not silently drop anything else in this config.
+The gating comment in `MyosinThreads.execute()` flags this assumption
+for future ports — any new Myosin subclass override that contributes
+a NON-anchor dropped force would need to either (a) be ported to its
+own device path or (b) keep its own per-class CPU dispatch outside the
+`DIAG_CPU_ANCHOR` gate.
+
+### Step 5 — Commands for jba to run (CPU-vs-device A/B + gliding gate)
+
+All on aorus. Build once:
+
+```
+cd ~/Code/BoA
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+      boxOfActin/*.java *.java
+```
+
+**Phase-1 A/B: SingleMyoDiag (the minimal probe — Lesson 3).**
+Anchor effect is visible directly: a missing or wrong-sign anchor force
+shows up as the single myosin drifting away from its anchor (the
+2026-05-31 reproduction). Expectation: `head_r` (head-to-anchor distance)
+stays bounded ~0.06 µm steady state in BOTH arms; the two arms agree to
+within float32 noise, not the 10× drift of the buggy era.
+
+```
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+
+# Arm A — device anchor kernel (default, the new path)
+BOA_DIAG_SINGLE_MYO=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -r -gpu -pf ParameterFiles/<singleMyo paramfile>
+
+# Arm B — CPU anchor pass (today's pre-Phase-1 behaviour)
+BOA_DIAG_SINGLE_MYO=1 BOA_DIAG_CPU_ANCHOR=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -r -gpu -pf ParameterFiles/<singleMyo paramfile>
+```
+
+(Substitute the singleMyo parameter file — the one
+`SingleMyoDiag.initFromEnv` expects, presumably the same one used in
+the 2026-05-31 reproduction. If unsure, grep `SingleMyoDiag` or check
+the most recent SingleMyoDiag run log for the `-pf` argument.)
+
+Pass criterion: `head_r` distribution bounded, no drift, two arms within
+float32-noise of each other.
+
+**Phase-1 gate: gliding 10-seed ensemble.** After SingleMyoDiag clears,
+re-run the standard gliding ensemble and compare to the post-fix
+baseline (`856.80 / 7.30 / 8.22` from the 2026-06-01 anchor-fix entry):
+
+```
+# Default: device anchor kernel active.
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
+```
+
+Expectation: numbers match the post-fix baseline to within seed-jitter
+(the device anchor produces the same force the post-fix CPU pass did,
+modulo `accurateAcos`-vs-`fastAcos` precision which the joints kernel
+already proved acceptable). If A=B both clear and the ensemble matches,
+Phase 1 is green; flip `DIAG_CPU_ANCHOR=false` as the permanent default
+(it already is) and move on to Phase 2 (step forces).
+
+### Bail-outs / flags
+
+- **No hard bail-outs.** The survey resolved cleanly: `moveCoeff(2, dir)`
+  needs only data already on device (`myoDrags[md9..md9+2]`); the
+  force-sum target is the same buffer the joints kernel already writes;
+  arg budget fits.
+- **Discretion handled silently (per spec):** EVERY_EXECUTION instead of
+  FIRST_EXECUTION for the anchor buffers — see Step 1 #5 reasoning.
+- **No discoveries pause anything.** Slot map matches the joints
+  kernel's; no separate `isAnchored` index needed (parallel
+  `anchoredFlags` IntArray indexed by joint-slot is sufficient and
+  matches the existing `cockedFlags` shape).
+
 ## 2026-06-02 — Phase 0 layout-decision spike (AoS vs SoA): keep AoS
 
 First executable step of the residency campaign. Goal: settle the code-wide

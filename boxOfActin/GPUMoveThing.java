@@ -149,6 +149,19 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_CPU_DELTA_ADD = false;
 
+    /**
+     * Diagnostic flag (2026-06-02 — Phase 1 anchor-spring port). When true
+     * and Env.useGPU is true, the device anchor-spring kernel contribution
+     * (folded into jointsKernel) is SKIPPED — anchoredFlags is forced to 0
+     * for every Myosin in packJointsRange — and Myosin.MyosinThreads keeps
+     * dispatching MyosinFixed.applyGPUDroppedForces() so the anchor is
+     * applied on CPU (today's behaviour). When false (default), the device
+     * kernel applies the anchor and the CPU pass is skipped. Lets jba do a
+     * clean CPU-vs-device A/B on the identical build. CPU-only (non-`-gpu`)
+     * runs are unaffected either way.
+     */
+    public static boolean DIAG_CPU_ANCHOR = false;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
@@ -227,6 +240,15 @@ public class GPUMoveThing {
     private static IntArray   motorSlots;     // myoCap -- move slot of myoMotor
     private static FloatArray myoDrags;       // myoCap * 9 -- packed drag tensors for rod/lever/motor
     private static IntArray   cockedFlags;    // myoCap
+    // 2026-06-02 Phase 1 — anchor spring (A7.b). anchorPts carries
+    // MyosinFixed.myFixedPt (x,y,z) per Myosin; anchoredFlags is 1 for
+    // MyosinFixed and 0 for other Myosin subclasses. Packed in
+    // packJointsRange() each step (same cadence as drags / cockedFlags) so
+    // any future mid-run anchor-point change just shows up at the next step.
+    // The CPU MyosinFixed.applyGPUDroppedForces() reduced pass is gated off
+    // unless DIAG_CPU_ANCHOR is true; otherwise it would double-apply.
+    private static FloatArray anchorPts;      // myoCap * 3
+    private static IntArray   anchoredFlags;  // myoCap
 
     // ----- small inputs -----
     private static FloatArray params;         // move kernel: [0]=deltaT, [1]=brownianForceMag
@@ -379,6 +401,14 @@ public class GPUMoveThing {
     // jointForceSum (and cpuTorqueSum + jointTorqueSum) as plain reads.
     // Each Myosin's three sub-slots are unique, so writes are conflict-free
     // without atomics.
+    //
+    // 2026-06-02 Phase 1 — folded the MyosinFixed rod-tail anchor spring
+    // (A7.b) into this kernel. anchorPts (myoCap*3) carries each anchored
+    // Myosin's fixed point; anchoredFlags (myoCap) is 1 for MyosinFixed,
+    // 0 otherwise. When anchored, the kernel ADDS the anchor force to the
+    // rod's joint-force write (force only, no torque — mirroring the CPU
+    // formula in MyosinFixed.applyRodFixedPtForce where the torque lines
+    // are commented out). When not anchored, no anchor contribution.
     // -------------------------------------------------------------------------
     private static void jointsKernel(
             FloatArray coord,
@@ -390,6 +420,8 @@ public class GPUMoveThing {
             IntArray   motorSlots,
             FloatArray myoDrags,
             IntArray   cockedFlags,
+            FloatArray anchorPts,
+            IntArray   anchoredFlags,
             FloatArray jointParams,
             IntArray   counts) {
 
@@ -627,6 +659,65 @@ public class GPUMoveThing {
                     leverTy -= tvy * torsionMag;
                     leverTz -= tvz * torsionMag;
                 }
+            }
+
+            // applyRodFixedPtForce (MyosinFixed anchor spring — A7.b).
+            // Mirrors MyosinFixed.applyRodFixedPtForce on the CPU. Force only;
+            // CPU torque lines are commented out and the kernel matches that.
+            // anchoredFlags[m] == 0 → not anchored → skip.
+            if (anchoredFlags.get(m) == 1) {
+                int a3 = m * 3;
+                double apx = (double) anchorPts.get(a3);
+                double apy = (double) anchorPts.get(a3 + 1);
+                double apz = (double) anchorPts.get(a3 + 2);
+
+                // rod end1 = rod coord - 0.5 * rodLen * rod uVec (matches recomputeDerivedSoA)
+                double re1x = rcx - halfRod * rux;
+                double re1y = rcy - halfRod * ruy;
+                double re1z = rcz - halfRod * ruz;
+
+                double dx = re1x - apx, dy = re1y - apy, dz = re1z - apz;
+                double dist2 = dx * dx + dy * dy + dz * dz;
+                double strainDist = Math.sqrt(dist2);
+                double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
+                // linkUVec1 = unit(rod.end1 - fixedPt). Matches CPU
+                // Pt3D.unitVec(Pt3D from, Pt3D to) = unit(from - to).
+                double l1x = dx * invStrain, l1y = dy * invStrain, l1z = dz * invStrain;
+                // linkUVec2 = -linkUVec1, used as the rod's moveCoeff(2, linkUVec2)
+                // input on the CPU. Same magnitude either way through cosBeta^2.
+                double l2x = -l1x, l2y = -l1y, l2z = -l1z;
+
+                // moveC1 = 0 (fixed point doesn't move). Only the rod's
+                // mobility along linkUVec2 contributes to the denominator.
+                // Reproduces MyoRod.moveCoeff(2, linkUVec2):
+                //   cosBeta = dot(uVec, linkUVec2)
+                //   cosAlpha = sin(acos(cosBeta))     [= sqrt(1 - cosBeta^2)]
+                //   lSq   = 1e-12 * rodLen^2
+                //   Cx    = cosBeta^2 / bTransGam.x
+                //   Cperp = cosAlpha^2 / bTransGam.y
+                //   Ctheta = lSq * cosAlpha^2 / (4 * bRotGam.y)
+                //   moveC = Cx + Cperp + Ctheta
+                double cosBeta = rux * l2x + ruy * l2y + ruz * l2z;
+                if (cosBeta > 1.0)  cosBeta = 1.0;
+                if (cosBeta < -1.0) cosBeta = -1.0;
+                double cosAlphA  = Math.sin(accurateAcos(cosBeta));
+                double cosAlphA2 = cosAlphA * cosAlphA;
+                double lSqA     = 1.0e-12 * rodLen * rodLen;
+                double CxA      = cosBeta * cosBeta / rBTGx;
+                double CperpA   = cosAlphA2 / rBTGy;
+                double CthetaA  = lSqA * cosAlphA2 / (4.0 * rBRGy);
+                double moveC2A  = CxA + CperpA + CthetaA;
+
+                double denomA = dt * moveC2A;   // moveC1 = 0
+                double forceMagA = (denomA > 0.0) ? (j2FracMove * 1.0e-6 * strainDist / denomA) : 0.0;
+
+                // CPU applies F = -forceMag * linkUVec1 to the rod (after the
+                // F.scale(-1, F) line). Equivalently: rod gets +forceMag*l2.
+                rodFx += forceMagA * l2x;
+                rodFy += forceMagA * l2y;
+                rodFz += forceMagA * l2z;
+                // No torque contribution — CPU's myoRod.incTorqueSum line is
+                // commented out. See MyosinFixed.applyRodFixedPtForce.
             }
 
             // Write joint contributions to the device-side delta buffers.
@@ -999,6 +1090,8 @@ public class GPUMoveThing {
         motorSlots     = new IntArray(myoCap);
         myoDrags       = new FloatArray(myoCap * 9);
         cockedFlags    = new IntArray(myoCap);
+        anchorPts      = new FloatArray(myoCap * 3);
+        anchoredFlags  = new IntArray(myoCap);
         jointSlotToMyoIdx = new int[myoCap];
 
         params      = new FloatArray(2);
@@ -1024,6 +1117,7 @@ public class GPUMoveThing {
                               brownianScales, velMask,
                               rodSlots, leverSlots, motorSlots,
                               myoDrags, cockedFlags,
+                              anchorPts, anchoredFlags,
                               jointParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
@@ -1031,6 +1125,7 @@ public class GPUMoveThing {
                   jointForceSum, jointTorqueSum,
                   rodSlots, leverSlots, motorSlots,
                   myoDrags, cockedFlags,
+                  anchorPts, anchoredFlags,
                   jointParams, counts)
             .task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
@@ -1072,6 +1167,7 @@ public class GPUMoveThing {
                                   jointForceSum, jointTorqueSum,
                                   rodSlots, leverSlots, motorSlots,
                                   myoDrags, cockedFlags,
+                                  anchorPts, anchoredFlags,
                                   jointParams, counts)
                 .task("joints",
                       GPUMoveThing::jointsKernel,
@@ -1079,6 +1175,7 @@ public class GPUMoveThing {
                       jointForceSum, jointTorqueSum,
                       rodSlots, leverSlots, motorSlots,
                       myoDrags, cockedFlags,
+                      anchorPts, anchoredFlags,
                       jointParams, counts)
                 .transferToHost(DataTransferMode.EVERY_EXECUTION,
                                 jointForceSum, jointTorqueSum);
@@ -1503,6 +1600,7 @@ public class GPUMoveThing {
     private static void packJointsRange(int start, int end) {
         Myosin[] myos = Myosin.theMyosins;
         int[] toMyo = jointSlotToMyoIdx;
+        boolean cpuAnchor = DIAG_CPU_ANCHOR;
         for (int mj = start; mj < end; mj++) {
             Myosin myo = myos[toMyo[mj]];
             MyoRod   rod   = myo.myoRod;
@@ -1519,6 +1617,22 @@ public class GPUMoveThing {
             myoDrags.set(d9 + 7, (float) motor.bTransGam.y);
             myoDrags.set(d9 + 8, (float) motor.bRotGam.y);
             cockedFlags.set(mj, motor.isCocked() ? 1 : 0);
+            // Anchor data (Phase 1, A7.b). DIAG_CPU_ANCHOR forces the
+            // kernel-side flag to 0 so the device contribution is skipped;
+            // the CPU MyosinThreads dispatch then runs the anchor pass.
+            int a3 = mj * 3;
+            if (!cpuAnchor && myo instanceof MyosinFixed) {
+                MyosinFixed mf = (MyosinFixed) myo;
+                anchorPts.set(a3,     (float) mf.myFixedPt.x);
+                anchorPts.set(a3 + 1, (float) mf.myFixedPt.y);
+                anchorPts.set(a3 + 2, (float) mf.myFixedPt.z);
+                anchoredFlags.set(mj, 1);
+            } else {
+                anchorPts.set(a3,     0f);
+                anchorPts.set(a3 + 1, 0f);
+                anchorPts.set(a3 + 2, 0f);
+                anchoredFlags.set(mj, 0);
+            }
         }
     }
 
