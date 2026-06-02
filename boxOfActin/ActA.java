@@ -132,30 +132,32 @@ public class ActA {
 	}
 	
 	public void step () {
+		long _spT = StepProfiler.t0();
 		//System.out.print("in ActA.step()...");
 		// add arp, nucleate, enforce tether
 		if (bound && boundFil.removeMe) { releaseFil(); }
-		
+
 		nucleateFilament();
 		makeSideBranch();
-		if (bound) {    
+		if (bound) {
 			moveFilLoc();  // might become unbound, release if boundLoc moves off boundFil
-			updatePts();   
+			updatePts();
 			updateLink();
 			applyTetherForce();
 			checkTetherDetachRocketBugsStyle();
 			//checkTetherDetach();
 			checkUncap();
 			ptsUpdated = true;
-		} else { 
-			ptsUpdated = false; 
-		} 
-		
+		} else {
+			ptsUpdated = false;
+		}
+
 		if (bound) {  // after all these possible actions above...
-			boundFil.actAOn = true; 	// flag filament so it knows it's tethered 
-		} else {	
+			boundFil.actAOn = true; 	// flag filament so it knows it's tethered
+		} else {
 			releaseFil();  // several paths to unbinding above
 		}
+		StepProfiler.add(StepProfiler.F11_ACTA, _spT);
 	}
 	
 	public void nucleateFilament() {

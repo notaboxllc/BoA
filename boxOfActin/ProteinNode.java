@@ -288,10 +288,12 @@ public class ProteinNode extends Thing {
 		//increment counters that control how often different sims occur
 		collCheckCt++;
 		if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
+			long _spT = StepProfiler.t0();
 			checkBugOrBoxCollision();
+			StepProfiler.add(StepProfiler.F12_PROTEINNODE_BOUNDARY, _spT);
 			collCheckCt = 0;
 		}
-		
+
 	}
 	
 	public void resetCounters() {

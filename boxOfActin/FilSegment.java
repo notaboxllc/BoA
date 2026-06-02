@@ -454,23 +454,32 @@ public class FilSegment extends Thing {
 		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		// increment counters that control how often different bits are run
 		collCheckCt++;
-		
+
 		/*if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
 			checkBugOrBoxCollision(); 		// these should add forces and torques to forceSum and torqueSum
 			if (Env.simulationTime < 0.001) { checkForminBinding(); }
-			
+
 			collCheckCt = 0;
 		}*/
+		long _spT;
+		_spT = StepProfiler.t0();
 		checkBugOrBoxCollision(); 		// these should add forces and torques to forceSum and torqueSum
-		
+		StepProfiler.add(StepProfiler.F1_2_FILSEG_BOUNDARY, _spT);
+
+		_spT = StepProfiler.t0();
 		addLinkForces();				// if linked to other segments
-		
+		StepProfiler.add(StepProfiler.F3_FILSEG_CHAIN_LINK, _spT);
+
+		_spT = StepProfiler.t0();
 		addTorsionSpringForces();		// bending rigidity proxy
-		
+		StepProfiler.add(StepProfiler.F4_FILSEG_CHAIN_TORQUE, _spT);
+
+		_spT = StepProfiler.t0();
 		addNodeForces();				// calculate elastic forces to keep filament ends and bound plasmids together
-	
+		StepProfiler.add(StepProfiler.F5_6_FILSEG_NODE, _spT);
+
 		//setCompression();				// register compressive force in filament, if any
-		
+
 	}
 	
 	public void biochemStep () {

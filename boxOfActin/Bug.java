@@ -141,7 +141,9 @@ public class Bug extends Crucible {
 	}
 	
 	public void step () {
+		long _spT = StepProfiler.t0();
 		setViscousDrag();
+		StepProfiler.add(StepProfiler.FX_BUG_DRAG_TENSOR, _spT);
 	}
 	
 	public void calcRandomForces () {  // override Thing.calRandomForces to share bug random forces/torques with small attached filaments

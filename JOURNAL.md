@@ -4,6 +4,178 @@ Last updated: 2026-06-01
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-06-01 — Pre-port characterization: step() force profiling + bending benchmark GPU baselines
+
+Two pre-port data-gathering passes following the step() survey. No code ported,
+no physics altered. Diagnostic infrastructure added behind default-off flags so
+it can be reused as porting progresses.
+
+### Part A — step() per-force profile (workload-dependent; F8-F10 dominates gliding)
+
+Added `boxOfActin/StepProfiler.java` — a tiny thread-safe per-force timer keyed
+by the survey's F-labels. Gated by `BOA_STEP_PROFILE=1` (default OFF, zero cost
+when unset). Wired into the force-method sites in
+`FilSegment.step` (F1/F2, F3, F4, F5/F6), `StaticFilSegment.step` (F1, F3, F4),
+`MyoMotor.step` (F8-F10 via `updateMyoFilLinks` → `tipLink.step` →
+addForces/alignUVec/alignYVec/ckRelease), `MyoMiniFilament.step` (F7),
+`ProteinNode.step` (F12), `ActA.step` (F11), and `Bug.step` (drag-tensor
+update). Also split the previously-untimed `resetCt` phase into its own
+`resetCtTimer`. `StepProfiler.report()` prints at end of run beside
+`JointDiag.dump`/`SingleMyoDiag.dump`.
+
+CPU run, `ParameterFiles/glidingDense_demo_smoke` (M≈98K motors, ~1156 fil
+segments, 1101 steps) — log `RUN_LOGS/2026-06-01_step_profile_partA.txt`:
+
+```
+Force                                  sec      pct       calls      ns/call
+F1/F2  FilSeg boundary collision       0.284    1.0%      1273772    223
+F3     FilSeg chain link spring        0.654    2.3%      1273772    513
+F4     FilSeg chain torsion spring     0.216    0.8%      1273772    169
+F5/F6  FilSeg node tether              0.029    0.1%      1273772     23
+F8-F10 MyoMotor tipLink (motor-fil)   27.273   95.8%    107898000    253
+TOTAL (sum of buckets, thread-time)   28.456
+ThingStep Threads barrier wall        58.767
+```
+
+Note: bucket sums are SUM-across-worker-threads; wall ≈ bucket-sum / 16
+worker threads with perfect balance.
+
+**Result that flips the survey's port-order hypothesis.** The survey
+hypothesized F3 (chain link spring) would dominate per-call and overall. F3 IS
+the most expensive per-call site (513 ns/call vs 223/169/253 for the others —
+two `fastAcos` calls inside `moveCoeff`), but the workload's *count of
+FilSegments* is two orders of magnitude smaller than its *count of MyoMotors*:
+98K motors × 1101 steps × 253 ns/call ≈ 27 s, vs 1156 segs × 1101 steps ×
+513 ns/call ≈ 0.65 s. **In motor-heavy gliding-assay configs, the dominant
+step()-phase cost is F8-F10 (MyoFilLink spring + alignment torques + release
+check) — not F3/F4.** In a filament-heavy / Listeria / membrane config (many
+segments, few motors), F3 would dominate. Port order should be workload-driven,
+not survey-hypothesis-driven.
+
+Per-force ordering of next-port priority (gliding-assay workload):
+1. **F8-F10 (MyoFilLink)** — 95.8 % of step-phase work. Touches every bound
+   motor every step, computes a spring force + two alignment torques + a
+   stochastic release check. Pairwise, motor↔seg via fixed `tipLink.mySeg`
+   pointer — same "fixed-pointer pair" pattern as the survey's filament chain
+   forces, no spatial grid needed. Validation probe = gliding assay
+   (bindEvents, meanBoundMotors, glidingVelocity) — already in the 10-seed
+   protocol.
+2. **F3 (chain link)** — only 2.3 % here but per-call expensive; will dominate
+   in non-gliding workloads. Validation probes already exist (deflection +
+   relaxation; see Part B for baselines).
+3. **F4 (chain torsion)** — pairs with F3 topologically; port together.
+4. Lower-cost forces deferred.
+
+### Part B — Deflection + LP benchmark GPU baselines (Lesson 5 prereq)
+
+Per Lesson 5, the deflection and LP benchmarks have never been run on the GPU
+path; established now so future F3/F4 ports localize regressions instantly.
+Added `BOA_BMDIAG_MAX_STEPS` env override to `-bmDiag`'s 5M default cap (used
+500K for these baselines), and extended `-bmDiag`'s periodic console line plus
+its DONE line to report `lpMeas` alongside the deflection ratio (LP chain was
+already constructed in benchmark mode; previously only the WebSocket HUD path
+emitted Lp).
+
+Both benchmarks **do run on the GPU path without errors** — LP and deflection
+chain FilSegments are GPU-handled (classified into the `GPUMoveThing` slot
+plan; `brownianOff` flag on deflection chain is honored at pack time, line
+1173 of `GPUMoveThing.java`).
+
+500K-step results (`RUN_LOGS/2026-06-01_bmdiag_{cpu,gpu}.txt`):
+
+| Observable | CPU | -gpu | Δ |
+|---|---|---|---|
+| Deflection ratio | 0.998420 | 0.999876 | +0.146 % |
+| defl (µm) | 0.009786 | 0.009800 | +0.14 % |
+| Lp_meas (µm) | 2176 | 1494 | (both transient) |
+| Lp_theo (µm) | 15 | 15 | — |
+| Wall (500K steps) | ~6 min | ~13 min | GPU 2× slower at tiny scale |
+
+**Deflection ratio baseline established.** Both paths sit at the calibrated
+≈1.0 target; the GPU ratio is 0.146 % above CPU. This is reproducible (came
+from the GPU moveThing integration order — CPU step() forces are identical on
+both paths because F3/F4 are still on CPU). When F3/F4 move to the GPU, this
++0.146 % gap is the per-port tolerance to monitor. A ratio that drifts beyond
+the per-port noise on either path is a regression.
+
+**Lp_meas is NOT converged at 500K steps.** With `lpEwmaAlpha = 0.001` the
+EWMA window is ~1000 samples, and `accumulateLpData` fires once per
+`toFileInterval = 1000` steps, so 500K steps = 500 samples = 0.5×
+window — still in the transient. Both runs are far from Lp_theo = 15 µm
+(2176 / 1494 µm). The CPU vs GPU number difference here doesn't carry signal;
+it's two different stochastic trajectories from two different RNG seeds (CPU
+calcRandomForces vs GPU Wang-hash) in the EWMA transient. **For a usable LP
+baseline, a future session needs ≥ 5M steps (5×window).** Recommend a single
+20M-step `-bmDiag` per path run overnight when F3/F4 GPU port is imminent.
+
+GPU benchmark wall time is 2× CPU at this tiny scale (60-segment chains) —
+the GPU dispatch overhead doesn't amortize. Expected; not a concern for
+benchmark validity, just runtime budgeting.
+
+### Files touched
+
+- New: `boxOfActin/StepProfiler.java` (~80 lines).
+- `boxOfActin/FilSegment.java`, `StaticFilSegment.java`, `MyoMotor.java`,
+  `MyoMiniFilament.java`, `ProteinNode.java`, `ActA.java`, `Bug.java` —
+  each gets `long _spT = StepProfiler.t0(); ...; StepProfiler.add(BUCKET, _spT);`
+  around its force-computing call(s). Zero overhead when `BOA_STEP_PROFILE`
+  unset (the `t0()` returns 0 and `add()` returns immediately).
+- `boxOfActin/BoxOfActin.java` — added `resetCtTimer` and timer wiring in
+  doLoop; `computeLpMeas()` helper extracted from `buildLpJson`;
+  `bmDiagMaxSteps()` env-cap helper; extended `-bmDiag` periodic + DONE
+  prints to include Lp_meas; called `StepProfiler.report()` at end of run.
+
+### Next
+
+Port F8-F10 (MyoFilLink) to GPU first for gliding-assay workloads. Apply
+GPU_MIGRATION_LESSONS.md Lesson 2 (force-coverage audit) before kernel
+landing: when MyoMotor.step() is short-circuited on the GPU path, every
+force it currently dispatches (= just F8-F10 via `tipLink.step()` =
+addForces, alignUVecTorque, alignYVecTorque) must be replicated in the
+kernel, with `ckRelease` (stochastic unbind check) kept on CPU since it
+mutates motor binding state. Anchor the validation in the gliding-assay
+10-seed protocol; the kernel touches the same forces the assay was
+designed to test.
+
+For F3/F4 port (later): re-run the deflection/LP `-bmDiag` baselines at
+≥ 5M steps to get a stable Lp_meas reference first; then port; then re-run
+and compare ratio + Lp_meas against the longer baselines.
+
+## 2026-06-01 — step() port pre-survey (force-coverage audit, ground truth)
+
+Survey-only pass before any step() GPU port: catalog every force/torque
+computed in the `stepStart` dispatch, the spatial structures step() consumes
+(none — it's pointer-traversed chain topology, not a grid), the per-step
+phase ordering, cost ranking expected vs known, and the validation probe
+mapping. Lives in `STEP_PORT_SURVEY.md` at the repo root. Implements
+GPU_MIGRATION_LESSONS.md Lesson 2 (force-coverage audit) as the FIRST step
+of the port so no force gets silently dropped the way the rod-tail anchor was.
+
+Key findings worth surfacing here:
+- step() does NOT use any spatial mesh. F3/F4 (filament chain link + torsion)
+  walk `end1Fil`/`end2Fil` pointers; F8/F9/F10 walk `MyoFilLink.mySeg`. The
+  hard part of a pairwise GPU port (grid + neighbour list) is off the
+  critical path.
+- 13 distinct forces/torques across 6 Thing subclasses (F1–F13 in the doc).
+  Stiff constraints to flag for Lesson 5: F3, F4, F5, F6, F8, F9, F10, F11.
+- Validation coverage today: F3/F4 covered by deflection + LP benchmarks
+  (BUT they have never run on the GPU path — must verify runnability first).
+  F5/F6 (node tether) have NO direct probe — build a SingleFilNodeDiag
+  before that subset ports. F1/F7/F12 (boundary) have no direct probe; add
+  a wall-push diagnostic.
+- Cost: ThingStep aggregate is ~22–26 s of 1101 steps at M=98K on GPU path
+  (post anchor-fix), the dominant remaining CPU phase. Per-force breakdown
+  inside step() not yet measured — survey flags this as a profiling gap to
+  close before committing port order.
+- Silent-drop risk surface: every subclass listed in Table A is one
+  short-circuit away from the anchor-spring shape of bug. The reduced
+  CPU pass pattern (`applyGPUDroppedForces` hook from MyosinFixed) is the
+  established mitigation.
+
+Recommended next step (planner's call): F3 + F4 first — highest impact,
+best validation coverage, simplest topology. Profiling pass to confirm the
+ranking before committing.
+
 ## 2026-06-01 — Bulk MemorySegment pack/unpack: tried, REVERTED (regression at both scales)
 
 Attempted to replace the per-element `FloatArray.set()/.get()` loops in `GPUMoveThing`

@@ -1,0 +1,9 @@
+*** step() per-force profile (BOA_STEP_PROFILE=1) ***
+  Force                                     sec    pct          calls      ns/call
+  F1/F2  FilSeg boundary collision        0.284   1.0%        1273772          223
+  F3     FilSeg chain link spring         0.654   2.3%        1273772          513
+  F4     FilSeg chain torsion spring      0.216   0.8%        1273772          169
+  F5/F6  FilSeg node tether               0.029   0.1%        1273772           23
+  F8-F10 MyoMotor tipLink (motor-fil)    27.273  95.8%      107898000          253
+  TOTAL (sum of buckets)                 28.456
+ThingStep Threads took 58.767000 seconds.

@@ -27,13 +27,14 @@ public class BoxOfActin {
 	static RunTimer gatherTimer = new RunTimer("GatherForces");
 	static RunTimer moveTimer = new RunTimer("Move");
 	static RunTimer biochemTimer = new RunTimer("Biochem");
+	static RunTimer resetCtTimer = new RunTimer("ResetCounters");
 	static RunTimer cleanupTimer1 = new RunTimer("Cleanups1");
 	static RunTimer cleanupTimer2 = new RunTimer("Cleanups2");
 	static RunTimer cleanupTimer3 = new RunTimer("Cleanups3");
 	static RunTimer cleanupTimer4 = new RunTimer("Cleanups4");
 
 
-	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,gatherTimer,moveTimer,biochemTimer,cleanupTimer1};
+	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,gatherTimer,moveTimer,biochemTimer,resetCtTimer,cleanupTimer1};
 
 	
 	// counters for doLoop()
@@ -851,8 +852,10 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.biochemStop);
 				biochemTimer.stopInc();
 
+				resetCtTimer.start();
 				startAllThreadSets(Env.resetCtStart);
 				waitOnAllThreadSets(Env.resetCtStop);
+				resetCtTimer.stopInc();
 
 				// Membrane relaxation loop... special passes to allow forces to propogate/move nodes, especially laterally at collisions
 				int mPass = 0;
@@ -896,18 +899,30 @@ public class BoxOfActin {
 				drainParamQueue();  // C4: apply pending parameter changes, dispatch acks
 
 				// -bmDiag: fixed-parameter equilibrium diagnostic — no search, just report ratio every 5000 steps
+				// BOA_BMDIAG_MAX_STEPS overrides the default 5M step cap (useful for shorter
+				// characterization runs during pre-port baselines).
 				if (Env.benchmarkDiag) {
 					benchStepCount++;
+					// LP characterization: accumulate tangent-correlation EWMA every output-interval steps
+					// (matches the production cadence in the frame-write block above). Headless: no
+					// LiveFrameServer needed; just builds lpFil.cMean for computeLpMeas().
+					if (lpFil != null && benchStepCount % Env.toFileInterval.getIntValue() == 0) {
+						accumulateLpData();
+					}
 					if (benchStepCount % 5000 == 0) {
 						double ratio = computeDeflectionRatio();
 						double defl = deflFil.analyticDefl * ratio;
-						System.out.printf("[BMDIAG] step=%8d  simT=%8.2fs  ratio=%.6f  defl=%.6fµm%n",
-							benchStepCount, Env.simulationTime, ratio, defl);
+						double lpMeas = computeLpMeas();
+						System.out.printf("[BMDIAG] step=%8d  simT=%8.2fs  ratio=%.6f  defl=%.6fµm  lpMeas=%.4fµm  lpSamples=%d%n",
+							benchStepCount, Env.simulationTime, ratio, defl,
+							lpMeas, lpFil == null ? 0 : lpFil.sampleCount);
 						System.out.flush();
 					}
-					if (benchStepCount >= 5_000_000) {
-						System.out.printf("[BMDIAG] DONE: %d steps  simT=%.1fs  final ratio=%.6f%n",
-							benchStepCount, Env.simulationTime, computeDeflectionRatio());
+					if (benchStepCount >= bmDiagMaxSteps()) {
+						double lpMeas = computeLpMeas();
+						System.out.printf("[BMDIAG] DONE: %d steps  simT=%.1fs  final ratio=%.6f  final lpMeas=%.4fµm  lpTheo=%.4fµm  lpSamples=%d%n",
+							benchStepCount, Env.simulationTime, computeDeflectionRatio(),
+							lpMeas, Env.persistenceLength, lpFil == null ? 0 : lpFil.sampleCount);
 						System.exit(0);
 					}
 				}
@@ -1262,6 +1277,8 @@ public class BoxOfActin {
 		// 2026-05-31 conformation diagnostic: no-op when disabled.
 		JointDiag.dump();
 		SingleMyoDiag.dump();
+		// step() per-force profile — no-op when BOA_STEP_PROFILE unset.
+		StepProfiler.report();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
@@ -1446,6 +1463,49 @@ public class BoxOfActin {
 	// Weighted log-linear regression: weight_k = C_k² (proportional to 1/var(log C_k) for
 	// small fluctuations). High-C (small-s) points get strong weight; noisy large-s tails
 	// are down-weighted, making Lp_meas stable even when L ≲ Lp.
+	// BOA_BMDIAG_MAX_STEPS overrides the 5M step cap of -bmDiag for pre-port baseline runs.
+	// Cached as a static so we don't parseInt on every step.
+	private static int CACHED_BMDIAG_MAX_STEPS = -1;
+	private static int bmDiagMaxSteps() {
+		if (CACHED_BMDIAG_MAX_STEPS != -1) return CACHED_BMDIAG_MAX_STEPS;
+		String v = System.getenv("BOA_BMDIAG_MAX_STEPS");
+		int n = 5_000_000;
+		if (v != null && !v.isEmpty()) {
+			try { n = Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) {}
+		}
+		CACHED_BMDIAG_MAX_STEPS = n;
+		return n;
+	}
+
+	// Pre-port characterization helper: returns Lp_meas in µm (or NaN if not yet measurable).
+	// Same weighted log-linear regression as buildLpJson's lpMeas computation, but headless
+	// (no JSON, no LiveFrameServer). Used by -bmDiag periodic print to log Lp_meas alongside
+	// the deflection ratio.
+	private static double computeLpMeas() {
+		if (lpFil == null || !lpFil.cMeanInitialized) return Double.NaN;
+		int nLp = lpFil.nSegs;
+		double segLen = lpFil.segLen;
+		double sumW = 0, sumWS = 0, sumWLogC = 0, sumWS2 = 0, sumWSlogC = 0;
+		int nFit = 0;
+		for (int k = 1; k < nLp; k++) {
+			double ck = lpFil.cMean[k];
+			if (ck > 0.01) {
+				double sk = k * segLen;
+				double logC = Math.log(ck);
+				double w = ck * ck;
+				sumW += w; sumWS += w * sk; sumWLogC += w * logC;
+				sumWS2 += w * sk * sk; sumWSlogC += w * sk * logC;
+				nFit++;
+			}
+		}
+		if (nFit < 2 || sumW <= 1e-30) return Double.NaN;
+		double denom = sumWS2 - sumWS * sumWS / sumW;
+		if (Math.abs(denom) <= 1e-30) return Double.NaN;
+		double b = (sumWSlogC - sumWS * sumWLogC / sumW) / denom;
+		if (b >= 0) return Double.NaN;
+		return -1.0 / b;
+	}
+
 	private static String buildLpJson() {
 		if (lpFil == null || !lpFil.cMeanInitialized) return null;
 		int nLp = lpFil.nSegs;

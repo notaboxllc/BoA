@@ -170,14 +170,16 @@ public class MyoMotor extends Thing {
 	public void step () {
 		if (Env.myosinsOff) { return; }
 		bindTimer += Env.deltaT.getValue();
-		
+
 		collCheckCt++;
 		if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
 			//checkOuterBugCollision();		// these should add forces and torques to forceSum and torqueSum
 			collCheckCt = 0;
 		}
-		
+
+		long _spT = StepProfiler.t0();
 		updateMyoFilLinks();
+		StepProfiler.add(StepProfiler.F8_10_MYOMOTOR_TIPLINK, _spT);
 	}
 	
 	public void checkOuterBugCollision () {

@@ -305,10 +305,12 @@ public class MyoMiniFilament extends Thing {
 		//increment counters that control how often different sims occur
 		collCheckCt++;
 		if (collCheckCt >= collisionCheckInt | Env.simulationTime == 0) {
+			long _spT = StepProfiler.t0();
 			checkOuterBugCollision();		// these should add forces and torques to forceSum and torqueSum
+			StepProfiler.add(StepProfiler.F7_MYOMINI_BOUNDARY, _spT);
 			collCheckCt = 0;
 		}
-		
+
 	}
 	
 	public void resetCounters() {
