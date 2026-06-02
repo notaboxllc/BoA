@@ -4,6 +4,115 @@ Last updated: 2026-06-01
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
+## 2026-06-01 — Bulk MemorySegment pack/unpack: tried, REVERTED (regression at both scales)
+
+Attempted to replace the per-element `FloatArray.set()/.get()` loops in `GPUMoveThing`
+pack/unpack with `MemorySegment.copy` bulk transfers. Hypothesis (from prompt): per-element
+calls have non-trivial dispatch overhead and bulk transfers should drop pack/unpack from
+~10–15 ms/call to well under 1 ms.
+
+### Mechanism investigated (works cleanly)
+
+`uk.ac.manchester.tornado.api.types.arrays.FloatArray` exposes `getSegment()` which returns
+a `MemorySegment` already sliced past the array header (via `asSlice(ARRAY_HEADER)` —
+verified by disassembling the API jar). The data starts at byte offset 0 in the returned
+segment; no header offset to account for. Same layout for `IntArray`. Bulk copy is just:
+
+```java
+MemorySegment.copy(MemorySegment.ofArray(stagingFloat[]), 0L,
+                   floatArray.getSegment(),               0L,
+                   nElements * Float.BYTES);
+```
+
+### Implementation tried
+
+Added slot-major `float[]` (and `int[]`) staging arrays as CPU mirrors of each `FloatArray`.
+Worker threads in `packRange`/`packJointsRange` wrote to staging via plain array writes
+(no virtual dispatch); after the fanout, a single `MemorySegment.copy` per array pushed
+staging → device-side segment. Unpack ran in reverse: `MemorySegment.copy(seg → staging)`
+once, then workers scattered staging → sparse SoA index space. The staging-as-mirror
+design preserved bit-identical behaviour for myosin coord/uVec/yVec slots that the old
+conditional pack skipped: their staging values stayed at the last unpack-side bulk-copy
+(= kernel output), so bulk-copy back was a no-op for those slots.
+
+`jointForceSum` / `jointTorqueSum` zeroing moved from per-slot `.set(0f)` to a single
+`segment.asSlice(0, n3Bytes).fill((byte)0)` — bit-identical (all zeros).
+
+`velMask` (set once in `classifyThings`) became a one-shot bulk copy.
+
+Compiled clean; smoke observables PASS (glidingAssay500_val seed=1: bindEvents=1028 vs
+baseline mean 861±240, meanBoundMotors=7.15 vs 7.37±1.52).
+
+### Timing — A/B at M=98K and M=400K, both GPU paths
+
+**glidingDense_demo_smoke (M≈98K motors, slotCount≈294K, 1101 steps):**
+
+|             | baseline (per-elem) | bulk-copy | delta    |
+|-------------|---------------------|-----------|----------|
+| slotPack    | 9.70 s / 8.81 ms    | 12.97 s / 11.78 ms | +3.0 ms |
+| jointPack   | 6.03 s / 5.48 ms    |  6.44 s /  5.85 ms | +0.4 ms |
+| exec        | 12.53 s / 11.4 ms   | 13.42 s / 12.2 ms  | ~noise  |
+| unpack      | 17.72 s / 16.1 ms   | 18.94 s / 17.2 ms  | +1.1 ms |
+| **total**   | **45.98 s / 41.8 ms** | **51.77 s / 47.0 ms** | **+5.2 ms/call (+12%)** |
+
+**glidingScale400K (M≈400K motors, 400 steps):**
+
+|             | baseline           | bulk-copy           | delta    |
+|-------------|--------------------|---------------------|----------|
+| slotPack    | 14.40 s / 36.0 ms  | 17.99 s / 45.0 ms   | +9.0 ms  |
+| jointPack   |  9.18 s / 22.9 ms  |  9.35 s / 23.4 ms   | ~noise   |
+| exec        | 17.49 s / 43.7 ms  | 17.53 s / 43.8 ms   | ~noise   |
+| unpack      | 26.52 s / 66.3 ms  | 27.57 s / 68.9 ms   | +2.6 ms  |
+| **total**   | **67.58 s / 169 ms** | **72.44 s / 181 ms** | **+12 ms/call (+7%)** |
+
+Regression scales with slot count (slotPack gap 3 ms → 9 ms going 98K → 400K).
+
+### Why bulk copy lost
+
+The per-element `FloatArray.set()` was already near-optimal for this gather-then-write
+pattern. The JIT inlines `FloatArray.set` → `TornadoMemorySegment.setAtIndex` →
+`MemorySegment.setAtIndex(JAVA_FLOAT, …)` down to a direct off-heap memory store; 16
+worker threads parallelise the loop and effectively saturate the memory bus. At M=294K
+slots × ~14 floats packed per slot, that's ~16 MB written per call ≈ 8 ms at saturated
+multi-core bandwidth — exactly the observed baseline.
+
+The bulk-copy variant added a heap-array staging round-trip: workers gather SoA →
+staging[] (one full RAM-write pass), then a SINGLE-THREADED `MemorySegment.copy(heap, …,
+offheap, …)` moves staging → device segment (another full pass, single core, bandwidth
+≤ 1/N of saturated). Doubled the memory traffic AND serialised the second pass, for no
+per-call latency reduction (the per-element overhead being optimised away was never
+material). Single-threaded copy of ~16 MB at single-core bandwidth (~5 GB/s) ≈ 3 ms; that
+matches the +3 ms regression at M=98K and the +9 ms at M=400K.
+
+The unpack regression is the same story: replaced parallel per-element `.get()` (off-heap
+reads + scatter to SoA) with a single-threaded bulk read into staging + parallel scatter
+from staging. The bulk read serialises what was previously parallel.
+
+### Lesson — when bulk copy DOESN'T help
+
+Per-element off-heap writes via the Tornado API are JIT-inlined to direct memory stores.
+They are bandwidth-bound at multi-core; bulk copy via `MemorySegment.copy(heap, offheap)`
+is single-threaded and bandwidth-bound at single-core. For gather-then-write patterns
+already parallelised across N cores, adding a staging mirror is strictly worse:
+2× memory traffic and serialised on the off-heap write.
+
+Bulk copy WOULD help if (a) the loop ran on a single thread, (b) the per-element call had
+real dispatch overhead the JIT couldn't elide, or (c) the source was already contiguous
+and could feed directly into the off-heap segment with no staging mirror. None apply here.
+
+Code reverted; per-element pack/unpack stays. The optimisation idea is documented in
+case future investigation (e.g., a parallelised bulk copy, or sourcing kernel inputs from
+a contiguous off-heap region maintained outside the gather pattern) becomes viable.
+
+### Next
+
+Per-step pack/unpack is NOT the dominant cost — exec (12 ms) and unpack-CPU-side work
+(recomputeDerivedSoA + xRange/yRange/zRange + bindTip refresh: most of the 17 ms in
+"unpack") are larger. The step() GPU port (moving filament-side forces to the kernel)
+remains the bigger lever, and the force-coverage audit (GPU_MIGRATION_LESSONS.md Lesson 2)
+applies as the first step there. RUN_LOGS for this A/B saved nowhere (figures in table
+above are the full record).
+
 ## 2026-06-01 — GPU joints kernel: RESOLVED (rod-tail anchor force was dropped on GPU path)
 
 The GPU myosin-joints kernel caused a ~42% gliding-assay binding drop. Root cause: the
@@ -30,9 +139,9 @@ Pointers:
 - Distilled lessons (silent force-dropping, force-coverage auditing, minimal reproduction,
   watch-it-run, validation coverage): GPU_MIGRATION_LESSONS.md.
 
-Next: bulk-memcpy pack/unpack (prompt queued); step() GPU port — apply the force-coverage
-audit (GPU_MIGRATION_LESSONS.md Lesson 2) as the FIRST step to prevent another silently-
-dropped force.
+Next: step() GPU port — apply the force-coverage audit (GPU_MIGRATION_LESSONS.md Lesson 2)
+as the FIRST step to prevent another silently-dropped force.
+(Bulk-memcpy pack/unpack was tried and reverted; see 2026-06-01 entry above.)
 
 ## 2026-05-30 — Myosin joints GPU kernel
 
