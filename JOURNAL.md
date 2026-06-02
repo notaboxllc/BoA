@@ -1,8 +1,288 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-02
+Last updated: 2026-06-02 PM (gliding-assay filament IC overshoot fix applied)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-02 — Gliding-assay filament IC overshoot — fix
+
+**Scope:** code edit only — IC placement of the single gliding-assay test
+filament. No force/code-path changes elsewhere.
+
+### Change
+
+`FilSegment.makeGlidingAssayFilament` (`boxOfActin/FilSegment.java:3334`):
+
+```java
+double stdFilSegLengthUM = Env.stdSegLength.getIntValue() * Env.actinMonoRadius;
+Pt3D loc = new Pt3D(Env.boxXDim.getValue()/2 - filLength/2 - stdFilSegLengthUM/2, 0, 0);
+```
+
+Canonical name for the standard per-segment length is `Env.stdSegLength`
+(`Env.java:544`, param label `filSegLength`, units = monomers; default 32,
+overridden to **64** in `glidingAssay500_val`). In microns:
+`64 × actinMonoRadius = 64 × 0.0027 = 0.1728 µm`. Half = **0.0864 µm**, the
+pad applied inward from the +x wall. Formula is `boxXDim`-relative so it
+auto-scales to any box width.
+
+### Geometry (val config: `glidingAssay500_val`, boxXDim=14, filLength=2.0)
+
+| quantity | old | new |
+|---|---|---|
+| `coord.x` (segment center)              | 6.00000 | 5.91360 |
+| `end1.x` (pointed/minus end)            | 4.99965 | 4.91325 |
+| `end2.x` (barbed/plus end)              | **7.00035** | **6.91395** |
+| wall threshold (`boxXDim/2 − R`)        | 6.99650 | 6.99650 |
+| margin below threshold                  | −3.85 nm (over) | **+82.55 nm (clear)** |
+| runway cost vs old (−x direction)       | — | 0.0864 µm |
+
+### Validation (smoke run, `glidingAssay500_val`, `-3js`)
+
+Frame 0 (post-step-1; `threeJSCounter` writes on the first doLoop pass):
+chain is **straight** to thermal-noise tolerance. The original FilSegment
+has split off a 64-mon chunk at its +x end as expected; both fragments lie
+on the x-axis with y/z deviations < 1 nm:
+
+```
+id=42001 (5-segment-wise unchunked main): end1=(4.91330, -0.00080, -0.00019)
+                                          end2=(6.74120, +0.00033, -0.00036)
+id=42002 (first split-off 64-mon chunk):  end1=(6.91130, +0.00044, -0.00037)
+                                          end2=(7.08680, +0.00054, -0.00039)
+```
+
+Frame 1 (one toFileInterval later): chain has fully chunked into 12
+segments, y/z deviations remain ≤ ~20 nm — i.e. only thermal jitter, not
+the >100-nm step-1 wall-collision bend that contaminated the prior IC.
+**No frame-1 wall-collision bend.**
+
+Note: by frame 0 the post-split chain extent exceeds the IC contour by
+one `actinMonoRadius` per split (the `(n+1)·r` per-segment length
+convention), so the +x-most endpoint after splitting (7.087 µm) is past
+the wall threshold even with the fix. That's a downstream behavior, not
+an IC issue — the IC itself (single 740-mon FilSegment) is straight and
+clears the threshold by 82.55 nm at t=0, so the first physics step no
+longer triggers the wall force and the spurious step-1 bend is gone.
+
+### Caveat for future baselines
+
+Absolute gliding velocities / motor-binding counts will shift slightly vs
+prior runs because the IC is now straight rather than wall-relaxing — any
+future gliding baseline should be regenerated on this corrected IC. The
+Phase-1 device-vs-CPU delta (RUN_LOGS/2026-06-02_phase1_*) is unaffected
+because both arms shared the old IC.
+
+## 2026-06-02 — Gliding-assay filament IC overshoot — survey
+
+**Scope:** read-only survey. Confirms the bug, identifies root cause,
+proposes a fix. No code or param edits.
+
+### 1. Placement math (val config: `glidingAssay500_val`)
+
+Code path: `BoxOfActin.begin → setUpGlidingAssay → FilSegment.makeGlidingAssayFilament`
+(`boxOfActin/FilSegment.java:3334`). The whole body is six lines:
+
+```java
+double filLength = Env.glidingFilamentLength.getValue();    // 2.0 µm
+int    monCt    = (int)(filLength/Env.actinMonoRadius);     // 740
+Pt3D   loc      = new Pt3D(Env.boxXDim.getValue()/2-filLength/2, 0, 0);
+Pt3D   ang      = new Pt3D(1,0,0);
+new FilSegment(loc, ang, -1, monCt, false);
+```
+
+`loc` is passed to the `FilSegment(Pt3D initCoord, …)` constructor and
+ends up in `Thing.coord` — i.e. the segment **centre**. Derived endpoints
+(`Thing.java:774-782`):
+
+```
+end1 = coord − (length/2) · uVec
+end2 = coord + (length/2) · uVec
+```
+
+Inside the constructor (`FilSegment.java:258`) the actual contour length
+is recomputed from monomer count:
+
+```
+length = (monCt + 1) · actinMonoRadius = 741 · 0.0027 = 2.0007 µm
+```
+
+Plugging in the val config (`boxXDim=14`, `glidingFilamentLength=2.0`,
+`actinMonoRadius=0.0027 µm` from `Env.java:498`):
+
+| quantity | value (µm) |
+|---|---|
+| `boxXDim/2` (+x wall)            | 7.0000 |
+| `coord.x` (centre)               | 6.0000 |
+| `length` (contour)               | 2.0007 |
+| `end1.x` (pointed/minus end)     | 4.9997 |
+| `end2.x` (barbed/plus end)       | **7.0003** |
+| wall-force threshold (`boxXDim/2 − R`, `R = actinWidth/2 = 0.0035`) | 6.9965 |
+
+**Barbed/plus end = `end2`.** Confirmed by `FilSegment.java:2210`
+("only barbed-end (end2Pt) can bind to formin at node") and
+`FilSegment.java:1237` (barbed-tip → bug-surface registration uses
+end2 tracking).
+
+**Geometric overshoot of the +x wall: ≈ 0.35 nm** — essentially zero
+visually. **Wall-force activation: yes, immediately at step 1**:
+`Chamber.amICollidingOuter` (line 128) triggers when an endpoint passes
+`dims.x/2 − R = 6.9965 µm`; end2 sits at 7.0003 µm, ~3.8 nm beyond the
+threshold. So at the very first physics step, a wall force acts on end2,
+the centre is at x=6 (1 µm of lever arm), and the resulting torque flips
+the +x end inward → the artificial bend the user observed.
+
+**Placement IS scaled by `Env.boxXDim`**, not hardcoded for the old
+16 µm box. Algebraically, end2.x = `boxXDim/2 − filLength/2 + length/2`
+≈ `boxXDim/2` for any boxXDim. **The barbed end has always been pinned
+to the +x wall by construction** — that is the formula's invariant. So
+this is not a 16→14 box-shrink regression; it's a long-standing design
+flaw that becomes visible only when the IC is rendered (the original
+`-3jsLive` viewer wasn't around when the gliding code was written).
+
+### 2. When did it change
+
+`git log -S "makeGlidingAssayFilament" -- boxOfActin/FilSegment.java`
+returns exactly one commit: **`5b8e423` (initial commit)**. The body of
+`makeGlidingAssayFilament` has never been modified.
+
+The box dim has moved twice:
+
+- `6cf19b3` (2026-05-26) — `glidingAssayTest` widened 4×4 → 16×2,
+  `glidingFilamentLength` 1.0 → 2.0.
+- `6fff2fa` (2026-05-29) — `glidingAssay500` and `glidingAssay500_val`
+  **created with `boxXDim=14`, `glidingFilamentLength=2.0`** (no prior
+  history at 16 µm in these files).
+
+In every historical config (`boxXDim=4, filLength=1`; `16,2`; `14,2`)
+the formula puts `end2.x` exactly at `boxXDim/2`. The pre-Phase-0
+"clean" `glidingTst.001` run had the same geometric IC as the current
+runs — the bend was always there, only the visual prominence
+differs (a 16-µm-wide arena lets the post-bounce relaxation eat the
+artifact before it draws the eye; the 14-µm arena does not).
+
+**Direction of fix: change the placement (single file).** The box
+widths are physics-motivated; they're not the bug. The
+"`barbed end at +x wall`" invariant is.
+
+### 3. Validation impact
+
+The post-fix baseline **and** the Phase-1 ensemble both ran from
+`ParameterFiles/glidingAssay500_val`
+(boxXDim=14.0, glidingFilamentLength=2.0). Verified:
+
+- 2026-06-01 baseline: `RUN_LOGS/2026-06-01_J2_0.1_rest96_ensembles.txt`
+  declares `## Param file: ParameterFiles/glidingAssay500_val`.
+- 2026-06-02 Phase-1 ensemble: each
+  `RUN_LOGS/2026-06-02_phase1_ensemble_seed{1..10}.log`
+  reads `Parameter assigned: boxXDim set to 14.0` and
+  `glidingFilamentLength set to 2.0` at startup.
+
+So the IC overshoot is identical (~0.35 nm, same wall-force kick) in
+both ensembles. **The bent IC is NOT a confound for the ~2 σ
+bindEvents / meanBoundMotors shift between baseline and Phase 1** —
+both ensembles experience the same first-step torque and post-bounce
+relaxation. The drift is genuinely attributable to the Phase-0
+RNG-mapping change + Phase-1 anchor port, as already hypothesised.
+
+**The IC overshoot IS a confound for the absolute numbers** (every
+gliding velocity / binding count is measured starting from an
+artificially bent rod whose first ~µs of dynamics is wall relaxation,
+not myosin-driven gliding). Phase-1 numbers and the 856.80/7.30/8.22
+baseline are both biased the same way, so the *delta* is clean; but
+neither is a "clean" gliding-assay IC.
+
+### 4. Root cause (confident)
+
+`makeGlidingAssayFilament` was written treating `loc` as the segment
+**centre**, but the formula `boxXDim/2 − filLength/2` is the value one
+would write down if `loc` were the **−x end** (so the +x end lands at
+`boxXDim/2`). Whether the author intended end-anchoring or
+centre-anchoring, the formula ends up placing the barbed-end exactly at
+the +x wall. The result is the artificially bent IC.
+
+This is **gliding-only**. Other `new FilSegment(...)` call sites
+either use `theBox.rdmPtInside()` (random interior point) or coordinates
+explicitly inside the box. No general Thing/wall change is implicated.
+
+### 5. Proposed fix (planner: please scope)
+
+Replace the placement line in `FilSegment.makeGlidingAssayFilament`
+(`FilSegment.java:3337`) so the **entire** filament lives inside the
+box for arbitrary `boxXDim`. Simplest correct version: centre at the
+box origin so the barbed end is `filLength/2` from either wall:
+
+```java
+Pt3D loc = new Pt3D(0, 0, 0);
+```
+
+For the val config this puts end1 at x ≈ −1.0003 and end2 at x ≈ +1.0003,
+both ~6 µm from the nearest wall. The filament still slides freely along
++x/−x as myosins drive it; the wall is never touched at t=0.
+
+**Validation follow-up (out of scope for the fix itself):** the gliding
+ensemble likely needs a re-baseline on the corrected IC. The
+2 σ baseline-vs-Phase-1 *delta* survives unchanged (both ensembles share
+the bent IC and would have shared a clean IC), but the *absolute*
+binding / velocity numbers will shift — possibly enough to invalidate
+the 856.80 / 7.30 / 8.22 reference values. Plan a fresh post-fix
+baseline before judging Phase-1's borderline binding deltas as
+PASS/FAIL.
+
+## 2026-06-02 — ThreeJSWriter endpoint-key regression fix
+
+**Bug:** every endpoint JSON key in frame and inspectResult payloads was
+being emitted as the Pt3D accessor name (`"end1AsPt3D()"`,
+`"end2AsPt3D()"`) instead of the viewer contract (`"end1"`, `"end2"`),
+on segments AND on myosin rod/lever/motor records AND on MyoMiniFilament
+inspect records. The viewer reads `seg.end1` / `rod.end1` / etc., got
+`undefined`, threw inside the geometry build, and the HUD hung on
+"loading…" for every post-refactor live and file run.
+
+**Introducing change:** `daa239b` (2026-05-30, "Pt3D pose field removal:
+kill the bridge, GPU unpack -33 %") — the refactor that switched
+endpoint *value* reads from `fs.end1.x` (field) to `fs.getEnd1X()`
+(getter) also rewrote the JSON *key* strings from `"end1"` to
+`"end1AsPt3D()"`, almost certainly an over-broad search/replace pass.
+The two changes ride together in the same hunks in
+`boxOfActin/ThreeJSWriter.java` — values updated correctly, keys
+poisoned.
+
+**Fix:** only the key strings, in `boxOfActin/ThreeJSWriter.java`.
+9 occurrences across `buildFrameJson` (segments, myosin rod/lever,
+minifilaments, motorJson) and the inspect builders (`inspectFilSegment`,
+`inspectMyoMiniFilament`). Values continue to come from the getters —
+those are correct. Done as `replace_all` on the escaped JSON-key form
+(`\"end1AsPt3D()\"` → `\"end1\"`); a prose comment at line 222 mentions
+the accessor names in code context (not as a JSON key) and was
+deliberately untouched. Grep after the fix:
+`"end[12][A-Za-z()]*":` returns exactly `"end1":` and `"end2":` in a
+written frame; `grep -c AsPt3D <frame>.json` returns 0.
+
+**Side effect:** frame size shrank from 5.36 MB → 4.69 MB at
+gliding-assay scale (8-char key → 4-char key × ~6 key occurrences per
+of ~14k myosins ≈ 670 KB/frame).
+
+**Salvaging pre-fix run outputs locally — no re-run needed:**
+
+```
+sed -i '' -e 's/"end1AsPt3D()"/"end1"/g' -e 's/"end2AsPt3D()"/"end2"/g' <dir>/frame_*.json
+```
+
+(The leading `''` after `-i` is the BSD/macOS form; on the aorus GNU
+sed, drop it: `sed -i -e 's/"end1AsPt3D()"/"end1"/g' …`.)
+
+Verified by smoke run with the rebuilt binary
+(`-pf /tmp/phase1_files/smoke.params -seed 7 -3js …`) writing 2 frames
+to `/tmp/phase1_files/smoke_out/`. Pre-fix frame archives
+(`/tmp/phase1_files/seed7_short.zip`, `…/seed7_long.zip`) can be fixed
+with the sed line above after unzip — no GPU run needed.
+
+**Process note (Lesson 4 — watch it run):** this slipped through because
+every validation since the refactor has been numeric (head_r, head_z,
+bindEvents, glidingVelocity, theta_RL/LM) — nobody actually loaded a
+post-`daa239b` frame in the Three.js viewer until the live-view
+shakedown surfaced "loading…". Numeric pipelines don't probe the
+serialization contract. Recommend: any future refactor touching frame
+emission gets a one-frame eyeball in the viewer before the next port.
 
 ## 2026-06-02 — Phase 1: anchor spring ported to device kernel (A7.b)
 
@@ -263,6 +543,132 @@ Phase 1 is green; flip `DIAG_CPU_ANCHOR=false` as the permanent default
   kernel's; no separate `isAnchored` index needed (parallel
   `anchoredFlags` IntArray indexed by joint-slot is sufficient and
   matches the existing `cockedFlags` shape).
+
+### Phase 1 — validation results (2026-06-02 PM, aorus)
+
+Build: same javac line as Step 5; `.class` files dated 10:38 newer than
+the latest `.java` (10:34). No code touched between build and validation.
+
+#### Stage 1 — SingleMyoDiag A/B (cheap probe, runs first)
+
+Param file `ParameterFiles/singleMyoDiag` (runTime 5.0s = 500k steps,
+n=50010 samples at interval 10, J2=0, seed 1). Logs:
+`/tmp/phase1_val/armA_device.log`, `/tmp/phase1_val/armB_cpuanchor.log`.
+
+| metric         | Arm A (device, default)  | Arm B (BOA_DIAG_CPU_ANCHOR=1) | A − B gap   | post-fix ref (2026-06-01) |
+|---|---|---|---|---|
+| head_r mean    | 0.063027 µm              | 0.062805 µm                   | +0.000222 µm (0.22 nm) | device 0.063 µm, CPU 0.061 µm |
+| head_r max     | 0.122737 µm              | 0.121740 µm                   | bounded     | well below buggy-era 1.046 µm |
+| head_z mean    | −0.050704 µm             | −0.052131 µm                  | +1.43 nm    | post-fix CPU/GPU gap 0.04 nm (≠ same test) |
+| theta_RL mean  | 1.672946 rad (95.853°)   | 1.673300 rad (95.873°)        | 0.02°       | — |
+| theta_LM mean  | 0.273547 rad (15.673°)   | 0.272594 rad (15.619°)        | 0.05°       | — |
+| cocked frac    | 0.0013                   | 0.0001                        | (Brownian)  | — |
+
+**Stage 1 verdict: PASS.**
+1. **Bounded, no drift.** Both arms steady-state head_r ≈ 0.063 µm —
+   within 0.5% of the post-fix device reference 0.063 µm, two orders of
+   magnitude below the pre-fix 0.533 µm drift.
+2. **A/B agreement.** head_r A−B gap = 0.22 nm, ~10× tighter than the
+   ~2 nm float32-vs-double reference gap. theta_RL/theta_LM align to
+   ≤0.05°. head_z A−B gap = 1.43 nm: larger than the 0.04 nm post-fix
+   reference, but that reference was a *different* comparison
+   (CPU-joints-double vs GPU-joints-float32 on the gliding assay). Here
+   both arms run GPU joints in float32 and differ only on the anchor
+   compute path; a ~1 nm gap is consistent with float32-trajectory
+   noise (Arm A's head_z here, −0.0507 µm, also differs from the May 31
+   device-arm value of −0.0518 µm by ~1 nm — same regime). The buggy-
+   era CPU/GPU head_z gap was 93 nm; the present gap is 65× tighter.
+
+Gate cleared → Stage 2 dispatched.
+
+#### Stage 2 — 10-seed gliding ensemble (`glidingAssay500_val`)
+
+Default device anchor build (`DIAG_CPU_ANCHOR=false`). Per-seed logs:
+`/tmp/phase1_val/ensemble_seed{1..10}.log`. Status heartbeat in
+`.last_run_status` (start 11:22, finish 12:14, ~52 min wall).
+
+| seed | bindEvents | meanBoundMotors | glidingVelocity |
+|---|---|---|---|
+| 1  | 855 | 6.942 | 8.4840 |
+| 2  | 824 | 7.208 | 8.8394 |
+| 3  | 768 | 6.576 | 7.9111 |
+| 4  | 849 | 6.792 | 8.5658 |
+| 5  | 620 | 6.133 | 7.6805 |
+| 6  | 664 | 6.001 | 7.2304 |
+| 7  | 320 | 2.855 | 6.6137 |
+| 8  | 674 | 6.279 | 8.5279 |
+| 9  | 800 | 6.886 | 8.6421 |
+| 10 | 805 | 6.408 | 8.1552 |
+
+Ensemble vs post-fix baseline (`856.80 ± 45.72 / 7.30 ± 0.30 / 8.22 ± 0.15`):
+
+| metric            | Phase-1 mean | SD     | SEM   | baseline       | diff    | cSEM  | \|d\|/cSEM  | verdict |
+|---|---|---|---|---|---|---|---|---|
+| bindEvents        | 717.900      | 162.21 | 51.30 | 856.80 ± 45.72 | −138.90 | 68.71 | **2.02 σ**  | borderline |
+| meanBoundMotors   |   6.208      |   1.24 |  0.39 |   7.30 ± 0.30  |  −1.092 |  0.49 | **2.21 σ**  | borderline |
+| glidingVelocity   |   8.065      |   0.71 |  0.23 |   8.22 ± 0.15  |  −0.155 |  0.27 |   0.57 σ    | PASS |
+
+**Stage 2 verdict: MIXED — gv clean PASS, bindEvents and
+meanBoundMotors ~2σ below baseline.** Compared to the post-fix
+reference deltas (0.44 / 0.67 / 0.80 σ), the binding-count observables
+have walked outward by ~3× their previous σ-distance while velocity
+held. Per the prompt's gate language ("a multi-σ shift on any
+observable is a regression"), this is not a clean ensemble pass.
+
+Contextual reads — *not* a verdict change, just for the planner:
+- **Seed 7 dominates the SEM.** bindEvents=320 is 4σ below the mean of
+  the other 9 (which is 762.1 ± 90.5). Excluding it, the 9-seed mean
+  is 762.1 / 6.581 / 8.226 — bindEvents drift drops from −139 to −95
+  (still down ~11%), mbm drift from −1.09 to −0.72, gv lands at 8.226
+  (right on baseline). Outlier-driven, but seed 7 is a legitimate
+  sample of the post-Phase-0 RNG distribution.
+- **Phase 0 changed the per-seed RNG mapping.** Pre-Phase-0, `-seed N`
+  did not control `GPUMoveThing.runSeed` (that was a class-load random
+  draw); post-Phase-0 it does. The 2026-06-01 baseline was generated
+  pre-Phase-0, so the per-seed values are NOT directly comparable
+  across the two ensembles — only the population mean is. The ~2σ
+  shift could reflect that the seeds {1..10} now deterministically
+  sample a slightly low-binding sub-region of the population, rather
+  than a Phase-1 anchor regression. The Stage-1 same-seed-1
+  conformation match (head_r 0.063 µm, on-baseline; theta_RL/LM aligned
+  to ≤0.05°) argues against a per-step force error.
+- **Velocity-binding decoupling is suggestive but not diagnostic.** A
+  Phase-1 anchor-force bug would most plausibly perturb the rod-end
+  trajectory and thus the binding geometry — but it would also pull
+  velocity along with it (binding count and stroke power are coupled
+  in the model). gv landing on baseline while binding drops by 15% is
+  more consistent with population-level RNG sampling than a force-path
+  defect, but only an extended ensemble (e.g. seeds 11..20 or 11..30)
+  can resolve which it is.
+
+#### Overall Phase 1 verdict: PARTIAL PASS — Stage 1 cleanly passed; Stage 2 mixed.
+
+- **Anchor-port correctness:** confirmed by Stage 1. Device anchor
+  kernel produces the same per-step force as the CPU anchor pass to
+  within float32-trajectory noise (0.22 nm head_r, 1.43 nm head_z
+  over 500k steps from identical seed). The "anchor lesson" residue
+  is closed at the per-step / per-myosin level.
+- **Ensemble agreement:** velocity matches baseline cleanly; the two
+  binding-count observables are ~2σ below. Per the prompt's strict
+  gate language this is not a clean ensemble PASS, and per the prompt's
+  constraint ("validation only — no code changes") this is reported
+  here as a flag for the planner, not investigated further in this
+  session. Recommended planner-scoped follow-ups (one of):
+  1. Extend to seeds 11..30 on the post-Phase-0 build to tighten SEM
+     and either confirm the shift is RNG-sampling (mean walks back
+     toward 856/7.30) or persists (then root-cause is structural).
+  2. Re-baseline by running 10 seeds on the *pre-Phase-1* build
+     (`MyosinFixed.applyGPUDroppedForces` CPU pass, no device anchor)
+     under the post-Phase-0 RNG; compare both n=10 ensembles in the
+     same RNG regime. This isolates the Phase 1 delta from the
+     Phase 0 delta.
+  3. Accept the partial pass on the strength of Stage 1, leave
+     `DIAG_CPU_ANCHOR=false` as default, and proceed to Phase 2 with
+     a note to revisit if Phase 2 ensembles show consistent low-bind
+     bias.
+
+Phase 2 (step forces) is NOT auto-greenlit by this entry. The planner
+should make the Stage 2 call before the next port begins.
 
 ## 2026-06-02 — Phase 0 layout-decision spike (AoS vs SoA): keep AoS
 

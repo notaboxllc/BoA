@@ -3334,7 +3334,8 @@ public class FilSegment extends Thing {
 	public static void makeGlidingAssayFilament () {
 		double filLength = Env.glidingFilamentLength.getValue();
 		int monCt = (int)(filLength/Env.actinMonoRadius);
-		Pt3D loc = new Pt3D(Env.boxXDim.getValue()/2-filLength/2,0,0);
+		double stdFilSegLengthUM = Env.stdSegLength.getIntValue() * Env.actinMonoRadius;
+		Pt3D loc = new Pt3D(Env.boxXDim.getValue()/2 - filLength/2 - stdFilSegLengthUM/2, 0, 0);
 		Pt3D ang = new Pt3D(1,0,0);
 		FilSegment newSeg = new FilSegment (loc,ang,-1,monCt,false);
 	}
