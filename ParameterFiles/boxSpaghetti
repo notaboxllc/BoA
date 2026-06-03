@@ -1,0 +1,69 @@
+<BOA> Box-spaghetti tipC A/B (Phase 2 F1 writeback) — small box, polymerizing actin, no motors/nodes
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
+runTime:true:2.0;                       // 20000 steps @ 1e-4 — long enough for polymerizing tips to reach walls
+fracMove:true:0.4;                      // Coeff. for PALM movement
+fracR:true:0.134;                       // Coeff. torque arm for PALM movement
+fracMoveTorq:true:0.013685;             // Coeff. for PALM torque movement
+drawInterval:true:100.0;                // Drawing Interval
+toFileInterval:true:200.0;              // 20000 steps -> 100 frames
+remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
+frameWidth:true:800.0;                  // Frame Width
+frameHeight:true:800.0;                 // Frame Height
+bugShapedCrucible:false:0.0;            // Box (Chamber) container — NOT pill
+simOutsideBug:false:0.0;                // No Listeria
+boxXDim:true:0.6;                       // Very small box so polymerizing tips reach the walls fast
+boxYDim:true:0.6;
+boxZDim:true:0.4;
+initialFilaments:true:6.0;              // Few short flexible filaments
+initialMyoMiniFils:true:0.0;            // No myosin minifilaments
+minFilLength:true:0.05;                 // Very short initial fils — they grow into walls quickly
+maxFilLength:true:0.15;
+stdDevActinDist:true:0.3;
+actinConc:true:50.0;                    // Very high actin conc — fast polymerization (~1.5 µm/s); drives strong wall attack
+actinConcNonHydro:false:0.0;            // No non-hydrolyzable actin
+aeta:true:1.0;
+capConc:true:0.0;                       // No capping — keep barbed ends growing
+capRate:true:0.0;
+nodeZone:true:0.9;
+nodeRadius:true:0.025;
+forminsPerNode:true:0.0;
+myosPerNode:true:0.0;
+actinSeed:true:3.0;
+actinOnCortex:true:0.0;
+filSegLength:true:64.0;                 // Segment monomer count — longer segs = softer chain visually
+BTransCoeff:true:1.0;
+BRotCoeff:true:0.5;
+nodeTorqSpring:true:1.0E-20;
+forminRelease:true:1.0;
+noMonomers:true:0.0;                    // Monomers ARE simulated and tracked
+filamentsAnneal:false:0.0;
+annealDist:true:0.054;
+annealAngleCosine:true:0.9;
+maxLinksOnSeg:true:10.0;
+sideBonds:true:0.0;
+filLinkSpring:true:1.0E-9;
+filLinkTorqSpring:true:1.0E-19;
+xLinkTransAttn:true:1.0;
+xLinkRotAttn:true:1.0;
+maxFilLinkDist:true:0.02;
+linkDissolveRate:true:1.0;
+cofilinRate:true:0.0;                   // Disable cofilin severing
+cofilinConc:true:0.0;
+cofilinRatio:true:1.1;
+myosSteppingSwitch:true:0.0;
+polyCompressionCutoff:true:0.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+kHydrolysis:true:1.0;
+kDissociation:true:1.0;
+showTime:true:0.0;
+showConc:true:0.0;
+showFilCt:true:0.0;
+showFilLinkCt:true:0.0;
+showMonCt:true:0.0;
+showHistBox:true:0.0;
+showYHistTics:true:0.0;
+flatTops:true:0.0;

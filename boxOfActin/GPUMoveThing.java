@@ -200,6 +200,23 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_CPU_F1 = false;
 
+    /**
+     * Diagnostic flag (2026-06-03 — tipC device writeback). When true (default),
+     * the box boundaryBoxKernel writes a per-endpoint wall-clearance into the
+     * boundaryTipC FloatArray, and bridgeBoundaryTipC() min-combines it into
+     * FilSegment.end{1,2}TipC after plan.execute() so the existing CPU
+     * polymerization gate (stericHindranceEnd2 → end2BiochemSim) sees the
+     * device's wall result. Set false (via BOA_DIAG_DEVICE_BOUNDARY_TIPC=0)
+     * to disable the writeback for the A/B that reproduces the pre-fix
+     * "tips grow through the wall" behaviour — independent of DIAG_CPU_F1
+     * (both A/B arms keep the device boundary FORCE/TORQUE active; only
+     * the tipC writeback toggles). On CPU runs (non-`-gpu`) and on the
+     * Listeria from-outside path, this flag has no effect (CPU
+     * bugForcesFromInside / checkBugCollisionFromOutside continue to write
+     * tipC=0 on hit unconditionally).
+     */
+    public static boolean DIAG_DEVICE_BOUNDARY_TIPC = true;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
@@ -305,6 +322,18 @@ public class GPUMoveThing {
     //                 FilSegment.bugForcesFromInside line `fnorm = 0.1 *
     //                 Math.min(fturn, ftrans)`).
     private static FloatArray boundaryParams;
+    // Per-segment per-endpoint wall clearance written by boundaryBoxKernel
+    // and consumed by bridgeBoundaryTipC() (called from moveThings() after
+    // plan.execute() returns, before BoxOfActin's biochem phase reads tipC).
+    // Layout: boundaryTipC[i*2+0] = end1 clearance, [i*2+1] = end2 clearance.
+    // Units: µm. Convention matches the existing Listeria from-outside path
+    // (checkBugCollisionFromOutside, FilSegment.java:1275/1293) — clearance
+    // is (wall_distance − radius), 0 on contact/penetration. Sentinel 1e6
+    // is written for inactive slots (non-FilSegment, DIAG_CPU_F1, or the
+    // boundaryActive[i]=0 gate) so bridgeBoundaryTipC()'s min-combine is a
+    // no-op for them, leaving CPU writes (registerATipClearance, the CPU
+    // bugForcesFromInside on the CPU-fallback / DIAG_CPU_F1 paths) untouched.
+    private static FloatArray boundaryTipC;     // slotCap * 2
     // Plan-build-time shape selector (Survey Option A). Today only BOX is
     // wired; PILL (Bug) becomes a sibling task as F1b after the pill CPU
     // revival flagged in the 2026-06-03 boundary survey. The shape is picked
@@ -1266,6 +1295,7 @@ public class GPUMoveThing {
             FloatArray bRotGam,
             FloatArray jointForceSum,
             FloatArray jointTorqueSum,
+            FloatArray boundaryTipC,
             FloatArray boundaryParams,
             IntArray   counts) {
 
@@ -1283,6 +1313,12 @@ public class GPUMoveThing {
 
         for (@Parallel int i = 0; i < coord.getSize() / 3; i++) {
             if (i >= N) { return; }
+            // tipC writeback (2026-06-03): sentinel-initialise BEFORE the
+            // boundaryActive early-return so inactive slots have a no-op
+            // value for bridgeBoundaryTipC()'s min-combine. Per-endpoint
+            // blocks below overwrite for active slots.
+            boundaryTipC.set(i * 2,     1.0e6f);
+            boundaryTipC.set(i * 2 + 1, 1.0e6f);
             if (boundaryActive.get(i) == 0) { return; }
 
             int i3 = i * 3;
@@ -1306,6 +1342,26 @@ public class GPUMoveThing {
                 double dx = cx - halfLen_um * ux;
                 double dy = cy - halfLen_um * uy;
                 double dz = cz - halfLen_um * uz;
+                // tipC writeback: per-axis clearance is (halfDim_i − R) − |d_i|
+                // (positive when endpoint center sits inside the inset wall on
+                // that axis; negative on the penetrating axis). Take the min
+                // over axes and clamp at 0 to get the box clearance, matching
+                // the convention used by the Listeria from-outside path at
+                // FilSegment.java:1275/1293 (`tipC = cE.delta` for outside; we
+                // pick the same "wall_distance − R" framing). 0 on contact /
+                // penetration; > 0 when near a wall but not yet touching.
+                {
+                    double absDX = (dx < 0.0) ? -dx : dx;
+                    double absDY = (dy < 0.0) ? -dy : dy;
+                    double absDZ = (dz < 0.0) ? -dz : dz;
+                    double cX = halfX - absDX;
+                    double cY = halfY - absDY;
+                    double cZ = halfZ - absDZ;
+                    double mc = (cX < cY) ? cX : cY;
+                    mc        = (cZ < mc) ? cZ : mc;
+                    double tipC1 = (mc < 0.0) ? 0.0 : mc;
+                    boundaryTipC.set(i * 2, (float) tipC1);
+                }
                 // sign(d_i) via ternary (PTX-safe, no Math.signum).
                 double sx = (dx > 0.0) ? 1.0 : ((dx < 0.0) ? -1.0 : 0.0);
                 double sy = (dy > 0.0) ? 1.0 : ((dy < 0.0) ? -1.0 : 0.0);
@@ -1357,6 +1413,19 @@ public class GPUMoveThing {
                 double dx = cx + halfLen_um * ux;
                 double dy = cy + halfLen_um * uy;
                 double dz = cz + halfLen_um * uz;
+                // tipC writeback: same per-axis clearance formula as end1.
+                {
+                    double absDX = (dx < 0.0) ? -dx : dx;
+                    double absDY = (dy < 0.0) ? -dy : dy;
+                    double absDZ = (dz < 0.0) ? -dz : dz;
+                    double cX = halfX - absDX;
+                    double cY = halfY - absDY;
+                    double cZ = halfZ - absDZ;
+                    double mc = (cX < cY) ? cX : cY;
+                    mc        = (cZ < mc) ? cZ : mc;
+                    double tipC2 = (mc < 0.0) ? 0.0 : mc;
+                    boundaryTipC.set(i * 2 + 1, (float) tipC2);
+                }
                 double sx = (dx > 0.0) ? 1.0 : ((dx < 0.0) ? -1.0 : 0.0);
                 double sy = (dy > 0.0) ? 1.0 : ((dy < 0.0) ? -1.0 : 0.0);
                 double sz = (dz > 0.0) ? 1.0 : ((dz < 0.0) ? -1.0 : 0.0);
@@ -1773,6 +1842,14 @@ public class GPUMoveThing {
         // Phase 2 F1: per-slot boundary-kernel gate + box-geometry uniforms.
         boundaryActive = new IntArray(slotCap);
         boundaryParams = new FloatArray(6);
+        // tipC writeback (2026-06-03): per-segment per-endpoint clearance
+        // read back from the device after plan.execute(). Two entries per
+        // slot (end1, end2). Sentinel-initialised to 1e6 — the kernel writes
+        // the sentinel at the top of every active thread BEFORE the
+        // boundaryActive early-return, so inactive slots and the
+        // DIAG_CPU_F1=true case are guaranteed safe no-ops in the min-combine.
+        boundaryTipC = new FloatArray(slotCap * 2);
+        for (int i = 0; i < slotCap * 2; i++) { boundaryTipC.set(i, 1.0e6f); }
 
         params      = new FloatArray(2);
         jointParams = new FloatArray(13);
@@ -1825,7 +1902,7 @@ public class GPUMoveThing {
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
                               soaLengthArr,
-                              boundaryActive, boundaryParams,
+                              boundaryActive, boundaryParams, boundaryTipC,
                               jointParams, chainParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
@@ -1851,6 +1928,7 @@ public class GPUMoveThing {
                   boundaryActive,
                   bTransGam, bRotGam,
                   jointForceSum, jointTorqueSum,
+                  boundaryTipC,
                   boundaryParams, counts);
         }
         // else if (boundaryShape == BOUNDARY_SHAPE_PILL) { ... // F1b }
@@ -1865,13 +1943,31 @@ public class GPUMoveThing {
                   brownianScales, velMask,
                   params, counts);
 
+        // boundaryTipC is transferred to host EVERY_EXECUTION when the box
+        // kernel is wired (so bridgeBoundaryTipC() sees fresh writes). When no
+        // boundary task is wired (BOUNDARY_SHAPE_NONE — pill or unknown), the
+        // bridge is skipped and the buffer stays at its host-side 1e6
+        // sentinel.
         if (DIAG_DUMP_JOINTS_STEP >= 0 || DIAG_DUMP_CHAIN_STEP >= 0) {
-            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                   coord, uVec, yVec,
-                                   jointForceSum, jointTorqueSum);
+            if (boundaryShape == BOUNDARY_SHAPE_BOX) {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                       coord, uVec, yVec,
+                                       jointForceSum, jointTorqueSum,
+                                       boundaryTipC);
+            } else {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                       coord, uVec, yVec,
+                                       jointForceSum, jointTorqueSum);
+            }
         } else {
-            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                   coord, uVec, yVec);
+            if (boundaryShape == BOUNDARY_SHAPE_BOX) {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                       coord, uVec, yVec,
+                                       boundaryTipC);
+            } else {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                       coord, uVec, yVec);
+            }
         }
 
         itg  = tg.snapshot();
@@ -2218,6 +2314,46 @@ public class GPUMoveThing {
         }
         if (topologyDirty || Thing.thingCt != lastThingCt) {
             classifyThings();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // tipC writeback bridge (2026-06-03 — Phase 2 F1 fix).
+    //
+    // After plan.execute() returns and boundaryTipC has been transferred back,
+    // walk every classified slot and min-combine the per-endpoint device
+    // clearance into FilSegment.end{1,2}TipC. The min-combine respects
+    // existing CPU writes (registerATipClearance from the xLink phase's
+    // ProteinNode-tip interaction, and bugForcesFromInside's tipC=0 set on
+    // CPU-fallback or DIAG_CPU_F1 paths) by never overwriting a smaller value.
+    //
+    // Inactive slots (non-FilSegment Myo/etc., and the boundaryActive[i]=0
+    // case for DIAG_CPU_F1=true) carry the kernel's 1e6 sentinel, making the
+    // min-combine a no-op for those segments — their tipC is whatever the
+    // CPU wrote earlier in the step.
+    //
+    // Caller is responsible for the boundaryShape == BOX gate and the
+    // DIAG_DEVICE_BOUNDARY_TIPC toggle; this method does no gating of its
+    // own beyond skipping non-FilSegment slots.
+    //
+    // Lesson 1 (per-force gate, not per-dispatch): end1TipC has no live
+    // reader (stericHindranceEnd1 exists but every caller is commented out
+    // at FilSegment.java:990-991), so the end1 min-combine is observationally
+    // inert in the current codebase. We still do it for cheapness and so
+    // that any future revival of the end1 polymerization gate is fed
+    // correctly without a second pass through this file.
+    // -------------------------------------------------------------------------
+    private static void bridgeBoundaryTipC() {
+        int sc = slotCount;
+        if (sc == 0) return;
+        for (int s = 0; s < sc; s++) {
+            Thing t = Thing.theThings[gpuThingIndices[s]];
+            if (!(t instanceof FilSegment)) continue;
+            FilSegment fs = (FilSegment) t;
+            double devE1 = (double) boundaryTipC.get(s * 2);
+            double devE2 = (double) boundaryTipC.get(s * 2 + 1);
+            if (devE1 < fs.end1TipC) fs.end1TipC = devE1;
+            if (devE2 < fs.end2TipC) fs.end2TipC = devE2;
         }
     }
 
@@ -2769,6 +2905,23 @@ public class GPUMoveThing {
         }
         for (int i = 0; i < cpuFallbackCt; i++) {
             cpuFallback[i].moveThing();
+        }
+        // tipC writeback bridge (2026-06-03): after plan.execute() has run
+        // the box boundary kernel and its FloatArray writes have been
+        // transferred back, min-combine the per-endpoint clearance into
+        // FilSegment.end{1,2}TipC. Runs BEFORE BoxOfActin's biochem phase
+        // reads tipC (stericHindranceEnd2 gates polymerization). The bridge
+        // is gated on DIAG_DEVICE_BOUNDARY_TIPC and on the box kernel
+        // actually being wired (BOUNDARY_SHAPE_BOX) so the pre-fix
+        // "tips-grow-through-the-wall" behaviour is recoverable for the A/B
+        // (BOA_DIAG_DEVICE_BOUNDARY_TIPC=0). DIAG_CPU_F1 is intentionally
+        // NOT a gate here: in CPU mode the kernel writes 1e6 sentinels via
+        // the early-return path, and min(1e6, existing) = existing — so the
+        // bridge is a no-op for CPU runs and won't trample existing CPU
+        // bugForcesFromInside writes (which set tipC=0 on hit, smaller than
+        // any sentinel).
+        if (DIAG_DEVICE_BOUNDARY_TIPC && boundaryShape == BOUNDARY_SHAPE_BOX) {
+            bridgeBoundaryTipC();
         }
         int tc = Thing.thingCt;
         if (tc > 0) {

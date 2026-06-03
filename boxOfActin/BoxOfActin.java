@@ -210,6 +210,28 @@ public class BoxOfActin {
 				System.err.println("[F1_DIAG] DIAG_CPU_F1 forced ON via env var (CPU pair runs)");
 			}
 		}
+		// BOA_DIAG_DEVICE_BOUNDARY_TIPC — toggle the Phase-2 F1 tipC writeback
+		// (independent of BOA_DIAG_CPU_F1: the boundary FORCE/TORQUE arm is
+		// unaffected; only the tipC clearance write-back into FilSegment is
+		// gated).
+		//   default (unset)             → bridgeBoundaryTipC() runs (writeback ON).
+		//                                 Polymerizing tips arrest at the wall.
+		//   "0" / "false"               → bridge skipped; pre-fix behaviour
+		//                                 (tips polymerize through the wall on
+		//                                 device runs). For the A/B that
+		//                                 reproduces the bug.
+		//   "1" / "true"                → bridge runs (same as default).
+		// See JOURNAL "tipC device writeback (box) — implementation".
+		String tipcEnv = System.getenv("BOA_DIAG_DEVICE_BOUNDARY_TIPC");
+		if (tipcEnv != null && !tipcEnv.isEmpty()) {
+			if (tipcEnv.equals("0") || tipcEnv.equalsIgnoreCase("false")) {
+				GPUMoveThing.DIAG_DEVICE_BOUNDARY_TIPC = false;
+				System.err.println("[F1_DIAG] DIAG_DEVICE_BOUNDARY_TIPC forced OFF (tipC writeback DISABLED)");
+			} else {
+				GPUMoveThing.DIAG_DEVICE_BOUNDARY_TIPC = true;
+				System.err.println("[F1_DIAG] DIAG_DEVICE_BOUNDARY_TIPC forced ON (tipC writeback ENABLED)");
+			}
+		}
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
 			try {

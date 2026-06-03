@@ -1,8 +1,261 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (Phase 2 F1b — pill from-inside CPU revival PASS; device port still deferred)
+Last updated: 2026-06-03 (tipC device writeback (box) PASS; polymerizing box workloads now valid on `-gpu` default)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — tipC device writeback (box) — implementation (PASS)
+
+**Verdict: PASS.** The F1 force-coverage gap left open by the 2026-06-03 PM
+F1 (box) entry — `boundaryBoxKernel` computed wall force/torque but never
+wrote `end{1,2}TipC`, so on the device path `tipC` stayed at its per-step
+`1e6` reset and `stericHindranceEnd2` never fired — is closed. The device
+now writes a per-endpoint wall clearance into a new readback FloatArray
+`boundaryTipC`; after `plan.execute()` returns, `bridgeBoundaryTipC()`
+min-combines those values into `FilSegment.end{1,2}TipC` BEFORE the
+biochem phase reads `tipC`. The existing `stericHindranceEnd2` →
+`end2BiochemSim` polymerization gate (FilSegment.java:1039) and
+`checkCapping` (line 1097) are unchanged. The F1 interim caveat —
+"polymerizing box runs require `BOA_DIAG_CPU_F1=1`" — is lifted for the
+box. F1b (pill) inherits the same writeback pattern when
+`boundaryPillKernel` is built.
+
+### Phase A — tipC setter-side survey
+
+`end2TipC` setter map (single live polymerization-clearance gate):
+
+| Setter | Location | Action | When |
+|---|---|---|---|
+| `resetCounters()` | FilSegment.java:1226 | `= 1e6` (overwrite) | resetCt phase, AFTER biochem (BoxOfActin.java:929) |
+| `StaticFilSegment.step()` | StaticFilSegment.java:26 | `= 1e6` (overwrite) | start of step on collisionCheckInt cadence |
+| `bugForcesFromInside` | FilSegment.java:2610 | `= 0` (overwrite, equiv. min-with-0) | CPU step() phase, ON contact only (caller `checkBugCollisionFromInside` gates on `cE.delta != 0`) |
+| `checkBugCollisionFromOutside` | FilSegment.java:1282/1293 | `= 0` on hit / `= cE.delta` near (overwrite) | CPU step() phase, Listeria from-outside path (`simOutsideBug=true`) |
+| `registerATipClearance` | FilSegment.java:1078 | min-combine | xLink phase (BoxOfActin.java:846), called from `checkNodeFilTipsCollision` (line 2023) — ProteinNode tip clearance |
+| **(NEW)** `bridgeBoundaryTipC()` | GPUMoveThing.java | min-combine | between move and biochem phases, after device kernel writeback |
+
+`end1TipC` setter map: **all writes are dead.** `stericHindranceEnd1()`
+(line 2868) exists but the only callers are commented out at
+FilSegment.java:990-991. `end1BiochemSim` (line 984) polymerizes
+unconditionally (`if (true)`); there is no live end1 gate. End1 sites at
+lines 1227 (reset), 1272/1275 (from-outside), 2607 (from-inside),
+StaticFilSegment.java:26 are observationally inert. We still write end1
+from the device kernel for symmetry / cheap-future-revival; the
+end1 min-combine in `bridgeBoundaryTipC()` is a no-op against any future
+reader.
+
+Commented-out dead sets confirmed dead: FilSegment.java:2189, 2220, 2397
+(all under `//if (...) { endXTipC = 0; }` patterns inside dead branches).
+
+Combine semantics: every setter except `registerATipClearance` overwrites,
+but the boundary-path overwrites are with `0` (≤ any other source so
+equivalent to min-with-0). Intended combined meaning: `tipC = min
+clearance across all sources` once the bridge lands.
+
+Co-occurrence (wall + node clearance for same tip simultaneously): real in
+pill smoke / formin-heavy runs; not in the box-spaghetti test below (no
+nodes). The min-combine is correct either way.
+
+Insertion point for the writeback: after `plan.execute()` returns and
+before BoxOfActin's biochem phase starts (BoxOfActin.java:898–924).
+`bridgeBoundaryTipC()` is called from inside `GPUMoveThing.moveThings()`
+immediately after `OP_UNPACK` and the CPU-fallback `moveThing()` loop —
+cleanest spot that keeps the bridge co-located with the device-result
+readback.
+
+### Phase B — implementation
+
+**Device** (`GPUMoveThing.java`):
+
+- New `FloatArray boundaryTipC` (capacity `slotCap * 2`; layout `[i*2+0]
+  = end1`, `[i*2+1] = end2`). Host-side initialised to `1e6` at
+  allocation; re-uploaded EVERY_EXECUTION (transferToDevice).
+- `boundaryBoxKernel` writes the `1e6` sentinel to both endpoints
+  **before** the `boundaryActive[i] == 0` early-return, so inactive
+  slots (`DIAG_CPU_F1`, non-FilSegment, simOutsideBug, wrong shape) have
+  a guaranteed no-op value for the host-side min-combine.
+- Active slots compute per-endpoint clearance `max(0, min over axes of
+  (halfDim_i − R − |d_i|))` — same convention as the Listeria
+  from-outside path (`cE.delta` as `tipC`, FilSegment.java:1275/1293).
+  `0` on contact / penetration; positive when near a wall but not yet
+  touching. The force/torque math is untouched; only the new clearance
+  computation is added per endpoint.
+- `boundaryTipC` added to transferToHost (EVERY_EXECUTION, gated on
+  `boundaryShape == BOUNDARY_SHAPE_BOX`).
+- `bridgeBoundaryTipC()` walks `gpuThingIndices[0..slotCount-1]`,
+  min-combines `boundaryTipC[s*2+0]` → `fs.end1TipC` and
+  `boundaryTipC[s*2+1]` → `fs.end2TipC` (only if smaller — respects
+  any existing CPU write from `registerATipClearance` or
+  `bugForcesFromInside` on CPU-fallback slots). Called from
+  `moveThings()` after the OP_UNPACK and the CPU-fallback `moveThing()`
+  loop, gated on `DIAG_DEVICE_BOUNDARY_TIPC && boundaryShape == BOX`.
+
+**Toggle flag** (`GPUMoveThing.DIAG_DEVICE_BOUNDARY_TIPC`, default `true`):
+
+- `BOA_DIAG_DEVICE_BOUNDARY_TIPC=0` → bridge skipped; reproduces the
+  pre-fix "tips polymerize through walls" behaviour for the A/B.
+- Independent of `BOA_DIAG_CPU_F1`. Both A/B arms keep the device
+  boundary FORCE/TORQUE active (`DIAG_CPU_F1=false` in both); only the
+  tipC writeback toggles.
+
+**FilSegment** unchanged. `stericHindranceEnd2`/`checkCapping`/biochem
+consumers all read `end2TipC` exactly as before.
+
+### Validation 1 — held-config tipC match (`HeldSegF1Diag`)
+
+Extended `boxOfActin/HeldSegF1Diag.java` with three tipC cases. Both CPU
+mirror (matches `bugForcesFromInside`'s 0-on-contact-only semantics) and
+device mirror (matches the new kernel's clamped-min-clearance formula)
+run on the same frozen pose. Numbers (full log:
+`RUN_LOGS/2026-06-03_heldSegF1_tipC.txt`):
+
+| Case | end2 geom | CPU `end2TipC` | DEV `end2TipC` | Expected DEV | |Δ| |
+|---|---|---|---|---|---|
+| T1 CONTACT | 30° tilt, end2 ~5 nm past +x | `0` | `0` | `0` | bit-equal |
+| T2 NEAR | 30° tilt, end2 ~5 nm clearance from +x | `1e6` (reset sentinel) | `5.000e-3` µm | `5.000e-3` | 4.3e-18 |
+| T3 NEAR | 30° tilt, end2 ~1 nm clearance from +x | `1e6` | `1.000e-3` µm | `1.000e-3` | 8.7e-19 |
+
+T1 verifies bit-for-bit match on contact — the case where both CPU and
+device fire `tipC=0`. T2/T3 document the new "near" signal the device
+adds: device writes positive clearance below `halfmono` (~1.35 nm)
+which trips the existing gate before actual penetration; CPU stays at
+the sentinel because `bugForcesFromInside` is only invoked on hit.
+Pre-existing F+T cases (1–5) re-run unchanged — all PASS, max |dT|
+2.5e-16 (float-noise floor).
+
+### Validation 2 — box-spaghetti A/B (jba's design)
+
+New `ParameterFiles/boxSpaghetti`: 0.6 × 0.6 × 0.4 µm box, 6 initially-
+short (0.05–0.15 µm) polymerizing filaments at `actinConc=50 µM`
+(≈1.5 µm/s growth), no motors / nodes / ActA / capping. 2 s run-time
+(20 000 steps), 100 frames.
+
+Three arms, ALL with the device boundary force/torque active:
+
+```
+# Arm A — writeback OFF (reproduces pre-fix bug)
+BOA_DIAG_DEVICE_BOUNDARY_TIPC=0 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/boxSpaghetti -3js /tmp/spaghettiA
+
+# Arm B — writeback ON (default; the fix)
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/boxSpaghetti -3js /tmp/spaghettiB
+
+# Reference — full CPU F1 (including tipC); should match Arm B
+BOA_DIAG_CPU_F1=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/boxSpaghetti -3js /tmp/spaghettiR
+```
+
+Excursion past walls (X±0.3, Y±0.3, Z±0.2 µm), per-frame max of
+`|endpoint_i| − halfDim_i`, clamped non-negative:
+
+| Arm | seg count trajectory (f0/f25/f50/f75/f100) | max overX | mean overX | mean overY | mean overZ | sustained breach pattern |
+|---|---|---|---|---|---|---|
+| **A — writeback OFF** | 6 → 8 → 12 → 19 → **30** | 0.111 µm | **0.00611** | 0.00430 | 0.00303 | f56–f100 (45 consecutive frames with 2–7 endpoints past walls) — *spaghetti through walls* |
+| **B — writeback ON** | 6 → 6 → 12 → 17 → **24** | 0.091 µm | **0.00210** | 0.00171 | 0.00166 | transient (f81–f83 spike then quiescent f84–f100) — *tips arrest, Brownian wobble at wall* |
+| **Reference — CPU F1** | 6 → 6 → 12 → 17 → **24** | 0.091 µm | **0.00191** | 0.00122 | 0.00014 | f32 single spike, then mostly clean — matches Arm B |
+
+Diagnostic numbers:
+
+- **Polymerization gating** — Arm A produces 6 extra segments
+  (30 vs 24) over the run; B and R agree exactly on final segment
+  count (24). The extra 6 splits in A correspond to additional
+  monomer additions that the missing gate let through at endpoints
+  already past the wall.
+- **Mean excursion** — Arm A's `mean overX` is 3× Arm B's and
+  3.2× the reference; Arm A's `mean overY` is 2.5×; Arm A's
+  `mean overZ` is 1.8× (Z is the thinnest dim and most sensitive
+  to ratcheting). Arm B and the reference agree on mean excursion
+  to within 10% (Brownian-noise level given different per-step
+  evaluation order).
+- **Sustained breach** — Arm A has 45 consecutive frames with
+  endpoints past the walls; Arm B has none, only single-frame
+  transients (Brownian ratcheting, acceptable per prompt).
+  Reference matches B's pattern.
+
+Logs: `RUN_LOGS/2026-06-03_boxSpaghetti_AB_summary.txt` (per-arm
+aggregates), `RUN_LOGS/2026-06-03_boxSpaghetti_AB_frames.txt`
+(per-frame breach trace + segCt trajectory).
+
+Frame JSONs from each arm (Arm A spaghetti spread + Arm B / R
+arrested) are at `/tmp/spaghettiA`, `/tmp/spaghettiB`, `/tmp/spaghettiR`
+on aorus; viewer-loadable via `python3 sim_server.py 8000` →
+`http://localhost:8000/sim_viewer_boa.html` then arm selection.
+
+### Force-coverage table — updated F1 row
+
+Replaces the `end1TipC`/`end2TipC` row in the 2026-06-03 PM F1 (box)
+entry:
+
+| Force / behaviour | CPU `BOA_DIAG_CPU_F1=1` | Device default (no env var) |
+|---|---|---|
+| `bugForcesFromInside` side effect: `end1TipC`/`end2TipC` | written on CPU (overwrite-with-0 on hit only); `end1TipC` writes are dead in the current codebase (no live `stericHindranceEnd1` caller); `end2TipC` is the live polymerization gate | **`end2TipC` written by `boundaryBoxKernel` → `boundaryTipC` FloatArray → `bridgeBoundaryTipC()` min-combine** (continuous near-clearance: 0 on hit, positive `max(0, halfDim − R − |d|)` when near). Min-combined with the CPU `registerATipClearance` value if a node is also nearby. `end1TipC` symmetric write for cheap-future-revival; observationally inert. Polymerizing box runs are now valid on `-gpu` default — the interim "polymerizing → `DIAG_CPU_F1=true`" caveat **is lifted for the box**. F1b (pill) inherits this pattern when `boundaryPillKernel` is built. |
+
+All other force/behaviour rows from the 2026-06-03 PM F1 entry remain
+correct.
+
+### Files changed
+
+| file | change |
+|---|---|
+| `boxOfActin/GPUMoveThing.java` | `DIAG_DEVICE_BOUNDARY_TIPC` flag; `boundaryTipC` FloatArray (slotCap × 2); `boundaryBoxKernel` writes sentinel + per-endpoint clearance; transferToDevice + transferToHost lists; new `bridgeBoundaryTipC()`; call from `moveThings()` after OP_UNPACK |
+| `boxOfActin/BoxOfActin.java` | `BOA_DIAG_DEVICE_BOUNDARY_TIPC` env hook in `begin()` |
+| `boxOfActin/HeldSegF1Diag.java` | `cpuTipCAtEnd` / `devTipCAtEnd` mirrors + `runTipCCase` helper + three tipC cases (T1 CONTACT, T2 NEAR ~5 nm, T3 NEAR ~1 nm) appended to `main()` |
+| `ParameterFiles/boxSpaghetti` | NEW — 0.6 × 0.6 × 0.4 µm box, 6 polymerizing filaments at 50 µM, capping disabled — A/B fixture for the writeback fix |
+| `RUN_LOGS/2026-06-03_heldSegF1_tipC.txt` | full `HeldSegF1Diag` output with the new tipC cases |
+| `RUN_LOGS/2026-06-03_boxSpaghetti_AB_summary.txt` | per-arm aggregate excursion + segCt stats |
+| `RUN_LOGS/2026-06-03_boxSpaghetti_AB_frames.txt` | per-frame breach trace + segCt trajectory for all three arms |
+
+### Constraints respected
+
+- **Box only.** `boundaryPillKernel` not built (still F1b deferred);
+  `BOUNDARY_SHAPE_PILL` slot left as a comment in
+  `allocateAndBuildPlan()`. The bridge is gated on
+  `boundaryShape == BOUNDARY_SHAPE_BOX`.
+- Node `tipC` computation (`registerATipClearance`) untouched. The
+  bridge only **min-combines** the device boundary `tipC` into the
+  same field; it never overwrites a smaller node value.
+- `stericHindranceEnd1`/`stericHindranceEnd2` and the polymerization /
+  capping logic unchanged. The fix is exclusively on the *setter*
+  side; the consumer chain that F1b pinned is fed correct data.
+- Listeria from-outside path (`simOutsideBug` active) untouched —
+  CPU `checkBugCollisionFromOutside` continues to write `tipC = 0` /
+  `cE.delta` exactly as before. The device kernel skips those slots
+  via `boundaryActive[i] = 0` (set in `classifyThings`), so the
+  bridge's sentinel value (`1e6`) is a no-op against the CPU's
+  outside-path write.
+- No Phase 3 (binding) / Phase 4 (residency) work touched.
+- CPU-only runs (non-`-gpu`) unaffected: device kernel does not run,
+  bridge is called only from `GPUMoveThing.moveThings()` which is
+  only invoked when `Env.useGPU == true`.
+
+### Open follow-ups (not part of this entry)
+
+- **F1b device port** — `boundaryPillKernel`. tipC writeback pattern is
+  ready to be replicated: write `0` on contact with the capsule
+  (cylinder side OR caps) and the radial / cap-distance clearance
+  otherwise into the same `boundaryTipC` FloatArray (or a sibling
+  with the same layout). Bridge code is shape-agnostic — only the
+  kernel formula changes.
+- **CPU box from-inside near-clearance extension** — optional. The
+  device now writes a continuous "near" tipC; the CPU
+  `bugForcesFromInside` still only writes `0` on hit. If exact
+  CPU/device parity becomes a requirement (e.g. for a future
+  bit-for-bit deflection bench under polymerizing conditions),
+  extend `checkBugCollisionFromInside` to also compute and write
+  the per-axis clearance when `cE.delta == 0`. Not needed for the
+  box-spaghetti behavioural A/B (B and R match within Brownian noise).
+- **end1 polymerization gate** — if ever revived, just uncomment the
+  guard at FilSegment.java:991. The device already writes end1TipC
+  and the bridge already min-combines it.
+
+**tipC device writeback (box) PASS.** F1b (pill device port) remains
+deferred; the writeback pattern is parametric on shape and ready for
+reuse.
 
 ## 2026-06-03 — Phase 2 F1b — pill exterior-container CPU revival (PASS)
 

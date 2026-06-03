@@ -1,0 +1,33 @@
+=== arm A_OFF (/tmp/spaghettiA) — 101 frames ===
+  frame                  segCt      overX      overY      overZ  over_endpts
+  frame_000000.json          6    0.00000    0.00000    0.00000     0/12   
+  frame_000025.json          8    0.00000    0.00000    0.00000     0/16   
+  frame_000050.json         12    0.00000    0.00000    0.00132     1/24   
+  frame_000075.json         19    0.00802    0.00016    0.00000     3/38   
+  frame_000100.json         30    0.00450    0.00666    0.00355     4/60   
+  ALL:  max overX=0.11119  overY=0.09310  overZ=0.06899
+  MEAN: overX=0.00611  overY=0.00430  overZ=0.00303
+  LAST: segCt=30  endpoints past walls = 4/60
+
+=== arm B_ON_default (/tmp/spaghettiB) — 101 frames ===
+  frame                  segCt      overX      overY      overZ  over_endpts
+  frame_000000.json          6    0.00121    0.00000    0.00000     2/12   
+  frame_000025.json          6    0.00000    0.01512    0.00065     2/12   
+  frame_000050.json         12    0.00000    0.00000    0.00000     0/24   
+  frame_000075.json         17    0.00227    0.00000    0.00000     1/34   
+  frame_000100.json         24    0.00312    0.00247    0.00000     2/48   
+  ALL:  max overX=0.09135  overY=0.09725  overZ=0.06117
+  MEAN: overX=0.00210  overY=0.00171  overZ=0.00166
+  LAST: segCt=24  endpoints past walls = 2/48
+
+=== arm R_CPU_F1 (/tmp/spaghettiR) — 101 frames ===
+  frame                  segCt      overX      overY      overZ  over_endpts
+  frame_000000.json          6    0.00000    0.00000    0.00000     0/12   
+  frame_000025.json          8    0.00000    0.00000    0.00000     0/16   
+  frame_000050.json         12    0.00000    0.00000    0.00000     0/24   
+  frame_000075.json         17    0.00000    0.00000    0.00027     1/34   
+  frame_000100.json         24    0.00180    0.00000    0.00000     2/48   
+  ALL:  max overX=0.09062  overY=0.07626  overZ=0.00369
+  MEAN: overX=0.00191  overY=0.00122  overZ=0.00014
+  LAST: segCt=24  endpoints past walls = 2/48
+
