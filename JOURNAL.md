@@ -1,8 +1,352 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-02 PM (Phase 2 F3/F4 — port design)
+Last updated: 2026-06-02 PM (Phase 2 F3/F4 — implementation, FAIL at deflection bench)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-02 — Phase 2 F3/F4 — implementation (FAIL at deflection bench)
+
+**Verdict: FAIL.** SingleFilDiag passes cleanly (both arms maxAbsY=maxAbsZ=0.0 over
+100k steps), but the deflection benchmark on `-gpu` lands at ratio=1.262 vs the
+CPU/arm-B reference 1.000 — a ~26% deficit in effective bending stiffness, well
+outside the ±0.05% gate around the +0.146% device baseline (target 0.999876,
+observed 1.262). Implementation lands clean (compiles, runs, force-coverage clean
+on both flag states), but the kernel produces systematically weaker F3/F4 restoring
+forces by ~21% (`1/1.26 ≈ 0.79`). Root cause not localized in this session — the
+unique-ownership F3/F4 formulae appear analytically equivalent to the CPU pair
+pattern, the topology + slot mapping match the design spec, both kernels reach a
+stable equilibrium (per-segment net force ≈ 0 at steady state in both arms). The
+remaining hypotheses are listed at the end. The implementation is committed under
+the `DIAG_CPU_F3F4` flag, **inverted-default** so the device path is OFF by
+default until the stiffness deficit is resolved (set `BOA_DIAG_CPU_F3F4=0` to
+re-activate the device kernel for debugging).
+
+### Step zero — `-gpu` deflection benchmark runnability
+
+PASS. Pre-port `-bmDiag -gpu -BOA_BMDIAG_MAX_STEPS=200000` reaches
+`final ratio=1.000001` (with the CPU F3/F4 path running, no chain kernel yet) —
+within ~0.013% of the cited 0.999876 device baseline, well inside the +0.146%
+tolerance. The bench gate is runnable on the GPU path; no separate scope needed.
+
+### Infrastructure — topology + soaLength
+
+Per-segment chain-topology index added to `GPUMoveThing`:
+- `topoEnd2Slot[i]` / `topoEnd2Side[i]` — move-slot of `end2Fil` and side flag
+  (0 if `ptAtEnd2 == end2Fil.end1Pt`, 1 if `== end2Pt`). Sentinel `-1` in slot
+  means "no chain neighbour on this side, or neighbour is CPU-fallback, or
+  `DIAG_CPU_F3F4` forces the kernel off".
+- `topoEnd1Slot[i]` / `topoEnd1Side[i]` — same shape for end1.
+- `soaLengthArr[i]` — per-slot length (µm); repacked every step from
+  `Thing.soaLength[thingIdx]` (length can change at biochem poly/depoly without
+  setting `topologyDirty`, so per-step refresh keeps device coherent).
+
+Topology buffers are populated in `classifyThings()` (runs only when
+`topologyDirty || thingCt != lastThingCt`). All five buffers are in the chained
+TaskGraph's `transferToDevice EVERY_EXECUTION` block — same precedent as the
+Phase-1 anchor buffers (small per-step transfer cost vs the plan-rebuild
+restructuring that FIRST_EXECUTION would require). Per-FilSegment
+`gpuChainHandled` flag set inside `classifyThings()` whenever the segment AND
+every active chain neighbour are GPU-handled and `DIAG_CPU_F3F4` is off; this
+is the flag `FilSegment.step()` reads to decide whether to skip CPU F3/F4.
+
+### Kernel — fused `chainPairForcesKernel`
+
+One device thread per move slot, unique-ownership semantics: each thread reads
+its own pose + the chain neighbour at each connected end, computes the F3 (link
+spring force/torque) and F4 (torsion spring torque) contributions **for its own
+segment only**, and writes them into `jointForceSum` / `jointTorqueSum` at its
+own slot. Newton's-3rd-law symmetry intended via the same-pair-force-magnitude
+analysis: A's thread applies `+F_A`, B's thread applies `+F_B = −F_A`. (See
+"suspected bugs" below — this is one of the candidate failure points.)
+
+**Disjoint-slot guarantee:** chain kernel writes only to FilSegment slots
+(topo`{1,2}`Slot ≥ 0 implies the slot holds a GPU-handled FilSegment).
+`jointsKernel` writes only to rod/lever/motor slots. The two never collide on
+the same `jointForceSum` entry. `packRange()` pre-zeros `jointForceSum` at all
+slots; threads that early-return (no chain neighbour) leave the zero in place.
+
+**Arg budget:** 13 args (coord, uVec, soaLengthArr, 4× topo IntArrays,
+bTransGam, bRotGam, jointForceSum, jointTorqueSum, chainParams, counts) — under
+the TornadoVM 15-arg cap. F3 + F4 fold into one fused kernel as the design
+predicted.
+
+**PTX safety:** only `Math.sqrt`, `Math.sin`, and the existing `accurateAcos`
+helper — all PTX-lowerable per `GPU_MIGRATION_LESSONS.md` Appendix A. No
+`Float.isNaN`; the F4 zero-cross guard uses `tvMag2 > 1.0e-30` instead.
+
+**TaskGraph wiring:** chained plan now runs `joints → chain → move` in that
+order (`jointForceSum`/`jointTorqueSum` shared between joints + chain writers
+and the move reader). Per-task worker grid added (`chained.chain` with
+`MOVE_KERNEL_BLOCK_SIZE`).
+
+### Gating — `DIAG_CPU_F3F4` + `FilSegment.step()` per-force skip
+
+Per Lesson 1 (silent force-dropping), the gate is **per-force inside
+`FilSegment.step()`**, not per-step()-dispatch:
+
+```java
+if (!gpuChainHandled) {
+    addLinkForces();          // F3
+    addTorsionSpringForces(); // F4
+}
+```
+
+F1 (`checkBugOrBoxCollision`) above this block and F5/F6 (`addNodeForces`)
+below remain unchanged on the CPU path — they keep running for GPU-handled
+segments. This is the exact Phase-1 anchor pattern: skip the per-force calls
+that the device kernel replicates, NOT the whole `step()` dispatch.
+
+`DIAG_CPU_F3F4` flag (default false) mirrors `DIAG_CPU_ANCHOR`:
+- OFF (default): device kernel applies F3+F4 on every GPU-handled chain
+  segment; CPU F3/F4 skipped (the gate above evaluates true).
+- ON: `classifyThings` packs all topology slots as `-1` → kernel returns early
+  on every thread → `gpuChainHandled = false` for every segment → CPU F3/F4
+  runs again.
+
+`BOA_DIAG_CPU_F3F4=1` env hook in `BoxOfActin.begin()`, parallel to the
+existing `BOA_DIAG_CPU_ANCHOR` hook.
+
+### Planner decisions — axial loads, break-detect, filID
+
+**Axial loads (F3 by-product):** the design's caveat is that
+`incEnd2AxialForce` / `incEnd1AxialForce` consume CPU-resident pose. *Survey
+finding:* `setCompression()` (the only consumer that reads these per-segment
+axials and feeds them into `compressionTrack` for `inCompression` poly-checks)
+is **commented out** at `FilSegment.java:481`. So the F3 axial accumulators
+are currently dead-code by-products — they accumulate, get zeroed in
+`resetCounters`, and are never read by any downstream consumer. Other writers
+of `end{1,2}AxialF` (the `inFil*` myosin-pull paths at lines 2246/2296/2342
+and the boundary-collision path at lines 2563/2566) still write and are also
+unread. **Phase-2 decision: drop the CPU axial-load stub entirely.** No
+residency impact for Phase 4 — the CPU path never reads them.
+
+**Break-detection (`breakAtEnd2` / angle-EWMA):** gated on
+`Env.maxSegDist.isActive()` and `Env.maxSegAngle.isActive()`. Both default
+INACTIVE; neither the deflection bench nor SingleFilDiag activates them. For
+gliding-assay and production runs, leave them on the CPU side as design says
+— stat-tracking via `end{1,2}SegDist`/`end{1,2}SegAng` `ValueTracker`s is
+cheap. Not a Phase-2 blocker; **CPU pose-read for break-detect is bench/biochem
+territory only.** No per-step pose consumer to retire before the Phase-4 flip.
+
+**filID propagation** (`addLinkForces` lines 1466-1469, 1530-1533): integer
+bookkeeping, no force/physics consequence. Skip on device; if a real merge
+event ever crosses the link, it'll re-equalise on the next biochem reclassify
+(`topologyDirty` fires). Not a residency blocker.
+
+### Force-coverage audit (Lesson 2)
+
+| Force | Pre-Phase-2 (CPU step()) | Phase-2 default (`DIAG_CPU_F3F4=false`) | Phase-2 with `DIAG_CPU_F3F4=true` | Applied once? |
+|---|---|---|---|---|
+| F1 (filament–boundary inside chamber) | `checkBugOrBoxCollision` (CPU) | unchanged (CPU) | unchanged (CPU) | ✓ |
+| F2 (filament–bug outside, Listeria only) | `checkBugCollisionFromOutside` (CPU) | unchanged (CPU) | unchanged (CPU) | ✓ where active |
+| **F3 (chain link)** | `addLinkForces` (CPU) | **device chainPairForces** | CPU `addLinkForces` (kernel skipped) | ✓ in both flag states |
+| **F4 (chain torsion)** | `addTorsionSpringForces` (CPU) | **device chainPairForces** | CPU `addTorsionSpringForces` (kernel skipped) | ✓ in both flag states |
+| F5/F6 (node tether trans + align torque) | `addNodeForces` (CPU) | unchanged (CPU) | unchanged (CPU) | ✓ where active |
+| F7 (MyoMiniFilament–bug/box) | `MyoMiniFilament.step` (CPU; cpuFallback) | unchanged (CPU) | unchanged (CPU) | ✓ |
+| F8/F9/F10 (motor tether spring + alignments) | `MyoFilLink.addForces`/`alignUVecTorque`/`alignYVecTorque` (CPU) | unchanged (CPU) | unchanged (CPU) | ✓ — Phase-2 motor port is later |
+| F11 (ActA tether) | `actAStart` wave (CPU) | unchanged (CPU) | unchanged (CPU) | ✓ where Listeria |
+| F12 (ProteinNode–boundary) | `ProteinNode.step` (CPU; cpuFallback) | unchanged (CPU) | unchanged (CPU) | ✓ |
+| Anchor spring (A7.b) | Phase-1: device `jointsKernel` | unchanged (device) | unchanged (device) | ✓ — Phase-1 default |
+| Joint constraints (rod/lever/motor) | `jointsKernel` (device) | unchanged (device) | unchanged (device) | ✓ |
+| Axial loads (F3 by-product) | `incEnd{1,2}AxialForce` (CPU) — dead code | **dropped (kernel does not compute)** | CPU computes (dead code, no consumer) | dead either way |
+| Break-detect EWMAs (`end{1,2}SegDist/Ang`) | CPU `addLinkForces` updates `ValueTracker` | CPU EWMA not updated for GPU-handled chain segs | CPU updates EWMA normally | only relevant when `maxSegDist/Angle.isActive()` (default OFF for bench / gliding) |
+| `filID` propagation | CPU `addLinkForces` (CPU) | CPU not running on GPU-handled chain segs | CPU runs normally | cosmetic; equalises on next biochem `topologyDirty` |
+
+**Verbal cross-check:** with `DIAG_CPU_F3F4=false` (default), every GPU-handled
+FilSegment slot's F3+F4 lands ONCE in `jointForceSum`/`jointTorqueSum` via the
+device chain kernel (the CPU's `addLinkForces`/`addTorsionSpringForces` calls
+are gated off in `step()`); F1, F5/F6, F11 still run on CPU, write to thread-
+local accumulators, gather to `soaForceSum`, pack to `cpuForceSum`, and are
+summed with `jointForceSum` in the move kernel. With `DIAG_CPU_F3F4=true`,
+chain kernel's per-slot writes are all zero (topology -1 → early return) and
+CPU F3/F4 land in `cpuForceSum` via the regular accumulator path. Nothing is
+dropped, nothing double-applied in either configuration.
+
+### Validation — SingleFilDiag (Lesson 5 minimal probe)
+
+Built `boxOfActin/SingleFilDiag.java` + `-singleFilDiag` CLI flag.
+Reuses the deflection bench chain (`FilSegment.makeBenchmarkChain`, 11 segs,
+pinned ends) but turns the midpoint force OFF
+(`Env.benchmarkForceOn.setValue(0)`) and per-segment Brownian is already off
+(`brownianOff=true` for bench segs). With no external force and pinned ends,
+a correct kernel must keep every segment center numerically straight; any
+drift in y or z is direct evidence of an F3/F4 bug.
+
+**Result: both arms PASS.** 100k-step run, sampling every step:
+
+| Arm | maxAbsY | maxAbsZ | verdict |
+|---|---|---|---|
+| A — device F3/F4 (`BOA_DIAG_CPU_F3F4=0`) | 0.000000e+00 µm | 0.000000e+00 µm | PASS |
+| B — CPU F3/F4 (current default) | 0.000000e+00 µm | 0.000000e+00 µm | PASS |
+
+Both arms held the chain *exactly* straight (no float drift, no Brownian, no
+midpoint force → no F3/F4 contribution since cross(uVec, ±uVec) = 0 on a
+perfectly straight chain). This validates the structural plumbing (kernel
+runs, returns the correct null-input value) but does NOT exercise force
+*magnitudes* — that's the deflection bench's job, and that's where the
+implementation falls over.
+
+Logs: `RUN_LOGS/2026-06-02_phase2_singleFil_armA_device.log`,
+`RUN_LOGS/2026-06-02_phase2_singleFil_armB_cpuf3f4.log`.
+
+### Validation — Deflection benchmark (the gate; FAIL)
+
+`-bmDiag -gpu` 200k steps with default bench params (fracMove=0.5, fracR=0.1,
+fracMoveTorq=0.265). 11-seg × 32-mon chain, span 0.9801 µm, F=3.085e-14 N,
+analytic δ=0.0098 µm.
+
+| Arm | final ratio | final defl | gap vs CPU baseline (0.9984) |
+|---|---|---|---|
+| A — device F3/F4 (`BOA_DIAG_CPU_F3F4=0`) | **1.262114** | 0.012370 µm | **+26.2%** ← FAIL |
+| B — CPU F3/F4 (current default) | 1.000049 | 0.009801 µm | +0.013% — within noise |
+| reference Step-0 pre-port (CPU F3/F4) | 1.000001 | — | +0.013% — within noise |
+| design device baseline target | 0.999876 | — | gate is ±0.05% around this |
+
+Arm A misses the gate by ~26%. Logs:
+`RUN_LOGS/2026-06-02_phase2_bmDiag_armA_device.log`,
+`RUN_LOGS/2026-06-02_phase2_bmDiag_armB_cpuf3f4.log`.
+
+**Per-segment force dump at step 5000** (via `BOA_DIAG_DUMP_CHAIN_STEP=5000`,
+new diagnostic added to GPUMoveThing):
+
+| slot=0 (left-pin) y-force | slot=5 (midSeg) y-force | slot=10 (right-pin) y-force |
+|---|---|---|
+| arm A: jntF.y = −2.05e-14 N (device kernel write) | jntF.y = +3.0849e-14 (kernel) cancelling cpuF.y = −3.0854e-14 (midpoint) | jntF.y = −2.05e-14 |
+| arm B: cpuF.y = −1.54e-14 N (CPU pair via soaForceSum→cpuForceSum) | cpuF.y ≈ 0 (midpoint + CPU F3+F4) | cpuF.y = −1.54e-14 |
+
+The end-shear in both arms equals `−F/2 = −1.54e-14` AT EACH ARM'S
+EQUILIBRIUM SHAPE — arm B at 9.8 nm deflection, arm A at 12.4 nm. The chain
+**tension** (x-component, ~1.61e-13 N at the ends) is the same in both arms;
+the **bending** (y-component) differs because the chains reach equilibrium at
+different bend angles. Each arm individually IS in static equilibrium (per-
+segment net force ≈ 0), confirming the kernel correctly applies *some* F3/F4
+forces in *roughly the right* shape — it's the magnitudes that are off.
+
+The fact that arm A's restoring force at 12.4 nm equals what CPU produces at
+9.8 nm means the device kernel's effective spring stiffness is ~21% softer
+than CPU's. The deficit is ~1/0.79 ≈ 1.26.
+
+### Suspected bug + open hypotheses (for the planner)
+
+1. **Newton's-3rd-law asymmetry in unique-ownership F3** — the analytical
+   pair-symmetry argument (`forceMag_A = forceMag_B`, `linkUVec_B = −linkUVec_A`)
+   holds exactly when chain is straight, but for a bent chain the two link
+   points are at DIFFERENT positions (each `r = actinMonoRadius` inside its
+   own segment from the glue), so the strainDist/linkUVec computed from A's
+   perspective vs B's perspective differ by `r·(A.uVec − B.uVec)`. CPU enforces
+   Newton's 3rd law by FIAT (computes F in one frame, applies +F/−F by hand);
+   GPU unique-ownership doesn't. The cumulative per-pair asymmetry across 10
+   chain links may bias equilibrium by the observed ~21%. This is the leading
+   hypothesis — but the size of the per-pair asymmetry (~r/strainDist · angle
+   ~ 0.01) doesn't obviously add up to 21% on a single inspection.
+2. **Subtle F4 sign convention bug** — F4's side-encoding (cross with neighbour's
+   `uVec` at side=0, `uVecR` at side=1) was caught and fixed mid-implementation
+   (the pre-fix version would have catastrophically destabilized the bench
+   because of 180° angTween on slightly bent pairs; SingleFilDiag couldn't have
+   exposed it because cross(uVec, ±uVec) = 0 on perfectly straight chains).
+   Post-fix the chain DOES reach a stable equilibrium, but maybe one direction
+   is still off — needs a CPU-vs-device per-pair torsion-magnitude diff.
+3. **moveCoeff `bRotGam.y` vs neighbour's `bRotGam.y` indexing** — verified
+   reads `bRotGam.get(i3+1)` for self and `bRotGam.get(n3+1)` for neighbour;
+   both should be the y-axis (perpendicular-to-rod-long-axis) rotational drag.
+   The pack writes `bRotGam.set(aX, .x), set(aY, .y), set(aZ, .z)` so the
+   indexing matches. Less likely but worth a paranoid re-check.
+4. **The diff between `accurateAcos` (GPU) and `fastAcos` (CPU)** is in the
+   *opposite* direction (GPU's accurateAcos returns slightly LARGER angles
+   at small bends → larger torsionMag → STIFFER chain), so it cannot be the
+   cause of a softer-than-CPU result.
+
+**Recommended next step:** add a per-pair F3/F4 diagnostic that computes both
+the device-kernel-formula and the CPU-formula on the SAME pose state (e.g.,
+via a CPU dry-run mirror inside `GPUMoveThing.moveThings()`, the same pattern
+the joints kernel uses for `DIAG_DUMP_JOINTS_STEP`), and dump them side-by-
+side at a bench equilibrium step. The diff between them isolates whether the
+bug is in (a) the kernel's local formula (would show as a per-pair mismatch
+even at identical inputs) or (b) the unique-ownership Newton-3rd-law model
+(would show as zero per-pair mismatch but accumulated equilibrium bias).
+
+`DIAG_DUMP_CHAIN_STEP` (new) and `BOA_DIAG_DUMP_CHAIN_STEP=N` env hook are
+already wired up — they dump per-slot `cpuForceSum`/`jointForceSum`/
+`jointTorqueSum` at step N, which is what I used for the table above.
+
+### Commands for jba
+
+All on aorus. Build:
+
+```
+cd ~/Code/BoA
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+      boxOfActin/*.java *.java
+```
+
+SingleFilDiag (the cheap probe — both arms passed; this re-runs the gate):
+
+```
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+
+# Arm A — device kernel
+BOA_BMDIAG_MAX_STEPS=100000 BOA_DIAG_CPU_F3F4=0 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -singleFilDiag -gpu
+
+# Arm B — CPU path (current default)
+BOA_BMDIAG_MAX_STEPS=100000 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -singleFilDiag -gpu
+```
+
+Deflection benchmark (the gate — currently FAILING in arm A):
+
+```
+# Arm A — device F3/F4 (expect ratio ≈ 1.26 → FAIL)
+BOA_BMDIAG_MAX_STEPS=200000 BOA_DIAG_CPU_F3F4=0 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu
+
+# Arm B — CPU F3/F4 (current default; expect ratio ≈ 1.00)
+BOA_BMDIAG_MAX_STEPS=200000 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu
+
+# Per-pair force dump at step 5000 (arm A, device kernel)
+BOA_BMDIAG_MAX_STEPS=6000 BOA_DIAG_DUMP_CHAIN_STEP=5000 BOA_DIAG_CPU_F3F4=0 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu 2>/tmp/diag_armA
+grep DIAG_CHAIN /tmp/diag_armA
+
+# Same dump, arm B (CPU pair via cpuForceSum — for direct slot-by-slot diff)
+BOA_BMDIAG_MAX_STEPS=6000 BOA_DIAG_DUMP_CHAIN_STEP=5000 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu 2>/tmp/diag_armB
+grep DIAG_CHAIN /tmp/diag_armB
+```
+
+### Constraints respected + default-flag note
+
+- Only the F3/F4 port: topology infra, fused chain kernel, `FilSegment.step()`
+  gating + flag, SingleFilDiag probe, per-pair dump diagnostic. Did NOT touch
+  F1/F5/F6, motor binding (Phase 3), or the residency flip (Phase 4).
+- `collisionCheckInt` cadence unchanged.
+- `DIAG_CPU_F3F4` default: **true** (CPU pair runs on `-gpu`, device chain
+  kernel forced to a no-op via topology-slot=-1). This is INVERTED from the
+  Phase-1 `DIAG_CPU_ANCHOR` precedent (which left the device kernel default-
+  active) because the device kernel here demonstrably fails the bench gate;
+  defaulting to the CPU path keeps gliding-assay and other `-gpu` runs honest
+  until the deficit is resolved. To activate the device kernel for a
+  debugging pass, set `BOA_DIAG_CPU_F3F4=0` (env var; flag-level OFF). Once
+  the 21% stiffness deficit is fixed and the bench gate passes, flip the
+  field default back to `false` in `GPUMoveThing.java` — that re-aligns with
+  the Phase-1 pattern of "device kernel is the default whenever `-gpu` is
+  on."
 
 ## 2026-06-02 — Phase 2 F3/F4 — port design
 

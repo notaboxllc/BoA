@@ -1,0 +1,508 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+[BENCH] 11-seg × 32-mon/seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+[BENCH:FORCE] deflFil.transForce=(0.0000e+00, -3.0854e-14, 0.0000e+00) N  EI=6.1747e-26  frac=0.0100  spanM=9.8010e-07
+[BENCH] τ_theo=0.057 s  ζ_perp_seg=3.309e-08 N·s/m
+[BENCH:CHAIN] i=0 coordAsPt3D()=(-0.4455,0.0000,0.0000) length=0.0891 isAnchor=true
+[BENCH:CHAIN] i=1 coordAsPt3D()=(-0.3564,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=2 coordAsPt3D()=(-0.2673,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=3 coordAsPt3D()=(-0.1782,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=4 coordAsPt3D()=(-0.0891,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=5 coordAsPt3D()=(0.0000,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=6 coordAsPt3D()=(0.0891,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=7 coordAsPt3D()=(0.1782,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=8 coordAsPt3D()=(0.2673,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=9 coordAsPt3D()=(0.3564,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=10 coordAsPt3D()=(0.4455,0.0000,0.0000) length=0.0891 isAnchor=true
+[LP] 539-seg × 32-mon/seg LP chain, contour=48.0249 µm, offset=(0, -1.5, -0.5) µm
+[BENCH] box auto-sized to 144.07 × 144.07 × 0.100 µm
+[BMDIAG] fixed-param diagnostic: fracR=0.1000  fracMoveTorq=0.2650  fracMove=0.5000  monomerCt=32  span=0.9801 µm
+[BMDIAG] analytic δ=0.009801 µm  reporting every 5000 steps  cap=5,000,000 steps
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 11; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 11 x 11 x 2 cells (0.2 µm each)
+GPUMoveThing: slotCap=1102 myoCap=1024 moveBlock=64 jointBlock=64 runSeed=-1433155091 nWorkers=16
+[BENCH:STEP] step=0 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,0.0000,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=0 getCoordY()=-9.324755e-05 veloc.y=0.0000e+00
+[BENCH:STEP] step=1 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0001,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=1 getCoordY()=-1.528765e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=2 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0002,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=2 getCoordY()=-1.981335e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=3 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0002,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=3 getCoordY()=-2.364548e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=4 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(-0.0000,-0.0002,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=4 getCoordY()=-2.710187e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=5 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0003,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=5 getCoordY()=-3.067123e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=6 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0003,-0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=6 getCoordY()=-3.365878e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=7 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0003,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=7 getCoordY()=-3.647511e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=8 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0004,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=8 getCoordY()=-3.922072e-04 veloc.y=0.0000e+00
+[BENCH:STEP] step=9 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(-0.0000,-0.0004,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=9 getCoordY()=-4.185552e-04 veloc.y=0.0000e+00
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=48.4 cumMaxPerThread=35
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=31.4 cumMaxPerThread=35
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=26.9 cumMaxPerThread=35
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=23.5 cumMaxPerThread=35
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=22.3 cumMaxPerThread=35
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=20.9 cumMaxPerThread=35
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=20.3 cumMaxPerThread=35
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=19.7 cumMaxPerThread=35
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=19.1 cumMaxPerThread=35
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=18.6 cumMaxPerThread=35
+[BMDIAG] step=    5000  simT=    0.50s  ratio=1.260723  defl=0.012356µm  lpMeas=2456.9020µm  lpSamples=5
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=18.3 cumMaxPerThread=35
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=18.1 cumMaxPerThread=35
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=17.8 cumMaxPerThread=35
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=17.5 cumMaxPerThread=35
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=17.5 cumMaxPerThread=35
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=17.3 cumMaxPerThread=35
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=17.2 cumMaxPerThread=35
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=17.3 cumMaxPerThread=35
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=17.2 cumMaxPerThread=35
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=17.3 cumMaxPerThread=35
+[BMDIAG] step=   10000  simT=    1.00s  ratio=1.262066  defl=0.012370µm  lpMeas=2460.6067µm  lpSamples=10
+Sim. time=01.00....~00.41 minutes computation to simulate 1 sec, run finished in ~04.06 hours
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=17.2 cumMaxPerThread=35
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=17.1 cumMaxPerThread=35
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=17.0 cumMaxPerThread=35
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=16.9 cumMaxPerThread=35
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=16.9 cumMaxPerThread=35
+[BMDIAG] step=   15000  simT=    1.50s  ratio=1.262026  defl=0.012369µm  lpMeas=2446.4878µm  lpSamples=15
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=16.9 cumMaxPerThread=35
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=16.9 cumMaxPerThread=35
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=16.8 cumMaxPerThread=35
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[BMDIAG] step=   20000  simT=    2.00s  ratio=1.262074  defl=0.012370µm  lpMeas=2423.6808µm  lpSamples=20
+Sim. time=02.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.70 hours
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[BMDIAG] step=   25000  simT=    2.50s  ratio=1.262064  defl=0.012369µm  lpMeas=2383.5931µm  lpSamples=25
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[BMDIAG] step=   30000  simT=    3.00s  ratio=1.262085  defl=0.012370µm  lpMeas=2371.0241µm  lpSamples=30
+Sim. time=03.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.69 hours
+[GATHER] call=61000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=62000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=63000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=64000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=65000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=66000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=67000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=68000 totalDirty=0 maxThread=0 cumAvg=16.7 cumMaxPerThread=35
+[GATHER] call=69000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=70000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[BMDIAG] step=   35000  simT=    3.50s  ratio=1.262104  defl=0.012370µm  lpMeas=2365.2173µm  lpSamples=35
+[GATHER] call=71000 totalDirty=0 maxThread=0 cumAvg=16.6 cumMaxPerThread=35
+[GATHER] call=72000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=73000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=74000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=75000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=76000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=77000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=78000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=79000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=80000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   40000  simT=    4.00s  ratio=1.262063  defl=0.012369µm  lpMeas=2361.9594µm  lpSamples=40
+Sim. time=04.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.67 hours
+[GATHER] call=81000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=82000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=83000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=84000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=85000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=86000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=87000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=88000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=89000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=90000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   45000  simT=    4.50s  ratio=1.262134  defl=0.012370µm  lpMeas=2345.0257µm  lpSamples=45
+[GATHER] call=91000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=92000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=93000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=94000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=95000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=96000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=97000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=98000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=99000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=100000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   50000  simT=    5.00s  ratio=1.262105  defl=0.012370µm  lpMeas=2315.2012µm  lpSamples=50
+Sim. time=05.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.64 hours
+[GATHER] call=101000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=102000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=103000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=104000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=105000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=106000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=107000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=108000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=109000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=110000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   55000  simT=    5.50s  ratio=1.262088  defl=0.012370µm  lpMeas=2278.7675µm  lpSamples=55
+[GATHER] call=111000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=112000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=113000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=114000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=115000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=116000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=117000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=118000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=119000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=120000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   60000  simT=    6.00s  ratio=1.262092  defl=0.012370µm  lpMeas=2236.8091µm  lpSamples=60
+Sim. time=06.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.64 hours
+[GATHER] call=121000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=122000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=123000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=124000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=125000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=126000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=127000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=128000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=129000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=130000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   65000  simT=    6.50s  ratio=1.262088  defl=0.012370µm  lpMeas=2203.0674µm  lpSamples=65
+[GATHER] call=131000 totalDirty=0 maxThread=0 cumAvg=16.5 cumMaxPerThread=35
+[GATHER] call=132000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=133000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=134000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=135000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=136000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=137000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=138000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=139000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=140000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   70000  simT=    7.00s  ratio=1.262102  defl=0.012370µm  lpMeas=2192.2069µm  lpSamples=70
+Sim. time=07.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.69 hours
+[GATHER] call=141000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=142000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=143000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=144000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=145000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=146000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=147000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=148000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=149000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=150000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   75000  simT=    7.50s  ratio=1.262138  defl=0.012370µm  lpMeas=2192.3234µm  lpSamples=75
+[GATHER] call=151000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=152000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=153000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=154000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=155000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=156000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=157000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=158000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=159000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=160000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[BMDIAG] step=   80000  simT=    8.00s  ratio=1.262058  defl=0.012369µm  lpMeas=2181.2216µm  lpSamples=80
+Sim. time=08.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.61 hours
+[GATHER] call=161000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=162000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=163000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=164000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=165000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=166000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=167000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=168000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=169000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=170000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[BMDIAG] step=   85000  simT=    8.50s  ratio=1.262065  defl=0.012369µm  lpMeas=2158.4974µm  lpSamples=85
+[GATHER] call=171000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=172000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=173000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=174000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=175000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=176000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=177000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=178000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=179000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=180000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=   90000  simT=    9.00s  ratio=1.262108  defl=0.012370µm  lpMeas=2136.9634µm  lpSamples=90
+Sim. time=09.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.66 hours
+[GATHER] call=181000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=182000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=183000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=184000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=185000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=186000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=187000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=188000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=189000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=190000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[BMDIAG] step=   95000  simT=    9.50s  ratio=1.262122  defl=0.012370µm  lpMeas=2114.9591µm  lpSamples=95
+[GATHER] call=191000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=192000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=193000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=194000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=195000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=196000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=197000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=198000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=199000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=200000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[BMDIAG] step=  100000  simT=   10.00s  ratio=1.262119  defl=0.012370µm  lpMeas=2109.3873µm  lpSamples=100
+Sim. time=10.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.64 hours
+[GATHER] call=201000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=202000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=203000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=204000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=205000 totalDirty=0 maxThread=0 cumAvg=16.3 cumMaxPerThread=35
+[GATHER] call=206000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=207000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=208000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=209000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=210000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  105000  simT=   10.50s  ratio=1.262110  defl=0.012370µm  lpMeas=2110.2640µm  lpSamples=105
+[GATHER] call=211000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=212000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=213000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=214000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=215000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=216000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=217000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=218000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=219000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=220000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  110000  simT=   11.00s  ratio=1.262110  defl=0.012370µm  lpMeas=2103.6966µm  lpSamples=110
+Sim. time=11.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.60 hours
+[GATHER] call=221000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=222000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=223000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=224000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=225000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=226000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=227000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=228000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=229000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=230000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  115000  simT=   11.50s  ratio=1.262132  defl=0.012370µm  lpMeas=2092.3315µm  lpSamples=115
+[GATHER] call=231000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=232000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=233000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=234000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=235000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=236000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=237000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=238000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=239000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=240000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  120000  simT=   12.00s  ratio=1.262099  defl=0.012370µm  lpMeas=2081.4491µm  lpSamples=120
+Sim. time=12.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.63 hours
+[GATHER] call=241000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=242000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=243000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=244000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=245000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=246000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=247000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=248000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=249000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=250000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  125000  simT=   12.50s  ratio=1.262127  defl=0.012370µm  lpMeas=2051.8755µm  lpSamples=125
+[GATHER] call=251000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=252000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=253000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=254000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=255000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=256000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=257000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=258000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=259000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=260000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  130000  simT=   13.00s  ratio=1.262083  defl=0.012370µm  lpMeas=2019.0408µm  lpSamples=130
+Sim. time=13.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.61 hours
+[GATHER] call=261000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=262000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=263000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=264000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=265000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=266000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=267000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=268000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=269000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=270000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  135000  simT=   13.50s  ratio=1.262074  defl=0.012370µm  lpMeas=1976.4346µm  lpSamples=135
+[GATHER] call=271000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=272000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=273000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=274000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=275000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=276000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=277000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=278000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=279000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=280000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  140000  simT=   14.00s  ratio=1.262100  defl=0.012370µm  lpMeas=1922.1401µm  lpSamples=140
+Sim. time=14.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.59 hours
+[GATHER] call=281000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=282000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=283000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=284000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=285000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=286000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=287000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=288000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=289000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=290000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  145000  simT=   14.50s  ratio=1.262054  defl=0.012369µm  lpMeas=1855.1772µm  lpSamples=145
+[GATHER] call=291000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=292000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=293000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=294000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=295000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=296000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=297000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=298000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=299000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=300000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  150000  simT=   15.00s  ratio=1.262084  defl=0.012370µm  lpMeas=1793.2634µm  lpSamples=150
+Sim. time=15.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.59 hours
+[GATHER] call=301000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=302000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=303000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=304000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=305000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=306000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=307000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=308000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=309000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=310000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  155000  simT=   15.50s  ratio=1.262106  defl=0.012370µm  lpMeas=1726.7699µm  lpSamples=155
+[GATHER] call=311000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=312000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=313000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=314000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=315000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=316000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=317000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=318000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=319000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=320000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  160000  simT=   16.00s  ratio=1.262094  defl=0.012370µm  lpMeas=1665.8652µm  lpSamples=160
+Sim. time=16.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.62 hours
+[GATHER] call=321000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=322000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=323000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=324000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=325000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=326000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=327000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=328000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=329000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=330000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  165000  simT=   16.50s  ratio=1.262088  defl=0.012370µm  lpMeas=1591.6243µm  lpSamples=165
+[GATHER] call=331000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=332000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=333000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=334000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=335000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=336000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=337000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=338000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=339000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=340000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  170000  simT=   17.00s  ratio=1.262107  defl=0.012370µm  lpMeas=1544.8230µm  lpSamples=170
+Sim. time=17.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.56 hours
+[GATHER] call=341000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=342000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=343000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=344000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=345000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=346000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=347000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=348000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=349000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=350000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  175000  simT=   17.50s  ratio=1.262129  defl=0.012370µm  lpMeas=1485.4250µm  lpSamples=175
+[GATHER] call=351000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=352000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=353000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=354000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=355000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=356000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=357000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=358000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=359000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=360000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  180000  simT=   18.00s  ratio=1.262090  defl=0.012370µm  lpMeas=1427.3202µm  lpSamples=180
+Sim. time=18.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.58 hours
+[GATHER] call=361000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=362000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=363000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=364000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=365000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=366000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=367000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=368000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=369000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=370000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  185000  simT=   18.50s  ratio=1.262092  defl=0.012370µm  lpMeas=1380.7972µm  lpSamples=185
+[GATHER] call=371000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=372000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=373000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=374000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=375000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=376000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=377000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=378000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=379000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=380000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  190000  simT=   19.00s  ratio=1.262074  defl=0.012370µm  lpMeas=1334.8454µm  lpSamples=190
+Sim. time=19.00....~00.37 minutes computation to simulate 1 sec, run finished in ~03.56 hours
+[GATHER] call=381000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=382000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=383000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=384000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=385000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=386000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=387000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=388000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=389000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=390000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  195000  simT=   19.50s  ratio=1.262126  defl=0.012370µm  lpMeas=1282.3618µm  lpSamples=195
+[GATHER] call=391000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=392000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=393000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=394000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=395000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=396000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=397000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=398000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=399000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[GATHER] call=400000 totalDirty=0 maxThread=0 cumAvg=16.4 cumMaxPerThread=35
+[BMDIAG] step=  200000  simT=   20.00s  ratio=1.262114  defl=0.012370µm  lpMeas=1247.2484µm  lpSamples=200
+[BMDIAG] DONE: 200000 steps  simT=20.0s  final ratio=1.262114  final lpMeas=1247.2484µm  lpTheo=15.0000µm  lpSamples=200

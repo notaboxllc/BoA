@@ -150,6 +150,7 @@ public class BoxOfActin {
 		// BOA_DIAG_SINGLE_MYO=1      → enable single-myosin thermal characterization
 		JointDiag.initFromEnv();
 		SingleMyoDiag.initFromEnv();
+		SingleFilDiag.initFromEnv();
 		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
 		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
 		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
@@ -165,6 +166,33 @@ public class BoxOfActin {
 		    && !cpuAnchorEnv.equals("0") && !cpuAnchorEnv.equalsIgnoreCase("false")) {
 			GPUMoveThing.DIAG_CPU_ANCHOR = true;
 			System.err.println("[ANCHOR_DIAG] DIAG_CPU_ANCHOR forced ON via env var");
+		}
+		// BOA_DIAG_CPU_F3F4 — toggle the Phase-2 F3/F4 source-of-truth.
+		//   default (unset / 1 / true) → CPU addLinkForces /
+		//                                 addTorsionSpringForces runs (safe
+		//                                 mode while the kernel's 26%
+		//                                 stiffness deficit is unresolved).
+		//   "0" / "false"               → device chainPairForces kernel runs
+		//                                 and CPU pair is skipped on
+		//                                 GPU-handled chain segments.
+		// See JOURNAL "Phase 2 F3/F4 — implementation".
+		String cpuF3F4Env = System.getenv("BOA_DIAG_CPU_F3F4");
+		if (cpuF3F4Env != null && !cpuF3F4Env.isEmpty()) {
+			if (cpuF3F4Env.equals("0") || cpuF3F4Env.equalsIgnoreCase("false")) {
+				GPUMoveThing.DIAG_CPU_F3F4 = false;
+				System.err.println("[F3F4_DIAG] DIAG_CPU_F3F4 forced OFF via env var (device kernel ACTIVE)");
+			} else {
+				GPUMoveThing.DIAG_CPU_F3F4 = true;
+				System.err.println("[F3F4_DIAG] DIAG_CPU_F3F4 forced ON via env var (CPU pair runs)");
+			}
+		}
+		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
+		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
+			try {
+				GPUMoveThing.DIAG_DUMP_CHAIN_STEP = Integer.parseInt(dumpChainEnv.trim());
+				System.err.println("[F3F4_DIAG] dump chain forces at step "
+				    + GPUMoveThing.DIAG_DUMP_CHAIN_STEP);
+			} catch (NumberFormatException ignored) {}
 		}
 
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
@@ -329,6 +357,17 @@ public class BoxOfActin {
 			if (args[i].equals("-bmManual")) {
 				Env.benchmarkFilament = true;
 				Env.benchmarkManual = true;
+			}
+			if (args[i].equals("-singleFilDiag")) {
+				// Phase 2 F3/F4 SingleFilDiag probe: pinned-ends bench chain
+				// with NO midpoint force, no Brownian (segments default
+				// brownianOff=true in bench mode); reports max coord.y/z
+				// drift each output interval and at run end. Pass = chain
+				// stays numerically straight on -gpu.
+				Env.benchmarkFilament = true;
+				Env.benchmarkDiag = true;          // reuse the headless diag step loop
+				Env.benchmarkForceOn.setValue(0);  // suppress the midpoint force
+				SingleFilDiag.ENABLED = true;
 			}
 			if (args[i].equals("-bmTunerV15")) {
 				Env.benchmarkFilament = true;
@@ -897,6 +936,9 @@ public class BoxOfActin {
 				// 2026-05-31 single-myosin thermal characterization — no-op when
 				// BOA_DIAG_SINGLE_MYO unset.
 				SingleMyoDiag.sample();
+				// 2026-06-02 Phase 2 F3/F4 — single-filament chain straightness
+				// probe — no-op when -singleFilDiag / BOA_DIAG_SINGLE_FIL unset.
+				SingleFilDiag.sample();
 
 				// C3: safe-point — pause check (with inspect drain while waiting),
 				// kill check, then final inspect drain. Order: pause > kill > inspect.
@@ -933,6 +975,7 @@ public class BoxOfActin {
 						System.out.printf("[BMDIAG] DONE: %d steps  simT=%.1fs  final ratio=%.6f  final lpMeas=%.4fµm  lpTheo=%.4fµm  lpSamples=%d%n",
 							benchStepCount, Env.simulationTime, computeDeflectionRatio(),
 							lpMeas, Env.persistenceLength, lpFil == null ? 0 : lpFil.sampleCount);
+						SingleFilDiag.reportFinal();
 						System.exit(0);
 					}
 				}

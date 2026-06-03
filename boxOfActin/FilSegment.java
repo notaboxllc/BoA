@@ -169,6 +169,17 @@ public class FilSegment extends Thing {
 	boolean end2LinkCkd = false;
 	boolean end1TorqCkd = false;
 	boolean end2TorqCkd = false;
+	// Phase 2 F3/F4 (2026-06-02): set by GPUMoveThing.classifyThings() when
+	// this segment AND every active chain neighbour are GPU-handled and
+	// DIAG_CPU_F3F4 is false — meaning the device chainPairForcesKernel
+	// will compute this segment's F3/F4 contributions. step() gates its
+	// own addLinkForces / addTorsionSpringForces calls on !gpuChainHandled
+	// so the device and CPU never double-apply (Lesson 1 — per-force gate,
+	// not per-dispatch). Mixed-state chains (e.g. one neighbour is a
+	// CPU-fallback branched seg) keep gpuChainHandled = false; the CPU
+	// pair then runs both sides locally and the device kernel returns
+	// early at this slot.
+	boolean gpuChainHandled = false;
 	
 	int end1NodeThingNumber;		// ditto
 	int end2NodeThingNumber;		// ditto
@@ -466,13 +477,21 @@ public class FilSegment extends Thing {
 		checkBugOrBoxCollision(); 		// these should add forces and torques to forceSum and torqueSum
 		StepProfiler.add(StepProfiler.F1_2_FILSEG_BOUNDARY, _spT);
 
-		_spT = StepProfiler.t0();
-		addLinkForces();				// if linked to other segments
-		StepProfiler.add(StepProfiler.F3_FILSEG_CHAIN_LINK, _spT);
+		// Phase 2 F3/F4 — when the device chainPairForcesKernel handles this
+		// segment's chain link + torsion, skip the CPU pair here. F1 (above)
+		// and F5/F6 (below) keep running — Lesson 1 dictates a per-force
+		// gate, not a per-step()-dispatch gate, so the unported forces don't
+		// silently drop. Mixed chains (gpuChainHandled=false despite GPU
+		// being on for this segment) run the CPU pair as before.
+		if (!gpuChainHandled) {
+			_spT = StepProfiler.t0();
+			addLinkForces();				// if linked to other segments
+			StepProfiler.add(StepProfiler.F3_FILSEG_CHAIN_LINK, _spT);
 
-		_spT = StepProfiler.t0();
-		addTorsionSpringForces();		// bending rigidity proxy
-		StepProfiler.add(StepProfiler.F4_FILSEG_CHAIN_TORQUE, _spT);
+			_spT = StepProfiler.t0();
+			addTorsionSpringForces();		// bending rigidity proxy
+			StepProfiler.add(StepProfiler.F4_FILSEG_CHAIN_TORQUE, _spT);
+		}
 
 		_spT = StepProfiler.t0();
 		addNodeForces();				// calculate elastic forces to keep filament ends and bound plasmids together

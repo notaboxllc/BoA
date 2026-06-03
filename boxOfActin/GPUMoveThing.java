@@ -132,6 +132,16 @@ public class GPUMoveThing {
     public static final int DIAG_DUMP_MYO_LIMIT = 5;
 
     /**
+     * Phase 2 F3/F4 debug: dump per-FilSegment jointForceSum / jointTorqueSum
+     * at the specified step. Activated via env var BOA_DIAG_DUMP_CHAIN_STEP.
+     * Triggers transferToHost of jointForceSum/jointTorqueSum (gated at plan
+     * build time, same mechanism as DIAG_DUMP_JOINTS_STEP).
+     * Kept in for jba's continued investigation of the 26% bench stiffness
+     * deficit (see JOURNAL "Phase 2 F3/F4 — implementation").
+     */
+    public static int DIAG_DUMP_CHAIN_STEP = -1;
+
+    /**
      * Diagnostic flag (2026-05-31 — delta-buffer transport isolation).
      * When true and Env.useGPU is true:
      *   1. GPU joints kernel still runs and writes jointForceSum / jointTorqueSum
@@ -162,28 +172,45 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_CPU_ANCHOR = false;
 
+    /**
+     * Diagnostic flag (2026-06-02 — Phase 2 F3/F4 port). Mirrors DIAG_CPU_ANCHOR
+     * in shape but its DEFAULT IS INVERTED while the Phase-2 stiffness deficit
+     * is being investigated: default true means the device chainPairForces
+     * kernel is forced to a no-op (classifyThings packs all topology slots
+     * as -1, so every kernel thread returns early) and the per-FilSegment
+     * gating in FilSegment.step() flips so the CPU addLinkForces /
+     * addTorsionSpringForces pair runs again. Set to false (via
+     * BOA_DIAG_CPU_F3F4=0 or by editing here) to activate the device kernel.
+     * CPU-only (non-`-gpu`) runs are unaffected either way.
+     * Flip to false once the deflection-bench 26% stiffness deficit is fixed.
+     * See JOURNAL "Phase 2 F3/F4 — implementation".
+     */
+    public static boolean DIAG_CPU_F3F4 = true;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
         // SOA_POSE only converts the move kernel + pack/unpack; the joints
-        // kernel still reads pose at AoS indices. Route joints to CPU so the
-        // GPU joints task is bypassed (CPU joints write into cpuForceSum,
+        // and chain kernels still expect AoS pose. Route both to CPU so the
+        // GPU joints + chain tasks are bypassed (CPU writes into cpuForceSum,
         // which the SoA move kernel reads correctly — force buffers ARE
         // converted to axis-major in pack/unpack).
         if (SOA_POSE) {
             DIAG_CPU_JOINTS = true;
+            DIAG_CPU_F3F4   = true;
         }
         // MOVE_AB_PROFILE isolates the move kernel as the ONLY GPU task:
-        // joints routed to CPU (same rationale as above) AND split-plan
-        // execution so the moveOnly plan can be profiled in isolation.
+        // joints + chain routed to CPU AND split-plan execution so the
+        // moveOnly plan can be profiled in isolation.
         if (MOVE_AB_PROFILE) {
             DIAG_CPU_JOINTS    = true;
+            DIAG_CPU_F3F4      = true;
             DIAG_CPU_DELTA_ADD = true;
         }
         if (SOA_POSE || MOVE_AB_PROFILE) {
             System.err.printf(
-                "[PHASE0] SOA_POSE=%s MOVE_AB_PROFILE=%s -> DIAG_CPU_JOINTS=%s DIAG_CPU_DELTA_ADD=%s%n",
-                SOA_POSE, MOVE_AB_PROFILE, DIAG_CPU_JOINTS, DIAG_CPU_DELTA_ADD);
+                "[PHASE0] SOA_POSE=%s MOVE_AB_PROFILE=%s -> DIAG_CPU_JOINTS=%s DIAG_CPU_F3F4=%s DIAG_CPU_DELTA_ADD=%s%n",
+                SOA_POSE, MOVE_AB_PROFILE, DIAG_CPU_JOINTS, DIAG_CPU_F3F4, DIAG_CPU_DELTA_ADD);
         }
     }
 
@@ -250,9 +277,30 @@ public class GPUMoveThing {
     private static FloatArray anchorPts;      // myoCap * 3
     private static IntArray   anchoredFlags;  // myoCap
 
+    // ----- Phase 2 F3/F4 — per-FilSegment chain topology + length -----
+    // Populated by classifyThings(): for each slot i, if the slot holds a
+    // GPU-handled FilSegment whose chain neighbour at the corresponding end
+    // is ALSO a GPU-handled FilSegment, topoEnd{1,2}Slot[i] = neighbour's
+    // move-slot and topoEnd{1,2}Side[i] = 0 if my endPt == neighbour.end1Pt
+    // (ptAtEndN reference identity), 1 if == neighbour.end2Pt. Sentinel -1
+    // in topoEnd{1,2}Slot means "no chain neighbour on this side, or
+    // neighbour is CPU-fallback, or DIAG_CPU_F3F4 forces the kernel off".
+    // The kernel returns early per-slot when both ends are -1.
+    // soaLengthArr mirrors Thing.soaLength[thingIdx] per slot; refreshed in
+    // packRange every step (length may change at biochem poly/depoly
+    // boundaries without setting topologyDirty).
+    private static IntArray   topoEnd2Slot;   // slotCap
+    private static IntArray   topoEnd2Side;   // slotCap
+    private static IntArray   topoEnd1Slot;   // slotCap
+    private static IntArray   topoEnd1Side;   // slotCap
+    private static FloatArray soaLengthArr;   // slotCap
+
     // ----- small inputs -----
     private static FloatArray params;         // move kernel: [0]=deltaT, [1]=brownianForceMag
     private static FloatArray jointParams;    // joints kernel: 13 floats
+    // chain kernel: [0]=dt, [1]=fracMove, [2]=fracR, [3]=fracMoveTorq,
+    // [4]=filTorqSpringActive (1.0/0.0), [5]=filTorqSpring, [6]=actinMonoRadius.
+    private static FloatArray chainParams;
     private static IntArray   counts;         // [0]=slotCount, [1]=stepCount, [2]=runSeed, [3]=myoJointCt
 
     // ----- CPU-side index of packed Things, by slot -----
@@ -748,6 +796,324 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Chain kernel — Phase 2 F3/F4 port. One thread per move slot. Each
+    // thread owns its segment: reads ITS own pose + the chain neighbour at
+    // each connected end, computes the F3 (chain link force/torque) and F4
+    // (chain torsion spring) contributions for THIS segment only, and writes
+    // them into jointForceSum/jointTorqueSum at its own slot.
+    //
+    // Unique ownership: the CPU code uses "owner does both sides of one pair,
+    // mark visited" (end{1,2}LinkCkd / end{1,2}TorqCkd dedup flags). The GPU
+    // pattern is "each thread does its own side of both its pairs, no visited
+    // flags." Forceµmag is pair-symmetric (same strainDist, same
+    // moveCoeff sum regardless of which side computes), so both threads
+    // compute the same magnitude. Each applies +F (or +torsionVec*torsionMag)
+    // to itself only; the neighbour's thread applies the equal-and-opposite
+    // contribution to itself. Net result: identical to CPU paired application,
+    // no dedup state needed, no cross-writes, no atomics.
+    //
+    // Slot disjointness with jointsKernel: chainPairForcesKernel writes only
+    // to FilSegment slots (topo{1,2}Slot[i] >= 0 implies slot i is a
+    // GPU-handled FilSegment). jointsKernel writes only to rod/lever/motor
+    // slots. The two writes never collide on the same jointForceSum entry.
+    //
+    // Early exit: if both topoEnd2Slot < 0 and topoEnd1Slot < 0, the slot
+    // contributes nothing — either it's a Myo slot (always -1), a chain end
+    // with no neighbours on either side, or DIAG_CPU_F3F4 forced it off.
+    // packRange() pre-zeroed jointForceSum at this slot so early-return
+    // leaves the zero in place.
+    //
+    // Reads soaLengthArr (uploaded every step from Thing.soaLength to handle
+    // biochem length changes that don't trigger topologyDirty) and the
+    // topology IntArrays (rebuilt in classifyThings on topologyDirty; same
+    // EVERY_EXECUTION pattern as anchorPts — small per-step transfer, no
+    // plan invalidation needed when topology changes).
+    // -------------------------------------------------------------------------
+    private static void chainPairForcesKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray soaLengthArr,
+            IntArray   topoEnd2Slot,
+            IntArray   topoEnd2Side,
+            IntArray   topoEnd1Slot,
+            IntArray   topoEnd1Side,
+            FloatArray bTransGam,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray chainParams,
+            IntArray   counts) {
+
+        int N = counts.get(0);
+
+        double dt                  = (double) chainParams.get(0);
+        double fracMove            = (double) chainParams.get(1);
+        double fracR               = (double) chainParams.get(2);
+        double fracMoveTorq        = (double) chainParams.get(3);
+        double filTorqSpringActive = (double) chainParams.get(4);
+        double filTorqSpring       = (double) chainParams.get(5);
+        double actinMonoRadius     = (double) chainParams.get(6);
+
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
+
+        for (@Parallel int i = 0; i < coord.getSize() / 3; i++) {
+            if (i >= N) { return; }
+
+            int e2Slot = topoEnd2Slot.get(i);
+            int e1Slot = topoEnd1Slot.get(i);
+            if (e2Slot < 0 && e1Slot < 0) { return; }
+
+            int i3 = i * 3;
+            double cx  = (double) coord.get(i3);
+            double cy  = (double) coord.get(i3 + 1);
+            double cz  = (double) coord.get(i3 + 2);
+            double ux  = (double) uVec.get(i3);
+            double uy  = (double) uVec.get(i3 + 1);
+            double uz  = (double) uVec.get(i3 + 2);
+            double len = (double) soaLengthArr.get(i);
+            double halfLen_um = 0.5 * len;
+            double lSqSelf    = 1.0e-12 * len * len;
+
+            double rBTGx = (double) bTransGam.get(i3);
+            double rBTGy = (double) bTransGam.get(i3 + 1);
+            double rBRGy = (double) bRotGam.get(i3 + 1);
+
+            double fx = 0.0, fy = 0.0, fz = 0.0;
+            double tx = 0.0, ty = 0.0, tz = 0.0;
+
+            // --- end2 side ---
+            if (e2Slot >= 0) {
+                int e2Side = topoEnd2Side.get(i);
+                int n3     = e2Slot * 3;
+                double ncx = (double) coord.get(n3);
+                double ncy = (double) coord.get(n3 + 1);
+                double ncz = (double) coord.get(n3 + 2);
+                double nux = (double) uVec.get(n3);
+                double nuy = (double) uVec.get(n3 + 1);
+                double nuz = (double) uVec.get(n3 + 2);
+                double nlen = (double) soaLengthArr.get(e2Slot);
+                double nHalfLen_um = 0.5 * nlen;
+                double lSqN  = 1.0e-12 * nlen * nlen;
+                double nBTGx = (double) bTransGam.get(n3);
+                double nBTGy = (double) bTransGam.get(n3 + 1);
+                double nBRGy = (double) bRotGam.get(n3 + 1);
+
+                // My end2 in microns (matches Thing.recomputeDerivedSoA).
+                double e2x = cx + halfLen_um * ux;
+                double e2y = cy + halfLen_um * uy;
+                double e2z = cz + halfLen_um * uz;
+                // CPU: linkPt.add(end2Pt, actinMonoRadius, uVecR) — i.e.,
+                // linkPt = end2 - actinMonoRadius * uVec.
+                double lpx = e2x - actinMonoRadius * ux;
+                double lpy = e2y - actinMonoRadius * uy;
+                double lpz = e2z - actinMonoRadius * uz;
+                // ptAtEnd2 = neighbour.end1Pt (side=0) or neighbour.end2Pt (side=1).
+                double pax, pay, paz;
+                if (e2Side == 0) {
+                    pax = ncx - nHalfLen_um * nux;
+                    pay = ncy - nHalfLen_um * nuy;
+                    paz = ncz - nHalfLen_um * nuz;
+                } else {
+                    pax = ncx + nHalfLen_um * nux;
+                    pay = ncy + nHalfLen_um * nuy;
+                    paz = ncz + nHalfLen_um * nuz;
+                }
+                // Pt3D.unitVec(strainDist, ptAtEnd2, linkPt) → linkUVec = (ptAtEnd2 - linkPt)/strainDist.
+                double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
+                double strainDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
+                double luX = dx * invStrain, luY = dy * invStrain, luZ = dz * invStrain;
+                double lurX = -luX, lurY = -luY, lurZ = -luZ;
+
+                // moveCoeff(2, linkUVec) for self: cosBeta = dot(uVec, linkUVec).
+                double cosB1 = ux * luX + uy * luY + uz * luZ;
+                if (cosB1 > 1.0)  cosB1 = 1.0;
+                if (cosB1 < -1.0) cosB1 = -1.0;
+                double cosA1 = Math.sin(accurateAcos(cosB1));
+                double cosA1_2 = cosA1 * cosA1;
+                double moveC1 = cosB1 * cosB1 / rBTGx + cosA1_2 / rBTGy
+                              + lSqSelf * cosA1_2 / (4.0 * rBRGy);
+
+                // F3 moveCoeff for neighbour: cosBeta gets squared inside
+                // moveC = cosB²/bTGx + (1-cosB²)/bTGy + lSq*(1-cosB²)/(4 bRGy),
+                // so the sign of cosBeta is irrelevant — moveCoeff(1, x)
+                // and moveCoeff(2, x) return the same value for the same
+                // linkUVec. Use the raw neighbour uVec; squaring handles
+                // the side equivalence (verified against CPU moveCoeff in
+                // FilSegment.java:1340-1366).
+                double cosB2 = nux * lurX + nuy * lurY + nuz * lurZ;
+                if (cosB2 > 1.0)  cosB2 = 1.0;
+                if (cosB2 < -1.0) cosB2 = -1.0;
+                double cosA2 = Math.sin(accurateAcos(cosB2));
+                double cosA2_2 = cosA2 * cosA2;
+                double moveC2 = cosB2 * cosB2 / nBTGx + cosA2_2 / nBTGy
+                              + lSqN * cosA2_2 / (4.0 * nBRGy);
+
+                double denom = dt * (moveC1 + moveC2);
+                double forceMag = (denom > 0.0) ? (fracMove * 1.0e-6 * strainDist / denom) : 0.0;
+
+                double Fx = forceMag * luX, Fy = forceMag * luY, Fz = forceMag * luZ;
+                fx += Fx; fy += Fy; fz += Fz;
+                // R = 0.5e-6 * length * fracR * uVec (lever arm from coord to end2).
+                double Rscale = 0.5e-6 * len * fracR;
+                double Rx = Rscale * ux, Ry = Rscale * uy, Rz = Rscale * uz;
+                tx += Ry * Fz - Rz * Fy;
+                ty += Rz * Fx - Rx * Fz;
+                tz += Rx * Fy - Ry * Fx;
+
+                // F4 torsion at end2 (CPU FilSegment.java:1698-1707):
+                //   side=0 (ptAtEnd2 == neighbour.end1Pt) → cross(uVec, neighbour.uVec)
+                //   side=1 (ptAtEnd2 == neighbour.end2Pt) → cross(uVec, neighbour.uVecR)
+                // The sign convention here matters (unlike F3 which squares
+                // cosBeta) — a wrong sign flips the unit torsion vector AND
+                // produces angTween ≈ 180° on a straight chain, which would
+                // catastrophically destabilize bench loads (a bug masked by
+                // SingleFilDiag because cross(uVec, ±uVec) = 0 on a
+                // perfectly straight chain).
+                double nuxE, nuyE, nuzE;
+                if (e2Side == 0) { nuxE =  nux; nuyE =  nuy; nuzE =  nuz; }
+                else             { nuxE = -nux; nuyE = -nuy; nuzE = -nuz; }
+                double tvx = uy * nuzE - uz * nuyE;
+                double tvy = uz * nuxE - ux * nuzE;
+                double tvz = ux * nuyE - uy * nuxE;
+                double tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 1.0e-30) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                    double dotV = ux * nuxE + uy * nuyE + uz * nuzE;
+                    if (dotV > 1.0)  dotV = 1.0;
+                    if (dotV < -1.0) dotV = -1.0;
+                    double angTween = accurateAcos(dotV) * RAD2DEG;
+                    double torsionMag;
+                    if (filTorqSpringActive > 0.5) {
+                        torsionMag = fracMoveTorq * filTorqSpring * angTween;
+                    } else {
+                        double invBRG = 1.0 / rBRGy + 1.0 / nBRGy;
+                        torsionMag = fracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
+                    }
+                    tx += tvx * torsionMag;
+                    ty += tvy * torsionMag;
+                    tz += tvz * torsionMag;
+                }
+            }
+
+            // --- end1 side ---
+            if (e1Slot >= 0) {
+                int e1Side = topoEnd1Side.get(i);
+                int n3     = e1Slot * 3;
+                double ncx = (double) coord.get(n3);
+                double ncy = (double) coord.get(n3 + 1);
+                double ncz = (double) coord.get(n3 + 2);
+                double nux = (double) uVec.get(n3);
+                double nuy = (double) uVec.get(n3 + 1);
+                double nuz = (double) uVec.get(n3 + 2);
+                double nlen = (double) soaLengthArr.get(e1Slot);
+                double nHalfLen_um = 0.5 * nlen;
+                double lSqN  = 1.0e-12 * nlen * nlen;
+                double nBTGx = (double) bTransGam.get(n3);
+                double nBTGy = (double) bTransGam.get(n3 + 1);
+                double nBRGy = (double) bRotGam.get(n3 + 1);
+
+                // My end1 = coord - halfLen * uVec.
+                double e1x = cx - halfLen_um * ux;
+                double e1y = cy - halfLen_um * uy;
+                double e1z = cz - halfLen_um * uz;
+                // CPU: linkPt.add(end1Pt, actinMonoRadius, uVec) — i.e.,
+                // linkPt = end1 + actinMonoRadius * uVec.
+                double lpx = e1x + actinMonoRadius * ux;
+                double lpy = e1y + actinMonoRadius * uy;
+                double lpz = e1z + actinMonoRadius * uz;
+                double pax, pay, paz;
+                if (e1Side == 0) {
+                    pax = ncx - nHalfLen_um * nux;
+                    pay = ncy - nHalfLen_um * nuy;
+                    paz = ncz - nHalfLen_um * nuz;
+                } else {
+                    pax = ncx + nHalfLen_um * nux;
+                    pay = ncy + nHalfLen_um * nuy;
+                    paz = ncz + nHalfLen_um * nuz;
+                }
+                double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
+                double strainDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
+                double luX = dx * invStrain, luY = dy * invStrain, luZ = dz * invStrain;
+                double lurX = -luX, lurY = -luY, lurZ = -luZ;
+
+                // moveCoeff(1, linkUVec) for self: cosBeta = dot(uVecR, linkUVec) = -dot(uVec, linkUVec).
+                double cosB1 = -(ux * luX + uy * luY + uz * luZ);
+                if (cosB1 > 1.0)  cosB1 = 1.0;
+                if (cosB1 < -1.0) cosB1 = -1.0;
+                double cosA1 = Math.sin(accurateAcos(cosB1));
+                double cosA1_2 = cosA1 * cosA1;
+                double moveC1 = cosB1 * cosB1 / rBTGx + cosA1_2 / rBTGy
+                              + lSqSelf * cosA1_2 / (4.0 * rBRGy);
+
+                // F3 moveCoeff for neighbour: same sign-irrelevance as
+                // end2 side — cosBeta gets squared. Use raw neighbour uVec.
+                double cosB2 = nux * lurX + nuy * lurY + nuz * lurZ;
+                if (cosB2 > 1.0)  cosB2 = 1.0;
+                if (cosB2 < -1.0) cosB2 = -1.0;
+                double cosA2 = Math.sin(accurateAcos(cosB2));
+                double cosA2_2 = cosA2 * cosA2;
+                double moveC2 = cosB2 * cosB2 / nBTGx + cosA2_2 / nBTGy
+                              + lSqN * cosA2_2 / (4.0 * nBRGy);
+
+                double denom = dt * (moveC1 + moveC2);
+                double forceMag = (denom > 0.0) ? (fracMove * 1.0e-6 * strainDist / denom) : 0.0;
+
+                double Fx = forceMag * luX, Fy = forceMag * luY, Fz = forceMag * luZ;
+                fx += Fx; fy += Fy; fz += Fz;
+                // R = 0.5e-6 * length * fracR * uVecR (lever arm from coord to end1).
+                double Rscale = -0.5e-6 * len * fracR;
+                double Rx = Rscale * ux, Ry = Rscale * uy, Rz = Rscale * uz;
+                tx += Ry * Fz - Rz * Fy;
+                ty += Rz * Fx - Rx * Fz;
+                tz += Rx * Fy - Ry * Fx;
+
+                // F4 torsion at end1 (CPU FilSegment.java:1752-1761):
+                //   side=0 (ptAtEnd1 == neighbour.end1Pt) → cross(uVecR, neighbour.uVec)
+                //   side=1 (ptAtEnd1 == neighbour.end2Pt) → cross(uVecR, neighbour.uVecR)
+                // Same correct sign convention as end2 (uVec at side=0,
+                // uVecR at side=1).
+                double nuxE, nuyE, nuzE;
+                if (e1Side == 0) { nuxE =  nux; nuyE =  nuy; nuzE =  nuz; }
+                else             { nuxE = -nux; nuyE = -nuy; nuzE = -nuz; }
+                double mux = -ux, muy = -uy, muz = -uz;
+                double tvx = muy * nuzE - muz * nuyE;
+                double tvy = muz * nuxE - mux * nuzE;
+                double tvz = mux * nuyE - muy * nuxE;
+                double tvMag2 = tvx * tvx + tvy * tvy + tvz * tvz;
+                if (tvMag2 > 1.0e-30) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                    double dotV = mux * nuxE + muy * nuyE + muz * nuzE;
+                    if (dotV > 1.0)  dotV = 1.0;
+                    if (dotV < -1.0) dotV = -1.0;
+                    double angTween = accurateAcos(dotV) * RAD2DEG;
+                    double torsionMag;
+                    if (filTorqSpringActive > 0.5) {
+                        torsionMag = fracMoveTorq * filTorqSpring * angTween;
+                    } else {
+                        double invBRG = 1.0 / rBRGy + 1.0 / nBRGy;
+                        torsionMag = fracMoveTorq * DEG2RAD * angTween / (invBRG * dt);
+                    }
+                    tx += tvx * torsionMag;
+                    ty += tvy * torsionMag;
+                    tz += tvz * torsionMag;
+                }
+            }
+
+            jointForceSum.set(i3,      (float) fx);
+            jointForceSum.set(i3 + 1,  (float) fy);
+            jointForceSum.set(i3 + 2,  (float) fz);
+            jointTorqueSum.set(i3,     (float) tx);
+            jointTorqueSum.set(i3 + 1, (float) ty);
+            jointTorqueSum.set(i3 + 2, (float) tz);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Move kernel — sums the CPU-contributed forceSum and the device-side
     // joint-delta buffer to get the complete per-Thing force/torque, then
     // generates Brownian inline via Wang hash and integrates pose.
@@ -1094,8 +1460,16 @@ public class GPUMoveThing {
         anchoredFlags  = new IntArray(myoCap);
         jointSlotToMyoIdx = new int[myoCap];
 
+        // Phase 2 F3/F4: per-FilSegment chain topology + length buffers.
+        topoEnd2Slot = new IntArray(slotCap);
+        topoEnd2Side = new IntArray(slotCap);
+        topoEnd1Slot = new IntArray(slotCap);
+        topoEnd1Side = new IntArray(slotCap);
+        soaLengthArr = new FloatArray(slotCap);
+
         params      = new FloatArray(2);
         jointParams = new FloatArray(13);
+        chainParams = new FloatArray(7);
         counts      = new IntArray(4);
 
         gpuThingIndices       = new int[slotCap];
@@ -1118,7 +1492,10 @@ public class GPUMoveThing {
                               rodSlots, leverSlots, motorSlots,
                               myoDrags, cockedFlags,
                               anchorPts, anchoredFlags,
-                              jointParams, params, counts)
+                              topoEnd2Slot, topoEnd2Side,
+                              topoEnd1Slot, topoEnd1Side,
+                              soaLengthArr,
+                              jointParams, chainParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
                   coord, uVec,
@@ -1127,6 +1504,14 @@ public class GPUMoveThing {
                   myoDrags, cockedFlags,
                   anchorPts, anchoredFlags,
                   jointParams, counts)
+            .task("chain",
+                  GPUMoveThing::chainPairForcesKernel,
+                  coord, uVec, soaLengthArr,
+                  topoEnd2Slot, topoEnd2Side,
+                  topoEnd1Slot, topoEnd1Side,
+                  bTransGam, bRotGam,
+                  jointForceSum, jointTorqueSum,
+                  chainParams, counts)
             .task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
                            : GPUMoveThing::moveThingKernel,
@@ -1138,7 +1523,7 @@ public class GPUMoveThing {
                   params, counts)
             ;
 
-        if (DIAG_DUMP_JOINTS_STEP >= 0) {
+        if (DIAG_DUMP_JOINTS_STEP >= 0 || DIAG_DUMP_CHAIN_STEP >= 0) {
             tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                    coord, uVec, yVec,
                                    jointForceSum, jointTorqueSum);
@@ -1154,9 +1539,13 @@ public class GPUMoveThing {
         moveWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
         WorkerGrid jointWorker = new WorkerGrid1D(myoCap);
         jointWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
+        // Chain kernel: one thread per move slot, same shape as move kernel.
+        WorkerGrid chainWorker = new WorkerGrid1D(slotCap);
+        chainWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
 
         gridScheduler = new GridScheduler("chained.move", moveWorker);
         gridScheduler.addWorkerGrid("chained.joints", jointWorker);
+        gridScheduler.addWorkerGrid("chained.chain",  chainWorker);
 
         if (DIAG_CPU_DELTA_ADD) {
             // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,
@@ -1379,6 +1768,70 @@ public class GPUMoveThing {
         if (DIAG_CPU_JOINTS) {
             myoJointCt = 0;
         }
+
+        // Phase 2 F3/F4 — build per-FilSegment chain topology index.
+        // For each GPU-handled FilSegment slot, look up the chain neighbour
+        // at each connected end via thingNumberToMoveSlot. If a neighbour is
+        // CPU-fallback (slot = -1), DIAG_CPU_F3F4 is on, or the segment is
+        // not a FilSegment, mark topo*Slot[i] = -1 → kernel returns early
+        // and the CPU pair runs for that segment. gpuChainHandled mirrors
+        // the device decision so FilSegment.step() can gate its own
+        // addLinkForces / addTorsionSpringForces calls consistently.
+        boolean cpuChain = DIAG_CPU_F3F4;
+        for (int s = 0; s < slotCount; s++) {
+            Thing t = Thing.theThings[gpuThingIndices[s]];
+            int e2Slot = -1, e2Side = 0, e1Slot = -1, e1Side = 0;
+            boolean chainOnDevice = false;
+            if (!cpuChain && t instanceof FilSegment) {
+                FilSegment f = (FilSegment) t;
+                FilSegment ne2 = (f.filAtEnd2) ? f.end2Fil : null;
+                FilSegment ne1 = (f.filAtEnd1) ? f.end1Fil : null;
+                // Only commit the device path if every active chain neighbour
+                // is itself GPU-handled. Mixed-state chains (e.g. one end
+                // bound to a branched FilSegment with motherFil != null)
+                // fall back to CPU for THIS segment — the CPU
+                // addLinkForces() then handles both ends, preserving
+                // Newton's-3rd-law symmetry with the neighbour's CPU step().
+                boolean okE2 = (ne2 == null) || ne2.gpuHandled;
+                boolean okE1 = (ne1 == null) || ne1.gpuHandled;
+                if (okE2 && okE1) {
+                    if (ne2 != null) {
+                        int nIdx = ne2.myThingNumber;
+                        if (nIdx >= 0 && nIdx < thingNumberToMoveSlot.length) {
+                            int ns = thingNumberToMoveSlot[nIdx];
+                            if (ns >= 0) {
+                                e2Slot = ns;
+                                e2Side = (f.ptAtEnd2 == ne2.end1Pt) ? 0 : 1;
+                            }
+                        }
+                    }
+                    if (ne1 != null) {
+                        int nIdx = ne1.myThingNumber;
+                        if (nIdx >= 0 && nIdx < thingNumberToMoveSlot.length) {
+                            int ns = thingNumberToMoveSlot[nIdx];
+                            if (ns >= 0) {
+                                e1Slot = ns;
+                                e1Side = (f.ptAtEnd1 == ne1.end1Pt) ? 0 : 1;
+                            }
+                        }
+                    }
+                    chainOnDevice = true;
+                }
+                f.gpuChainHandled = chainOnDevice;
+            }
+            topoEnd2Slot.set(s, e2Slot);
+            topoEnd2Side.set(s, e2Side);
+            topoEnd1Slot.set(s, e1Slot);
+            topoEnd1Side.set(s, e1Side);
+        }
+        // CPU-fallback FilSegments keep gpuChainHandled = false (default);
+        // any FilSegment whose isGPUHandled flipped to false this classify
+        // pass also needs its chain flag cleared.
+        for (int i = 0; i < cpuFallbackCt; i++) {
+            if (cpuFallback[i] instanceof FilSegment) {
+                ((FilSegment) cpuFallback[i]).gpuChainHandled = false;
+            }
+        }
     }
 
     public static void onStepStart() {
@@ -1485,6 +1938,7 @@ public class GPUMoveThing {
         float[] soaCoordArr = Thing.soaCoord;
         float[] soaUVecArr  = Thing.soaUVec;
         float[] soaYVecArr  = Thing.soaYVec;
+        float[] soaLenArr   = Thing.soaLength;
         float   bTransCoef = sBTransCoeff;
         float   bRotCoef   = sBRotCoeff;
         float   xLnT       = sXLinkTAttn;
@@ -1589,6 +2043,12 @@ public class GPUMoveThing {
             }
             brownianScales.set(bT, tScale);
             brownianScales.set(bR, rScale);
+            // Phase 2 F3/F4 — refresh per-slot length. CPU keeps
+            // Thing.soaLength current via pushLengthToSoa() in
+            // FilSegment.initialize(), called from biochemStep when length
+            // changes. Repacking every step keeps device coherent regardless
+            // of whether the length change set topologyDirty.
+            soaLengthArr.set(slot, soaLenArr[thingIdx]);
         }
     }
 
@@ -1828,6 +2288,19 @@ public class GPUMoveThing {
         jointParams.set(11, (float) Myosin.uncockedLever_MotorAngle);
         jointParams.set(12, (float) Myosin.cockedLever_MotorAngle);
 
+        // Phase 2 F3/F4 — chain kernel parameters. fracMove/fracR/fracMoveTorq
+        // are runtime-mutable (Env.java setMutableAtRuntime). filTorqSpring
+        // active state encoded as a float (1.0/0.0) so the kernel can branch
+        // without an extra IntArray. actinMonoRadius is a compile-time
+        // constant from Env (no isActive() guard).
+        chainParams.set(0, (float) Env.deltaT.getValue());
+        chainParams.set(1, (float) Env.fracMove.getValue());
+        chainParams.set(2, (float) Env.fracR.getValue());
+        chainParams.set(3, (float) Env.fracMoveTorq.getValue());
+        chainParams.set(4, Env.filTorqSpring.isActive() ? 1.0f : 0.0f);
+        chainParams.set(5, (float) Env.filTorqSpring.getValue());
+        chainParams.set(6, (float) Env.actinMonoRadius);
+
         counts.set(0, slotCount);
         counts.set(1, stepCounter);
         counts.set(2, runSeed);
@@ -1882,6 +2355,30 @@ public class GPUMoveThing {
                     jointTorqueSum.get(ms3), jointTorqueSum.get(ms3 + 1), jointTorqueSum.get(ms3 + 2));
             }
             dumpDeltaStructure();
+        }
+
+        // Phase 2 F3/F4 chain-kernel dump: at the specified step, walk every
+        // GPU-handled FilSegment slot and report (cpuForceSum, jointForceSum,
+        // jointTorqueSum). Lets jba diff arm A (device F3/F4 → contribution
+        // in jointForceSum) against arm B (CPU F3/F4 → contribution lands in
+        // cpuForceSum via the soaForceSum pack). Slot N maps to thingIdx via
+        // gpuThingIndices[N]; ID printed for cross-reference with bench output.
+        if (DIAG_DUMP_CHAIN_STEP >= 0 && stepCounter == DIAG_DUMP_CHAIN_STEP) {
+            for (int s = 0; s < slotCount; s++) {
+                int thingIdx = gpuThingIndices[s];
+                Thing t = Thing.theThings[thingIdx];
+                if (!(t instanceof FilSegment)) continue;
+                FilSegment f = (FilSegment) t;
+                int s3 = s * 3;
+                System.err.printf(
+                    "[DIAG_CHAIN step=%d slot=%d thingIdx=%d filSegId=%d gpuCH=%b "
+                    + "cpuF=(%.4e,%.4e,%.4e) jntF=(%.4e,%.4e,%.4e) jntT=(%.4e,%.4e,%.4e)%n",
+                    stepCounter, s, thingIdx, f.thingInstanceId, f.gpuChainHandled,
+                    cpuForceSum.get(s3), cpuForceSum.get(s3 + 1), cpuForceSum.get(s3 + 2),
+                    jointForceSum.get(s3), jointForceSum.get(s3 + 1), jointForceSum.get(s3 + 2),
+                    jointTorqueSum.get(s3), jointTorqueSum.get(s3 + 1), jointTorqueSum.get(s3 + 2));
+            }
+            System.err.flush();
         }
 
         if (sc > 0) {
