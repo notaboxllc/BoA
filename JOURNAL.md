@@ -1,8 +1,54 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-02 PM (gliding-assay filament IC overshoot fix applied)
+Last updated: 2026-06-02 PM (parameter provenance written into -3js run folders)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-02 — Parameter provenance in -3js run folders
+
+**Scope:** `ThreeJSWriter.resolveOutputDir()` only — same hook that writes
+`source.zip`. No frame format, no parameter system, no sim behavior changed.
+
+### Change
+
+Each `-3js` run folder now contains two new provenance files alongside
+`source.zip`, written once at first-frame setup:
+
+- **`params_input.<origName>`** — verbatim copy of the file passed via `-pf`
+  (e.g. `params_input.boa10-64Seg`). Skipped with an info message if no `-pf`
+  was given.
+- **`params_effective.txt`** — t=0 snapshot of the `Parameter` registry
+  (iterates `Parameter.theParams[0..paramCt-1]`). Each line:
+  `<label> = <value>  (active=<bool>, type=<BOOLEAN|INT|DOUBLE>, default=<v>, units=<u>)`.
+  Header notes that mid-run mutable params (the `setMutableAtRuntime` whitelist:
+  aeta, fracMove, fracR, …) may diverge from this snapshot after t=0.
+
+**`params_effective` is the authoritative record.** A parameter file can list
+a line with `isActive=false`, in which case `getValue()` still returns the
+Java default and `params_input` looks misleading. The effective dump closes
+that gap by emitting both `getValue()` and `isActive()` for every parameter.
+
+### Validation
+
+Short smoke run: `BoxOfActin -r -pf ParameterFiles/boa10-64Seg -3js …`.
+
+- `params_input.boa10-64Seg` is byte-identical to the source param file
+  (`diff -q` clean, 109 lines).
+- `params_effective.txt` has 244 parameter lines, of which 36 carry
+  `active=false` (e.g. `glidingAssay`, `threeByThreeNodes`) — these are the
+  default-fallback cases the verbatim copy hides.
+- The three bending-calibration params show their effective values and active
+  flags side-by-side:
+  - `fracMove = 0.4   (active=true,  default=0.5)`
+  - `fracR = 0.134    (active=true,  default=0.1)`
+  - `fracMoveTorq = 0.013685 (active=true, default=0.265)`
+- Frame JSON output unchanged; sim behavior unchanged.
+
+### Open
+
+Headless ensemble / batch runs (no `-3js`) currently have no equivalent
+effective-param dump in their `RUN_LOGS/`. Flagging for the planner — not
+implemented here.
 
 ## 2026-06-02 — Gliding-assay filament IC overshoot — fix
 

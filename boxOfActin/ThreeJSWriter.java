@@ -1,6 +1,8 @@
 package boxOfActin;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.zip.*;
 
@@ -27,6 +29,66 @@ public class ThreeJSWriter {
         System.out.println("ThreeJSWriter: output directory " + Env.threeJSOutputDir);
         dirResolved = true;
         archiveSource();
+        copyInputParamFile();
+        writeEffectiveParams();
+    }
+
+    private static void copyInputParamFile() {
+        if (Env.paramFile == null) {
+            System.out.println("ThreeJSWriter: no -pf file given; skipping params_input");
+            return;
+        }
+        File src = Env.paramFile;
+        File dst = new File(Env.threeJSOutputDir + File.separator + "params_input." + src.getName());
+        try {
+            Files.copy(src.toPath(), dst.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("ThreeJSWriter: wrote " + dst.getName());
+        } catch (IOException e) {
+            System.err.println("ThreeJSWriter: could not copy param file: " + e.getMessage());
+        }
+    }
+
+    private static void writeEffectiveParams() {
+        File out = new File(Env.threeJSOutputDir + File.separator + "params_effective.txt");
+        try (PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(out)))) {
+            pw.println("# params_effective.txt — t=0 snapshot of Parameter registry at first frame write.");
+            pw.println("# Authoritative record of what the sim actually used: getValue() and isActive()");
+            pw.println("# for every Parameter. A line present in the -pf file with isActive=false falls");
+            pw.println("# back to the Java default; that gap is visible here, not in params_input.");
+            pw.println("# Mid-run mutable params (see Env.setMutableAtRuntime()) may change after t=0.");
+            pw.println("# Format: <label> = <value>  (active=<bool>, type=<BOOLEAN|INT|DOUBLE>, default=<v>, units=<u>)");
+            pw.println();
+            for (int i = 0; i < Parameter.paramCt; i++) {
+                Parameter p = Parameter.theParams[i];
+                if (p == null) continue;
+                String typeStr;
+                String valStr;
+                switch (p.type) {
+                    case Parameter.BOOLEAN:
+                        typeStr = "BOOLEAN";
+                        valStr = (p.getValue() != 0) ? "true" : "false";
+                        break;
+                    case Parameter.INT:
+                        typeStr = "INT";
+                        valStr = Integer.toString(p.getIntValue());
+                        break;
+                    default:
+                        typeStr = "DOUBLE";
+                        valStr = String.valueOf(p.getValue());
+                        break;
+                }
+                String defStr = (p.type == Parameter.INT)
+                        ? Integer.toString((int) p.defaultValue)
+                        : (p.type == Parameter.BOOLEAN
+                                ? ((p.defaultValue != 0) ? "true" : "false")
+                                : String.valueOf(p.defaultValue));
+                pw.printf("%s = %s  (active=%b, type=%s, default=%s, units=%s)%n",
+                        p.label, valStr, p.isActive(), typeStr, defStr, p.units);
+            }
+            System.out.println("ThreeJSWriter: wrote params_effective.txt (" + Parameter.paramCt + " parameters)");
+        } catch (IOException e) {
+            System.err.println("ThreeJSWriter: could not write params_effective: " + e.getMessage());
+        }
     }
 
     private static void archiveSource() {
@@ -72,7 +134,7 @@ public class ThreeJSWriter {
             FilSegment fs = FilSegment.theFilSegments[i];
             if (fs == null || fs.removeMe) continue;
             if (!first) sb.append(",");
-            sb.append(String.format("{\"id\":%d,\"end1AsPt3D()\":[%.5g,%.5g,%.5g],\"end2AsPt3D()\":[%.5g,%.5g,%.5g],\"r\":0.035",
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035",
                     fs.thingInstanceId,
                     fs.getEnd1X(), fs.getEnd1Y(), fs.getEnd1Z(),
                     fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z()));
@@ -100,13 +162,13 @@ public class ThreeJSWriter {
             if (m == null || m.removeMe) continue;
             if (!firstMyo) sb.append(",");
             sb.append(String.format(
-                    "{\"id\":%d,\"rod\":{\"end1AsPt3D()\":[%.5g,%.5g,%.5g],\"end2AsPt3D()\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
+                    "{\"id\":%d,\"rod\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"invisible\":%b}",
                     m.myoMotor.thingInstanceId,  // motor's stable ID; carries the biologically interesting state
                     m.myoRod.getEnd1X(), m.myoRod.getEnd1Y(), m.myoRod.getEnd1Z(),
                     m.myoRod.getEnd2X(), m.myoRod.getEnd2Y(), m.myoRod.getEnd2Z(),
                     MyoRod.radius, m.myoRod.rodInvisible));
             sb.append(String.format(
-                    ",\"lever\":{\"end1AsPt3D()\":[%.5g,%.5g,%.5g],\"end2AsPt3D()\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                    ",\"lever\":{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
                     m.myoLever.getEnd1X(), m.myoLever.getEnd1Y(), m.myoLever.getEnd1Z(),
                     m.myoLever.getEnd2X(), m.myoLever.getEnd2Y(), m.myoLever.getEnd2Z(),
                     MyoLever.radius));
@@ -119,7 +181,7 @@ public class ThreeJSWriter {
             MyoMiniFilament mf = MyoMiniFilament.myoMiniFils[i];
             if (mf == null || mf.removeMe) continue;
             if (!firstMiniFil) sb.append(",");
-            sb.append(String.format("{\"id\":%d,\"end1AsPt3D()\":[%.5g,%.5g,%.5g],\"end2AsPt3D()\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
                     mf.thingInstanceId,
                     mf.getEnd1X(), mf.getEnd1Y(), mf.getEnd1Z(),
                     mf.getEnd2X(), mf.getEnd2Y(), mf.getEnd2Z(),
@@ -215,8 +277,8 @@ public class ThreeJSWriter {
                 fs.getCoordX(), fs.getCoordY(), fs.getCoordZ()));
         sb.append(String.format(",\"orientation\":{\"ux\":%.5g,\"uy\":%.5g,\"uz\":%.5g}",
                 fs.getUVecX(), fs.getUVecY(), fs.getUVecZ()));
-        sb.append(String.format(",\"end1AsPt3D()\":[%.5g,%.5g,%.5g]", fs.getEnd1X(), fs.getEnd1Y(), fs.getEnd1Z()));
-        sb.append(String.format(",\"end2AsPt3D()\":[%.5g,%.5g,%.5g]", fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z()));
+        sb.append(String.format(",\"end1\":[%.5g,%.5g,%.5g]", fs.getEnd1X(), fs.getEnd1Y(), fs.getEnd1Z()));
+        sb.append(String.format(",\"end2\":[%.5g,%.5g,%.5g]", fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z()));
         sb.append(",\"filamentId\":").append(fs.filID);
         // filArrayPos is position in global theFilSegments[] — not an intra-filament index;
         // computing intra-filament index requires walking the end1AsPt3D()/end2AsPt3D() chain (omitted, C2)
@@ -275,8 +337,8 @@ public class ThreeJSWriter {
                 mf.getCoordX(), mf.getCoordY(), mf.getCoordZ()));
         sb.append(String.format(",\"orientation\":{\"ux\":%.5g,\"uy\":%.5g,\"uz\":%.5g}",
                 mf.getUVecX(), mf.getUVecY(), mf.getUVecZ()));
-        sb.append(String.format(",\"end1AsPt3D()\":[%.5g,%.5g,%.5g]", mf.getEnd1X(), mf.getEnd1Y(), mf.getEnd1Z()));
-        sb.append(String.format(",\"end2AsPt3D()\":[%.5g,%.5g,%.5g]", mf.getEnd2X(), mf.getEnd2Y(), mf.getEnd2Z()));
+        sb.append(String.format(",\"end1\":[%.5g,%.5g,%.5g]", mf.getEnd1X(), mf.getEnd1Y(), mf.getEnd1Z()));
+        sb.append(String.format(",\"end2\":[%.5g,%.5g,%.5g]", mf.getEnd2X(), mf.getEnd2Y(), mf.getEnd2Z()));
         sb.append(",\"ageSteps\":").append(Env.counter - mf.createdAtStep);
         // Collect IDs of motors currently bound to actin (onFil == true)
         sb.append(",\"attachedMotorIds\":[");
@@ -310,7 +372,7 @@ public class ThreeJSWriter {
             default:             state = "NONE";  break;
         }
         return String.format(
-            "{\"end1AsPt3D()\":[%.5g,%.5g,%.5g],\"end2AsPt3D()\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"state\":\"%s\",\"onFil\":%b}",
+            "{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"state\":\"%s\",\"onFil\":%b}",
             mo.getEnd1X(), mo.getEnd1Y(), mo.getEnd1Z(),
             mo.getEnd2X(), mo.getEnd2Y(), mo.getEnd2Z(),
             MyoMotor.radius, state, mo.onFil);
