@@ -185,30 +185,47 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_CPU_F3F4 = false;
 
+    /**
+     * Diagnostic flag (2026-06-03 — Phase 2 F1 box-boundary port). Mirrors
+     * DIAG_CPU_F3F4 in shape. Default false: device boundaryBoxKernel applies
+     * the rigid-box wall force/torque to every GPU-handled FilSegment and
+     * FilSegment.checkBugOrBoxCollision() skips its CPU
+     * checkBugCollisionFromInside() call. Set true (via BOA_DIAG_CPU_F1=1) to
+     * force boundaryActive[i] = 0 for every slot — the kernel still runs but
+     * every thread early-returns — and re-route F1 through the CPU pair for
+     * clean A/B. CPU-only (non-`-gpu`) runs are unaffected either way. The
+     * Listeria from-outside path (`Env.simOutsideBug` active) always stays on
+     * CPU; only the from-inside box wall is gated here.
+     * See JOURNAL "Phase 2 F1 (box) — implementation" (2026-06-03).
+     */
+    public static boolean DIAG_CPU_F1 = false;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
-        // SOA_POSE only converts the move kernel + pack/unpack; the joints
-        // and chain kernels still expect AoS pose. Route both to CPU so the
-        // GPU joints + chain tasks are bypassed (CPU writes into cpuForceSum,
-        // which the SoA move kernel reads correctly — force buffers ARE
-        // converted to axis-major in pack/unpack).
+        // SOA_POSE only converts the move kernel + pack/unpack; the joints,
+        // chain, and boundary kernels still expect AoS pose. Route them all to
+        // CPU so the GPU joints + chain + boundary tasks are bypassed (CPU
+        // writes into cpuForceSum, which the SoA move kernel reads correctly
+        // — force buffers ARE converted to axis-major in pack/unpack).
         if (SOA_POSE) {
             DIAG_CPU_JOINTS = true;
             DIAG_CPU_F3F4   = true;
+            DIAG_CPU_F1     = true;
         }
         // MOVE_AB_PROFILE isolates the move kernel as the ONLY GPU task:
-        // joints + chain routed to CPU AND split-plan execution so the
-        // moveOnly plan can be profiled in isolation.
+        // joints + chain + boundary routed to CPU AND split-plan execution
+        // so the moveOnly plan can be profiled in isolation.
         if (MOVE_AB_PROFILE) {
             DIAG_CPU_JOINTS    = true;
             DIAG_CPU_F3F4      = true;
+            DIAG_CPU_F1        = true;
             DIAG_CPU_DELTA_ADD = true;
         }
         if (SOA_POSE || MOVE_AB_PROFILE) {
             System.err.printf(
-                "[PHASE0] SOA_POSE=%s MOVE_AB_PROFILE=%s -> DIAG_CPU_JOINTS=%s DIAG_CPU_F3F4=%s DIAG_CPU_DELTA_ADD=%s%n",
-                SOA_POSE, MOVE_AB_PROFILE, DIAG_CPU_JOINTS, DIAG_CPU_F3F4, DIAG_CPU_DELTA_ADD);
+                "[PHASE0] SOA_POSE=%s MOVE_AB_PROFILE=%s -> DIAG_CPU_JOINTS=%s DIAG_CPU_F3F4=%s DIAG_CPU_F1=%s DIAG_CPU_DELTA_ADD=%s%n",
+                SOA_POSE, MOVE_AB_PROFILE, DIAG_CPU_JOINTS, DIAG_CPU_F3F4, DIAG_CPU_F1, DIAG_CPU_DELTA_ADD);
         }
     }
 
@@ -274,6 +291,30 @@ public class GPUMoveThing {
     // unless DIAG_CPU_ANCHOR is true; otherwise it would double-apply.
     private static FloatArray anchorPts;      // myoCap * 3
     private static IntArray   anchoredFlags;  // myoCap
+
+    // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
+    // boundaryActive[i] = 1 when slot i holds a GPU-handled FilSegment, the
+    // container is a Chamber (Survey Option A — separate kernels per shape;
+    // pill is F1b, not wired), DIAG_CPU_F1 is false, and simOutsideBug is
+    // inactive (Listeria from-outside stays on CPU). Otherwise 0; the
+    // boundary kernel early-returns and the CPU pair runs for that segment
+    // via FilSegment.gpuBoundaryHandled = false.
+    private static IntArray   boundaryActive;   // slotCap
+    // boundaryParams: [0]=dt, [1]=boxXDim, [2]=boxYDim, [3]=boxZDim,
+    //                 [4]=actinRadius, [5]=fnormScale (= 0.1, hardcoded in
+    //                 FilSegment.bugForcesFromInside line `fnorm = 0.1 *
+    //                 Math.min(fturn, ftrans)`).
+    private static FloatArray boundaryParams;
+    // Plan-build-time shape selector (Survey Option A). Today only BOX is
+    // wired; PILL (Bug) becomes a sibling task as F1b after the pill CPU
+    // revival flagged in the 2026-06-03 boundary survey. The shape is picked
+    // from `Thing.theBox instanceof ...` in allocateAndBuildPlan(); switching
+    // shape mid-run would require closePlan() + allocateAndBuildPlan() but
+    // Env.bugShapedCrucible is fixed at startup (no mid-run hook).
+    private static final int BOUNDARY_SHAPE_NONE = -1;
+    private static final int BOUNDARY_SHAPE_BOX  = 0;
+    // private static final int BOUNDARY_SHAPE_PILL = 1;   // future F1b
+    private static int boundaryShape = BOUNDARY_SHAPE_NONE;
 
     // ----- Phase 2 F3/F4 — per-FilSegment chain topology + length -----
     // Populated by classifyThings(): for each slot i, if the slot holds a
@@ -1175,6 +1216,207 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Boundary kernel — Phase 2 F1 port (Chamber from-inside).
+    //
+    // One thread per move slot. Each thread reads ITS own pose (end1/end2 from
+    // primary pose + soaLength), checks each endpoint against the rigid-box
+    // wall (Chamber center at origin, half-extents inset by actinRadius), and
+    // for any wall-penetrating endpoint computes Fcoll = fnormScale ·
+    // min(fturn, ftrans) · forceUVec, Tcoll = R × Fcoll, then ADDS them to its
+    // own jointForceSum / jointTorqueSum slot (read-modify-write on top of the
+    // chain kernel's writes — both tasks run sequentially in the chained
+    // TaskGraph on the same device buffers; boundary always runs AFTER chain).
+    //
+    // Formula mirrors Chamber.amICollidingOuter (Chamber.java:125-138):
+    //   forceUVec_i = sign(d_i)·(half_i − R) − d_i   for i ∈ {x,y,z}
+    //   zero axis i if sign(forceUVec_i) == sign(d_i) (segment still inside)
+    //   delta = |forceUVec|; forceUVec /= delta if nonzero
+    // and FilSegment.bugForcesFromInside (FilSegment.java:2565-2589):
+    //   R = (End − coord)·1e−6  (meters)
+    //   RxFuVecSqrd = |R × forceUVec|²
+    //   fturn  = 1e−6 · delta · bRotGam.y  / (RxFuVecSqrd · dt)
+    //   ftrans = 1e−6 · delta · bTransGam.x / dt
+    //   fnorm  = 0.1 · min(fturn, ftrans)     ← 0.1 hardcoded on CPU
+    //   Fcoll = fnorm · forceUVec
+    //   Tcoll = R × Fcoll
+    // The CPU side effects on `end1AxialF`/`end2AxialF` (used only by
+    // FilSegment.setCompression(), which is commented out at FilSegment.java
+    // line 500) and `end1TipC`/`end2TipC` (read by checkCapping under
+    // `end2NearArpFactor`, only set in Arp-related node binding paths — dead
+    // in gliding/deflection-bench workloads) are intentionally NOT replicated
+    // on the device. See JOURNAL "Phase 2 F1 (box) — implementation" force-
+    // coverage audit.
+    //
+    // Gating: per-slot boundaryActive[i] = 1 only for GPU-handled
+    // FilSegments when Thing.theBox instanceof Chamber, simOutsideBug
+    // inactive, and DIAG_CPU_F1 false. All other slots early-return.
+    //
+    // PTX-safe primitives only: ternaries for sign, ?: for min, Math.sqrt
+    // (PTX-native). Sentinel value 1.0e30 stands in for the divide-by-zero
+    // → +∞ path on CPU (R parallel to forceUVec): with ftrans ~ 1e−10 typical,
+    // 1e30 < ftrans is always false, so fnorm reduces to fnormScale · ftrans
+    // — same result as CPU's Math.min(+inf, ftrans).
+    // -------------------------------------------------------------------------
+    private static void boundaryBoxKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray soaLengthArr,
+            IntArray   boundaryActive,
+            FloatArray bTransGam,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray boundaryParams,
+            IntArray   counts) {
+
+        int N = counts.get(0);
+
+        double dt         = (double) boundaryParams.get(0);
+        double dimX       = (double) boundaryParams.get(1);
+        double dimY       = (double) boundaryParams.get(2);
+        double dimZ       = (double) boundaryParams.get(3);
+        double R          = (double) boundaryParams.get(4);
+        double fnormScale = (double) boundaryParams.get(5);
+        double halfX      = 0.5 * dimX - R;
+        double halfY      = 0.5 * dimY - R;
+        double halfZ      = 0.5 * dimZ - R;
+
+        for (@Parallel int i = 0; i < coord.getSize() / 3; i++) {
+            if (i >= N) { return; }
+            if (boundaryActive.get(i) == 0) { return; }
+
+            int i3 = i * 3;
+            double cx  = (double) coord.get(i3);
+            double cy  = (double) coord.get(i3 + 1);
+            double cz  = (double) coord.get(i3 + 2);
+            double ux  = (double) uVec.get(i3);
+            double uy  = (double) uVec.get(i3 + 1);
+            double uz  = (double) uVec.get(i3 + 2);
+            double len = (double) soaLengthArr.get(i);
+            double halfLen_um = 0.5 * len;
+
+            double bTGx = (double) bTransGam.get(i3);
+            double bRGy = (double) bRotGam.get(i3 + 1);
+
+            double fx = 0.0, fy = 0.0, fz = 0.0;
+            double tx = 0.0, ty = 0.0, tz = 0.0;
+
+            // ----- end1 endpoint: end = coord − halfLen · uVec -----
+            {
+                double dx = cx - halfLen_um * ux;
+                double dy = cy - halfLen_um * uy;
+                double dz = cz - halfLen_um * uz;
+                // sign(d_i) via ternary (PTX-safe, no Math.signum).
+                double sx = (dx > 0.0) ? 1.0 : ((dx < 0.0) ? -1.0 : 0.0);
+                double sy = (dy > 0.0) ? 1.0 : ((dy < 0.0) ? -1.0 : 0.0);
+                double sz = (dz > 0.0) ? 1.0 : ((dz < 0.0) ? -1.0 : 0.0);
+                double fux = sx * halfX - dx;
+                double fuy = sy * halfY - dy;
+                double fuz = sz * halfZ - dz;
+                // Zero axes where the endpoint is still inside the inset wall
+                // (sign(forceUVec) == sign(d)).
+                double fsx = (fux > 0.0) ? 1.0 : ((fux < 0.0) ? -1.0 : 0.0);
+                double fsy = (fuy > 0.0) ? 1.0 : ((fuy < 0.0) ? -1.0 : 0.0);
+                double fsz = (fuz > 0.0) ? 1.0 : ((fuz < 0.0) ? -1.0 : 0.0);
+                if (fsx == sx) fux = 0.0;
+                if (fsy == sy) fuy = 0.0;
+                if (fsz == sz) fuz = 0.0;
+                double delta2 = fux * fux + fuy * fuy + fuz * fuz;
+                if (delta2 > 0.0) {
+                    double delta = Math.sqrt(delta2);
+                    double invDelta = 1.0 / delta;
+                    double luX = fux * invDelta;
+                    double luY = fuy * invDelta;
+                    double luZ = fuz * invDelta;
+                    // R_lever = (end1 − coord) · 1e-6  (meters); end1 − coord
+                    // = −halfLen · uVec (microns).
+                    double Rx = -halfLen_um * ux * 1.0e-6;
+                    double Ry = -halfLen_um * uy * 1.0e-6;
+                    double Rz = -halfLen_um * uz * 1.0e-6;
+                    double cxR = Ry * luZ - Rz * luY;
+                    double cyR = Rz * luX - Rx * luZ;
+                    double czR = Rx * luY - Ry * luX;
+                    double RxFuVecSqrd = cxR * cxR + cyR * cyR + czR * czR;
+                    double fturn = (RxFuVecSqrd > 1.0e-30)
+                        ? (1.0e-6 * delta * bRGy) / (RxFuVecSqrd * dt)
+                        : 1.0e30;
+                    double ftrans = (1.0e-6 * delta * bTGx) / dt;
+                    double fnorm  = fnormScale * ((fturn < ftrans) ? fturn : ftrans);
+                    double Fx = fnorm * luX;
+                    double Fy = fnorm * luY;
+                    double Fz = fnorm * luZ;
+                    fx += Fx; fy += Fy; fz += Fz;
+                    tx += Ry * Fz - Rz * Fy;
+                    ty += Rz * Fx - Rx * Fz;
+                    tz += Rx * Fy - Ry * Fx;
+                }
+            }
+
+            // ----- end2 endpoint: end = coord + halfLen · uVec -----
+            {
+                double dx = cx + halfLen_um * ux;
+                double dy = cy + halfLen_um * uy;
+                double dz = cz + halfLen_um * uz;
+                double sx = (dx > 0.0) ? 1.0 : ((dx < 0.0) ? -1.0 : 0.0);
+                double sy = (dy > 0.0) ? 1.0 : ((dy < 0.0) ? -1.0 : 0.0);
+                double sz = (dz > 0.0) ? 1.0 : ((dz < 0.0) ? -1.0 : 0.0);
+                double fux = sx * halfX - dx;
+                double fuy = sy * halfY - dy;
+                double fuz = sz * halfZ - dz;
+                double fsx = (fux > 0.0) ? 1.0 : ((fux < 0.0) ? -1.0 : 0.0);
+                double fsy = (fuy > 0.0) ? 1.0 : ((fuy < 0.0) ? -1.0 : 0.0);
+                double fsz = (fuz > 0.0) ? 1.0 : ((fuz < 0.0) ? -1.0 : 0.0);
+                if (fsx == sx) fux = 0.0;
+                if (fsy == sy) fuy = 0.0;
+                if (fsz == sz) fuz = 0.0;
+                double delta2 = fux * fux + fuy * fuy + fuz * fuz;
+                if (delta2 > 0.0) {
+                    double delta = Math.sqrt(delta2);
+                    double invDelta = 1.0 / delta;
+                    double luX = fux * invDelta;
+                    double luY = fuy * invDelta;
+                    double luZ = fuz * invDelta;
+                    // R_lever = (end2 − coord) · 1e-6 = +halfLen · uVec · 1e-6.
+                    double Rx = halfLen_um * ux * 1.0e-6;
+                    double Ry = halfLen_um * uy * 1.0e-6;
+                    double Rz = halfLen_um * uz * 1.0e-6;
+                    double cxR = Ry * luZ - Rz * luY;
+                    double cyR = Rz * luX - Rx * luZ;
+                    double czR = Rx * luY - Ry * luX;
+                    double RxFuVecSqrd = cxR * cxR + cyR * cyR + czR * czR;
+                    double fturn = (RxFuVecSqrd > 1.0e-30)
+                        ? (1.0e-6 * delta * bRGy) / (RxFuVecSqrd * dt)
+                        : 1.0e30;
+                    double ftrans = (1.0e-6 * delta * bTGx) / dt;
+                    double fnorm  = fnormScale * ((fturn < ftrans) ? fturn : ftrans);
+                    double Fx = fnorm * luX;
+                    double Fy = fnorm * luY;
+                    double Fz = fnorm * luZ;
+                    fx += Fx; fy += Fy; fz += Fz;
+                    tx += Ry * Fz - Rz * Fy;
+                    ty += Rz * Fx - Rx * Fz;
+                    tz += Rx * Fy - Ry * Fx;
+                }
+            }
+
+            // ADD to jointForceSum / jointTorqueSum at this slot. The chain
+            // kernel (which runs BEFORE this one in the chained TaskGraph) has
+            // already SET the slot's value to its F3+F4 contribution (or
+            // zeroed it via packRange's pre-step zero-init if chain
+            // early-returned). RMW here is safe — both tasks share device
+            // buffers within one .execute(); chain's writes are visible to
+            // boundary because no host re-upload happens between tasks within
+            // the same TaskGraph execution.
+            jointForceSum.set(i3,     (float)((double) jointForceSum.get(i3)     + fx));
+            jointForceSum.set(i3 + 1, (float)((double) jointForceSum.get(i3 + 1) + fy));
+            jointForceSum.set(i3 + 2, (float)((double) jointForceSum.get(i3 + 2) + fz));
+            jointTorqueSum.set(i3,     (float)((double) jointTorqueSum.get(i3)     + tx));
+            jointTorqueSum.set(i3 + 1, (float)((double) jointTorqueSum.get(i3 + 1) + ty));
+            jointTorqueSum.set(i3 + 2, (float)((double) jointTorqueSum.get(i3 + 2) + tz));
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Move kernel — sums the CPU-contributed forceSum and the device-side
     // joint-delta buffer to get the complete per-Thing force/torque, then
     // generates Brownian inline via Wang hash and integrates pose.
@@ -1528,6 +1770,10 @@ public class GPUMoveThing {
         topoEnd1Side = new IntArray(slotCap);
         soaLengthArr = new FloatArray(slotCap);
 
+        // Phase 2 F1: per-slot boundary-kernel gate + box-geometry uniforms.
+        boundaryActive = new IntArray(slotCap);
+        boundaryParams = new FloatArray(6);
+
         params      = new FloatArray(2);
         jointParams = new FloatArray(13);
         chainParams = new FloatArray(7);
@@ -1537,12 +1783,35 @@ public class GPUMoveThing {
         brownianRule          = new int[slotCap];
         cpuFallback           = new Thing[Math.max(64, slotCap)];
 
+        // Phase 2 F1 — plan-build-time shape dispatch (Survey Option A).
+        // Today only Chamber (box) is wired; the Bug-shaped pill kernel
+        // (F1b) becomes a sibling task here after the pill CPU revival
+        // flagged in the 2026-06-03 survey. Container shape is fixed for
+        // the lifetime of the plan (Env.bugShapedCrucible / makeCrucible
+        // are not mid-run mutable); a future shape switch would require
+        // closePlan() + allocateAndBuildPlan(). When the shape is unknown
+        // or unsupported, no boundary task is wired and the CPU pair runs
+        // for every segment.
+        if (Thing.theBox instanceof Chamber) {
+            boundaryShape = BOUNDARY_SHAPE_BOX;
+        } else {
+            boundaryShape = BOUNDARY_SHAPE_NONE;
+        }
+
         // Chained TaskGraph: joints task writes per-step joint contributions
         // to a SEPARATE device-side delta buffer (jointForceSum / jointTorqueSum
         // are uploaded zero-initialised each step); move task reads
         // cpuForceSum + jointForceSum (and cpuTorqueSum + jointTorqueSum) as
         // plain reads. coord/uVec/yVec are shared between tasks (read by both,
         // move writes new pose).
+        //
+        // Phase 2 F1: when boundaryShape == BOUNDARY_SHAPE_BOX, the "boundary"
+        // task runs AFTER "chain" and BEFORE "move", adding the per-segment
+        // wall force/torque to jointForceSum/jointTorqueSum via RMW (chain
+        // SETs its F3+F4 contribution, boundary reads-adds its F1
+        // contribution, move reads the combined sum). Inter-task RMW within
+        // a single .execute() is safe because both tasks share device-resident
+        // buffers and no host re-upload happens between tasks.
         TaskGraph tg = new TaskGraph("chained")
             .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               coord, uVec, yVec,
@@ -1556,6 +1825,7 @@ public class GPUMoveThing {
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
                               soaLengthArr,
+                              boundaryActive, boundaryParams,
                               jointParams, chainParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
@@ -1572,8 +1842,20 @@ public class GPUMoveThing {
                   topoEnd1Slot, topoEnd1Side,
                   bTransGam, bRotGam,
                   jointForceSum, jointTorqueSum,
-                  chainParams, counts)
-            .task("move",
+                  chainParams, counts);
+
+        if (boundaryShape == BOUNDARY_SHAPE_BOX) {
+            tg = tg.task("boundary",
+                  GPUMoveThing::boundaryBoxKernel,
+                  coord, uVec, soaLengthArr,
+                  boundaryActive,
+                  bTransGam, bRotGam,
+                  jointForceSum, jointTorqueSum,
+                  boundaryParams, counts);
+        }
+        // else if (boundaryShape == BOUNDARY_SHAPE_PILL) { ... // F1b }
+
+        tg = tg.task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
                            : GPUMoveThing::moveThingKernel,
                   coord, uVec, yVec,
@@ -1581,8 +1863,7 @@ public class GPUMoveThing {
                   jointForceSum, jointTorqueSum,
                   bTransGam, bRotGam,
                   brownianScales, velMask,
-                  params, counts)
-            ;
+                  params, counts);
 
         if (DIAG_DUMP_JOINTS_STEP >= 0 || DIAG_DUMP_CHAIN_STEP >= 0) {
             tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
@@ -1607,6 +1888,13 @@ public class GPUMoveThing {
         gridScheduler = new GridScheduler("chained.move", moveWorker);
         gridScheduler.addWorkerGrid("chained.joints", jointWorker);
         gridScheduler.addWorkerGrid("chained.chain",  chainWorker);
+
+        // Phase 2 F1: boundary kernel, one thread per move slot.
+        if (boundaryShape == BOUNDARY_SHAPE_BOX) {
+            WorkerGrid boundaryWorker = new WorkerGrid1D(slotCap);
+            boundaryWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
+            gridScheduler.addWorkerGrid("chained.boundary", boundaryWorker);
+        }
 
         if (DIAG_CPU_DELTA_ADD) {
             // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,
@@ -1839,10 +2127,29 @@ public class GPUMoveThing {
         // the device decision so FilSegment.step() can gate its own
         // addLinkForces / addTorsionSpringForces calls consistently.
         boolean cpuChain = DIAG_CPU_F3F4;
+        // Phase 2 F1 — global gate for the box-boundary kernel: only when
+        // DIAG_CPU_F1 is off AND simOutsideBug is inactive (Listeria
+        // from-outside path stays on CPU regardless) AND boundaryShape was
+        // wired to BOX at plan-build (Survey Option A — pill is F1b).
+        boolean boundaryOnDevice = (!DIAG_CPU_F1)
+                                && !Env.simOutsideBug.isActive()
+                                && (boundaryShape == BOUNDARY_SHAPE_BOX);
         for (int s = 0; s < slotCount; s++) {
             Thing t = Thing.theThings[gpuThingIndices[s]];
             int e2Slot = -1, e2Side = 0, e1Slot = -1, e1Side = 0;
             boolean chainOnDevice = false;
+            // Phase 2 F1: per-slot boundary gate. Every GPU-handled
+            // FilSegment slot under the global gate gets boundaryActive=1;
+            // chain-end / mid-chain / isolated segments all need the wall
+            // check. Non-FilSegment slots (Myo etc.) stay 0.
+            int bActive = 0;
+            if (boundaryOnDevice && t instanceof FilSegment) {
+                bActive = 1;
+                ((FilSegment) t).gpuBoundaryHandled = true;
+            } else if (t instanceof FilSegment) {
+                ((FilSegment) t).gpuBoundaryHandled = false;
+            }
+            boundaryActive.set(s, bActive);
             if (!cpuChain && t instanceof FilSegment) {
                 FilSegment f = (FilSegment) t;
                 FilSegment ne2 = (f.filAtEnd2) ? f.end2Fil : null;
@@ -1887,10 +2194,12 @@ public class GPUMoveThing {
         }
         // CPU-fallback FilSegments keep gpuChainHandled = false (default);
         // any FilSegment whose isGPUHandled flipped to false this classify
-        // pass also needs its chain flag cleared.
+        // pass also needs its chain + boundary flags cleared so the CPU
+        // pair runs both forces locally.
         for (int i = 0; i < cpuFallbackCt; i++) {
             if (cpuFallback[i] instanceof FilSegment) {
-                ((FilSegment) cpuFallback[i]).gpuChainHandled = false;
+                ((FilSegment) cpuFallback[i]).gpuChainHandled    = false;
+                ((FilSegment) cpuFallback[i]).gpuBoundaryHandled = false;
             }
         }
     }
@@ -2361,6 +2670,19 @@ public class GPUMoveThing {
         chainParams.set(4, Env.filTorqSpring.isActive() ? 1.0f : 0.0f);
         chainParams.set(5, (float) Env.filTorqSpring.getValue());
         chainParams.set(6, (float) Env.actinMonoRadius);
+
+        // Phase 2 F1 — box-boundary kernel parameters. Box dims are
+        // theoretically Parameters (Env.boxXDim/Y/Z), but no parameter file
+        // marks them mutableAtRuntime so re-reading every step is cheap
+        // future-proofing. fnormScale = 0.1 mirrors the literal in
+        // FilSegment.bugForcesFromInside (`fnorm = 0.1 * Math.min(...)`);
+        // if that hardcoded scaling ever moves to a Parameter, pick it up here.
+        boundaryParams.set(0, (float) Env.deltaT.getValue());
+        boundaryParams.set(1, (float) Env.boxXDim.getValue());
+        boundaryParams.set(2, (float) Env.boxYDim.getValue());
+        boundaryParams.set(3, (float) Env.boxZDim.getValue());
+        boundaryParams.set(4, (float) FilSegment.radius);
+        boundaryParams.set(5, 0.1f);
 
         counts.set(0, slotCount);
         counts.set(1, stepCounter);

@@ -180,6 +180,16 @@ public class FilSegment extends Thing {
 	// pair then runs both sides locally and the device kernel returns
 	// early at this slot.
 	boolean gpuChainHandled = false;
+	// Phase 2 F1 (2026-06-03): set by GPUMoveThing.classifyThings() when
+	// this segment is GPU-handled, Thing.theBox instanceof Chamber,
+	// simOutsideBug is inactive, and DIAG_CPU_F1 is false — meaning the
+	// device boundaryBoxKernel will compute this segment's box from-inside
+	// wall force/torque. checkBugOrBoxCollision() gates the CPU
+	// checkBugCollisionFromInside call on !gpuBoundaryHandled so device and
+	// CPU never double-apply (per-force gate per Lesson 1). The Listeria
+	// from-outside path keeps running on CPU unconditionally — the gate
+	// applies only to the from-inside branch.
+	boolean gpuBoundaryHandled = false;
 	
 	int end1NodeThingNumber;		// ditto
 	int end2NodeThingNumber;		// ditto
@@ -1226,10 +1236,24 @@ public class FilSegment extends Thing {
 
 	public void checkBugOrBoxCollision() {
 		//if (Env.bugOff.isActive()) { return; }
-		if (Env.simOutsideBug.isActive()) { 
+		if (Env.simOutsideBug.isActive()) {
+			// Listeria from-outside path stays on CPU (out of scope for
+			// Phase 2 F1; survey confirmed lmBug is a separate static ref
+			// from theBox with no shared state with the from-inside path).
 			checkBugCollisionFromOutside();
 		} else {
-			checkBugCollisionFromInside();
+			// Phase 2 F1 — when the device boundaryBoxKernel handles this
+			// segment's from-inside box wall, skip the CPU pair here.
+			// Per-force gate (Lesson 1): we gate INSIDE checkBugOrBox so
+			// the Listeria branch stays live on CPU even when the box is
+			// ported. The side effects of bugForcesFromInside on
+			// end1AxialF/end2AxialF/end1TipC/end2TipC are dead in the
+			// box-from-inside gliding/bench workloads (see
+			// boundaryBoxKernel header comment); device kernel does not
+			// replicate them.
+			if (!gpuBoundaryHandled) {
+				checkBugCollisionFromInside();
+			}
 		}
 	}
 	

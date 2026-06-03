@@ -1,8 +1,271 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (Phase 2 F3/F4 — fix: owner-perspective linkUVec; bench PASS, default flipped)
+Last updated: 2026-06-03 (Phase 2 F1 box — boundaryBoxKernel PASS; default device-active, F1b pill deferred)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — Phase 2 F1 (box) — implementation (PASS)
+
+**Verdict: PASS.** Rigid-box from-inside boundary force/torque (Chamber
+`amICollidingOuter` + `bugForcesFromInside`) ported to a per-segment device
+kernel `boundaryBoxKernel`. Cheap near-wall probe matches CPU bit-for-bit
+on five non-degenerate held-config cases (max rel diff 2.5e-16 = float-noise
+floor). End-to-end gliding-assay viewer check confirms a wall-touching
+filament is confined identically by device and CPU arms (started at
+end1.x = +7.086 µm just past the +7.0 wall, pushed back inside to 6.99 µm
+within 4 frames; arm-A / arm-B per-frame max-|x| drift ≤ 0.015 µm, Brownian
+noise). Default flipped: `DIAG_CPU_F1 = false`, device kernel active by
+default; `BOA_DIAG_CPU_F1=1` re-routes to CPU `checkBugCollisionFromInside`
+for clean A/B. The pill (`Bug` from-inside) port is deferred to **F1b**
+pending the CPU pill revival flagged in the 2026-06-03 boundary survey
+(axis-convention fix + smoke run).
+
+### Step 0 — formula confirmation
+
+Survey settled the dispatch shape; this entry confirms the live target
+configs run `theBox instanceof Chamber`:
+
+- `Env.bugShapedCrucible` defaults `false` (Env.java:384); no parameter
+  file in `ParameterFiles/` enables it (`grep` returns nothing). Every
+  current run sets `Thing.theBox` to a `Chamber` via
+  `Chamber.makeABox()` (BoxOfActin.java:2169-2176).
+- `Env.simOutsideBug` defaults `false`; tested gliding parameter files
+  leave it unset, so `FilSegment.checkBugOrBoxCollision` takes the
+  from-inside branch (FilSegment.java:1229-1233).
+
+**Chamber from-inside wall force** (Chamber.java:125-138):
+- inputs: `ctr` (endpoint, global), `R` (segment radius)
+- `d = ctr − chamberCenter` (chamberCenter = origin per `makeABox`)
+- `forceUVec_i = sign(d_i) · (dims_i / 2 − R) − d_i` for i ∈ {x,y,z}
+- if `sign(forceUVec_i) == sign(d_i)` (endpoint still inside the
+  inset wall on axis i), zero that axis
+- `delta = |forceUVec|`; if nonzero, `forceUVec /= delta`
+
+**bugForcesFromInside** (FilSegment.java:2565-2589):
+- `R_lever = (End − coord) · 1e−6` (m)
+- `RxFuVecSqrd = |R_lever × forceUVec|²`
+- `fturn  = 1e−6 · delta · bRotGam.y  / (RxFuVecSqrd · dt)`
+- `ftrans = 1e−6 · delta · bTransGam.x / dt`
+- `fnorm  = 0.1 · min(fturn, ftrans)`   ← 0.1 hardcoded literal on CPU
+- `Fcoll = fnorm · forceUVec`,  `Tcoll = R_lever × Fcoll`
+- adds to per-Thing `forceSum`/`torqueSum`
+
+Box dimensions: `Env.boxXDim/Y/Z` (defaults 2 × 2 × 0.1 µm; gliding500 sets
+14 × 2 × 0.5 µm). `FilSegment.radius = Env.actinWidth / 2 = 0.0035 µm`.
+All scalar uniforms; no per-segment shape inputs needed.
+
+### boundaryBoxKernel + plan-build-time shape dispatch (Survey Option A)
+
+`GPUMoveThing.boundaryBoxKernel` (GPUMoveThing.java line ~1245): one thread
+per move slot, runs AFTER `chain` and BEFORE `move` in the chained
+TaskGraph. Per-slot early-return on `boundaryActive[i] == 0` (non-FilSegment
+slot, DIAG_CPU_F1 on, Listeria active, or wrong container shape). For
+active slots, reads pose inline (`coord/uVec/soaLengthArr`), computes
+end1/end2 wall checks identical to the CPU formulas above, ADDS F+T to
+this slot's `jointForceSum`/`jointTorqueSum` (RMW on top of chain's writes;
+both tasks share device buffers within one .execute() and no host
+re-upload happens between tasks).
+
+Plan-build-time shape selector (`boundaryShape`, set in
+`allocateAndBuildPlan` from `Thing.theBox instanceof ...`):
+
+| shape constant | wired? | notes |
+|---|---|---|
+| `BOUNDARY_SHAPE_BOX` (0) | YES (this entry) | `Chamber` → `boundaryBoxKernel` task added |
+| `BOUNDARY_SHAPE_PILL` (1) | NO — **F1b** | sibling task slot left as a comment; needs pill CPU revival first (axis-convention fix from 2026-06-03 survey §4a) |
+| `BOUNDARY_SHAPE_NONE` (-1) | n/a | no boundary task wired; CPU pair runs for every seg |
+
+Container shape is fixed for the run, so the shape branch resolves once at
+plan build. Switching shape mid-run would require `closePlan()` +
+`allocateAndBuildPlan()` — not exposed today (Env.bugShapedCrucible is not
+mid-run mutable).
+
+PTX-safe primitives only: ternaries for sign (no `Math.signum`), `?:` for
+min, `Math.sqrt` (PTX-native). The CPU's `1/0 → +∞` divide-by-zero branch
+(R parallel to forceUVec → `RxFuVecSqrd = 0`) is sidestepped with a
+sentinel: `fturn = (RxFuVecSqrd > 1e-30) ? ... : 1e30`. With ftrans ~ 1e−10
+typical, `1e30 < ftrans` is always false → `fnorm = fnormScale · ftrans` —
+same numerical result as CPU's `Math.min(+inf, ftrans)`. Lesson logged for
+the audit.
+
+### Gating (Lesson 1 — per-force, not per-dispatch)
+
+`FilSegment.gpuBoundaryHandled` set true by `GPUMoveThing.classifyThings()`
+when, for this segment, all of:
+
+- `Env.useGPU` (GPU run)
+- this segment is GPU-handled (slot ≥ 0)
+- `Thing.theBox instanceof Chamber` (Survey Option A — only box ported)
+- `Env.simOutsideBug` inactive (Listeria from-outside stays on CPU)
+- `DIAG_CPU_F1 == false`
+
+The gate is **inside** `FilSegment.checkBugOrBoxCollision`
+(FilSegment.java:1227-1248): the Listeria from-outside branch
+(`checkBugCollisionFromOutside`) always runs on CPU; only the from-inside
+call is gated. Per-force gating per Lesson 1 — never skip the whole
+dispatch.
+
+```java
+if (Env.simOutsideBug.isActive()) {
+    checkBugCollisionFromOutside();   // always CPU
+} else {
+    if (!gpuBoundaryHandled) {
+        checkBugCollisionFromInside();
+    }
+}
+```
+
+A/B flag: `DIAG_CPU_F1 = false` (device default). `BOA_DIAG_CPU_F1=1`
+env-var hook in `BoxOfActin.begin()` flips it ON (CPU pair runs and
+device kernel early-returns at every slot via `boundaryActive[i] = 0`).
+SOA_POSE / MOVE_AB_PROFILE interlock at GPUMoveThing.java:202-212 also
+forces `DIAG_CPU_F1 = true` (AoS-only kernel cannot read SoA pose).
+
+### Force-coverage audit (Lesson 2)
+
+| Force / behaviour | CPU `DIAG_CPU_F1=true` | Device `DIAG_CPU_F1=false` (default) |
+|---|---|---|
+| **F1 box wall (Chamber from-inside)**: F+T per endpoint | CPU `checkBugCollisionFromInside` runs | device `boundaryBoxKernel` runs; CPU skipped via `gpuBoundaryHandled` |
+| F1b pill wall (Bug from-inside) | CPU `checkBugCollisionFromInside` runs (matches CPU axis convention) — but no current param file enables `bugShapedCrucible`; path is cold | not ported — device skips, `gpuBoundaryHandled` stays false, CPU pair would run; deferred to F1b after pill revival |
+| Listeria from-outside (`simOutsideBug` true) | CPU `checkBugCollisionFromOutside` runs (entire ActA / tipC / from-outside chain stays on CPU) | same — CPU path runs unconditionally regardless of GPU state |
+| `bugForcesFromInside` side effects: `end1AxialF`/`end2AxialF` increments | written on CPU (dead-write — only reader is `setCompression()`, commented out at FilSegment.java:500) | not written on device (intentionally — dead in production) |
+| `bugForcesFromInside` side effects: `end1TipC`/`end2TipC` zeroing on wall hit | written on CPU; reader is `checkCapping()` gated on `end2NearArpFactor` (only set by Arp-related node binding in `registerATipClearance`) — dead in gliding/bench workloads | not written on device — outside the audit scope for this port, behaviour matches production needs |
+| F3 link force, F4 torsion | CPU pair via `addLinkForces` / `addTorsionSpringForces` (unchanged from F3/F4 entry) | device `chainPairForcesKernel` (this kernel runs BEFORE boundary in the chained plan; boundary RMW preserves its writes) |
+| F5/F6 node forces, biochem, mesh, motors | CPU (unchanged) | CPU (unchanged) |
+| Anchor spring (MyosinFixed) | folded into device `jointsKernel` when `DIAG_CPU_ANCHOR=false` | same |
+
+**Applied exactly once** in either flag state. **Nothing dropped or doubled.**
+The CPU side effects on axial/tipC fields are documented as out of scope:
+neither field has a live reader in gliding-assay or deflection-bench
+workloads (see column descriptions). If pill-from-inside is ever revived
+with branching Arp-related biochem, those side effects need re-evaluation
+in the F1b port.
+
+### Validation 1 — held-config near-wall probe (cheap gate)
+
+`boxOfActin/HeldSegF1Diag.java` constructs a single FilSegment in
+prescribed wall-touching configs and runs both formulas on the SAME
+frozen pose:
+
+| Case | description | result |
+|---|---|---|
+| 1 | 30° tilt in x-y, end2 ~5 nm past +x wall — single-axis hit, non-trivial torque z | PASS (|dF|=0, |dT|=0) |
+| 2 | 30° tilt, both ends past +x wall | PASS (|dF|=0, |dT|=6e−36, rel=2e−16) |
+| 3 | 45° tilt, end2 past +x,+y corner — two-axis containment | PASS (|dF|=0, |dT|=2e−37, rel=2e−16) |
+| 4 | fully inside box, no collision | PASS (both zero) |
+| 5 | full 3D tilt (φ=20°, θ=30°), end2 ~5 nm past +x — fully 3D R×F components | PASS (|dF|=0, |dT|=0) |
+
+Full dump: `RUN_LOGS/2026-06-03_heldSegF1_diag.txt`. Max relative error on
+torque is 2.5e-16 across the suite — at the float-noise floor; CPU and
+device produce bit-equal forces and torques modulo the last-bit `?:`-vs-
+`Math.signum` cross product reordering. The lesson from the F3 near-miss
+(non-degenerate, non-axis-aligned probe) was respected — Cases 1, 2, 5 all
+test off-axis lever arms where a transposed cross product would not
+cancel.
+
+### Validation 2 — gliding `-3js` viewer wall check
+
+`ParameterFiles/glidingAssay500` (box 14 × 2 × 0.5 µm, `runTime=0.01s`,
+single 11-segment glider). Arm A: `-gpu` with `DIAG_CPU_F1=false`
+(device). Arm B: `-gpu BOA_DIAG_CPU_F1=1` (CPU). Both 1000 steps,
+`toFileInterval=100.0` → 12 JSON frames.
+
+Frame-by-frame `max(|endpoint.x|)` across all FilSegment endpoints:
+
+```
+frame                   armA_maxX armA_oversA |  armB_maxX armB_oversB
+frame_000000.json         7.08600     1 |    7.08650     1
+frame_000001.json         7.02090     1 |    7.02630     1
+frame_000002.json         7.01510     1 |    7.01410     1
+frame_000003.json         7.00530     1 |    7.00550     1
+frame_000004.json         6.99990     0 |    7.00690     1
+frame_000005.json         6.99680     0 |    7.00030     1
+frame_000006.json         7.00060     1 |    6.99500     0
+frame_000007.json         6.99720     0 |    6.99370     0
+frame_000008.json         6.98940     0 |    6.99090     0
+frame_000009.json         6.99780     0 |    6.98470     0
+frame_000010.json         6.99200     0 |    6.97670     0
+frame_000011.json         6.98750     0 |    6.98610     0
+```
+
+(`oversA/B` = count of endpoints past the ±7.0 wall in that frame, summed
+over both ends of every segment in the glider.) The filament starts placed
+ASTRIDE the +x wall (frame 0: end at +7.086, ~0.086 µm past the wall —
+configured glider position is inside-most segment crosses the box boundary
+at startup). Within 4 frames the device kernel pushes the offending
+endpoint back inside (frame 4: 6.9999 µm, no oversteps). Per-frame max-|x|
+diverges by ≤ 0.015 µm between arms — Brownian-noise level expected from
+two stochastic runs with the same seed but different per-step evaluation
+order. Max-|y| stays < 0.05 µm (wall at ±1.0), max-|z| < 0.06 µm (wall at
+±0.25); neither arm violates the y or z walls. Both arms behave
+indistinguishably; no escapes; no NaN/Inf produced by the device path.
+
+Logs: `RUN_LOGS/2026-06-03_phase2_F1_glidingAB.txt`,
+`RUN_LOGS/2026-06-03_phase2_F1_glidingArmA.dat`,
+`RUN_LOGS/2026-06-03_phase2_F1_glidingArmB.dat`.
+
+### Default flip — DIAG_CPU_F1 = false (device active)
+
+`GPUMoveThing.java:200` declares `public static boolean DIAG_CPU_F1 =
+false` (initial value). The `BOA_DIAG_CPU_F1` env-var hook in
+`BoxOfActin.begin()` re-routes through CPU when set to "1"/"true".
+SOA_POSE/MOVE_AB_PROFILE interlock unchanged.
+
+### Constraints respected
+
+- Only the box (`Chamber`) from-inside boundary ported. Pill kernel **not**
+  built. Pill CPU revival (uVec axis-convention fix per survey §4a) **not**
+  applied — both deferred to F1b.
+- Membrane / `Mesh` / `StickyNode`, Listeria from-outside path,
+  `bugForcesFromOutside`, ActA binding / `tipC` / contact uncapping — all
+  unchanged on CPU.
+- F3/F4 chain kernel untouched. Anchor spring (Phase 1) untouched.
+  `collisionCheckInt` cadence unchanged. Residency flip (Phase 4)
+  untouched.
+- `bugForcesFromInside` axial-force / tipC side effects documented as
+  intentionally skipped on device; force-coverage audit shows they're dead
+  in production workloads. If pill+Arp biochem is ever combined, audit re-
+  examination is required for F1b.
+
+### A/B commands (aorus)
+
+Build (Phase 5 — Java 21 + TornadoVM):
+
+```
+cd ~/Code/BoA
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+      boxOfActin/*.java *.java
+```
+
+Near-wall probe (no TornadoVM needed):
+
+```
+java -cp ".:libs/*" boxOfActin.HeldSegF1Diag
+```
+
+Gliding wall-confinement arms (1000 steps, single glider):
+
+```
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+
+# Arm A — device F1 (NEW DEFAULT; wall force on device)
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500 -3js /tmp/armA
+
+# Arm B — CPU F1 (CPU checkBugCollisionFromInside runs)
+BOA_DIAG_CPU_F1=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500 -3js /tmp/armB
+```
+
+**Phase 2 F1 (box) PASS.** F1b (pill from-inside) deferred — requires CPU
+pill revival per the 2026-06-03 boundary survey before the device port can
+proceed.
 
 ## 2026-06-03 — Phase 2 F3/F4 — fix: owner-perspective linkUVec (PASS)
 

@@ -186,6 +186,30 @@ public class BoxOfActin {
 				System.err.println("[F3F4_DIAG] DIAG_CPU_F3F4 forced ON via env var (CPU pair runs)");
 			}
 		}
+		// BOA_DIAG_CPU_F1 — toggle the Phase-2 F1 box-boundary source-of-truth.
+		//   default (unset)             → device boundaryBoxKernel runs and
+		//                                 FilSegment.checkBugOrBoxCollision
+		//                                 skips checkBugCollisionFromInside.
+		//   "1" / "true"                → CPU checkBugCollisionFromInside
+		//                                 runs and the device kernel is
+		//                                 gated off (boundaryActive[i]=0
+		//                                 for every slot — kernel still
+		//                                 launched but every thread
+		//                                 early-returns).
+		//   "0" / "false"               → device kernel runs (same as default).
+		// The Listeria from-outside branch (simOutsideBug active) stays on
+		// CPU either way — only the from-inside box wall is gated here.
+		// See JOURNAL "Phase 2 F1 (box) — implementation".
+		String cpuF1Env = System.getenv("BOA_DIAG_CPU_F1");
+		if (cpuF1Env != null && !cpuF1Env.isEmpty()) {
+			if (cpuF1Env.equals("0") || cpuF1Env.equalsIgnoreCase("false")) {
+				GPUMoveThing.DIAG_CPU_F1 = false;
+				System.err.println("[F1_DIAG] DIAG_CPU_F1 forced OFF via env var (device kernel ACTIVE)");
+			} else {
+				GPUMoveThing.DIAG_CPU_F1 = true;
+				System.err.println("[F1_DIAG] DIAG_CPU_F1 forced ON via env var (CPU pair runs)");
+			}
+		}
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
 			try {
