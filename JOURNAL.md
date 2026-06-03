@@ -1,8 +1,343 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-02 PM (parameter provenance written into -3js run folders)
+Last updated: 2026-06-02 PM (Phase 2 F3/F4 — port design)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-02 — Phase 2 F3/F4 — port design
+
+**Scope:** survey + design only, no edits, no runs. Drafted to give the planner
+enough specificity to scope implementation prompts. Reads `RESIDENCY_PLAN.md`
+(Phase 2), `STEP_PORT_SURVEY.md` (F-inventory), `RESIDENCY_AUDIT.md` (A9, A12,
+post-move sync), `GPU_MIGRATION_LESSONS.md` (Lessons 2 + 5), and the relevant
+source.
+
+### 1. Scoping question — what pose state is uploaded each step today?
+
+**Answer: only the primary pose (`coord`, `uVec`, `yVec`). Derived fields are
+NOT uploaded.**
+
+Evidence: the chained TaskGraph in `GPUMoveThing.java:1112-1121` lists
+`coord, uVec, yVec` plus force/torque/drag/slot/joint-param buffers under
+`DataTransferMode.EVERY_EXECUTION`. There is no transferToDevice call for
+`soaEnd1`, `soaEnd2`, `soaZVec`, or `soaTransXTox`. The derived fields are
+CPU-only artifacts produced by `Thing.recomputeDerivedSoA` (`Thing.java:736-783`)
+inside `GPUMoveThing.moveThings` *after* OP_UNPACK — they exist solely to feed
+CPU consumers in the next step.
+
+**What this means for sequencing.**
+
+Re-reading the F3/F4 source against the upload list, the implication is
+NOT what the audit suggested at first glance. F4 reads only `uVec` of self
+and neighbour — already device-resident every step. F3 reads `end2Pt`/`end1Pt`,
+but those are trivially `coord ± (length/2)·uVec`, i.e. a one-line inline
+recompute per thread from primary pose. **Neither kernel needs the SoA
+derived-field arrays uploaded or precomputed by a separate kernel.**
+
+So the **device derived-field recompute kernel is NOT a Phase 2 prerequisite**.
+It is deferred to Phase 4 (the residency flip), where it replaces the
+post-OP_UNPACK CPU sync block (`recomputeDerivedSoA` + `end1Pt`/`end2Pt`/
+`bindTip` Pt3D refresh at `GPUMoveThing.java:1894-1917`). For Phase 2, F3
+computes its two endpoints inline; F4 reads `uVec` directly.
+
+This is a cleaner Phase 2 than the plan anticipated. The chain-topology index
+remains a Phase 2 prerequisite (next section), but the derived-field
+infrastructure shifts entirely to Phase 4.
+
+### 2. Infrastructure — chain/binding topology index on device
+
+**Today (CPU pattern).** Per FilSegment, the chain neighbour is a Thing
+reference (`end1Fil`, `end2Fil`, `FilSegment.java:158-159`). "Which end of the
+neighbour am I attached to" is answered by **Pt3D reference identity**:
+`ptAtEnd2 == end2Fil.end1Pt` (true ⇒ neighbour's end1 is glued to my end2)
+or `ptAtEnd2 == end2Fil.end2Pt` (false ⇒ neighbour's end2 is glued to my end2).
+See the `setEnd*Links` helpers at `FilSegment.java:2660-2670` and the usages
+inside `addLinkForces` (`FilSegment.java:1428`, `1448`, `1460`, `1490-1493`,
+`1511`, `1524`).
+
+Pt3D reference identity does not survive serialization to a device buffer.
+The device needs an explicit side flag.
+
+**Device design — one per-segment topology buffer, FIRST_EXECUTION + dirty
+re-upload.**
+
+Per segment slot `i`, four ints:
+
+| field | meaning | sentinel for "no neighbour" |
+|---|---|---|
+| `topoEnd2Slot[i]` | move-slot of `end2Fil` | `-1` |
+| `topoEnd2Side[i]` | `0` if `ptAtEnd2 == end2Fil.end1Pt`, `1` if `== end2Pt` | `0` (unused when slot = -1) |
+| `topoEnd1Slot[i]` | move-slot of `end1Fil` | `-1` |
+| `topoEnd1Side[i]` | `0` if `ptAtEnd1 == end1Fil.end1Pt`, `1` if `== end2Pt` | `0` |
+
+(Two `IntArray`s of length `M`, one for slots, one for sides, packed
+`[end2Slot, end2Side, end1Slot, end1Side]` per segment — 16 B/segment.)
+
+**Slot indexing consistency.** Use the existing
+`thingNumberToMoveSlot[]` map maintained by `GPUMoveThing.classifyThings()`
+(`GPUMoveThing.java:1307-1372`). The Phase 1 anchor kernel and move kernel
+already index by this slot — the topology buffer must use the same indexing
+so neighbour lookups in the F3/F4 kernel match the pose lookups.
+
+**Upload cadence.** Topology mutates only at biochem boundaries
+(`FilSegment.biochemStep()` calls `setEnd2Links` / `removeEnd2Links` via
+`end1BiochemSim` / `end2BiochemSim`, `FilSegment.java:495-496`, `509`).
+Biochem already flips `topologyDirty = true` (the existing reclassification
+trigger at `GPUMoveThing.java:1396-1398`). Re-use the same flag:
+- FIRST_EXECUTION upload at start;
+- on `topologyDirty`, rebuild the topology buffer alongside the slot map and
+  re-upload with `DataTransferMode.EVERY_EXECUTION` for that step only, then
+  drop back to FIRST_EXECUTION semantics.
+
+In implementation terms: keep a small companion to `classifyThings()` that
+walks every alive segment, looks up `end1Fil`/`end2Fil` in
+`thingNumberToMoveSlot`, and writes the four ints — exactly the same shape
+as the slot map build. Cost: O(filSegmentCt), called only on dirty.
+
+**Motor binding for F3/F4: not needed.** The motor-tether forces F8/F9/F10
+are a separate sub-port (Phase 2 third chunk, after F1). Their binding index
+(`MyoFilLink.mySeg` slot + `posOnSeg` + cocked flag) is uploaded per-step
+already in `cockedFlags` and the motor SoA pack; the binding-index residency
+design lives with the F8/F9/F10 port, not F3/F4.
+
+### 3. Infrastructure — derived-field recompute kernel (deferred)
+
+Per §1, the recompute kernel is **deferred to Phase 4**. It is mandatory at
+the residency flip, when the per-step `recomputeDerivedSoA` CPU pass and
+the FilSegment `end1Pt`/`end2Pt` Pt3D refresh and the MyoMotor `bindTip`
+refresh in `GPUMoveThing.moveThings:1894-1917` are deleted. At that point
+the kernel mirrors `Thing.java:745-783` exactly: per-thread:
+
+```
+zVec = uVec × yVec; normalize.
+yVec = zVec × uVec.       // re-orthogonalize
+transXTox = row-major [uVec; yVec; zVec].
+end1 = coord - (length/2)·uVec.
+end2 = coord + (length/2)·uVec.
+```
+
+For Phase 2 F3/F4:
+- F4 reads `uVec` of self and neighbour directly. uVecR = -uVec is a sign flip.
+- F3 computes its two endpoints inline: `end2 = coord + 0.5·length·uVec`,
+  `linkPt = end2 + actinMonoRadius·(-uVec)`. Neighbour endpoints likewise from
+  neighbour's `coord` + `uVec` + `length` (uploaded primary pose + uploaded
+  `soaLength`). No derived-field buffers needed.
+
+If `soaLength` is not currently in the EVERY_EXECUTION upload list — it isn't,
+since lengths change only at biochem boundaries — it should join the topology
+buffer's FIRST_EXECUTION/dirty pattern. One more `FloatArray` of size M; reupload
+when `topologyDirty` fires.
+
+### 4. F3/F4 kernel plan
+
+**Threading: one device thread per segment.** Each thread owns its slot.
+For each end, the thread reads its own pose + neighbour pose + computes the
+pair force/torque **from its own perspective only**, applying the result to
+its own accumulators (`cpuForceSum[i]`, `cpuTorqueSum[i]`, axial buffers).
+Newton's third law: the neighbour's thread independently computes the same
+pair force from its perspective and writes its own accumulators. No cross-writes,
+no atomics, no per-pair dedup flags.
+
+This is **a behavioural restructure of the CPU pattern**, not a literal port.
+The CPU code is "owner does both sides of one pair, mark visited" (`end2LinkCkd`
+etc., `FilSegment.java:1411`, `1444`, `1473`, `1507`). The GPU pattern is
+"each thread does its own side of both its pairs, no visited flags." The CPU
+flags were a dedup that goes away with unique ownership.
+
+**Force-coverage equivalence sketch.** For a chain `[A — B — C]` with the
+pair (A,B):
+- CPU: A's thread processes the pair. Writes `F` to A.forceSum, `-F` to B.forceSum,
+  `R_A×F` to A.torqueSum, `R_B×(-F)` to B.torqueSum, axial loads to both ends.
+  Marks `A.end2LinkCkd = B.end1LinkCkd = true`.
+- GPU: A's thread reads A and B pose, computes the same `F` (since `forceMag` is
+  pair-symmetric: same `strainDist`, same `(moveCoeff1 + moveCoeff2)` regardless
+  of which side computes), applies `+F` and `R_A×F` to A only. B's thread reads
+  B and A pose, computes the same `F` magnitude in the same direction (linkUVec
+  is symmetric up to sign; B sees `-linkUVec` from its end1 side), applies
+  `+(-F) = -F` and `R_B×(-F)` to B only. Same net forces; pair never
+  double-counted (each thread owns one end of each pair); no dedup state needed.
+
+**Axial loads** (`incEnd2AxialForce`, `incEnd1AxialForce`) flow the same way:
+each segment writes only its own end's axial contribution, computed from its
+own `uVec`. Buffer: two new device `FloatArray`s of length M (`end1AxialSum`,
+`end2AxialSum`) or pack into a single length-2M buffer. Download with pose
+at output frames if needed; today these feed biochemistry on the CPU side,
+which stays CPU for Phase 2 — so per-step CPU download is still required for
+axial loads until biochem ports later. **Pin this as a Phase 2 caveat**: axial
+loads are a CPU-consumed by-product, so a per-step axial download must be added
+or the existing CPU axial-accumulator path must remain. The simplest first cut:
+keep the CPU axial accumulator code in the reduced-pass CPU step() (Phase 2
+fallback), and add device-side axial buffers only when biochem itself moves to
+device (later phase). This means **the kernel writes force/torque to device,
+but axial loads stay computed in a reduced-pass CPU step** for Phase 2 — the
+exact opposite of the desired direction, but it keeps the kernel small. Flag
+for planner: alternative is to download axial sums each step (16 B/segment,
+trivial).
+
+**Kernel parameter budget (TornadoVM 15-arg cap).** F3 needs:
+`coord, uVec, length, topoSlots, topoSides, cpuForceSum, cpuTorqueSum,
+end1AxialSum, end2AxialSum, bRotGamY, bTransGamX, bTransGamY` plus a small
+`params` IntArray-or-FloatArray packing `dt, fracMove, fracR, actinMonoRadius,
+maxSegDist, maxSegDistActive_flag`. That's 12 arrays + 1 packed params → fits.
+
+F4 needs: `coord, uVec, length, topoSlots, topoSides, cpuTorqueSum, bRotGamY,
+params(dt, fracMoveTorq, filTorqSpring, filTorqSpringActive, maxSegAng,
+maxSegAngActive)`. That's 7 arrays + packed params → fits easily.
+
+**One kernel or two?** Recommend **one combined kernel**, `chainPairForces`, with
+a single per-segment thread that does both F3 and F4 against each end neighbour.
+Reasons:
+- The two operations share the topology lookup, the neighbour-pose fetch, and
+  the `forceMag`/axial flow — fusion eliminates a redundant read.
+- F3 + F4 together still fit under 15 args (the union of the two arg sets
+  above is 13 arrays + 1 packed params).
+- The CPU code already calls them sequentially from `FilSegment.step()`; the
+  ordering between them is independent (no F-on-F dependency in the same step).
+
+**Topology-break detection.** F3's `breakAtEnd2()` / F4's angle-break is
+EWMA-gated (`end2SegDist.registerValue`/`end2SegAng.registerValue`,
+`FilSegment.java:1416-1421`, `1700-1707`) and rare. Two options:
+(a) compute strain/angle on device, store per-segment scalar, download once
+   per N steps for the CPU EWMA. (b) keep the break-check on the
+   reduced-pass CPU step using post-move CPU-resident pose (the planner can
+   pick — both work). Pre-decided: (b) for simplest Phase 2 — bench/diagnostic
+   territory only.
+
+**`filID` propagation.** F3's chain-merge bookkeeping
+(`FilSegment.java:1466-1469`, `1530-1533`) is integer book-keeping on a
+CPU-only field with no force consequence. Skip in the kernel; keep on the
+CPU reduced pass (one int compare per segment, trivial). Not a residency
+blocker.
+
+### 5. Force-coverage map (Lesson 2 — mandatory)
+
+After Phase 2 F3/F4 lands, every step force must be applied exactly once
+across the device path and the CPU-fallback path.
+
+| Force | CPU `step()` today | Device kernel after F3/F4 port | CPU reduced step() after port | Applied exactly once? |
+|---|---|---|---|---|
+| F1 (filament–boundary inside chamber) | `checkBugOrBoxCollision` | NO (Phase 2 F1 port is later) | YES (reduced pass runs F1) | YES |
+| F2 (filament–bug outside, Listeria) | `checkBugCollisionFromOutside` | NO | YES (reduced pass; Listeria only) | YES (Listeria configs) |
+| **F3 (chain link)** | `addLinkForces` | **YES (this port)** | NO (skipped on GPU-handled segments) | YES |
+| **F4 (chain torsion)** | `addTorsionSpringForces` | **YES (this port)** | NO (skipped on GPU-handled segments) | YES |
+| F5 (node tether trans) | `addNodeForces` | NO (deferred per RESIDENCY_PLAN) | YES (reduced pass; node-tethered configs) | YES (where active) |
+| F6 (node alignment torque) | `addNodeForces` | NO | YES | YES (where active) |
+| F7 (MyoMiniFilament–bug/box) | `MyoMiniFilament.step` | NO — MyoMiniFilament is CPU-fallback (cpuFallback[]) | YES (its own CPU step() unchanged) | YES |
+| F8 (motor tether spring) | `MyoFilLink.addForces` | NO (Phase 2 motor-port chunk later) | YES (reduced pass; motors GPU-handled but their step forces stay CPU until that chunk) | YES |
+| F9 (motor uVec align torque) | `MyoFilLink.alignUVecTorque` | NO | YES | YES |
+| F10 (motor yVec align torque) | `MyoFilLink.alignYVecTorque` | NO | YES | YES |
+| F11 (ActA tether) | runs in `actAStart` wave (not step()) | NO | unchanged (its own wave) | YES (Listeria) |
+| F12 (ProteinNode–boundary) | `ProteinNode.step` | NO — ProteinNode is CPU-fallback | YES (own CPU step()) | YES |
+| Axial loads (F3 by-product) | `incEnd1/2AxialForce` | NO (deferred — see §4) | YES (computed in reduced pass alongside F3 stub) | YES |
+| Bug drag-tensor side-effect (`Bug.setViscousDrag`) | `Bug.step` | NO — Bug is CPU-fallback | YES (own CPU step()) | YES |
+
+**Reduced-pass shape for GPU-handled FilSegments.** Today `FilSegment.step()`
+runs F1 + F3 + F4 + F5/F6 sequentially. After this port, the reduced pass
+for GPU-handled segments must run F1 + (axial-load CPU stub from §4
+caveat) + F5/F6 — **skipping F3 and F4**. Mechanism: add a per-subclass
+"skipGPUDroppedForces" branch inside `FilSegment.step()`, analogous to
+`MyosinThreads.applyGPUDroppedForces` (the Phase 1 anchor mechanism).
+Concretely: gate the F3 and F4 calls on `!isGPUHandled()`.
+
+**Critical: do NOT skip the entire FilSegment.step() dispatch on GPU-handled
+segments.** That would silently drop F1, F5, F6. The Lesson 1 anchor-bug
+shape. Confirm pre-port with grep: every `FilSegment.step()` call site must
+either reach the reduced pass or be intentionally skipped.
+
+### 6. Validation design
+
+**Cheap single-filament pre-check (the F3/F4 analogue of SingleMyoDiag).**
+
+Build a `SingleFilDiag` minimal-reproduction config (or temp `-bm`-style mode)
+that runs ONE straight filament — 11 segments, pinned at both ends, no
+motors, no boundaries other than chamber walls far away, no Brownian motion
+(or BTransCoeff/BRotCoeff = 0). With no perturbing forces and pins holding
+the ends, the chain must remain straight: every segment's `coord` y/z
+deviation from the pin line should stay numerically zero. Any F3 or F4
+drift is instantly visible.
+
+Run on `-gpu`; CPU baseline is "stays straight." Pass criterion: max
+`|coord_y|` and `|coord_z|` < 1e-5 µm over 100k steps. This is Lesson 3 +
+Lesson 4 applied: minimal isolated body, watchable. Cost: trivial; runs
+in seconds.
+
+**Deflection benchmark — the gate.** After the pre-check passes:
+
+- **Config:** standard `-bmManual` deflection chain (11-segment, pinned ends,
+  midpoint transverse force), validated phalloidin bending regime — verify
+  the bench config used produces the established `bendKp` (the `aeta`-dependent
+  bending coefficient pair) so the gate has the same physics as the CPU
+  reference. Pre-port read of `BoxOfActin.applyBenchmarkPins` and the
+  deflection bench setup confirms.
+- **CPU reference:** 0.998420 deflection ratio.
+- **Device baseline (pre-F3/F4 port, post-anchor):** 0.999876 — a +0.146%
+  offset attributable to existing float32/anchor effects.
+- **Pass criterion:** GPU ratio remains at +0.146% (±0.05%) of CPU. A larger
+  shift is a regression. **Do not gate on absolute agreement with CPU** —
+  the +0.146% offset is the pre-existing device baseline, not a defect.
+- **τ_meas vs τ_theo:** record but not gate; informational.
+
+**LP benchmark — soft sanity check, NOT a hard target.** Per RESIDENCY_PLAN
+§Phase 2: Lp is Brownian-coefficient-dependent and chain-length-dependent.
+Run a short LP sample (~30s wall-clock) post-port; confirm Lp falls in the
+plausible 5–25 µm ballpark. Reject if Lp collapses (< 1 µm — torsion
+broken) or diverges (no decay — torsion zero). No overnight LP run.
+
+**Validate-once discipline.** Order is: SingleFilDiag pre-check (trivial,
+local). If it fails, fix before touching the bench. If it passes, deflection
+bench (still cheap). If deflection passes within tolerance, declare F3/F4
+landed and proceed to gliding 10-seed ensemble only as confirmation, not
+localization.
+
+**Benchmark runnability on `-gpu` — pre-port verification.** Per Lesson 5 and
+the open-question 4 in `STEP_PORT_SURVEY`, the deflection benchmark has not
+yet run on the GPU path. **Step zero of implementation must be: confirm the
+existing CPU-only F3/F4 deflection benchmark runs cleanly under `-gpu`**
+(reading uploaded pose round-tripped through OP_UNPACK, no kernel changes
+yet). If it does not — e.g. because the pinned-endpoint Things or midpoint
+force injection don't classify as GPU-handled — fix that BEFORE writing
+the F3/F4 kernel. The kernel is gated on a probe that runs.
+
+### 7. Risks / scope-expansion flags
+
+- **Axial-load buffers** (§4 caveat): if the planner prefers device-resident
+  axial loads now (avoid CPU stub), add ~16 B/segment device buffer + per-step
+  download. Trivial bandwidth but is a small scope-expansion vs the
+  "keep axial CPU-side" alternative. Recommended: keep CPU-side until
+  biochem moves to device.
+- **soaLength FIRST_EXECUTION/dirty upload** (§3): a small new device buffer
+  managed alongside the topology index. Not a separate piece of infrastructure,
+  just a co-dependency.
+- **Topology-break / `filID` propagation**: F3's `breakAtEnd2` and `filID`
+  merge stay on CPU reduced pass — confirmed as bench/biochem-territory only,
+  no residency blocker.
+- **Pair-dedup flags `endNLinkCkd` / `endNTorqCkd`**: with unique-ownership
+  GPU pattern these become CPU-only. Keep them only for the reduced-pass
+  CPU step()'s remaining F1/F5/F6 work. No device representation needed.
+- **F4 already reads only primary pose** (only `uVec`). This is a genuinely
+  smaller surface than the audit's "F3/F4/F8 read derived fields" framing
+  suggested. The audit was right at the higher abstraction; the source
+  details simplify Phase 2.
+- **CPU reduced-pass for GPU-handled FilSegments runs F1/F5/F6 sequentially.**
+  Today F1 is in `FilSegment.step()` ahead of F3/F4; F5/F6 after. Gating
+  F3+F4 on `!isGPUHandled()` preserves the ordering of the unported forces;
+  no reshuffling needed.
+- **Validate-once discipline must include the smoke check that deflection
+  runs at all on `-gpu`** before kernel work begins. Pre-port verification
+  is cheap; skipping it risks discovering at the gate that the gate itself
+  is broken (Lesson 5).
+
+### 8. The one-line scope of Phase 2 F3/F4
+
+Build a per-segment device buffer of chain-neighbour slot+side ints (FIRST_EXECUTION
++ topology-dirty reupload) and `soaLength`; write one fused `chainPairForces`
+kernel implementing F3 + F4 with unique-ownership semantics (each thread
+writes only its own segment's force/torque); gate F3/F4 off in `FilSegment.step()`
+for GPU-handled segments via the established `applyGPUDroppedForces` pattern,
+keeping F1/axial-load-CPU-stub/F5/F6 in the reduced pass; validate
+SingleFilDiag (straight chain stays straight) then the deflection bench (gate
+on the +0.146% device baseline). Derived-field recompute kernel is deferred
+to Phase 4; nothing in this chunk needs it.
 
 ## 2026-06-02 — Parameter provenance in -3js run folders
 
