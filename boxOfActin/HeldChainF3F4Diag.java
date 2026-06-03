@@ -229,22 +229,46 @@ public class HeldChainF3F4Diag {
     // (F, T) for ONLY itself (no neighbor application — that is what the
     // neighbor thread computes independently in its own block).
     //
+    // meIsOwner: deterministic from slot indices in the kernel
+    //   (selfIsOwner = i < neighbour.slot). Both threads on a pair arrive
+    //   at the same OWNER-perspective linkUVec; non-owner applies −F.
+    //
     // dumpTag: e.g. "DEV.slot=0.end2" for clean labeling.
     // ----------------------------------------------------------
-    static double[] deviceChainEnd2(Seg me, Seg nbr, int e2Side, boolean dump, String dumpTag) {
-        double lpx = me.e2x() - actinMonoRadius * me.ux;
-        double lpy = me.e2y() - actinMonoRadius * me.uy;
-        double lpz = me.e2z() - actinMonoRadius * me.uz;
-        double pax = (e2Side == 0) ? nbr.e1x() : nbr.e2x();
-        double pay = (e2Side == 0) ? nbr.e1y() : nbr.e2y();
-        double paz = (e2Side == 0) ? nbr.e1z() : nbr.e2z();
+    static double[] deviceChainEnd2(Seg me, Seg nbr, int e2Side, boolean meIsOwner, boolean dump, String dumpTag) {
+        // Self's offset linkPt (end2 case): end2 - r·uVec_self.
+        double selfLpx = me.e2x() - actinMonoRadius * me.ux;
+        double selfLpy = me.e2y() - actinMonoRadius * me.uy;
+        double selfLpz = me.e2z() - actinMonoRadius * me.uz;
+        // Neighbour's connecting tip.
+        double nbrTipx = (e2Side == 0) ? nbr.e1x() : nbr.e2x();
+        double nbrTipy = (e2Side == 0) ? nbr.e1y() : nbr.e2y();
+        double nbrTipz = (e2Side == 0) ? nbr.e1z() : nbr.e2z();
+        // Neighbour's offset linkPt (offset INTO neighbour from its connecting tip):
+        //   e2Side==0 (nbr via end1) → +r·uVec_nbr; e2Side==1 (nbr via end2) → −r·uVec_nbr.
+        double nbrLpx = (e2Side == 0) ? (nbrTipx + actinMonoRadius * nbr.ux)
+                                       : (nbrTipx - actinMonoRadius * nbr.ux);
+        double nbrLpy = (e2Side == 0) ? (nbrTipy + actinMonoRadius * nbr.uy)
+                                       : (nbrTipy - actinMonoRadius * nbr.uy);
+        double nbrLpz = (e2Side == 0) ? (nbrTipz + actinMonoRadius * nbr.uz)
+                                       : (nbrTipz - actinMonoRadius * nbr.uz);
+
+        // Owner-perspective linkPt and ptAtEnd: owner's monomer-back point and
+        // non-owner's connecting tip. Both threads compute the same line.
+        double lpx, lpy, lpz, pax, pay, paz;
+        if (meIsOwner) {
+            lpx = selfLpx; lpy = selfLpy; lpz = selfLpz;
+            pax = nbrTipx; pay = nbrTipy; paz = nbrTipz;
+        } else {
+            lpx = nbrLpx;  lpy = nbrLpy;  lpz = nbrLpz;
+            pax = me.e2x(); pay = me.e2y(); paz = me.e2z();
+        }
         double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
         double strainDist = Math.sqrt(dx*dx + dy*dy + dz*dz);
         double inv = (strainDist > 0) ? 1.0/strainDist : 0;
         double luX = dx*inv, luY = dy*inv, luZ = dz*inv;
-        double lurX = -luX, lurY = -luY, lurZ = -luZ;
 
-        // self moveCoeff: cosB = ux*luX + uy*luY + uz*luZ  (dot uVec, linkUVec)
+        // self moveCoeff: cosB squared, sign irrelevant.
         double cosB1 = me.ux*luX + me.uy*luY + me.uz*luZ;
         if (cosB1 >  1) cosB1 =  1;
         if (cosB1 < -1) cosB1 = -1;
@@ -254,8 +278,7 @@ public class HeldChainF3F4Diag {
                       + cosA1*cosA1/me.bTransGam_y
                       + lSq1*cosA1*cosA1/(4.0 * me.bRotGam_y);
 
-        // nbr moveCoeff: cosB = nux*lurX + nuy*lurY + nuz*lurZ  (raw nbr uVec dotted into linkUVecR; sign is squared away)
-        double cosB2 = nbr.ux*lurX + nbr.uy*lurY + nbr.uz*lurZ;
+        double cosB2 = nbr.ux*luX + nbr.uy*luY + nbr.uz*luZ;
         if (cosB2 >  1) cosB2 =  1;
         if (cosB2 < -1) cosB2 = -1;
         double cosA2 = Math.sin(accurateAcos(cosB2));
@@ -265,7 +288,8 @@ public class HeldChainF3F4Diag {
                       + lSq2*cosA2*cosA2/(4.0 * nbr.bRotGam_y);
 
         double forceMag = (fracMove * 1e-6 * strainDist) / (dt * (moveC1 + moveC2));
-        double Fx = forceMag*luX, Fy = forceMag*luY, Fz = forceMag*luZ;
+        double fSign = meIsOwner ? 1.0 : -1.0;
+        double Fx = fSign*forceMag*luX, Fy = fSign*forceMag*luY, Fz = fSign*forceMag*luZ;
 
         // self torque: R = 0.5e-6 * length * fracR * uVec
         double Rscale = 0.5e-6 * me.length * fracR;
@@ -322,22 +346,37 @@ public class HeldChainF3F4Diag {
         return new double[]{Fx, Fy, Fz, Ttotx, Ttoty, Ttotz, forceMag, angDeg, torsionMag};
     }
 
-    static double[] deviceChainEnd1(Seg me, Seg nbr, int e1Side, boolean dump, String dumpTag) {
-        // linkPt = end1 + actinMonoRadius * uVec
-        double lpx = me.e1x() + actinMonoRadius * me.ux;
-        double lpy = me.e1y() + actinMonoRadius * me.uy;
-        double lpz = me.e1z() + actinMonoRadius * me.uz;
-        double pax = (e1Side == 0) ? nbr.e1x() : nbr.e2x();
-        double pay = (e1Side == 0) ? nbr.e1y() : nbr.e2y();
-        double paz = (e1Side == 0) ? nbr.e1z() : nbr.e2z();
+    static double[] deviceChainEnd1(Seg me, Seg nbr, int e1Side, boolean meIsOwner, boolean dump, String dumpTag) {
+        // Self's offset linkPt (end1 case): end1 + r·uVec_self.
+        double selfLpx = me.e1x() + actinMonoRadius * me.ux;
+        double selfLpy = me.e1y() + actinMonoRadius * me.uy;
+        double selfLpz = me.e1z() + actinMonoRadius * me.uz;
+        // Neighbour's connecting tip.
+        double nbrTipx = (e1Side == 0) ? nbr.e1x() : nbr.e2x();
+        double nbrTipy = (e1Side == 0) ? nbr.e1y() : nbr.e2y();
+        double nbrTipz = (e1Side == 0) ? nbr.e1z() : nbr.e2z();
+        // Neighbour's offset linkPt.
+        double nbrLpx = (e1Side == 0) ? (nbrTipx + actinMonoRadius * nbr.ux)
+                                       : (nbrTipx - actinMonoRadius * nbr.ux);
+        double nbrLpy = (e1Side == 0) ? (nbrTipy + actinMonoRadius * nbr.uy)
+                                       : (nbrTipy - actinMonoRadius * nbr.uy);
+        double nbrLpz = (e1Side == 0) ? (nbrTipz + actinMonoRadius * nbr.uz)
+                                       : (nbrTipz - actinMonoRadius * nbr.uz);
+
+        double lpx, lpy, lpz, pax, pay, paz;
+        if (meIsOwner) {
+            lpx = selfLpx; lpy = selfLpy; lpz = selfLpz;
+            pax = nbrTipx; pay = nbrTipy; paz = nbrTipz;
+        } else {
+            lpx = nbrLpx;  lpy = nbrLpy;  lpz = nbrLpz;
+            pax = me.e1x(); pay = me.e1y(); paz = me.e1z();
+        }
         double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
         double strainDist = Math.sqrt(dx*dx + dy*dy + dz*dz);
         double inv = (strainDist > 0) ? 1.0/strainDist : 0;
         double luX = dx*inv, luY = dy*inv, luZ = dz*inv;
-        double lurX = -luX, lurY = -luY, lurZ = -luZ;
 
-        // self moveCoeff: cosB = -(ux*luX + ...) — uses uVecR · linkUVec
-        double cosB1 = -(me.ux*luX + me.uy*luY + me.uz*luZ);
+        double cosB1 = me.ux*luX + me.uy*luY + me.uz*luZ;
         if (cosB1 >  1) cosB1 =  1;
         if (cosB1 < -1) cosB1 = -1;
         double cosA1 = Math.sin(accurateAcos(cosB1));
@@ -346,7 +385,7 @@ public class HeldChainF3F4Diag {
                       + cosA1*cosA1/me.bTransGam_y
                       + lSq1*cosA1*cosA1/(4.0 * me.bRotGam_y);
 
-        double cosB2 = nbr.ux*lurX + nbr.uy*lurY + nbr.uz*lurZ;
+        double cosB2 = nbr.ux*luX + nbr.uy*luY + nbr.uz*luZ;
         if (cosB2 >  1) cosB2 =  1;
         if (cosB2 < -1) cosB2 = -1;
         double cosA2 = Math.sin(accurateAcos(cosB2));
@@ -356,7 +395,8 @@ public class HeldChainF3F4Diag {
                       + lSq2*cosA2*cosA2/(4.0 * nbr.bRotGam_y);
 
         double forceMag = (fracMove * 1e-6 * strainDist) / (dt * (moveC1 + moveC2));
-        double Fx = forceMag*luX, Fy = forceMag*luY, Fz = forceMag*luZ;
+        double fSign = meIsOwner ? 1.0 : -1.0;
+        double Fx = fSign*forceMag*luX, Fy = fSign*forceMag*luY, Fz = fSign*forceMag*luZ;
 
         // self torque: R = -0.5e-6 * length * fracR * uVec  (i.e. +half_length*fracR*uVecR)
         double Rscale = -0.5e-6 * me.length * fracR;
@@ -482,12 +522,13 @@ public class HeldChainF3F4Diag {
             System.out.println();
             System.out.println("  DEVICE FORMULA (seg0 thread, end2 block):");
         }
-        double[] devS0 = deviceChainEnd2(s0, s1, /*e2Side=*/0, dumpVerbose, "DEV.seg0.end2");
+        // BENT joint owner = seg0 (slot 0 < slot 1).
+        double[] devS0 = deviceChainEnd2(s0, s1, /*e2Side=*/0, /*meIsOwner=*/true,  dumpVerbose, "DEV.seg0.end2");
         if (dumpVerbose) {
             System.out.println();
             System.out.println("  DEVICE FORMULA (seg1 thread, end1 block — the OTHER side of the same pair):");
         }
-        double[] devS1 = deviceChainEnd1(s1, s0, /*e1Side=*/1, dumpVerbose, "DEV.seg1.end1");
+        double[] devS1 = deviceChainEnd1(s1, s0, /*e1Side=*/1, /*meIsOwner=*/false, dumpVerbose, "DEV.seg1.end1");
 
         // ---- F3 / F4 at the STRAIGHT joint (seg1 ↔ seg2) ----
         // For straight, angTween = 0 and torsion contributes 0; strainDist = actinMonoRadius
@@ -504,12 +545,13 @@ public class HeldChainF3F4Diag {
             System.out.println();
             System.out.println("  DEVICE FORMULA (seg1 thread, end2 block):");
         }
-        double[] devS1_e2 = deviceChainEnd2(s1, s2, /*e2Side=*/0, dumpVerbose, "DEV.seg1.end2");
+        // STRAIGHT joint owner = seg1 (slot 1 < slot 2).
+        double[] devS1_e2 = deviceChainEnd2(s1, s2, /*e2Side=*/0, /*meIsOwner=*/true,  dumpVerbose, "DEV.seg1.end2");
         if (dumpVerbose) {
             System.out.println();
             System.out.println("  DEVICE FORMULA (seg2 thread, end1 block):");
         }
-        double[] devS2 = deviceChainEnd1(s2, s1, /*e1Side=*/1, dumpVerbose, "DEV.seg2.end1");
+        double[] devS2 = deviceChainEnd1(s2, s1, /*e1Side=*/1, /*meIsOwner=*/false, dumpVerbose, "DEV.seg2.end1");
 
         // ---- Comparison summary (always dumped, even when not verbose) ----
         System.out.printf("%n  --- SUMMARY @ theta=%.4f° ---%n", thetaDeg);

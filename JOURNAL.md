@@ -1,8 +1,201 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (Phase 2 F3/F4 — diagnostic: F3 Newton-3 violation localized)
+Last updated: 2026-06-03 (Phase 2 F3/F4 — fix: owner-perspective linkUVec; bench PASS, default flipped)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — Phase 2 F3/F4 — fix: owner-perspective linkUVec (PASS)
+
+**Verdict: PASS.** The F3 Newton-3 leak localized in the 2026-06-03 AM held-config
+diagnostic is closed. Both threads on a chain pair now compute the **same**
+owner-perspective `linkUVec` (the CPU `addLinkForces` formula evaluated from the
+owner's side), so per-thread F3 forces come out exactly anti-parallel by
+construction — no atomic writes, no visited flags, no inter-thread state. The
+held-bent dump shows zero pair-force sum at every θ, the per-segment F3 torque
+on the non-owner matches CPU bit-for-bit, SingleFilDiag holds the chain at zero
+drift over 100k steps, and the deflection benchmark on `-gpu` lands at
+`ratio=1.000107` (was 1.262114; CPU/arm-B baseline 1.000049, design device
+baseline 0.999876, gate +0.146%). Default flag flipped: `DIAG_CPU_F3F4 = false`,
+device kernel active by default; `BOA_DIAG_CPU_F3F4=1` re-routes through CPU
+F3/F4 for clean A/B.
+
+### The fix — owner = lower slot index, both threads compute owner's linkUVec
+
+In `chainPairForcesKernel`, the F3 link force/torque block in both end2 and
+end1 cases now branches on `selfIsOwner = (i < neighbourSlot)`:
+
+```java
+// Owner's offset linkPt and non-owner's connecting tip
+//   ↓ both threads compute the SAME line ↓
+if (selfIsOwner) {
+    linkPt = self.connectingTip + r·(offsetDirectionIntoSelf);
+    ptAtEnd = neighbour.connectingTip;
+} else {
+    linkPt = neighbour.connectingTip + r·(offsetDirectionIntoNeighbour);
+    ptAtEnd = self.connectingTip;
+}
+linkUVec = unit(ptAtEnd - linkPt);
+fSign    = selfIsOwner ? +1 : -1;
+F_self   = fSign · forceMag · linkUVec;
+```
+
+The offset direction INTO each segment from its connecting tip is determined
+by which end of that segment carries the link (end2 → −uVec; end1 → +uVec).
+For self in its own end2 block this matches the existing CPU formula
+(`linkPt = end2 − r·uVec`); for the non-owner case, the offset is applied
+along the neighbour's uVec (signed by the neighbour's connecting side, given
+by `topoEnd{1,2}Side`). Both topology buffers (`topoEnd*Slot` and
+`topoEnd*Side`) already carry the data needed; no new buffer or atomic write
+was required. The R lever arm (used in the per-segment torque) still uses
+self's own uVec — that part was correctly per-segment before the fix.
+
+The moveCoeff calculation reads `dot(uVec_self, linkUVec)` for self and
+`dot(uVec_nbr, linkUVec)` for the neighbour; cosBeta gets squared in the
+formula, so the sign of either dot is irrelevant — both threads compute the
+same moveC sum and the same forceMag.
+
+### Held-bent dump @ θ=10° — DEV per-thread forces match CPU's +/− pair
+
+`HeldChainF3F4Diag` (unchanged geometry, mirror functions updated to thread the
+`meIsOwner` flag through):
+
+| quantity | CPU (owner=seg0) | DEV seg0 thread (owner) | DEV seg1 thread (non-owner) |
+|---|---|---|---|
+| linkUVec | `(+1, 0, 0)` | `(+1, 0, 0)` | `(+1, 0, 0)` ← same line, fSign flips |
+| forceMag | 1.590158e-13 N | 1.590044e-13 N | 1.590044e-13 N |
+| F on seg0 | `(+1.590e-13, 0, 0)` | `(+1.590e-13, 0, 0)` | (n/a) |
+| F on seg1 | `(−1.590e-13, 0, 0)` | (n/a) | `(−1.590e-13, 0, 0)` ✓ |
+| T_F3 on seg0 | `(0, 0, 0)` | `(0, 0, 0)` ✓ | (n/a) |
+| T_F3 on seg1 | `(0, 0, −1.230151e-22)` | (n/a) | `(0, 0, −1.230062e-22)` ✓ |
+
+θ-sweep (1°, 5°, 10°, 20°, 45°):
+
+```
+DEV pair-force sum (F_s0+F_s1):
+  θ=1°  → (0, 0, 0)         was (+2.46e-17, -2.81e-15, 0)
+  θ=5°  → (0, 0, 0)         was (+6.11e-16, -1.40e-14, 0)
+  θ=10° → (0, 0, 0)         was (+2.42e-15, -2.76e-14, 0)
+  θ=20° → (0, 0, 0)         was (+9.22e-15, -5.23e-14, 0)
+  θ=45° → (0, 0, 0)         was (+3.83e-14, -9.26e-14, 0)
+```
+
+Full dump: `RUN_LOGS/2026-06-03_held3seg_f3f4_fix.txt`. The DEV F3 torque on the
+non-owner is now `−1.230e-22` at θ=10° matching CPU to ~7e-5 (same fastAcos vs
+accurateAcos noise as forceMag); previously zero (the wrong-direction-artifact
+mentioned in the diagnostic prompt).
+
+### SingleFilDiag arm A (device F3/F4) — no straight-chain regression
+
+```
+[SINGLE_FIL_DIAG] FINAL:
+  total steps      = 100000
+  max |coord.y|    = 0.000000e+00 µm
+  max |coord.z|    = 0.000000e+00 µm
+  verdict          = PASS
+```
+
+Log: `RUN_LOGS/2026-06-03_phase2_singleFil_armA_device_fix.log`. Chain stays
+numerically straight on `-gpu` (same as before the fix — the chain is straight
+so cross(u,±u)=0 and the canonical-owner branch hits the strainDist≈0 path).
+
+### Deflection benchmark `-bmDiag -gpu` — bench PASS
+
+200k steps, default bench params (fracMove=0.5, fracR=0.1, fracMoveTorq=0.265):
+
+| Arm | final ratio | final defl | gap vs CPU/arm-B (1.000049) |
+|---|---|---|---|
+| A — device F3/F4 (`BOA_DIAG_CPU_F3F4=0`) | **1.000107** | 0.009802 µm | +0.006% ← PASS |
+| A — pre-fix (for comparison) | 1.262114 | 0.012370 µm | +26.2% ← FAIL |
+| B — CPU F3/F4 (current default) | 1.000049 | 0.009801 µm | — baseline |
+| design device baseline target | 0.999876 | — | gate ±0.05% around this |
+
+Arm A now lands `(1.000107 − 0.999876) / 0.999876 = +0.023%` from the design
+device baseline — comfortably inside the +0.146% tolerance. Log:
+`RUN_LOGS/2026-06-03_phase2_bmDiag_armA_device_fix.log`.
+
+### Default flip — DIAG_CPU_F3F4 = false (device active)
+
+`GPUMoveThing.java:188` now `public static boolean DIAG_CPU_F3F4 = false;`.
+The `BOA_DIAG_CPU_F3F4=1` env-var hook in `BoxOfActin.begin()` still re-routes
+through CPU F3/F4 for A/B testing. No other code or gating changed.
+
+### What this means re: the "no canonical-owner trick" framing in the prompt
+
+The fix DOES use a canonical-owner determination — owner is the segment with
+the lower move-slot index, computed inline from `i < topoEnd*Slot` — but it
+needs no inter-thread coordination: no atomic, no visited flag, no second pass,
+no cross-slot write. Each thread independently arrives at the same owner-
+perspective `linkUVec` from the data it already has (its own pose, the
+neighbour's pose via the topology index, the constant `actinMonoRadius`), and
+the +/− sign falls out of the same slot comparison. Unique-ownership writes
+preserved.
+
+### Constraints respected
+
+- Only F3 link-direction (and the dependent moveCoeff/forceMag/F/torque) in
+  `chainPairForcesKernel` changed; F4 untouched.
+- CPU `addLinkForces` / `addTorsionSpringForces` untouched.
+- Per-force gating in `FilSegment.step()` untouched.
+- Force-coverage table from the 2026-06-02 entry still applies — every force
+  applied exactly once in both flag states.
+- `HeldChainF3F4Diag.deviceChainEnd{1,2}` updated to mirror the new kernel
+  (added `meIsOwner` parameter, threaded through call sites). The diagnostic
+  is standalone pure-Java; not part of the production code path.
+
+### A/B commands (aorus)
+
+Build (Phase 5 — Java 21 + TornadoVM):
+
+```
+cd ~/Code/BoA
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+      boxOfActin/*.java *.java
+```
+
+Held-bent dump (no TornadoVM needed):
+
+```
+java -cp ".:libs/*" boxOfActin.HeldChainF3F4Diag
+```
+
+SingleFilDiag arms:
+
+```
+TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
+TDIR="$TORNADOVM_HOME/share/java/tornado"
+
+# Arm A — device kernel (NEW DEFAULT)
+BOA_BMDIAG_MAX_STEPS=100000 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -singleFilDiag -gpu
+
+# Arm B — CPU pair
+BOA_BMDIAG_MAX_STEPS=100000 BOA_DIAG_CPU_F3F4=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -singleFilDiag -gpu
+```
+
+Deflection benchmark arms:
+
+```
+# Arm A — device F3/F4 (NEW DEFAULT; target ratio ≈ 1.000)
+BOA_BMDIAG_MAX_STEPS=200000 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu
+
+# Arm B — CPU F3/F4 (target ratio ≈ 1.000)
+BOA_BMDIAG_MAX_STEPS=200000 BOA_DIAG_CPU_F3F4=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+    -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+    BoxOfActin -bmDiag -gpu
+```
+
+**Phase-2 F3/F4 PASS.**
 
 ## 2026-06-03 — Phase 2 F3/F4 — held-config diagnostic (root cause = F3, not F4)
 

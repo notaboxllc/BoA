@@ -168,14 +168,14 @@ public class BoxOfActin {
 			System.err.println("[ANCHOR_DIAG] DIAG_CPU_ANCHOR forced ON via env var");
 		}
 		// BOA_DIAG_CPU_F3F4 — toggle the Phase-2 F3/F4 source-of-truth.
-		//   default (unset / 1 / true) → CPU addLinkForces /
-		//                                 addTorsionSpringForces runs (safe
-		//                                 mode while the kernel's 26%
-		//                                 stiffness deficit is unresolved).
-		//   "0" / "false"               → device chainPairForces kernel runs
-		//                                 and CPU pair is skipped on
-		//                                 GPU-handled chain segments.
-		// See JOURNAL "Phase 2 F3/F4 — implementation".
+		//   default (unset)             → device chainPairForces kernel runs
+		//                                 (Newton-3-safe owner-perspective
+		//                                 linkUVec; bench lands on CPU value).
+		//   "1" / "true"                → CPU addLinkForces /
+		//                                 addTorsionSpringForces runs and the
+		//                                 device kernel is gated off.
+		//   "0" / "false"               → device kernel runs (same as default).
+		// See JOURNAL "Phase 2 F3/F4 — fix".
 		String cpuF3F4Env = System.getenv("BOA_DIAG_CPU_F3F4");
 		if (cpuF3F4Env != null && !cpuF3F4Env.isEmpty()) {
 			if (cpuF3F4Env.equals("0") || cpuF3F4Env.equalsIgnoreCase("false")) {

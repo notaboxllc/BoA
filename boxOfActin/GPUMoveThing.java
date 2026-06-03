@@ -174,18 +174,16 @@ public class GPUMoveThing {
 
     /**
      * Diagnostic flag (2026-06-02 — Phase 2 F3/F4 port). Mirrors DIAG_CPU_ANCHOR
-     * in shape but its DEFAULT IS INVERTED while the Phase-2 stiffness deficit
-     * is being investigated: default true means the device chainPairForces
-     * kernel is forced to a no-op (classifyThings packs all topology slots
-     * as -1, so every kernel thread returns early) and the per-FilSegment
-     * gating in FilSegment.step() flips so the CPU addLinkForces /
-     * addTorsionSpringForces pair runs again. Set to false (via
-     * BOA_DIAG_CPU_F3F4=0 or by editing here) to activate the device kernel.
+     * in shape. Default false: device chainPairForcesKernel applies F3+F4 to
+     * every GPU-handled chain segment and the CPU pair is gated off in
+     * FilSegment.step(). Set true (via BOA_DIAG_CPU_F3F4=1) to force the kernel
+     * to a no-op (classifyThings packs all topology slots as -1, every thread
+     * returns early) and re-route F3+F4 through the CPU pair for clean A/B.
      * CPU-only (non-`-gpu`) runs are unaffected either way.
-     * Flip to false once the deflection-bench 26% stiffness deficit is fixed.
-     * See JOURNAL "Phase 2 F3/F4 — implementation".
+     * See JOURNAL "Phase 2 F3/F4 — fix" (default flipped 2026-06-03 after the
+     * Newton-3 leak fix landed bench ratio on the CPU value).
      */
-    public static boolean DIAG_CPU_F3F4 = true;
+    public static boolean DIAG_CPU_F3F4 = false;
 
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
@@ -899,34 +897,73 @@ public class GPUMoveThing {
                 double nBTGy = (double) bTransGam.get(n3 + 1);
                 double nBRGy = (double) bRotGam.get(n3 + 1);
 
-                // My end2 in microns (matches Thing.recomputeDerivedSoA).
+                // F3 link force/torque. Both threads must compute the SAME
+                // linkUVec line so per-thread forces are exactly anti-parallel
+                // (Newton-3). Owner = segment with the lower slot index;
+                // canonical from the topology indices, no atomic/visited-flag
+                // coordination. Each thread independently identifies whether
+                // it is the owner via slot comparison, computes the OWNER's
+                // perspective linkUVec, then applies +F (owner) or −F (non-
+                // owner) to itself.
+
+                // My end2 tip in microns (matches Thing.recomputeDerivedSoA).
                 double e2x = cx + halfLen_um * ux;
                 double e2y = cy + halfLen_um * uy;
                 double e2z = cz + halfLen_um * uz;
-                // CPU: linkPt.add(end2Pt, actinMonoRadius, uVecR) — i.e.,
-                // linkPt = end2 - actinMonoRadius * uVec.
-                double lpx = e2x - actinMonoRadius * ux;
-                double lpy = e2y - actinMonoRadius * uy;
-                double lpz = e2z - actinMonoRadius * uz;
-                // ptAtEnd2 = neighbour.end1Pt (side=0) or neighbour.end2Pt (side=1).
-                double pax, pay, paz;
+                // Self's offset linkPt (if self is owner): end2 - r·uVec_self.
+                double selfLpx = e2x - actinMonoRadius * ux;
+                double selfLpy = e2y - actinMonoRadius * uy;
+                double selfLpz = e2z - actinMonoRadius * uz;
+                // Neighbour's connecting tip (side=0 → end1, side=1 → end2).
+                double nbrTipx, nbrTipy, nbrTipz;
                 if (e2Side == 0) {
-                    pax = ncx - nHalfLen_um * nux;
-                    pay = ncy - nHalfLen_um * nuy;
-                    paz = ncz - nHalfLen_um * nuz;
+                    nbrTipx = ncx - nHalfLen_um * nux;
+                    nbrTipy = ncy - nHalfLen_um * nuy;
+                    nbrTipz = ncz - nHalfLen_um * nuz;
                 } else {
-                    pax = ncx + nHalfLen_um * nux;
-                    pay = ncy + nHalfLen_um * nuy;
-                    paz = ncz + nHalfLen_um * nuz;
+                    nbrTipx = ncx + nHalfLen_um * nux;
+                    nbrTipy = ncy + nHalfLen_um * nuy;
+                    nbrTipz = ncz + nHalfLen_um * nuz;
                 }
-                // Pt3D.unitVec(strainDist, ptAtEnd2, linkPt) → linkUVec = (ptAtEnd2 - linkPt)/strainDist.
-                double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
+                // Neighbour's offset linkPt (if neighbour is owner): tip ± r·uVec_nbr,
+                // offset INTO the neighbour from its connecting tip.
+                //   e2Side==0 (nbr connects via end1): +r·uVec_nbr.
+                //   e2Side==1 (nbr connects via end2): −r·uVec_nbr.
+                double nbrLpx, nbrLpy, nbrLpz;
+                if (e2Side == 0) {
+                    nbrLpx = nbrTipx + actinMonoRadius * nux;
+                    nbrLpy = nbrTipy + actinMonoRadius * nuy;
+                    nbrLpz = nbrTipz + actinMonoRadius * nuz;
+                } else {
+                    nbrLpx = nbrTipx - actinMonoRadius * nux;
+                    nbrLpy = nbrTipy - actinMonoRadius * nuy;
+                    nbrLpz = nbrTipz - actinMonoRadius * nuz;
+                }
+                // Owner-perspective linkPt and ptAtEnd: from the owner's view,
+                // linkPt is the owner's monomer-back position and ptAtEnd is
+                // the non-owner's connecting tip (matches CPU addLinkForces).
+                double linkPtX, linkPtY, linkPtZ;
+                double ptAtEndX, ptAtEndY, ptAtEndZ;
+                if (i < e2Slot) {
+                    linkPtX = selfLpx;  linkPtY = selfLpy;  linkPtZ = selfLpz;
+                    ptAtEndX = nbrTipx; ptAtEndY = nbrTipy; ptAtEndZ = nbrTipz;
+                } else {
+                    linkPtX = nbrLpx;   linkPtY = nbrLpy;   linkPtZ = nbrLpz;
+                    ptAtEndX = e2x;     ptAtEndY = e2y;     ptAtEndZ = e2z;
+                }
+                double dx = ptAtEndX - linkPtX;
+                double dy = ptAtEndY - linkPtY;
+                double dz = ptAtEndZ - linkPtZ;
                 double strainDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
                 double luX = dx * invStrain, luY = dy * invStrain, luZ = dz * invStrain;
-                double lurX = -luX, lurY = -luY, lurZ = -luZ;
 
-                // moveCoeff(2, linkUVec) for self: cosBeta = dot(uVec, linkUVec).
+                // moveCoeff for self and neighbour: cosBeta is squared inside
+                // (moveC = cosB²/bTGx + (1−cosB²)/bTGy + lSq·(1−cosB²)/(4 bRGy)),
+                // so the sign of cosBeta is irrelevant — moveCoeff(1, x) and
+                // moveCoeff(2, x) yield the same value, and dot products with
+                // ±linkUVec give the same squared cosBeta. Use the raw uVec
+                // dotted with the (owner-perspective) linkUVec for both.
                 double cosB1 = ux * luX + uy * luY + uz * luZ;
                 if (cosB1 > 1.0)  cosB1 = 1.0;
                 if (cosB1 < -1.0) cosB1 = -1.0;
@@ -935,14 +972,7 @@ public class GPUMoveThing {
                 double moveC1 = cosB1 * cosB1 / rBTGx + cosA1_2 / rBTGy
                               + lSqSelf * cosA1_2 / (4.0 * rBRGy);
 
-                // F3 moveCoeff for neighbour: cosBeta gets squared inside
-                // moveC = cosB²/bTGx + (1-cosB²)/bTGy + lSq*(1-cosB²)/(4 bRGy),
-                // so the sign of cosBeta is irrelevant — moveCoeff(1, x)
-                // and moveCoeff(2, x) return the same value for the same
-                // linkUVec. Use the raw neighbour uVec; squaring handles
-                // the side equivalence (verified against CPU moveCoeff in
-                // FilSegment.java:1340-1366).
-                double cosB2 = nux * lurX + nuy * lurY + nuz * lurZ;
+                double cosB2 = nux * luX + nuy * luY + nuz * luZ;
                 if (cosB2 > 1.0)  cosB2 = 1.0;
                 if (cosB2 < -1.0) cosB2 = -1.0;
                 double cosA2 = Math.sin(accurateAcos(cosB2));
@@ -953,7 +983,11 @@ public class GPUMoveThing {
                 double denom = dt * (moveC1 + moveC2);
                 double forceMag = (denom > 0.0) ? (fracMove * 1.0e-6 * strainDist / denom) : 0.0;
 
-                double Fx = forceMag * luX, Fy = forceMag * luY, Fz = forceMag * luZ;
+                // Sign: +forceMag·linkUVec if self is owner, −forceMag·linkUVec if not.
+                double fSign = (i < e2Slot) ? 1.0 : -1.0;
+                double Fx = fSign * forceMag * luX;
+                double Fy = fSign * forceMag * luY;
+                double Fz = fSign * forceMag * luZ;
                 fx += Fx; fy += Fy; fz += Fz;
                 // R = 0.5e-6 * length * fracR * uVec (lever arm from coord to end2).
                 double Rscale = 0.5e-6 * len * fracR;
@@ -1015,33 +1049,59 @@ public class GPUMoveThing {
                 double nBTGy = (double) bTransGam.get(n3 + 1);
                 double nBRGy = (double) bRotGam.get(n3 + 1);
 
-                // My end1 = coord - halfLen * uVec.
+                // F3 link force/torque, owner-perspective linkUVec (same as
+                // end2 block). Owner = lower slot index, determined inline.
+                // My end1 tip = coord − halfLen·uVec.
                 double e1x = cx - halfLen_um * ux;
                 double e1y = cy - halfLen_um * uy;
                 double e1z = cz - halfLen_um * uz;
-                // CPU: linkPt.add(end1Pt, actinMonoRadius, uVec) — i.e.,
-                // linkPt = end1 + actinMonoRadius * uVec.
-                double lpx = e1x + actinMonoRadius * ux;
-                double lpy = e1y + actinMonoRadius * uy;
-                double lpz = e1z + actinMonoRadius * uz;
-                double pax, pay, paz;
+                // Self's offset linkPt (if self is owner): end1 + r·uVec_self.
+                double selfLpx = e1x + actinMonoRadius * ux;
+                double selfLpy = e1y + actinMonoRadius * uy;
+                double selfLpz = e1z + actinMonoRadius * uz;
+                // Neighbour's connecting tip (side=0 → end1, side=1 → end2).
+                double nbrTipx, nbrTipy, nbrTipz;
                 if (e1Side == 0) {
-                    pax = ncx - nHalfLen_um * nux;
-                    pay = ncy - nHalfLen_um * nuy;
-                    paz = ncz - nHalfLen_um * nuz;
+                    nbrTipx = ncx - nHalfLen_um * nux;
+                    nbrTipy = ncy - nHalfLen_um * nuy;
+                    nbrTipz = ncz - nHalfLen_um * nuz;
                 } else {
-                    pax = ncx + nHalfLen_um * nux;
-                    pay = ncy + nHalfLen_um * nuy;
-                    paz = ncz + nHalfLen_um * nuz;
+                    nbrTipx = ncx + nHalfLen_um * nux;
+                    nbrTipy = ncy + nHalfLen_um * nuy;
+                    nbrTipz = ncz + nHalfLen_um * nuz;
                 }
-                double dx = pax - lpx, dy = pay - lpy, dz = paz - lpz;
+                // Neighbour's offset linkPt (if neighbour is owner): tip ± r·uVec_nbr,
+                // offset INTO the neighbour from its connecting tip.
+                //   e1Side==0 (nbr connects via end1): +r·uVec_nbr.
+                //   e1Side==1 (nbr connects via end2): −r·uVec_nbr.
+                double nbrLpx, nbrLpy, nbrLpz;
+                if (e1Side == 0) {
+                    nbrLpx = nbrTipx + actinMonoRadius * nux;
+                    nbrLpy = nbrTipy + actinMonoRadius * nuy;
+                    nbrLpz = nbrTipz + actinMonoRadius * nuz;
+                } else {
+                    nbrLpx = nbrTipx - actinMonoRadius * nux;
+                    nbrLpy = nbrTipy - actinMonoRadius * nuy;
+                    nbrLpz = nbrTipz - actinMonoRadius * nuz;
+                }
+                double linkPtX, linkPtY, linkPtZ;
+                double ptAtEndX, ptAtEndY, ptAtEndZ;
+                if (i < e1Slot) {
+                    linkPtX = selfLpx;  linkPtY = selfLpy;  linkPtZ = selfLpz;
+                    ptAtEndX = nbrTipx; ptAtEndY = nbrTipy; ptAtEndZ = nbrTipz;
+                } else {
+                    linkPtX = nbrLpx;   linkPtY = nbrLpy;   linkPtZ = nbrLpz;
+                    ptAtEndX = e1x;     ptAtEndY = e1y;     ptAtEndZ = e1z;
+                }
+                double dx = ptAtEndX - linkPtX;
+                double dy = ptAtEndY - linkPtY;
+                double dz = ptAtEndZ - linkPtZ;
                 double strainDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 double invStrain = (strainDist > 0.0) ? (1.0 / strainDist) : 0.0;
                 double luX = dx * invStrain, luY = dy * invStrain, luZ = dz * invStrain;
-                double lurX = -luX, lurY = -luY, lurZ = -luZ;
 
-                // moveCoeff(1, linkUVec) for self: cosBeta = dot(uVecR, linkUVec) = -dot(uVec, linkUVec).
-                double cosB1 = -(ux * luX + uy * luY + uz * luZ);
+                // moveCoeff for self and neighbour (cosBeta squared → sign irrelevant).
+                double cosB1 = ux * luX + uy * luY + uz * luZ;
                 if (cosB1 > 1.0)  cosB1 = 1.0;
                 if (cosB1 < -1.0) cosB1 = -1.0;
                 double cosA1 = Math.sin(accurateAcos(cosB1));
@@ -1049,9 +1109,7 @@ public class GPUMoveThing {
                 double moveC1 = cosB1 * cosB1 / rBTGx + cosA1_2 / rBTGy
                               + lSqSelf * cosA1_2 / (4.0 * rBRGy);
 
-                // F3 moveCoeff for neighbour: same sign-irrelevance as
-                // end2 side — cosBeta gets squared. Use raw neighbour uVec.
-                double cosB2 = nux * lurX + nuy * lurY + nuz * lurZ;
+                double cosB2 = nux * luX + nuy * luY + nuz * luZ;
                 if (cosB2 > 1.0)  cosB2 = 1.0;
                 if (cosB2 < -1.0) cosB2 = -1.0;
                 double cosA2 = Math.sin(accurateAcos(cosB2));
@@ -1062,9 +1120,12 @@ public class GPUMoveThing {
                 double denom = dt * (moveC1 + moveC2);
                 double forceMag = (denom > 0.0) ? (fracMove * 1.0e-6 * strainDist / denom) : 0.0;
 
-                double Fx = forceMag * luX, Fy = forceMag * luY, Fz = forceMag * luZ;
+                double fSign = (i < e1Slot) ? 1.0 : -1.0;
+                double Fx = fSign * forceMag * luX;
+                double Fy = fSign * forceMag * luY;
+                double Fz = fSign * forceMag * luZ;
                 fx += Fx; fy += Fy; fz += Fz;
-                // R = 0.5e-6 * length * fracR * uVecR (lever arm from coord to end1).
+                // R = 0.5e-6 * length * fracR * uVecR (lever arm from coord to end1, i.e. −uVec).
                 double Rscale = -0.5e-6 * len * fracR;
                 double Rx = Rscale * ux, Ry = Rscale * uy, Rz = Rscale * uz;
                 tx += Ry * Fz - Rz * Fy;
