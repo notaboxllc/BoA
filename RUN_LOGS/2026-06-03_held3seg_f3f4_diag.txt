@@ -1,0 +1,195 @@
+HeldChainF3F4Diag — instrument F3/F4 intermediates, CPU vs device kernel formula.
+Constants: aeta=0.100000  dt=0.000100000  fracMove=0.500000  fracR=0.100000  fracMoveTorq=0.265000
+Geometry: actinMonoRadius=0.00270000  filRadius=0.00350000  monCt=32  segLen=0.0891000 µm
+
+================================================================
+  theta = 10.000000° (1.745329e-01 rad)
+================================================================
+  seg0: c=(-4.455000e-02,0.000000e+00,0.000000e+00) u=(1.000000e+00,0.000000e+00,0.000000e+00) L=8.910000e-02
+  seg1: c=(4.387319e-02,7.736026e-03,0.000000e+00) u=(9.848078e-01,1.736482e-01,0.000000e+00) L=8.910000e-02
+  seg2: c=(1.316196e-01,2.320808e-02,0.000000e+00) u=(9.848078e-01,1.736482e-01,0.000000e+00) L=8.910000e-02
+  drag: bTransGam.x=2.388515e-08  bTransGam.y=3.308846e-08  bRotGam.y=3.936198e-23
+
+  --- BENT JOINT (seg0.end2 <-> seg1.end1) ---
+
+  CPU FORMULA (owner = seg0, seg0.end2Side=0 because ptAtEnd2 == seg1.end1Pt):
+    [CPU.F3.end2]   linkPt    = (-2.700000e-03, 0.000000e+00, 0.000000e+00)
+    [CPU.F3.end2]   ptAtEnd2  = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [CPU.F3.end2]   strainDist= 2.700000e-03 µm
+    [CPU.F3.end2]   linkUVec  = (1.000000e+00, 0.000000e+00, 0.000000e+00)
+    [CPU.F3.end2]   cosB(self)= 1.000000e+00  moveC(self) = 4.186702e+07
+    [CPU.F3.end2]   cosB(nbr) = 9.848078e-01  moveC(nbr)  = 4.303018e+07
+    [CPU.F3.end2]   forceMag  = 1.590158e-13 N
+    [CPU.F3.end2]   F_self    = (1.590158e-13, 0.000000e+00, 0.000000e+00) N
+    [CPU.F3.end2]   T_self    = (0.000000e+00, 0.000000e+00, 0.000000e+00) N·µm
+    [CPU.F3.end2]   F_nbr     = (-1.590158e-13, -0.000000e+00, -0.000000e+00) N    (= -F_self)
+    [CPU.F3.end2]   T_nbr     = (0.000000e+00, 0.000000e+00, -1.230151e-22) N·µm
+    [CPU.F4.end2]   cross(uVec,nbr.uVec_signed) raw = (0.000000e+00, 0.000000e+00, 1.736482e-01)
+    [CPU.F4.end2]   |cross|                          = 1.736482e-01
+    [CPU.F4.end2]   unit torsionVec                  = (0.000000e+00, 0.000000e+00, 1.000000e+00)
+    [CPU.F4.end2]   dot(uVec, nbr.uVec_signed)       = 9.848078e-01
+    [CPU.F4.end2]   angTween (deg, fastAcos)         = 9.987312e+00°
+    [CPU.F4.end2]   torsionMag                       = 9.091149e-21 N·µm
+    [CPU.F4.end2]   T_self (= +tvU · torsionMag)     = (0.000000e+00, 0.000000e+00, 9.091149e-21)
+    [CPU.F4.end2]   T_nbr  (= -T_self)               = (-0.000000e+00, -0.000000e+00, -9.091149e-21)
+
+  DEVICE FORMULA (seg0 thread, end2 block):
+    [DEV.seg0.end2.F3] linkPt    = (-2.700000e-03, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.F3] ptAtSide  = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.F3] strainDist= 2.700000e-03 µm
+    [DEV.seg0.end2.F3] linkUVec  = (1.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.F3] cosB(self)= 1.000000e+00  moveC(self)= 4.186702e+07
+    [DEV.seg0.end2.F3] cosB(nbr) = -9.848078e-01  moveC(nbr) = 4.303629e+07
+    [DEV.seg0.end2.F3] forceMag  = 1.590044e-13 N    (applied to SELF only)
+    [DEV.seg0.end2.F3] F_self    = (1.590044e-13, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.F3] T_self_F3 = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.F4] tvUnit    = (0.000000e+00, 0.000000e+00, 1.000000e+00)
+    [DEV.seg0.end2.F4] dotV      = 9.848078e-01  angTween= 1.000000e+01° (accurateAcos)
+    [DEV.seg0.end2.F4] torsionMag= 9.102699e-21 N·µm
+    [DEV.seg0.end2.F4] T_self_F4 = (0.000000e+00, 0.000000e+00, 9.102699e-21)
+    [DEV.seg0.end2.TOT] F_self   = (1.590044e-13, 0.000000e+00, 0.000000e+00)
+    [DEV.seg0.end2.TOT] T_self   = (0.000000e+00, 0.000000e+00, 9.102699e-21)
+
+  DEVICE FORMULA (seg1 thread, end1 block — the OTHER side of the same pair):
+    [DEV.seg1.end1.F3] linkPt    = (2.658981e-03, 4.688501e-04, 0.000000e+00)
+    [DEV.seg1.end1.F3] ptAtSide  = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg1.end1.F3] strainDist= 2.700000e-03 µm
+    [DEV.seg1.end1.F3] linkUVec  = (-9.848078e-01, -1.736482e-01, 0.000000e+00)
+    [DEV.seg1.end1.F3] cosB(self)= 1.000000e+00  moveC(self)= 4.186702e+07
+    [DEV.seg1.end1.F3] cosB(nbr) = 9.848078e-01  moveC(nbr) = 4.303629e+07
+    [DEV.seg1.end1.F3] forceMag  = 1.590044e-13 N    (applied to SELF only)
+    [DEV.seg1.end1.F3] F_self    = (-1.565888e-13, -2.761082e-14, 0.000000e+00)
+    [DEV.seg1.end1.F3] T_self_F3 = (-0.000000e+00, 0.000000e+00, -2.350989e-38)
+    [DEV.seg1.end1.F4] tvUnit    = (0.000000e+00, 0.000000e+00, -1.000000e+00)
+    [DEV.seg1.end1.F4] dotV      = 9.848078e-01  angTween= 1.000000e+01° (accurateAcos)
+    [DEV.seg1.end1.F4] torsionMag= 9.102699e-21 N·µm
+    [DEV.seg1.end1.F4] T_self_F4 = (0.000000e+00, 0.000000e+00, -9.102699e-21)
+    [DEV.seg1.end1.TOT] F_self   = (-1.565888e-13, -2.761082e-14, 0.000000e+00)
+    [DEV.seg1.end1.TOT] T_self   = (0.000000e+00, 0.000000e+00, -9.102699e-21)
+
+  --- STRAIGHT JOINT (seg1.end2 <-> seg2.end1) ---
+
+  CPU FORMULA (owner = seg1, e2Side=0):
+    [CPU.F3.end2]   linkPt    = (8.508739e-02, 1.500320e-02, 0.000000e+00)
+    [CPU.F3.end2]   ptAtEnd2  = (8.774637e-02, 1.547205e-02, 0.000000e+00)
+    [CPU.F3.end2]   strainDist= 2.700000e-03 µm
+    [CPU.F3.end2]   linkUVec  = (9.848078e-01, 1.736482e-01, 0.000000e+00)
+    [CPU.F3.end2]   cosB(self)= 1.000000e+00  moveC(self) = 4.186702e+07
+    [CPU.F3.end2]   cosB(nbr) = 1.000000e+00  moveC(nbr)  = 4.186702e+07
+    [CPU.F3.end2]   forceMag  = 1.612247e-13 N
+    [CPU.F3.end2]   F_self    = (1.587754e-13, 2.799638e-14, 0.000000e+00) N
+    [CPU.F3.end2]   T_self    = (0.000000e+00, 0.000000e+00, -1.645692e-37) N·µm
+    [CPU.F3.end2]   F_nbr     = (-1.587754e-13, -2.799638e-14, -0.000000e+00) N    (= -F_self)
+    [CPU.F3.end2]   T_nbr     = (0.000000e+00, 0.000000e+00, -1.645692e-37) N·µm
+    [CPU.F4.end2]   cross(uVec,nbr.uVec_signed) raw = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [CPU.F4.end2]   |cross|                          = 0.000000e+00
+    [CPU.F4.end2]   unit torsionVec                  = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [CPU.F4.end2]   dot(uVec, nbr.uVec_signed)       = 1.000000e+00
+    [CPU.F4.end2]   angTween (deg, fastAcos)         = 8.537736e-07°
+    [CPU.F4.end2]   torsionMag                       = 7.771644e-28 N·µm
+    [CPU.F4.end2]   T_self (= +tvU · torsionMag)     = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [CPU.F4.end2]   T_nbr  (= -T_self)               = (-0.000000e+00, -0.000000e+00, -0.000000e+00)
+
+  DEVICE FORMULA (seg1 thread, end2 block):
+    [DEV.seg1.end2.F3] linkPt    = (8.508739e-02, 1.500320e-02, 0.000000e+00)
+    [DEV.seg1.end2.F3] ptAtSide  = (8.774637e-02, 1.547205e-02, 0.000000e+00)
+    [DEV.seg1.end2.F3] strainDist= 2.700000e-03 µm
+    [DEV.seg1.end2.F3] linkUVec  = (9.848078e-01, 1.736482e-01, 0.000000e+00)
+    [DEV.seg1.end2.F3] cosB(self)= 1.000000e+00  moveC(self)= 4.186702e+07
+    [DEV.seg1.end2.F3] cosB(nbr) = -1.000000e+00  moveC(nbr) = 4.186702e+07
+    [DEV.seg1.end2.F3] forceMag  = 1.612247e-13 N    (applied to SELF only)
+    [DEV.seg1.end2.F3] F_self    = (1.587754e-13, 2.799638e-14, 0.000000e+00)
+    [DEV.seg1.end2.F3] T_self_F3 = (0.000000e+00, 0.000000e+00, -1.645692e-37)
+    [DEV.seg1.end2.F4] tvUnit    = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg1.end2.F4] dotV      = 0.000000e+00  angTween= 0.000000e+00° (accurateAcos)
+    [DEV.seg1.end2.F4] torsionMag= 0.000000e+00 N·µm
+    [DEV.seg1.end2.F4] T_self_F4 = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg1.end2.TOT] F_self   = (1.587754e-13, 2.799638e-14, 0.000000e+00)
+    [DEV.seg1.end2.TOT] T_self   = (0.000000e+00, 0.000000e+00, -1.645692e-37)
+
+  DEVICE FORMULA (seg2 thread, end1 block):
+    [DEV.seg2.end1.F3] linkPt    = (9.040535e-02, 1.594090e-02, 0.000000e+00)
+    [DEV.seg2.end1.F3] ptAtSide  = (8.774637e-02, 1.547205e-02, 0.000000e+00)
+    [DEV.seg2.end1.F3] strainDist= 2.700000e-03 µm
+    [DEV.seg2.end1.F3] linkUVec  = (-9.848078e-01, -1.736482e-01, 0.000000e+00)
+    [DEV.seg2.end1.F3] cosB(self)= 1.000000e+00  moveC(self)= 4.186702e+07
+    [DEV.seg2.end1.F3] cosB(nbr) = 1.000000e+00  moveC(nbr) = 4.186702e+07
+    [DEV.seg2.end1.F3] forceMag  = 1.612247e-13 N    (applied to SELF only)
+    [DEV.seg2.end1.F3] F_self    = (-1.587754e-13, -2.799638e-14, 0.000000e+00)
+    [DEV.seg2.end1.F3] T_self_F3 = (-0.000000e+00, 0.000000e+00, 2.821186e-37)
+    [DEV.seg2.end1.F4] tvUnit    = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg2.end1.F4] dotV      = 0.000000e+00  angTween= 0.000000e+00° (accurateAcos)
+    [DEV.seg2.end1.F4] torsionMag= 0.000000e+00 N·µm
+    [DEV.seg2.end1.F4] T_self_F4 = (0.000000e+00, 0.000000e+00, 0.000000e+00)
+    [DEV.seg2.end1.TOT] F_self   = (-1.587754e-13, -2.799638e-14, 0.000000e+00)
+    [DEV.seg2.end1.TOT] T_self   = (0.000000e+00, 0.000000e+00, 2.821186e-37)
+
+  --- SUMMARY @ theta=10.0000° ---
+  BENT joint: CPU F3 forceMag = 1.590158e-13 ; DEV(seg0) forceMag = 1.590044e-13 ; DEV(seg1) forceMag = 1.590044e-13
+  BENT joint: CPU F4 angTween = 1.000000e+01° ; DEV(seg0) angTween = 1.000000e+01° ; DEV(seg1) angTween = 1.000000e+01°
+  BENT joint: CPU F4 torsionMag = 9.091149e-21 ; DEV(seg0) torsionMag = 9.102699e-21 ; DEV(seg1) torsionMag = 9.102699e-21
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (2.415634e-15, -2.761082e-14, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 7.771644e-28 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+
+
+================================================================
+  SWEEP: terse summary across angles
+================================================================
+
+  --- SUMMARY @ theta=1.0000° ---
+  BENT joint: CPU F3 forceMag = 1.612020e-13 ; DEV(seg0) forceMag = 1.612020e-13 ; DEV(seg1) forceMag = 1.612020e-13
+  BENT joint: CPU F4 angTween = 1.000000e+00° ; DEV(seg0) angTween = 1.000000e+00° ; DEV(seg1) angTween = 1.000000e+00°
+  BENT joint: CPU F4 torsionMag = 9.102583e-22 ; DEV(seg0) torsionMag = 9.102699e-22 ; DEV(seg1) torsionMag = 9.102699e-22
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (2.455185e-17, -2.813363e-15, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 0.000000e+00 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+
+
+  --- SUMMARY @ theta=5.0000° ---
+  BENT joint: CPU F3 forceMag = 1.606603e-13 ; DEV(seg0) forceMag = 1.606596e-13 ; DEV(seg1) forceMag = 1.606596e-13
+  BENT joint: CPU F4 angTween = 5.000000e+00° ; DEV(seg0) angTween = 5.000000e+00° ; DEV(seg1) angTween = 5.000000e+00°
+  BENT joint: CPU F4 torsionMag = 4.549905e-21 ; DEV(seg0) torsionMag = 4.551349e-21 ; DEV(seg1) torsionMag = 4.551349e-21
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (6.113582e-16, -1.400241e-14, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 0.000000e+00 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+
+
+  --- SUMMARY @ theta=10.0000° ---
+  BENT joint: CPU F3 forceMag = 1.590158e-13 ; DEV(seg0) forceMag = 1.590044e-13 ; DEV(seg1) forceMag = 1.590044e-13
+  BENT joint: CPU F4 angTween = 1.000000e+01° ; DEV(seg0) angTween = 1.000000e+01° ; DEV(seg1) angTween = 1.000000e+01°
+  BENT joint: CPU F4 torsionMag = 9.091149e-21 ; DEV(seg0) torsionMag = 9.102699e-21 ; DEV(seg1) torsionMag = 9.102699e-21
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (2.415634e-15, -2.761082e-14, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 7.771644e-28 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+
+
+  --- SUMMARY @ theta=20.0000° ---
+  BENT joint: CPU F3 forceMag = 1.529397e-13 ; DEV(seg0) forceMag = 1.529397e-13 ; DEV(seg1) forceMag = 1.529397e-13
+  BENT joint: CPU F4 angTween = 2.000000e+01° ; DEV(seg0) angTween = 2.000000e+01° ; DEV(seg1) angTween = 2.000000e+01°
+  BENT joint: CPU F4 torsionMag = 1.820540e-20 ; DEV(seg0) torsionMag = 1.820540e-20 ; DEV(seg1) torsionMag = 1.820540e-20
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (9.223394e-15, -5.230846e-14, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 0.000000e+00 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+
+
+  --- SUMMARY @ theta=45.0000° ---
+  BENT joint: CPU F3 forceMag = 1.309123e-13 ; DEV(seg0) forceMag = 1.309123e-13 ; DEV(seg1) forceMag = 1.309123e-13
+  BENT joint: CPU F4 angTween = 4.500000e+01° ; DEV(seg0) angTween = 4.500000e+01° ; DEV(seg1) angTween = 4.500000e+01°
+  BENT joint: CPU F4 torsionMag = 4.096214e-20 ; DEV(seg0) torsionMag = 4.096214e-20 ; DEV(seg1) torsionMag = 4.096214e-20
+  BENT joint: DEV pair-force sum (F_s0+F_s1) = (3.834333e-14, -9.256899e-14, 0.000000e+00)  ← should be (0,0,0) for Newton-3
+  BENT joint: DEV pair-torque sum (T_s0+T_s1) = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← NOT expected to be 0 (lever arms differ)
+  BENT joint: CPU pair-force sum             = (0.000000e+00, 0.000000e+00, 0.000000e+00)  ← 0 by FIAT (owner applies +F/-F)
+  STRAIGHT joint: CPU F3 |F| = 1.612247e-13 ; DEV(seg1) |F| = 1.612247e-13 ; DEV(seg2) |F| = 1.612247e-13
+  STRAIGHT joint: F4 torsionMag — CPU 0.000000e+00 ; DEV(seg1) 0.000000e+00 ; DEV(seg2) 0.000000e+00
+

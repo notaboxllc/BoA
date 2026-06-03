@@ -1,8 +1,129 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-02 PM (Phase 2 F3/F4 — implementation, FAIL at deflection bench)
+Last updated: 2026-06-03 (Phase 2 F3/F4 — diagnostic: F3 Newton-3 violation localized)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — Phase 2 F3/F4 — held-config diagnostic (root cause = F3, not F4)
+
+**Diagnostic only — no fix, no verdict on which path is correct.** Built a
+standalone pure-Java intermediates-dump on a held 3-segment chain with one
+bending joint between seg0 and seg1 (single-joint test config, zero gap at
+links, seg1↔seg2 straight to verify the null case). Mirrors both formulas
+(CPU `addLinkForces` / `addTorsionSpringForces` and device
+`chainPairForcesKernel`) on identical input and prints ordered intermediates
+side-by-side. Code: `boxOfActin/HeldChainF3F4Diag.java`. Full dump:
+`RUN_LOGS/2026-06-03_held3seg_f3f4_diag.txt`.
+
+### 1. F3 identical on identical input?
+
+**Scalar F3 forceMag agrees** between CPU and device to ~7e-5 relative
+(noise from `fastAcos` vs `accurateAcos` in `moveCoeff` at θ where
+|cos β|∈[0.95, 1.0]). Example at θ=10°: CPU 1.590158e-13 N, device 1.590044e-13 N.
+At θ ≥ 20° both paths fall in the `Math.acos` band and agree to ulp.
+
+**F4 torsionMag also agrees** to ≤0.13% (same acos crossover noise; θ=10°:
+CPU 9.091e-21 vs device 9.103e-21 N·µm). At θ=20°/45° both: 1.820e-20 /
+4.096e-20 N·µm, identical.
+
+So the per-thread scalar magnitudes are essentially identical. **F4 is not
+the divergent subsystem** — contrary to the planner-prompt framing.
+
+### 2. First divergence — F3 linkUVec direction (Newton-3 violation)
+
+The first ordered intermediate where the two paths disagree is the **F3
+`linkUVec` self-direction**, which each device thread computes from its own
+perspective. **CPU computes one linkUVec from the owner's perspective and
+applies `+F` to owner / `−F` to neighbour by fiat**; **device computes a
+separate linkUVec per thread**, and the two threads' linkUVecs are not
+anti-parallel for a bent joint.
+
+At θ=10° on the bent joint (seg0.end2 ↔ seg1.end1):
+
+| quantity | CPU (owner=seg0 applies to BOTH) | DEV seg0 thread | DEV seg1 thread |
+|---|---|---|---|
+| linkUVec_self | `(+1, 0, 0)` | `(+1, 0, 0)` | `(-cos10°, -sin10°, 0) = (-0.9848, -0.1736, 0)` |
+| forceMag | 1.590158e-13 N | 1.590044e-13 N | 1.590044e-13 N |
+| F on seg0 | `(+1.590e-13, 0, 0)` | `(+1.590e-13, 0, 0)` | (n/a) |
+| F on seg1 | `(-1.590e-13, 0, 0)` ← anti-parallel **by fiat** | (n/a) | `(-1.566e-13, -2.761e-14, 0)` ← along its own linkUVec |
+
+The two values applied to seg1 disagree both in magnitude (same to 7e-5)
+and **direction (by the joint angle θ)**. CPU enforces Newton-3rd-law by
+construction; device per-thread unique-ownership does not.
+
+The F3 torque on seg1 also differs as a downstream consequence: CPU computes
+`R_nbr × F_opp` where `F_opp = -F_self_owner = (-forceMag, 0, 0)` and
+`R_nbr = -½·L·fracR·uVec_seg1`, giving a small non-zero z-torque
+(-1.23e-22 N·µm at θ=10°). Device seg1 thread computes `R × F` where its
+own R and F are both along ±uVec_seg1 (parallel), so the device F3 torque
+on seg1 is exactly zero. Same root cause: directionality of F on the
+neighbour is different on the two paths.
+
+### 3. Asymmetry on the device
+
+Per-thread **F vectors are NOT anti-parallel** on a bent joint:
+
+```
+DEV pair-force sum (F_seg0 + F_seg1) at the bent joint:
+  θ=1°  → (+2.46e-17, -2.81e-15, 0)
+  θ=5°  → (+6.11e-16, -1.40e-14, 0)
+  θ=10° → (+2.42e-15, -2.76e-14, 0)
+  θ=20° → (+9.22e-15, -5.23e-14, 0)
+  θ=45° → (+3.83e-14, -9.26e-14, 0)
+```
+
+The residual magnitude is `forceMag · 2·sin(θ/2)` (chord length between the
+two unit linkUVecs at angle θ; verified ≈ `forceMag · sin θ` at small θ and
+exactly `forceMag · sin θ` y-component for this in-plane geometry). At
+θ=10°, `1.590e-13 · sin 10° = 2.76e-14` — matches the dump exactly.
+
+CPU pair-force sum is `(0, 0, 0)` at every θ by construction.
+
+**F4 pair-torque sum IS zero on the device** at every θ — the device's
+torsion-vector unit (cross of uVecs, normalized) is exactly `-`opposite on
+the two threads, and each thread multiplies by the same `torsionMag`. So
+F4 satisfies pair-symmetry; F3 does not.
+
+### 4. θ-scaling of the divergent quantity
+
+The divergent quantity (F3 linkUVec direction; equivalently the device
+pair-force-sum magnitude) scales **geometrically with the bend angle**:
+
+| θ | DEV pair-force-sum magnitude | ratio to `forceMag·sin θ` |
+|---|---|---|
+| 1° | 2.813e-15 | 1.000 |
+| 5° | 1.402e-14 | 1.000 |
+| 10° | 2.764e-14 | 1.000 |
+| 20° | 5.310e-14 | 1.000 |
+| 45° | 1.002e-13 | 1.000 |
+
+Not a constant ratio — a `sin θ` scaling. Confirms the divergence is
+**geometric** (each path computes the linkUVec direction differently at
+finite curvature), not a coefficient/partition mismatch. The two paths
+become identical at θ=0 (which is why SingleFilDiag passes — a perfectly
+straight chain has no Newton-3 violation to detect; cross(u, ±u)=0
+suppresses any signal). The bench by contrast settles to a curved
+equilibrium where every joint contributes a sinθ-scaled leak; with 10
+chain joints in the 11-seg bench at the per-joint angles needed to support
+the midpoint force, the cumulative residual is comparable in magnitude to
+the applied force and biases the equilibrium shape — consistent with the
+~21% softening (`1/0.79 ≈ 1.26` deflection ratio) observed at the bench.
+
+This confirms Hypothesis #1 from the 2026-06-02 PM entry (the leading
+hypothesis — Newton-3rd-law asymmetry in unique-ownership F3) and **rules
+out** the other listed hypotheses (F4 sign convention #2 produces no
+θ-scaling residual here; `bRotGam.y` indexing #3 affects only F4
+torsionMag, which agrees; `fastAcos` vs `accurateAcos` #4 produces a
+sub-1% noise floor with no θ-amplification).
+
+### Constraints respected
+
+- No changes to F3/F4 physics, the kernel, or the CPU formula. Only added
+  the standalone `HeldChainF3F4Diag.java` instrumented dump (zero
+  cross-dependencies on the rest of the codebase, runs as
+  `java -cp . boxOfActin.HeldChainF3F4Diag`).
+- No analytical ground truth derived; both paths reported as-is, no
+  correctness verdict. Planner + jba adjudicate the fix direction.
 
 ## 2026-06-02 — Phase 2 F3/F4 — implementation (FAIL at deflection bench)
 
