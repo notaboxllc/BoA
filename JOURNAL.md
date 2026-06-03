@@ -1,8 +1,217 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (Phase 2 F1 box — boundaryBoxKernel PASS; default device-active, F1b pill deferred)
+Last updated: 2026-06-03 (Phase 2 F1b — pill from-inside CPU revival PASS; device port still deferred)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — Phase 2 F1b — pill exterior-container CPU revival (PASS)
+
+**Verdict: PASS.** The pill-as-exterior-boundary path (filaments confined
+*inside* a capsule via `Bug` as `Thing.theBox`) is alive again as a CPU
+reference, ready for the eventual `boundaryPillKernel` device port. The
+axis-convention mismatch flagged in the 2026-06-03 boundary survey §4a is
+resolved by transforming the from-inside collision math into the pill body
+frame (survey option b — preserves `uVec=(0,1,0)` and leaves the Listeria
+constructor / from-outside path untouched). A polymerizing-actin smoke
+run confirms (a) filaments stay inside the capsule (cylinder + both caps),
+and (b) polymerizing barbed ends do not grow through the wall — the
+existing CPU `bugForcesFromInside` `end2TipC = 0` write + `stericHindranceEnd2`
+gate works correctly under the body-frame collision math.
+
+CPU-only. Device kernels (`boundaryBoxKernel` and the still-unbuilt
+`boundaryPillKernel`) untouched. The 2026-06-03 F1 (box) entry's
+`end1TipC`/`end2TipC` characterization is corrected in place (see below)
+— tipC is a **live** polymerization-clearance gate, only *appearing* dead
+in the gliding/bench workloads because those use non-polymerizing
+filaments.
+
+### Axis fix — option (b), body-frame transform in `amICollidingOuter`/`Inner`
+
+The `Bug` constructor sets `setUVec(0,1,0); setYVec(1,0,0)` so the pill's
+long axis is global `+y`. The from-inside collision methods previously
+did their math in the global frame, implicitly treating global `+x` as
+the long axis — fine if the pill were aligned that way, but contradicting
+the recorded `uVec`. Survey §4a flagged the mismatch.
+
+`Bug.java` `amICollidingOuter` and `amICollidingInner` now mirror the
+style of `amICollidingFromOutside`:
+
+```java
+lcE.tmpPt1.sub(ctr, coordAsPt3D());   // global vector to query point
+lcE.tmpPt1.XTox(this);                // -> body frame; tmpPt1.x is along pill long axis
+if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {
+    lcE.forceUVec.copy(0, tmpPt1.y, tmpPt1.z);  // outward radial in body
+    ...
+    lcE.forceUVec.reverse();          // inward
+    lcE.forceUVec.xToX(this);         // back to global
+}
+```
+
+Caps use `rec1`/`rec2` directly (already correctly placed along `uVec`
+in global frame by `initialize()`). The `forceUVec` for the cap case is
+constructed in global frame via `sub(rec*, ctr)` (inward = contact → cap
+center) so no second transform is needed.
+
+The placement helpers `rdmPtInside()`, `rdmPtInside(double objRadius)`,
+and `rdmPtInsideNodeZone()` also build a body-frame point and then
+translate by `coordAsPt3D()`. They were missing the body→global rotation
+in between — added one line each: `pt.xToX(this);` before `pt.inc(coordAsPt3D())`.
+Without this fix, `makeRandomFilament` would scatter initial filaments
+in a global-`+x`-aligned capsule while the collision math now constrains
+them to a global-`+y`-aligned one → mass violation at `t=0`.
+
+`rdmPtOnRearHemisphere` and `rdmPtOnCylinder` are present in `Bug.java`
+but have no live callers in the codebase (dead code) — not touched.
+
+### Why option (b) over option (a)
+
+Survey §5 listed two viable fixes:
+
+- (a) leave physics, fix orientation: change the `Bug` constructor or
+  `makeABugCrucible` to set `uVec=(1,0,0)` so body == global. Touches one
+  line, but contradicts the constructor that Listeria (`makeListeriaBug`)
+  also uses, requiring a separate code path or a flag to discriminate
+  "Bug-as-theBox" vs "Bug-as-lmBug".
+- (b) leave orientation, fix physics: transform the from-inside math into
+  body frame and rotate the placement helpers' outputs back to global.
+  More files touched (3 collision/placement methods in `Bug.java`), but
+  the constructor is untouched and there is **zero risk to the Listeria
+  from-outside path** — that path already does its own body-frame
+  transform (`tmpPt1.XTox(this)` at `amICollidingFromOutside`) and uses
+  `rec1`/`rec2` for cap centers. The shared `uVec=(0,1,0)` convention is
+  preserved end-to-end.
+
+Picked (b) for the constructor preservation and the entanglement
+avoidance — no Listeria path or viewer rendering needed to be inspected
+or modified. The pill body axes are now fully consistent: `uVec=(0,1,0)`
+on the `Bug` instance ↔ collision math treats long-axis as `uVec` ↔
+placement scatters along `uVec`.
+
+### Smoke run — `ParameterFiles/pillCpuSmoke`
+
+New param file: pill `length=3 µm`, `radius=0.5 µm` (defaults), 20 initial
+filaments (`minFilLength=0.15`, `maxFilLength=0.6`), no myosin minifilaments,
+no protein nodes, **polymerizing actin** (all `kATPOn/Off`, `kADPOff` rates
+fall through to `Env` defaults: `kATPOn2=11.6 µM⁻¹s⁻¹`, etc.), capRate
+reduced to 0.5 s⁻¹ to keep barbed ends uncapped long enough to grow into
+the wall. `bugShapedCrucible:true:1.0;`, `simOutsideBug:false:0.0;`.
+`runTime=0.2 s` (2000 steps); `toFileInterval=50` (41 frames).
+
+Run:
+
+```
+java --enable-preview -Xmx800M -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -pf ParameterFiles/pillCpuSmoke -3js /tmp/pillSmoke2
+```
+
+(No `-gpu`; CPU path only. TornadoVM jar is needed on the classpath only
+because `reportMoveAB()` is called at end-of-run.)
+
+### Confinement result — caps + cylinder
+
+Per-frame endpoint excursion past the pill wall (positive = past the wall,
+in µm). Pill long axis tested as `+y` (current fix) vs `+x` (the broken
+hypothesis the survey identified):
+
+| metric                                               | value         |
+|---                                                   |---            |
+| max excursion under `pill-along-y` (fix)             | 0.1448 µm     |
+| max excursion under `pill-along-x` (broken)          | 0.8876 µm     |
+| mean excursion `pill-along-y`                        | **−0.190 µm** (inside) |
+| mean excursion `pill-along-x`                        | +0.165 µm (outside)    |
+| max excursion steady-state (frame ≥ 3, `pill-along-y`) | **0.0333 µm** |
+| 99-pctile excursion steady-state                     | **0.0039 µm** (≈ 1 filament radius) |
+
+The two hypotheses give a 7-fold spread in mean excursion; the
+discrimination is unambiguous: filaments are confined to a capsule along
+`+y`, exactly as the fixed math intends. The frame-0 max (0.1448 µm) is
+the initial-placement transient — `makeRandomFilament` picks two interior
+points and places a filament center+extent equal to their separation,
+which can put endpoints just outside the wall. The wall force pushes
+them back within 1-4 frames; from frame 3 onward, max excursion stays
+under 0.033 µm (≈ 7 filament radii) and the 99-percentile sits at one
+filament radius — wall-touching, not penetrating.
+
+Endpoint locality in the last frame: ~65 endpoints in the cylindrical
+mid-section, ~13 in the `−y` cap, ~5 in the `+y` cap, all inside.
+`y`-range of all last-frame endpoints: `[−1.258, +1.236] µm` (pill
+extent: `|y| ≤ 1.5`). `x`-range: `[−0.488, +0.440]`; `z`-range:
+`[−0.396, +0.364]` — well inside the radial wall `±0.500`.
+
+### Polymerization-gating-at-wall result
+
+Per-frame segment count grows from 35 (frame 0) to 42 (frame 40) — 7
+polymerization-driven splits over 2000 steps. Long-lived barbed ends
+(end2) that approach the wall stay arrested at it. Sample trace from
+the smoke output (full table in
+`RUN_LOGS/2026-06-03_pillCpuSmoke_F1b.txt`):
+
+```
+seg 25: starts at end2=(+0.254,+0.854,+0.593) — outside wall, dist=−0.145
+  f 1: end2=(+0.189,+0.804,+0.469)   wall_dist=−0.006   ← pushed to wall
+  f10: end2=(+0.306,+0.787,+0.361)   wall_dist=+0.026
+  f40: end2=(+0.243,+0.970,+0.357)   wall_dist=+0.068   ← drifted inside
+seg 21: starts at end2=(+0.534,+0.515,+0.168) — outside wall, dist=−0.060
+  f 1: pushed back; oscillates within ±0.07 µm of wall through f40
+```
+
+The CPU `bugForcesFromInside` writes `end1TipC = 0` / `end2TipC = 0` on
+wall hit (FilSegment.java:2607, 2610). `stericHindranceEnd2()` reads
+`end2TipC < halfmono` (FilSegment.java:2872-2875) and gates the
+polymerization branch in `end2BiochemSim` (FilSegment.java:1039). The
+trace confirms tips that reach the wall do not continue growing through
+it — they stay within ~one filament radius of the wall surface. No
+endpoint shows monotonically growing excursion (which would indicate
+the gate is bypassed).
+
+### Files changed
+
+| file | change |
+|---|---|
+| `boxOfActin/Bug.java` | `amICollidingOuter`, `amICollidingInner` — body-frame transform on input, force returned to global. Cap force constructed from global-frame `rec1`/`rec2` |
+| `boxOfActin/Bug.java` | `rdmPtInside()`, `rdmPtInside(double)`, `rdmPtInsideNodeZone()` — added `pt.xToX(this)` before `pt.inc(coordAsPt3D())` so body-frame placements land in the correct global location |
+| `ParameterFiles/pillCpuSmoke` | NEW — polymerizing-actin smoke configuration enabling `bugShapedCrucible` |
+| `JOURNAL.md` (this file, F1 entry) | `end1TipC`/`end2TipC` row in the force-coverage table corrected: live polymerization-clearance gate, *not* dead in general; only appears dead under stabilized-filament workloads (gliding/bench). Device path validated only for non-polymerizing workloads; polymerizing box runs require `BOA_DIAG_CPU_F1=1` |
+| `RUN_LOGS/2026-06-03_pillCpuSmoke_F1b.txt` | per-frame confinement + tip-trace dump |
+
+No GPU code touched. `boundaryBoxKernel` unmodified. `boundaryPillKernel`
+still unbuilt — the deferred device F1b port can now use this CPU pill
+as its bit-for-bit reference.
+
+### Constraints respected
+
+- CPU-only. No device-kernel changes. No GPU port of the pill.
+- `simOutsideBug:false` throughout. Listeria from-outside path not
+  exercised, not modified. The `lmBug` static reference is untouched.
+- The `Bug` constructor (`setUVec(0,1,0)`) is unchanged — body-frame fix
+  goes in the collision/placement methods only, so the same `Bug` class
+  remains correct for Listeria (`makeListeriaBug`, which uses
+  `amICollidingFromOutside`'s already-body-frame code path).
+- No entanglement encountered. The viewer rendering question (the
+  capsule itself is **not** drawn — `ThreeJSWriter` only emits the box
+  `bounds` from `boxXDim/Y/Z`) is unaffected: confinement was verified
+  programmatically from the per-frame JSON, not visually. The box
+  wireframe shown in the viewer is cosmetically irrelevant in this run
+  (boxes set 4 × 4 × 4 µm purely to bound the camera around the pill).
+
+### Open follow-ups (not part of F1b)
+
+- `boundaryPillKernel` device port: mirror `boundaryBoxKernel`. Plan-build
+  shape dispatch already has `BOUNDARY_SHAPE_PILL=1` slot reserved.
+  Uniforms: `coord.{x,y,z}`, `length`, `radius`, `halfCylLength`, plus
+  the body-frame rotation matrix entries from `Thing.soaTransXTox` for
+  this `Bug` instance (or pre-rotated `rec1`/`rec2`/`uVec` packed as
+  scalar uniforms — the pill's rotation is fixed for the whole run, so
+  the rotation matrix is a plan-build-time constant).
+- tipC device write-back: corollary to the F1 device validation gap.
+  When `boundaryBoxKernel` (and later `boundaryPillKernel`) is extended
+  to compute end1TipC/end2TipC on wall hits, the device→host bridge needs
+  to surface those values back to FilSegment so polymerization biochemistry
+  (which runs on CPU) reads the latest gate. Until then, polymerizing
+  workloads must run with `BOA_DIAG_CPU_F1=1`.
+- Viewer pill wireframe: a follow-up if visually-rich pill runs become a
+  workflow priority. The current programmatic verification from JSON is
+  sufficient for validation gating.
 
 ## 2026-06-03 — Phase 2 F1 (box) — implementation (PASS)
 
@@ -126,20 +335,31 @@ forces `DIAG_CPU_F1 = true` (AoS-only kernel cannot read SoA pose).
 | Force / behaviour | CPU `DIAG_CPU_F1=true` | Device `DIAG_CPU_F1=false` (default) |
 |---|---|---|
 | **F1 box wall (Chamber from-inside)**: F+T per endpoint | CPU `checkBugCollisionFromInside` runs | device `boundaryBoxKernel` runs; CPU skipped via `gpuBoundaryHandled` |
-| F1b pill wall (Bug from-inside) | CPU `checkBugCollisionFromInside` runs (matches CPU axis convention) — but no current param file enables `bugShapedCrucible`; path is cold | not ported — device skips, `gpuBoundaryHandled` stays false, CPU pair would run; deferred to F1b after pill revival |
+| F1b pill wall (Bug from-inside) | CPU `checkBugCollisionFromInside` runs (axis-convention fixed in F1b — see entry above; `ParameterFiles/pillCpuSmoke` exercises this path) | not ported — device skips, `gpuBoundaryHandled` stays false, CPU pair runs; device pill kernel still deferred |
 | Listeria from-outside (`simOutsideBug` true) | CPU `checkBugCollisionFromOutside` runs (entire ActA / tipC / from-outside chain stays on CPU) | same — CPU path runs unconditionally regardless of GPU state |
 | `bugForcesFromInside` side effects: `end1AxialF`/`end2AxialF` increments | written on CPU (dead-write — only reader is `setCompression()`, commented out at FilSegment.java:500) | not written on device (intentionally — dead in production) |
-| `bugForcesFromInside` side effects: `end1TipC`/`end2TipC` zeroing on wall hit | written on CPU; reader is `checkCapping()` gated on `end2NearArpFactor` (only set by Arp-related node binding in `registerATipClearance`) — dead in gliding/bench workloads | not written on device — outside the audit scope for this port, behaviour matches production needs |
+| `bugForcesFromInside` side effects: `end1TipC`/`end2TipC` zeroing on wall hit | written on CPU; **live polymerization-clearance gate** — read by `stericHindranceEnd1`/`stericHindranceEnd2` (FilSegment.java:2867-2875), which gate `end1BiochemSim`/`end2BiochemSim` polymerization (FilSegment.java:1039). Also read by `checkCapping` for the Arp-near branch. Only *appeared* dead in the gliding/bench validation because those param files use stabilized, non-polymerizing filaments (all `kATPOn/Off`, `kADPOff` rates zero); any polymerizing-actin run in any chamber needs the gate | **not written on device** — F1 device path is therefore validated **only for non-polymerizing workloads**. Polymerizing box runs must use `BOA_DIAG_CPU_F1=1` (CPU pair) until tipC is computed and written back from the device. A tipC survey + device fix is forthcoming |
 | F3 link force, F4 torsion | CPU pair via `addLinkForces` / `addTorsionSpringForces` (unchanged from F3/F4 entry) | device `chainPairForcesKernel` (this kernel runs BEFORE boundary in the chained plan; boundary RMW preserves its writes) |
 | F5/F6 node forces, biochem, mesh, motors | CPU (unchanged) | CPU (unchanged) |
 | Anchor spring (MyosinFixed) | folded into device `jointsKernel` when `DIAG_CPU_ANCHOR=false` | same |
 
-**Applied exactly once** in either flag state. **Nothing dropped or doubled.**
-The CPU side effects on axial/tipC fields are documented as out of scope:
-neither field has a live reader in gliding-assay or deflection-bench
-workloads (see column descriptions). If pill-from-inside is ever revived
-with branching Arp-related biochem, those side effects need re-evaluation
-in the F1b port.
+**Applied exactly once** in either flag state for forces and torques.
+**Nothing dropped or doubled** in the force/torque coverage. The two CPU
+side effects on `FilSegment` differ:
+
+- **`end1AxialF`/`end2AxialF`** — genuinely dead. The only reader is
+  `setCompression()`, commented out at FilSegment.java:500. The device
+  skipping these writes has no observable effect.
+- **`end1TipC`/`end2TipC`** — **live for polymerizing workloads**. The
+  device kernel currently omits these writes, so the device F1 path is
+  validated only against the gliding/bench param files used in this
+  entry (stabilized filaments with all polymerization rates zero). A
+  polymerizing box run on `-gpu` would lose the wall-arrest gate at the
+  barbed end and grow tips through the wall. **Polymerizing box runs
+  must use `BOA_DIAG_CPU_F1=1`** until a tipC survey + device fix lands.
+  This also applies to F1b (pill from-inside) once it is ported: tipC
+  must be written from the device pill kernel for any polymerizing pill
+  run.
 
 ### Validation 1 — held-config near-wall probe (cheap gate)
 
@@ -222,10 +442,12 @@ SOA_POSE/MOVE_AB_PROFILE interlock unchanged.
 - F3/F4 chain kernel untouched. Anchor spring (Phase 1) untouched.
   `collisionCheckInt` cadence unchanged. Residency flip (Phase 4)
   untouched.
-- `bugForcesFromInside` axial-force / tipC side effects documented as
-  intentionally skipped on device; force-coverage audit shows they're dead
-  in production workloads. If pill+Arp biochem is ever combined, audit re-
-  examination is required for F1b.
+- `bugForcesFromInside` side effects: `end1AxialF`/`end2AxialF` are
+  genuinely dead (no live reader). `end1TipC`/`end2TipC` are the live
+  polymerization-clearance gate — skipped on device, which is safe **only
+  for the non-polymerizing gliding/bench workloads used to validate this
+  port**. Polymerizing box runs must keep `BOA_DIAG_CPU_F1=1` until tipC
+  is written back from the device. F1b will inherit the same constraint.
 
 ### A/B commands (aorus)
 

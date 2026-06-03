@@ -385,6 +385,9 @@ public class Bug extends Crucible {
 				pt.x += -1*halfCylLength;
 			}
 		}
+		// F1b: pt is in body frame (long axis = body-x); rotate into global so the
+		// placement matches the uVec the constructor set, then translate by bug center.
+		pt.xToX(this);
 		pt.inc(coordAsPt3D());
 		return pt;
 	}
@@ -422,6 +425,8 @@ public class Bug extends Crucible {
 				pt.x += -1*halfCylLength;
 			}
 		}
+		// F1b: pt is in body frame — rotate into global before translating.
+		pt.xToX(this);
 		pt.inc(coordAsPt3D());
 		return pt;
 	}
@@ -436,6 +441,8 @@ public class Bug extends Crucible {
 		pt.x = nodeGen.nextGaussian()*(Env.nodeZone.getValue()/2); // gaussian dist.
 		//pt.x = 2*Env.mtRNG.nextDouble()*Env.nodeZone - Env.nodeZone;	// uniform dist.
 		if (Math.abs(pt.x) > Env.nodeZone.getValue()) { pt.x *= Env.nodeZone.getValue()/Math.abs(pt.x); } // bring in outliers from gaussian
+		// F1b: pt is in body frame — rotate into global before translating.
+		pt.xToX(this);
 		pt.inc(coordAsPt3D());
 		return pt;
 	}
@@ -459,86 +466,98 @@ public class Bug extends Crucible {
 	}
 	
 	public void amICollidingOuter (CollisionEvent lcE, Pt3D ctr, double R) {
+		// F1b axis-convention fix (2026-06-03): the pill long axis lives along uVec
+		// (set to (0,1,0) by the constructor — global +y), not global +x. Transform
+		// the global-frame query point into body frame so the cylinder/cap geometry
+		// math is consistent. The cylinder force is built in body frame and rotated
+		// back to global at the end; cap forces use rec1/rec2 which are already in
+		// global frame (placed along uVec by initialize()).
 		lcE.zeroDelta();	// set cE.delta = 0.... no collision if unchanged below
 		lcE.tmpPt1.sub(ctr, coordAsPt3D());
-		lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z);
-		double yzDist = Pt3D.vecMag(lcE.forceUVec);
+		lcE.tmpPt1.XTox(this);	// global -> body; now tmpPt1.x is along pill long axis
 		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// check collisions in cylindrical section of bug
+			lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z);	// outward radial in body frame
+			double yzDist = Pt3D.vecMag(lcE.forceUVec);
 			if (yzDist+R < radius) {
 				return;
 			} else {
 				lcE.delta = Math.abs(yzDist + R - radius);
 				lcE.forceUVec.unitVec();
-				lcE.forceUVec.reverse();  // force vector
+				lcE.forceUVec.reverse();  // inward (toward axis), still body frame
+				lcE.forceUVec.xToX(this); // body -> global
 				return;
 			 }
-			
+
 		} else {		// check collisions in hemispherical caps
-			if (lcE.tmpPt1.x > 0) {	// positive x hemisphere
-				lcE.tmpPt2.copy(getCoordX()+halfCylLength, getCoordY(), getCoordZ());
-				double topdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
+			if (lcE.tmpPt1.x > 0) {	// positive body-x cap (rec2)
+				double topdist = Pt3D.ptDist (ctr, rec2);
 				if (topdist + R < radius) {
 					return;
 				} else {
 					lcE.delta = Math.abs(topdist + R - radius);
-					lcE.forceUVec.unitVec(topdist, lcE.tmpPt2, ctr);
+					lcE.forceUVec.sub(rec2, ctr); // inward: contact -> cap center, global frame
+					lcE.forceUVec.unitVec();
 					return;
 				}
 			}
-			if (lcE.tmpPt1.x < 0) {  // negative x hemisphere
-				lcE.tmpPt2.copy(getCoordX()-halfCylLength, getCoordY(), getCoordZ());
-				double botdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
+			if (lcE.tmpPt1.x < 0) {  // negative body-x cap (rec1)
+				double botdist = Pt3D.ptDist (ctr, rec1);
 				if (botdist + R < radius) {
 					return;
 				} else {
 					lcE.delta = Math.abs(botdist + R - radius);
-					lcE.forceUVec.unitVec(botdist, lcE.tmpPt2, ctr);
+					lcE.forceUVec.sub(rec1, ctr); // inward, global frame
+					lcE.forceUVec.unitVec();
 					return;
 				}
 			}
-		
-		}  
+
+		}
 	}
 	
 	public void amICollidingInner (CollisionEvent lcE, Pt3D ctr, double R) {
-		lcE.zeroDelta();	// set cE.delta = 0.... no collision if unchanged below
-		double dist = Pt3D.ptDist(ctr, coordAsPt3D());
+		// F1b axis-convention fix — mirror of amICollidingOuter; collision is against
+		// the inner cortex shell (innerRadius). Force points OUTWARD (away from axis /
+		// away from cap center) to push objects out of the cortex zone.
+		lcE.zeroDelta();
 		lcE.tmpPt1.sub(ctr, coordAsPt3D());
-		lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z);
-		double yzDist = Pt3D.vecMag(lcE.forceUVec);
-		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// check collisions in cylindrical section of bug
+		lcE.tmpPt1.XTox(this); // global -> body
+		if (Math.abs(lcE.tmpPt1.x) < halfCylLength) {	// cylindrical section
+			lcE.forceUVec.copy(0, lcE.tmpPt1.y, lcE.tmpPt1.z); // outward radial in body
+			double yzDist = Pt3D.vecMag(lcE.forceUVec);
 			if (yzDist+R > innerRadius) {
 				return;
 			} else {
 				lcE.delta = Math.abs(yzDist + R - innerRadius);
-				lcE.forceUVec.unitVec(); // yzVec is useful as a force vector
+				lcE.forceUVec.unitVec();
+				lcE.forceUVec.xToX(this); // body -> global; force points outward
 				return;
 			 }
-			
-		} else {		// check collisions in hemispherical caps
-			if (lcE.tmpPt1.x > 0) {	// positive x hemisphere
-				lcE.tmpPt2.copy(getCoordX()+halfCylLength, getCoordY(), getCoordZ());
-				double topdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
+
+		} else {		// hemispherical caps
+			if (lcE.tmpPt1.x > 0) {	// positive body-x cap (rec2)
+				double topdist = Pt3D.ptDist (ctr, rec2);
 				if (topdist + R > innerRadius) {
 					return;
 				} else {
 					lcE.delta = Math.abs(topdist + R - innerRadius);
-					lcE.forceUVec.unitVec(topdist, ctr, lcE.tmpPt2);
+					lcE.forceUVec.sub(ctr, rec2); // outward: cap center -> contact
+					lcE.forceUVec.unitVec();
 					return;
 				}
 			}
-			if (lcE.tmpPt1.x < 0) {  // negative x hemisphere
-				lcE.tmpPt2.copy(getCoordX()-halfCylLength, getCoordY(), getCoordZ());
-				double botdist = Pt3D.ptDist (ctr, lcE.tmpPt2);
+			if (lcE.tmpPt1.x < 0) {  // negative body-x cap (rec1)
+				double botdist = Pt3D.ptDist (ctr, rec1);
 				if (botdist + R > innerRadius) {
 					return;
 				} else {
 					lcE.delta = Math.abs(botdist + R - innerRadius);
-					lcE.forceUVec.unitVec(botdist, ctr, lcE.tmpPt2);
+					lcE.forceUVec.sub(ctr, rec1); // outward
+					lcE.forceUVec.unitVec();
 					return;
 				}
 			}
-		
+
 		}
 	}
 	

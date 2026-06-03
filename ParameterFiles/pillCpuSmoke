@@ -1,0 +1,71 @@
+<BOA> Pill-container CPU smoke (F1b) — bugShapedCrucible=true, polymerizing actin, no myosin
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
+runTime:true:0.2;                       // Run Time (s) — short smoke
+fracMove:true:0.4;                      // Coeff. for PALM movement
+fracR:true:0.134;                       // Coeff. torque arm for PALM movement
+fracMoveTorq:true:0.013685;             // Coeff. for PALM torque movement
+drawInterval:true:100.0;                // Drawing Interval
+toFileInterval:true:50.0;               // Frame interval (steps); 0.2s @ 1e-4 = 2000 steps -> 40 frames
+remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
+frameWidth:true:800.0;                  // Frame Width
+frameHeight:true:800.0;                 // Frame Height
+bugShapedCrucible:true:1.0;             // ENABLE pill exterior boundary (Bug as theBox)
+bugLength:true:3.0;                     // Pill total tip-to-tip length (µm)
+bugRadius:true:0.5;                     // Pill cylinder + cap radius (µm)
+simOutsideBug:false:0.0;                // Listeria from-outside path OFF
+bugOff:true:1.0;                        // (legacy gate; from-inside path is theBox dispatch, not this)
+initialFilaments:true:20.0;             // Modest test population
+initialMyoMiniFils:true:0.0;            // No myosin minifilaments
+minFilLength:true:0.15;                 // (µm)
+maxFilLength:true:0.6;                  // (µm)
+stdDevActinDist:true:0.5;
+boxXDim:true:4.0;                       // Wireframe bounds wider than pill (viewer cosmetics)
+boxYDim:true:4.0;
+boxZDim:true:4.0;
+actinConcNonHydro:false:0.0;            // No non-hydrolyzable actin
+aeta:true:1.0;
+capConc:true:0.05;                      // Low cap concentration — keep tips uncapped longer
+nodeZone:true:0.9;
+nodeRadius:true:0.025;
+forminsPerNode:true:0.0;
+myosPerNode:true:0.0;
+actinSeed:true:3.0;
+actinOnCortex:true:0.0;
+filSegLength:true:64.0;
+BTransCoeff:true:1.0;
+BRotCoeff:true:0.5;
+nodeTorqSpring:true:1.0E-20;
+forminRelease:true:1.0;
+noMonomers:true:0.0;                    // Monomers ARE simulated and tracked
+filamentsAnneal:false:0.0;
+annealDist:true:0.054;
+annealAngleCosine:true:0.9;
+maxLinksOnSeg:true:10.0;
+sideBonds:true:0.0;
+filLinkSpring:true:1.0E-9;
+filLinkTorqSpring:true:1.0E-19;
+xLinkTransAttn:true:1.0;
+xLinkRotAttn:true:1.0;
+maxFilLinkDist:true:0.02;
+linkDissolveRate:true:1.0;
+capRate:true:0.5;                       // Reduce capping to allow tip growth to reach wall
+cofilinRate:true:0.0;                   // Disable cofilin severing
+cofilinConc:true:0.0;
+cofilinRatio:true:1.1;
+myosSteppingSwitch:true:0.0;
+polyCompressionCutoff:true:0.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+kHydrolysis:true:1.0;
+kDissociation:true:1.0;
+showTime:true:0.0;
+showConc:true:0.0;
+showFilCt:true:0.0;
+showFilLinkCt:true:0.0;
+showMonCt:true:0.0;
+showHistBox:true:0.0;
+showYHistTics:true:0.0;
+flatTops:true:0.0;
