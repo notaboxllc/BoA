@@ -8477,3 +8477,275 @@ seeding, IntArray output for per-thread results, plan invalidation hook on
 mutated FIRST_EXECUTION inputs. Patterns to *not* inherit: AoS layout, single
 plan, per-step pos round-trip, isotropic-sphere bounds math, mutex CPU/GPU
 in main loop without ensemble-validation tooling.
+
+## 2026-06-03 — Boundary subsystem — pill exterior containment survey
+
+Scope: identify the state of the **pill-as-exterior-boundary** path
+(filaments confined *inside* a capsule) ahead of the GPU F1 port, which
+must cover both from-inside shapes (box + pill). Read-only survey; no
+edits, no runs. Listeria from-outside is a separable special project to
+be disabled now and revived later — confirmed clean-disable below.
+
+### 1. Path existence and state
+
+**The pill-as-container path is live and runtime-selectable — not
+commented out.** Dispatch is polymorphic through `Thing.theBox`, which is
+declared as a `Crucible` reference and bound to either a `Chamber` (box)
+or a `Bug` (pill) at run start. Both subclasses override
+`amICollidingOuter`; nothing in the call chain checks the concrete type
+except `ProteinNode.checkBugOrBoxCollision` which conditionally also
+invokes `amICollidingInner` on the cortex side (see §3).
+
+Container selection (BoxOfActin.java:2169-2176):
+```java
+public static void makeCrucible () {
+    if (Env.bugShapedCrucible.isActive() & !Env.simOutsideBug.isActive()) {
+        Bug.makeABugCrucible();           // pill as theBox
+    } else {
+        Chamber.makeABox();               // box as theBox
+    }
+    if (Env.simOutsideBug.isActive()) { Bug.makeListeriaBug(); }  // lmBug
+}
+```
+- `Env.bugShapedCrucible` (Env.java:384) — boolean, default `false`.
+- `Env.simOutsideBug` (Env.java:311) — boolean, default `false`.
+- `Bug.makeABugCrucible` (Bug.java:284-287) — news a `Bug` and assigns
+  to `Thing.theBox`. **Live, not commented.**
+- `Bug.makeListeriaBug` (Bug.java:289-301) — news a separate `Bug` and
+  assigns to `Thing.lmBug` (a distinct static reference). The
+  pill-as-container Bug and the Listeria Bug are independent instances.
+
+**No stock parameter file enables `bugShapedCrucible`.** `grep -rn
+bugShapedCrucible ParameterFiles/` returns nothing; the default `false`
+means every current run gets a Chamber. So the path compiles, dispatches
+correctly, and is selectable by a one-line parameter file change — but
+is *cold* in practice (no CI/benchmark exercises it).
+
+### 2. Container-selection mechanism
+
+A run is box *or* pill — never both. The choice is made once in
+`makeCrucible()` at startup (and again in `restartRun()`,
+BoxOfActin.java:2196). Switching mid-run would require tearing down and
+reconstructing `theBox`, which is not currently exposed as a
+mid-run-mutable knob.
+
+The boolean is fixed for the entire run. **This is exactly what we want
+for the GPU port** — no per-thread shape branching needed inside the
+boundary kernel (see §6).
+
+### 3. Callers of `theBox.amICollidingOuter` (from-inside path)
+
+Every Thing that interacts with the from-inside container dispatches
+through `theBox.amICollidingOuter`:
+- `FilSegment.checkBugCollisionFromInside` (FilSegment.java:1236-1243) —
+  one call per endpoint, end1Pt and end2Pt.
+- `ProteinNode.checkOuterBugCollision` (ProteinNode.java:483-489).
+- `ProteinNode.checkInnerBugCollision` (ProteinNode.java:491-497) — gated
+  on `Thing.theBox instanceof Bug` (ProteinNode.java:479). Nodes can be
+  trapped between the inner and outer cortex shells of a Bug-as-theBox;
+  Chamber has no inner shell.
+- `MyoMiniFilament.step` (MyoMiniFilament.java:508, 514) — end1 + end2.
+- `MyoMotor.step` (MyoMotor.java:186) — head endpoint.
+
+All of these would route through whatever box/pill kernel implements
+`amICollidingOuter` on the device.
+
+### 4. Pill from-inside geometry (`Bug.amICollidingOuter`, lines 461-501)
+
+Inputs: `ctr` (point in global frame), `R` (object radius), Bug's
+own `coordAsPt3D()` (pill center, global frame). Outputs into the
+caller's `CollisionEvent`: `delta` (impingement distance in microns;
+`0` = no collision) and `forceUVec` (inward-pointing unit vector;
+*reversed* in the cylindrical case so the force pushes the offender
+back toward the axis).
+
+Algorithm (treating the pill axis as the **x** axis — see §4a):
+1. `tmpPt1 = ctr − coord` (vector from pill center to object center).
+2. If `|tmpPt1.x| < halfCylLength` — cylindrical region:
+   - `yzDist = sqrt(tmpPt1.y² + tmpPt1.z²)`
+   - If `yzDist + R < radius` → no collision.
+   - Else `delta = |yzDist + R − radius|`, `forceUVec = −(0,y,z)/|.|`
+     (inward radial unit vector).
+3. Else if `tmpPt1.x > 0` — positive-x cap:
+   - `tmpPt2 = coord + (halfCylLength, 0, 0)` (cap center, global).
+   - `topdist = |ctr − tmpPt2|`.
+   - If `topdist + R < radius` → no collision.
+   - Else `delta = |topdist + R − radius|`,
+     `forceUVec = (tmpPt2 − ctr)/topdist` (cap center inward).
+4. Else (`tmpPt1.x < 0`) — symmetric for negative-x cap at
+   `coord − (halfCylLength, 0, 0)`.
+
+Parameters a device kernel needs (all uniforms; all fixed for the run):
+- `coord` (pill center, 3 floats; zero in the default constructor —
+  `Bug(new Pt3D(0,0,0), …)`).
+- `length`, `radius`, `halfCylLength = (length − 2·radius)/2`,
+  `innerRadius = radius − corticalDepth` (only for the inner-shell pass).
+- These live as **static** fields on `Bug` (Bug.java:19-23), set once in
+  `calculateProperties()`. There is only ever one Bug-as-theBox per run.
+  `corticalDepth = 2.1·Env.nodeRadius.getValue()` is recomputed in
+  `calculateProperties`; if `nodeRadius` ever becomes mid-run mutable the
+  device-side `innerRadius` would need refresh — not a concern today.
+- The cap-center scratch points `rec1`, `rec2` are computed in
+  `initialize()` (Bug.java:139-140) but `amICollidingOuter` does *not*
+  use them — it recomputes `(coord ± halfCylLength·x̂, coord.y, coord.z)`
+  inline. (Note: `amICollidingFromOutside` *does* use `rec1`/`rec2`.)
+
+#### 4a. Axis-convention gotcha — flag for revival
+
+`Bug`'s constructor sets `setUVec(0,1,0); setYVec(1,0,0)` (Bug.java:94-95),
+i.e. body x = global y, body y = global x. `initialize()` then places
+`rec1`/`rec2` along `uVecAsPt3D() = (0,1,0)` → cap centers sit on the
+**global y-axis** at `(0, ±(L/2−R), 0)`.
+
+But `amICollidingOuter` (and `amICollidingInner`) compares
+`tmpPt1.x` against `halfCylLength` **in the global frame** with no body
+transform — implicitly treating **global x** as the pill long axis. The
+from-outside path (`amICollidingFromOutside`, line 557) explicitly calls
+`tmpPt1.XTox(this)` to enter body frame before doing the same test, and
+*does* use `rec1`/`rec2` (in global frame) for the cap centers. The
+from-inside path does neither — it is internally consistent only if the
+pill is unrotated and aligned with **global x**.
+
+Consequences if `bugShapedCrucible=true` is turned on today:
+- Confinement wall behaves as a capsule along **+x** with caps at
+  `±halfCylLength·x̂`.
+- Viewer rendering (and `rdmPtInside` / `rdmPtInsideNodeZone` /
+  `rdmPtOnCylinder`, which all build points with body-x conventions and
+  `inc(coordAsPt3D())` with no rotation) likewise treat global x as the
+  long axis — so confinement geometry and initial placements are mutually
+  consistent. **The collision math works in practice**, just under the
+  assumption "pill is along global x," which contradicts the
+  uVec=(0,1,0) the constructor records.
+- The viewer (Three.js) — not investigated here — may render the pill
+  along whichever axis it derives from JSON; if it consumes
+  `rec1`/`rec2` (which sit on the y-axis), the rendered shape would be
+  misaligned with the collision surface. **Verify before enabling.**
+
+The simplest revival path is to leave the convention "pill is along
+global x" but fix `Bug` for the from-inside case to set
+`setUVec(1,0,0); setYVec(0,1,0)` (i.e. body == global), so cap centers,
+viewer rendering, and `amICollidingOuter` agree. The current
+`uVec=(0,1,0)` was sized for Listeria (lmBug at `(0,−5,0)`, pointing
+toward the cell body in +y) and is only safe there because the
+from-outside path transforms into body frame.
+
+### 5. Revival cost for a working CPU reference
+
+Minimum to get a confined-pill run that we can validate the GPU port
+against:
+1. Create a parameter file derived from `boa10-64Seg` with
+   `bugShapedCrucible:true:1.0;`, set `bugLength`/`bugRadius` to sensible
+   values (defaults: 3 µm × 0.5 µm), and confirm `simOutsideBug:false`.
+2. Decide axis convention. **Two viable options:**
+   - **(a) leave physics, fix orientation** — change `makeABugCrucible`
+     (or the `Bug` constructor when used as theBox) to leave
+     uVec=(1,0,0), so body frame == global. Cap centers, viewer, and
+     `amICollidingOuter` math all align.
+   - **(b) leave orientation, fix physics** — add `XTox(this)` transforms
+     to `amICollidingOuter` and `amICollidingInner` so they operate in
+     body frame, and rewrite `rdmPtInside*` to apply `xToX(this)` before
+     `inc(coordAsPt3D())`. More files touched; matches the
+     `amICollidingFromOutside` style.
+3. Either way, do a smoke run (~1 k steps, deflection chain off) with
+   `-3jsLive` and visually confirm filaments stay inside the rendered
+   pill. No other code needs to change; all callers already dispatch
+   through `theBox.amICollidingOuter`.
+
+This is **not a deep revival** — the path is wired, the math is present,
+and the only blocker is the axis-convention mismatch. A morning's work.
+
+### 6. Listeria-disable safety
+
+`lmBug` is a *separate* static reference (Thing.lmBug) from `theBox`.
+Its lifecycle is independent: it is `null` unless
+`simOutsideBug.isActive()` triggers `Bug.makeListeriaBug` (which assigns
+it). `restartRun` nulls it back to `null` on every restart
+(BoxOfActin.java:2195). No code reads `lmBug` from a path that runs when
+`simOutsideBug` is inactive — every caller either gates on
+`Env.simOutsideBug.isActive()` (FilSegment.java:1229,
+ProteinNode.java:475) or null-checks (`if (Thing.lmBug != null)`,
+BoxOfActin.java:1801). `FileOps` writes `lmBug.pathCoord` only inside
+the Simularium JSON wave, which is its own gated subsystem.
+
+`checkBugCollisionFromOutside`, `bugForcesFromOutside`, the ActA tether
+machinery (`ActA.checkBindingToActA`, `Bug.addTetherFormed/Broken`,
+`Bug.addNucleation`), tip-clearance bookkeeping (`end1TipC` /
+`end2TipC`), and the contact-uncapping branch are all reached only via
+the `if (Env.simOutsideBug.isActive())` gate at FilSegment.java:1229.
+
+**Conclusion: disabling Listeria is already a one-parameter flip** —
+set `simOutsideBug:false`. No code changes needed, no shared state with
+the from-inside pill path. The two subsystems share the *class*
+(`Bug`), but the from-inside pill ignores `lmBug` entirely and the
+Listeria path ignores `theBox`. Tip-clearance fields on `FilSegment`
+(`end1TipC`, `end2TipC`) are written by the from-outside path and reset
+by `resetCounters`; if `simOutsideBug=false` they are simply never
+written and remain at their reset values. No subsystem reads them
+under the from-inside path.
+
+Caveat: the pill-as-theBox subsystem doesn't currently have its own CI
+coverage either, so disabling Listeria is safe but enabling the pill
+container will need its own smoke validation (§5).
+
+### 7. GPU-port structure recommendation
+
+Two clean structures, both compatible with the 15-arg cap:
+
+**Option A — separate kernels, planned at run start.** Two device
+kernels: `boundaryBoxKernel` and `boundaryPillKernel`. Plan-build (in
+the existing lazy `if (plan == null)` style) selects which kernel goes
+into the F1 task graph based on `Thing.theBox instanceof Bug` at the
+time the plan is first built. Each kernel takes only the uniforms it
+needs:
+- Box: 3 dims (`dimX, dimY, dimZ`), per-segment endpoint SoA, force/torque
+  out arrays. ~7 args, well under the cap.
+- Pill: `coord.x,y,z`, `length`, `radius`, `halfCylLength`, per-segment
+  endpoint SoA, force/torque out arrays. ~9 args, well under the cap.
+
+No per-thread branching; no wasted registers on the other shape's
+geometry. The cost is two PTX modules instead of one, which is
+negligible.
+
+**Option B — single kernel, uniform shape flag.** One
+`boundaryKernel` that takes a `shapeFlag` (0 = box, 1 = pill) plus the
+union of geometry args. Each thread branches on `shapeFlag` — and
+because the flag is a uniform (same value for every thread), the branch
+is uniform and there's no warp divergence. Simpler dispatch (one task
+graph), but the arg list bloats (~12-13 args) and we pay register
+pressure for the unused shape's parameters.
+
+**Recommendation: Option A.** Keep box and pill as separate device
+kernels selected at plan-build time. Rationale:
+- The container shape is fixed for a run, so there is *no benefit* to a
+  fused kernel and a real cost (extra args, dead-register pressure,
+  CPU-side condition that obscures which shape is actually running).
+- Plan-build already keys off `Env.gpuPath` etc.; adding a
+  `theBox instanceof Bug` arm is in-style.
+- Matches Lesson 1 ("per-force gate, not per-step-dispatch gate") — the
+  *shape* is gated once at plan build, not per timestep, and the F1
+  dispatch then runs unconditionally.
+- Validation is cleaner: bench A/B between CPU box ↔ GPU box, and CPU
+  pill ↔ GPU pill, are two independent two-bench comparisons rather than
+  a four-corner matrix with a runtime flag.
+
+**Sequencing.** Port box first (it is what every current parameter file
+selects, all benchmarks already exercise it). Revive the CPU pill path
+per §5, validate it against expectations (filaments stay inside,
+deflection ratio sensible if a pinned chain is placed inside a pill),
+then port pill as a second kernel that mirrors the box port's plan/task
+structure. The pill port adds no new SoA fields — all geometry is
+scalar uniforms — so it should be substantially smaller than the box
+port.
+
+### Summary
+
+The pill-as-exterior-boundary path is **wired but cold**: live
+dispatch, no parameter file enables it, and one axis-convention bug
+(§4a) needs a one-line fix before turning it on. Listeria from-outside
+disables cleanly with `simOutsideBug:false` (no shared state with the
+from-inside path). The GPU F1 port should ship two separate
+kernels — `boundaryBoxKernel` and `boundaryPillKernel` — selected at
+plan-build time from `theBox instanceof Bug`, in that order (box first
+because it's the live workload). Pill kernel becomes meaningful only
+after the §5 revival.
+
