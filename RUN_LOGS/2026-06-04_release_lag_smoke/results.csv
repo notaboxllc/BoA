@@ -1,0 +1,7 @@
+arm,seed,bindEvents,meanBoundMotors,glidingVelocity,wall_sec
+device,1,614,6.084,7.2886,335
+freshCPU,1,609,5.637,6.6483,335
+laggedCPU,1,957,7.692,8.8028,335
+device,2,846,6.949,8.1206,340
+freshCPU,2,761,6.879,7.9605,335
+laggedCPU,2,1161,8.938,8.8142,335

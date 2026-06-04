@@ -235,6 +235,25 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_CPU_MOTOR = false;
 
+    /**
+     * Diagnostic flag (2026-06-04 — motor-port borderline release-lag probe).
+     * Default false: CPU MyoFilLink.addForces feeds the *current* step's
+     * forceDotFil to the tracker (registerValue) AND to link.forceDotFil
+     * (the field ckRelease reads). When true, addForces instead feeds the
+     * *previous* step's forceDotFil — the per-link prevForceDotFil buffer
+     * holds last step's value until next step's addForces consumes it. This
+     * induces on the CPU release path the same one-step lag the device path
+     * has inherently (ckRelease in step N reads forceDotFil written by
+     * bridgeMotorForceWriteback at end of moveThings N-1). Flag is set via
+     * BOA_DIAG_RELEASE_LAG=1; default-off behaviour is identical to the
+     * existing CPU pair. No effect on the device-handled motors path
+     * (gpuMotorHandled gates the CPU pair off, so addForces never runs and
+     * prevForceDotFil is never read). Toggle is reversible and contained:
+     * only the lag toggle changes; force formula, ckRelease formula, and
+     * dissociateADP formula are untouched.
+     */
+    public static boolean DIAG_RELEASE_LAG = false;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {

@@ -1,8 +1,237 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Motor force port (F8–F10) — implementation — Phase 2 motor BORDERLINE PASS, port committed at default device)
+Last updated: 2026-06-04 (Motor-port borderline — release-lag confirmation — hypothesis NOT CONFIRMED, partial N=8, stopped early)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Motor-port borderline — release-lag confirmation (NOT CONFIRMED, partial N=8 — diagnostic only, no fix)
+
+**Verdict: hypothesis NOT CONFIRMED.** The conjecture that the device's ~2σ
+borderline on `bindEvents` / `glidingVelocity` (with `meanBoundMotors` clean)
+is the 1-step `ckRelease` lag inherent to the `step → move → biochem` ordering
+is **not supported** by this toggle. The induced CPU lag produces an effect
+in the **opposite direction and several times larger** than the device's
+deviation from fresh CPU. The release-lag-only narrative as expressed by this
+toggle is incompatible with the data. Per the prompt's verdict logic, the
+investigation **stops here** — no fix is attempted in this entry.
+
+Ensemble was killed by the user at N=8 (intended N=20). The signal at N=8 is
+large enough that the three pairwise comparisons are unambiguous (5–8σ on the
+key observables); a full N=20 would refine magnitudes but not change the
+verdict direction.
+
+### Part A — `BOA_DIAG_RELEASE_LAG` toggle (default OFF; reversible; contained)
+
+New static flag `GPUMoveThing.DIAG_RELEASE_LAG` (default false). When false,
+CPU `MyoFilLink.addForces` writes the current step's `Dot(F, seg.uVec)` into
+`forceDotFil` and feeds it to `forceDotFilTrack`, unchanged from prior CPU
+semantics. When true, `addForces` instead feeds the **previous** step's value
+into both the `forceDotFil` field (read by `ckRelease`) and the tracker (read
+by `MyoMotor.dissociateADP` via `averageVal()`), while the per-link
+`prevForceDotFil` buffer holds the just-computed value for next step's
+release decision. Force *application* (the `incForceSum(F, motorPt)` on the
+motor and the seg's reaction) is unchanged — the lag affects **only** what
+`ckRelease`/`dissociateADP` see, not the integrated forces.
+
+Env hook: `BOA_DIAG_RELEASE_LAG=1` enables (any non-"0"/"false" value), `=0`
+disables. Mirrors `BOA_DIAG_CPU_MOTOR`/`BOA_DIAG_DEVICE_BOUNDARY_TIPC`
+precedents. The toggle is a no-op on device-handled motors (`gpuMotorHandled`
+gates the CPU pair off before `addForces` runs, so `prevForceDotFil` is never
+read); it only affects the CPU-arm (`BOA_DIAG_CPU_MOTOR=1`) path.
+
+**Caveat on toggle fidelity vs device structure.** The device's actual lag is
+asymmetric: `ckRelease` in step N reads `link.forceDotFil` written by
+`bridgeMotorForceWriteback` at end of move-(N-1) (1-step lag), but
+`dissociateADP` in step N reads the tracker that the same bridge updated at
+end of move-N (same step, no lag — bridge runs in move phase, biochem reads
+after). This toggle lags BOTH inputs symmetrically, per the prompt's literal
+instruction ("feed that to the tracker/release"). The effect direction
+observed is too large and too consistent (5–8σ) for the tracker-extra-lag
+component to plausibly reverse the conclusion — a tracker-fresh variant would
+produce a smaller, same-direction effect.
+
+Files: `boxOfActin/MyoFilLink.java` (`prevForceDotFil` field; `addForces`
+branch; `release()` zeroes it), `boxOfActin/GPUMoveThing.java`
+(`DIAG_RELEASE_LAG` static flag), `boxOfActin/BoxOfActin.java`
+(`BOA_DIAG_RELEASE_LAG` env hook).
+
+### Part B — `-3js` visual recording (PRE-ensemble)
+
+Three runs on a shortened gliding param file
+(`ParameterFiles/glidingAssay500_val_3jsdemo`: `runTime=0.05`,
+`toFileInterval=500` → 11 frames of ~4.6 MB each, ~50 MB per arm, viewable
+offline). All three arms ran cleanly to completion (no NaN, no crash);
+ThreeJSWriter emitted frames + `source.zip` + `params_effective.txt`.
+
+Frame paths (for offline visual sanity-check):
+- `RUN_LOGS/2026-06-04_release_lag_diag/3js_device_seed1/`    — device (F8–F10 on device, structural lag).
+- `RUN_LOGS/2026-06-04_release_lag_diag/3js_freshCPU_seed1/`  — CPU pair, fresh release.
+- `RUN_LOGS/2026-06-04_release_lag_diag/3js_laggedCPU_seed1/` — CPU pair, induced release lag.
+
+Per-arm `.log` files in the same directory carry the `[STATS]` lines (single-seed,
+short-run — informational only, not statistically meaningful at N=1):
+
+| arm        | bindEvents | meanBoundMotors | glidingVelocity |
+|---|---|---|---|
+| device     | 438        | 7.591           | 12.0213         |
+| freshCPU   | 566        | 8.313           | 12.4504         |
+| laggedCPU  | 508        | 8.314           | 11.4878         |
+
+Env-flag prints confirmed in the laggedCPU log:
+`[MOTOR_DIAG] DIAG_CPU_MOTOR forced ON via env var (CPU pair runs)` AND
+`[RELEASE_LAG_DIAG] DIAG_RELEASE_LAG forced ON (CPU release reads prior-step forceDotFil; mimics device lag)`.
+
+### Part C — three-arm paired ensemble (N=8, partial; intended N=20)
+
+All three arms run `-gpu` on `glidingAssay500_val` (the validation
+configuration), seeded `-seed N` with `N ∈ {1..8}`. Same seed → identical RNG
+draws across all unported phases, so the only differences are F8/F9/F10
+source-of-truth and CPU release-tracker timing:
+
+| Arm        | env vars                                        | F8/F9/F10 source | `ckRelease` sees   |
+|---|---|---|---|
+| device     | (none)                                          | device kernels   | bridge from move-(N-1) (structural 1-step lag) |
+| freshCPU   | `BOA_DIAG_CPU_MOTOR=1`                          | CPU `MyoFilLink` | current step's `Dot(F, seg.uVec)` (fresh) |
+| laggedCPU  | `BOA_DIAG_CPU_MOTOR=1 BOA_DIAG_RELEASE_LAG=1`   | CPU `MyoFilLink` | previous step's `Dot(F, seg.uVec)` (induced lag) |
+
+Driver: `scripts/triple_release_lag_gliding.sh`. Walls per run held at
+335–340s across all three arms; total wall to N=8 was ≈ 134 min. Seeds 1-2
+ran in the smoke (`RUN_LOGS/2026-06-04_release_lag_smoke/`); seeds 3–8 ran
+in the production ensemble before the user requested an early stop.
+
+### Three pairwise paired comparisons (N=8)
+
+Full table in `RUN_LOGS/2026-06-04_release_lag/analysis.txt`. Independent
+distributions:
+
+| observable      | device mean ± SEM | freshCPU mean ± SEM | laggedCPU mean ± SEM |
+|---|---|---|---|
+| bindEvents      | 747.6 ± 36.2      | 872.6 ± 60.8        | **1123.4** ± 42.7    |
+| meanBoundMotors | 6.872 ± 0.255     | 7.444 ± 0.338       | **8.672** ± 0.227    |
+| glidingVelocity | 7.725 ± 0.143     | 7.832 ± 0.229       | **9.298** ± 0.189    |
+
+Pairwise paired deltas:
+
+| pair                 | observable      | mean Δ    | SD(Δ)   | SEM(Δ)  | paired t | verdict           |
+|---|---|---|---|---|---|---|
+| device − freshCPU    | bindEvents      | −125.00   | 181.71  | 64.24   | −1.95    | mild scatter      |
+| device − freshCPU    | meanBoundMotors | −0.572    | 0.924   | 0.327   | −1.75    | mild scatter      |
+| device − freshCPU    | glidingVelocity | −0.107    | 0.730   | 0.258   | −0.42    | no bias           |
+| freshCPU − laggedCPU | bindEvents      | **−250.75** | 162.80 | 57.56   | **−4.36** | **BIAS (≥3σ)** |
+| freshCPU − laggedCPU | meanBoundMotors | **−1.228** | 0.801  | 0.283   | **−4.33** | **BIAS (≥3σ)** |
+| freshCPU − laggedCPU | glidingVelocity | **−1.466** | 0.561  | 0.198   | **−7.39** | **BIAS (≥3σ)** |
+| laggedCPU − device   | bindEvents      | **+375.75** | 130.13 | 46.01   | **+8.17** | **BIAS (≥3σ)** |
+| laggedCPU − device   | meanBoundMotors | **+1.800** | 0.941  | 0.333   | **+5.41** | **BIAS (≥3σ)** |
+| laggedCPU − device   | glidingVelocity | **+1.573** | 0.557  | 0.197   | **+7.99** | **BIAS (≥3σ)** |
+
+### Verdict against the prompt's logic
+
+1. **`laggedCPU` vs `device` should collapse to t ≈ 0 if the lag is the
+   cause.** It does **not**. The signed paired t's are +8.17 (bindEvents),
+   +5.41 (mbm), +7.99 (gv). The lag toggle moves `laggedCPU` **further from
+   device** than `freshCPU` already was, in the **opposite direction**.
+2. **`freshCPU` vs `laggedCPU` should reproduce the device's signature
+   direction** (lag drags bindEvents and gv DOWN, mbm clean). It does the
+   **opposite**: the lag drags bindEvents, mbm, and gv all UP — and on mbm in
+   particular, the device's deviation from freshCPU was *clean* in the prior
+   ensemble, whereas the induced lag shifts mbm by +5σ.
+3. **`device` vs `freshCPU` reproduces the original ~2σ borderline**
+   (paired t = −1.95 on bindEvents, similar direction to the prior ensemble's
+   −2.13). The starting point is intact, ruling out a code-state regression
+   as the explanation.
+
+**Conclusion.** The 1-step `ckRelease`/`dissociateADP` release-lag, as
+instrumented by this toggle, does **NOT** explain the device's borderline.
+The device's deviation from fresh CPU is small and in the direction
+(D &lt; F on bindEvents/gv) that the prior ensemble already showed, but the
+lag toggle produces a divergent, much larger, opposite-direction effect.
+**Per prompt: stop, don't guess at fixes.**
+
+### Why the lag pushes the signal "up"
+
+A short-form note on the observed mechanism (not a fix, just understanding):
+when `ckRelease` and `dissociateADP` see a stale (smaller-magnitude)
+`forceDotFil`, the catch+slip exponentials underestimate the current
+release rate during force build-up, so motors stay bound longer per cycle.
+Longer attachments → higher `meanBoundMotors` and processivity → filaments
+glide faster (`glidingVelocity` UP) → filaments traverse more area per unit
+time → more *new* attachment opportunities → higher `bindEvents`. This
+cascading explanation is consistent with all three observables shifting
+upward. But the **direction** is opposite to the device's signature, so this
+mechanism is **not** what the device is doing.
+
+### What the device is doing (best current understanding)
+
+The cheap probe (`HeldBoundMotorDiag`, 4 cases) proved CPU and device
+formulas are bit-equivalent in double precision (max |Δ|/scale = 1.13e-16,
+Newton-3 pair sums = 0 exactly, `forceDotFil` sign agreement in both
+polarities). Yet the ensemble shows a real ~2σ borderline on bindEvents/gv
+with mbm clean. The release-lag toggle just falsified the obvious
+mechanistic hypothesis. Candidate remaining causes (not investigated this
+session):
+- Reduced-precision intermediates in the PTX kernels' transcendentals
+  (`fastAcosF` / `expF`-style code paths used by the alignment kernels) that
+  drift differently than the bit-equivalent double path the probe verified.
+- Floating-point accumulation order in the seg-side CSR walk
+  (`segMotorForceKernel`) vs the CPU's incForceSum sequencing — Newton-3
+  pair sums to zero on a single pair, but multi-bound segs at the
+  gliding-assay density accumulate dozens of motor contributions in a
+  different order on device.
+- Some non-determinism within the gather/move pipeline (different threading
+  on aorus' 16 workers + GPU scheduler) that the prior journal already
+  flagged as "seed=1 produces different bindEvents across smoke vs ensemble
+  runs". Run-to-run variability at the same seed is a known property of the
+  pipeline; the ~2σ borderline may be near or within that variability.
+
+The next diagnostic step (when one is sketched) should isolate one of these,
+not the release lag.
+
+### Files added / modified
+
+| file | change |
+|---|---|
+| `boxOfActin/MyoFilLink.java` | `prevForceDotFil` field; `addForces` lag-toggle branch; `release()` zeroes `prevForceDotFil`. |
+| `boxOfActin/GPUMoveThing.java` | `DIAG_RELEASE_LAG` static flag (default false). |
+| `boxOfActin/BoxOfActin.java` | `BOA_DIAG_RELEASE_LAG` env hook. |
+| `ParameterFiles/glidingAssay500_val_3jsdemo` | NEW — short-run gliding param file for `-3js` visual sanity check (`runTime=0.05`, `toFileInterval=500`). |
+| `scripts/run_3js_lag_diag.sh` | NEW — sequential device/freshCPU/laggedCPU recorder using `-3js`. |
+| `scripts/triple_release_lag_gliding.sh` | NEW — three-arm paired ensemble driver with proper 5s-poll heartbeat (replaces the prior `sleep $HB` blocking poll that overshot wall measurements by up to `HB`s/run). |
+| `RUN_LOGS/2026-06-04_release_lag_diag/` | NEW — `-3js` recordings (device / freshCPU / laggedCPU) + analyze.py + 3js logs. |
+| `RUN_LOGS/2026-06-04_release_lag_smoke/` | NEW — N=2 smoke walls (335s/run). |
+| `RUN_LOGS/2026-06-04_release_lag/` | NEW — N=8 ensemble: `{device,freshCPU,laggedCPU}_seed{1..8}.log`, `results.csv`, `analysis.txt`, `analyze.py`. Seeds 1-2 carried over from smoke (header retained, append-on-existing). |
+| `RUN_LOGS/2026-06-04_release_lag_smoke_BUGGY/` | First smoke run, archived: the wall measurements (600s/run) reflect the heartbeat-loop overshoot bug, not real compute time. Do not use for projections. |
+
+### Constraints respected
+
+- **Diagnostic only.** No fix attempted. The release-decision ordering is
+  unchanged. The motor force formula and the `ckRelease`/`dissociateADP`
+  formulas are unchanged. Only a default-off, env-var-gated toggle was added.
+- **No `collisionCheckInt` cadence change.** Param file used the validation
+  config (`glidingAssay500_val`) unchanged.
+- **No concurrent `java`/builds during the ensemble.** The `-3js`
+  recordings (Part B) ran first, then the smoke, then the production
+  ensemble — strictly sequential. The wall-bug smoke that consumed the first
+  ~33 min did not overlap with any other invocation.
+- **Heartbeats every 5 min** to `.last_run_status` (and removed at session
+  end). Heartbeat overshoot bug discovered in smoke and fixed before
+  production; the production walls match the smoke walls at 335s/run.
+- **`-3js` cadence modest** (5 frames/sec sim = 11 frames per 0.05 sec at
+  toFileInterval=500), keeping per-arm JSON under ~50 MB total.
+
+### Stopped early — user request
+
+User instruction at 12:00 (about 1h40m into a projected 5h35m run): "Stop
+all current java runs. Summarize your findings and append to Journal.
+Commit and push." Ensemble killed at N=8 paired seeds, all three arms
+complete. Heartbeat orphan java (seed 9 device, just spawned) killed too.
+`.last_run_status` left in place with the run trail.
+
+The N=8 verdict above is robust given the 5–8σ magnitudes on the key
+pairwise comparisons. A full N=20 would tighten the SEMs proportionally and
+might shift any one paired t by ±0.5, but the verdict direction (lag → wrong
+way, hypothesis NOT confirmed) is not at risk.
+
+---
 
 ## 2026-06-04 — Motor force port (F8–F10) — implementation (Phase 2 motor — BORDERLINE PASS, port committed at default device)
 

@@ -30,6 +30,12 @@ public class MyoFilLink {
 	double forceMag = 0;
 	double forceDotFil = 0;   // use this value in calculating release probabilities, it's signed appropriately but only co-linear component of force
 	ValueTracker forceDotFilTrack = new ValueTracker(10); // or maybe use this running average for release prob
+	// 2026-06-04 release-lag diagnostic: holds prior step's just-computed
+	// Dot(F, seg.uVec). Read only when GPUMoveThing.DIAG_RELEASE_LAG is on; in
+	// that case addForces feeds prevForceDotFil to both forceDotFilTrack and
+	// link.forceDotFil, then overwrites prevForceDotFil with this step's value
+	// for next step's release decision.
+	double prevForceDotFil = 0;
 	
 	// re-used in force calcs
 	Pt3D F = new Pt3D();
@@ -115,16 +121,27 @@ public class MyoFilLink {
 		F.unitVec(attachPt,motorPt);
 		F.scale(forceMag);
 		myMotor.incForceSum(F,motorPt);
-		
+
 		// calculate component of force toward barbed-end, signed magnitude needed for catch/slip Guo&Guilford (2006) release probability
 		// Here, forceDotFil is positive for a force that will move myosin to plus-end of filament)
-		forceDotFil = Pt3D.Dot(F,mySeg.uVecAsPt3D());
-		//System.out.println ("forceDotFil = " + forceDotFil);
-		forceDotFilTrack.registerValue(forceDotFil);
-		
+		double thisStepDot = Pt3D.Dot(F,mySeg.uVecAsPt3D());
+		if (GPUMoveThing.DIAG_RELEASE_LAG) {
+			// Lag mode: ckRelease in this step sees prior step's forceDotFil;
+			// tracker gets prior step's value too. Mimics the device path's
+			// structural lag (ckRelease reads what bridgeMotorForceWriteback
+			// wrote in the PREVIOUS step's moveThings).
+			forceDotFilTrack.registerValue(prevForceDotFil);
+			forceDotFil = prevForceDotFil;
+			prevForceDotFil = thisStepDot;
+		} else {
+			forceDotFilTrack.registerValue(thisStepDot);
+			forceDotFil = thisStepDot;
+			prevForceDotFil = thisStepDot;   // keep buffer in sync so a mid-run flip is benign
+		}
+
 		F.scale(-1);
 		mySeg.incForceSum(F,attachPt);
-		
+
 	}
 	
 	/*public void addForces () {
@@ -221,6 +238,7 @@ public class MyoFilLink {
 		posOnSeg = 0;
 		forceMag = 0;
 		forceDotFil = 0;
+		prevForceDotFil = 0;
 		forceDotFilTrack.zero();
 		myMotor.onFil = false;
 		myMotor.bindTimer = 0;

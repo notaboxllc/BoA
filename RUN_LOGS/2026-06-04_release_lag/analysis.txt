@@ -1,0 +1,34 @@
+=== Three-arm release-lag confirmation ensemble (N=8) ===
+
+=== Ensemble distributions (independent) ===
+        observable |        arm |       mean         SD        SEM
+----------------------------------------------------------------------
+        bindEvents |     device |   747.6250   102.3006    36.1687
+        bindEvents |   freshCPU |   872.6250   171.8529    60.7592
+        bindEvents |  laggedCPU |  1123.3750   120.6387    42.6522
+   meanBoundMotors |     device |     6.8724     0.7198     0.2545
+   meanBoundMotors |   freshCPU |     7.4444     0.9550     0.3376
+   meanBoundMotors |  laggedCPU |     8.6719     0.6412     0.2267
+   glidingVelocity |     device |     7.7248     0.4034     0.1426
+   glidingVelocity |   freshCPU |     7.8321     0.6477     0.2290
+   glidingVelocity |  laggedCPU |     9.2982     0.5330     0.1885
+
+=== Pairwise paired deltas (per-seed) ===
+                  pair |         observable |     mean Δ      SD(Δ)    SEM(Δ)   paired t            verdict
+----------------------------------------------------------------------------------------------------
+     device − freshCPU |         bindEvents |  -125.0000   181.7070   64.2431     -1.946       mild scatter
+     device − freshCPU |    meanBoundMotors |    -0.5720     0.9235    0.3265     -1.752       mild scatter
+     device − freshCPU |    glidingVelocity |    -0.1073     0.7297    0.2580     -0.416            no bias
+  freshCPU − laggedCPU |         bindEvents |  -250.7500   162.7950   57.5567     -4.357         BIAS (≥3σ)
+  freshCPU − laggedCPU |    meanBoundMotors |    -1.2275     0.8010    0.2832     -4.334         BIAS (≥3σ)
+  freshCPU − laggedCPU |    glidingVelocity |    -1.4661     0.5608    0.1983     -7.394         BIAS (≥3σ)
+    laggedCPU − device |         bindEvents |  +375.7500   130.1337   46.0092     +8.167         BIAS (≥3σ)
+    laggedCPU − device |    meanBoundMotors |    +1.7995     0.9413    0.3328     +5.407         BIAS (≥3σ)
+    laggedCPU − device |    glidingVelocity |    +1.5734     0.5572    0.1970     +7.986         BIAS (≥3σ)
+
+=== Verdict logic ===
+  laggedCPU vs device:  t(bindEv)=+8.17, t(gv)=+7.99, t(mbm)=+5.41  → collapsed? False
+  freshCPU vs laggedCPU: t(bindEv)=-4.36, t(gv)=-7.39, t(mbm)=-4.33  → signature reproduced? False
+  VERDICT: NOT CONFIRMED — neither collapse nor signature reproduction. Hypothesis fails.
+
+Wall (s): device mean=337.5  freshCPU mean=335.1  laggedCPU mean=335.1  total ensemble wall ≈ 134.4 min

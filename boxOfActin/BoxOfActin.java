@@ -257,6 +257,24 @@ public class BoxOfActin {
 				System.err.println("[MOTOR_DIAG] DIAG_CPU_MOTOR forced ON via env var (CPU pair runs)");
 			}
 		}
+		// BOA_DIAG_RELEASE_LAG — induce a 1-step lag in the CPU release path so
+		// ckRelease and forceDotFilTrack see last step's forceDotFil rather than
+		// this step's. Default off (CPU release reads fresh same-step value).
+		// "1" / "true" turns the lag ON; "0" / "false" forces it OFF. The flag
+		// is a no-op on the device-handled motor path (gpuMotorHandled gates
+		// the CPU pair off, so addForces never runs and prevForceDotFil is
+		// never read). See JOURNAL "Motor-port borderline — release-lag
+		// confirmation".
+		String releaseLagEnv = System.getenv("BOA_DIAG_RELEASE_LAG");
+		if (releaseLagEnv != null && !releaseLagEnv.isEmpty()) {
+			if (releaseLagEnv.equals("0") || releaseLagEnv.equalsIgnoreCase("false")) {
+				GPUMoveThing.DIAG_RELEASE_LAG = false;
+				System.err.println("[RELEASE_LAG_DIAG] DIAG_RELEASE_LAG forced OFF (CPU release reads same-step forceDotFil)");
+			} else {
+				GPUMoveThing.DIAG_RELEASE_LAG = true;
+				System.err.println("[RELEASE_LAG_DIAG] DIAG_RELEASE_LAG forced ON (CPU release reads prior-step forceDotFil; mimics device lag)");
+			}
+		}
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
 			try {
