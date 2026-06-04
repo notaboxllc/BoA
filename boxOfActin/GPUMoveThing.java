@@ -217,6 +217,24 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_DEVICE_BOUNDARY_TIPC = true;
 
+    /**
+     * Diagnostic flag (2026-06-03 — Phase 2 F8/F9/F10 motor-force port).
+     * Mirrors DIAG_CPU_F3F4 in shape. Default false: the per-step myosin
+     * cross-bridge force (F8), uVec alignment torque (F9), and yVec
+     * alignment torque (F10) are computed on the device by motorForceKernel
+     * + segMotorForceKernel, and the CPU MyoFilLink path
+     * (addForces/alignUVecTorque/alignYVecTorque) early-returns inside
+     * MyoFilLink.step() when the motor's seg slot maps to the device path.
+     * Set true (via BOA_DIAG_CPU_MOTOR=1) to force boundSegSlot[mj] = -1 for
+     * every Myosin — the device kernels still launch but every motor
+     * early-returns and the per-MyoFilLink force/torque is computed entirely
+     * by the CPU pair via the unchanged tipLink.step() chain. CPU-only
+     * (non-`-gpu`) runs are unaffected either way. ckRelease / dissociateADP /
+     * binding detection (Phase 3) always stay on CPU regardless of this flag.
+     * See JOURNAL "Motor force port (F8–F10) — implementation".
+     */
+    public static boolean DIAG_CPU_MOTOR = false;
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
@@ -229,6 +247,7 @@ public class GPUMoveThing {
             DIAG_CPU_JOINTS = true;
             DIAG_CPU_F3F4   = true;
             DIAG_CPU_F1     = true;
+            DIAG_CPU_MOTOR  = true;
         }
         // MOVE_AB_PROFILE isolates the move kernel as the ONLY GPU task:
         // joints + chain + boundary routed to CPU AND split-plan execution
@@ -237,6 +256,7 @@ public class GPUMoveThing {
             DIAG_CPU_JOINTS    = true;
             DIAG_CPU_F3F4      = true;
             DIAG_CPU_F1        = true;
+            DIAG_CPU_MOTOR     = true;
             DIAG_CPU_DELTA_ADD = true;
         }
         if (SOA_POSE || MOVE_AB_PROFILE) {
@@ -308,6 +328,44 @@ public class GPUMoveThing {
     // unless DIAG_CPU_ANCHOR is true; otherwise it would double-apply.
     private static FloatArray anchorPts;      // myoCap * 3
     private static IntArray   anchoredFlags;  // myoCap
+
+    // ----- Phase 2 F8/F9/F10 — motor cross-bridge force port (2026-06-03) -----
+    // Per-Myosin binding state uploaded each step:
+    //   boundSegSlot[mj]   = move-slot of the FilSegment that motor mj is
+    //                        bound to; -1 if motor is unbound, the seg is
+    //                        CPU-fallback, or DIAG_CPU_MOTOR is on. The motor
+    //                        kernel and seg kernel both early-return when
+    //                        boundSegSlot[mj] < 0 and the CPU MyoFilLink
+    //                        addForces/alignUVec/alignYVec pair runs for that
+    //                        motor (gated in MyoFilLink.step()).
+    //   posOnSegArr[mj]    = arclength position of motor mj's attachment from
+    //                        seg.end1AsPt3D(), in µm. Constant per binding;
+    //                        re-packed every step for simplicity.
+    // Per-FilSegment CSR for the seg-side reaction force kernel:
+    //   segMotorOffsets[s] = prefix sum; motors bound to seg-slot s are at
+    //                        segMotorMyo[segMotorOffsets[s]..segMotorOffsets[s+1]).
+    //                        Built CPU-side in one pass over the boundSegSlot
+    //                        array (a transitional Phase-2 view that the
+    //                        Phase-3 device-side binding build will eliminate;
+    //                        until then it is the structurally-dual inverse
+    //                        of boundSegSlot, built in the same binding pass
+    //                        so the two cannot disagree).
+    //   segMotorMyo[k]     = joint index mj of a bound motor; len ≤ myoCap.
+    // Per-Myosin readback (device → host):
+    //   motorWriteback[mj*2+0] = forceMag (N), written by motorForceKernel.
+    //   motorWriteback[mj*2+1] = forceDotFil = Dot(F, seg.uVec) (N), signed,
+    //                            sign-equivalent to CPU's pre-flip dot product.
+    //                            Drained by bridgeMotorForceWriteback() into
+    //                            MyoFilLink.forceMag / forceDotFil, after
+    //                            which forceDotFilTrack.registerValue() is
+    //                            called to keep the 10-sample running average
+    //                            fed for MyoMotor.dissociateADP.
+    private static IntArray   boundSegSlot;     // myoCap
+    private static FloatArray posOnSegArr;      // myoCap
+    private static IntArray   segMotorOffsets;  // slotCap + 1
+    private static IntArray   segMotorMyo;      // myoCap (worst case)
+    private static FloatArray motorWriteback;   // myoCap * 2
+    private static FloatArray motorForceParams; // 6 floats: dt, motorLen, myoSpring, j1FracMoveTorq, uncockedAng, cockedAng
 
     // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
     // boundaryActive[i] = 1 when slot i holds a GPU-handled FilSegment, the
@@ -1486,6 +1544,420 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Motor-force kernels — Phase 2 F8/F9/F10 port (2026-06-03).
+    //
+    // F8  = MyoFilLink.addForces           — linear cross-bridge spring
+    // F9  = MyoFilLink.alignUVecTorque     — motor↔seg uVec alignment torque
+    // F10 = MyoFilLink.alignYVecTorque     — motor↔seg yVec alignment torque
+    //
+    // Each MyoFilLink is a one-motor ↔ one-seg pair. A FilSegment in the
+    // gliding bed may have many motors bound at once (many-to-one), so the
+    // pair force is split between two kernels to keep F3/F4's unique-ownership
+    // discipline (no atomics, no visited flags):
+    //
+    //   motorForceKernel   — one thread per Myosin (myo joint index). Reads
+    //                        its motor's pose, its bound seg's pose (via
+    //                        boundSegSlot), its posOnSeg/cocked flag. Writes
+    //                        +F, the motor-side R×F torque (F8), and
+    //                        -tvU·tmag torque on motor (F9 + F10) to its own
+    //                        motor slot only. Also writes per-Myosin
+    //                        forceMag and signed forceDotFil to a readback
+    //                        FloatArray for the CPU release path.
+    //
+    //   segMotorForceKernel — one thread per FilSegment slot. Walks its CSR
+    //                        bound-motor list (segMotorOffsets +
+    //                        segMotorMyo) and accumulates, for each bound
+    //                        motor, the seg-side reaction: -F, the seg-side
+    //                        R×(-F) torque (F8), and +tvU·tmag torque on
+    //                        seg (F9 + F10). Sums into its own slot only.
+    //
+    // Pinned direction convention (must be byte-for-byte identical in both
+    // kernels — Newton-3 invariant lives here):
+    //   • motorPt   = motor.coord + 0.5·motorLen · motor.uVec
+    //   • attachPt  = seg.coord  − 0.5·segLen   · seg.uVec  + posOnSeg · seg.uVec
+    //                = seg.end1AsPt3D() + posOnSeg · seg.uVec
+    //   • dx        = (motorPt − attachPt)    [µm]
+    //   • dist      = |dx|;  forceMag = dist · myoSpring     [N]
+    //   • F_unit    = (attachPt − motorPt) / dist   ← matches CPU's
+    //                Pt3D.unitVec(attachPt, motorPt) = (attachPt−motorPt)/mag.
+    //   • F         = forceMag · F_unit             [N, force ON the motor]
+    //   • forceDotFil = Dot(F, seg.uVec)            [N, signed]
+    // Motor kernel adds (+F, +R_motor×F) to motor slot, writes (forceMag,
+    // forceDotFil) to writeback. Seg kernel adds (−F, +R_seg×(−F)) to seg
+    // slot. Per F9: torsionUVec = unit(cross(seg.uVec, motor.uVec)),
+    //   torsionMag_U = j1FracMoveTorq · (π/180) · angD / ((1/motorBRGy +
+    //                  1/segBRGy) · dt), motor += −torsionUVec·torsionMag_U,
+    //   seg += +torsionUVec·torsionMag_U. Per F10: torsionYVec = unit(
+    //   cross(seg.yVec, motor.yVec)), torsionMag_Y same shape with bRotGam.x
+    //   in the denominator and no angRelaxed offset. Motor's bRotGam.x ==
+    //   bRotGam.y (set equal in MyoMotor.calculateProperties()), so lane 8
+    //   of myoDrags (motor.bRotGam.y) is correct for both F9 and F10.
+    //
+    // Sign of forceDotFil is load-bearing: MyoFilLink.ckRelease and
+    // MyoMotor.dissociateADP read forceDotFilTrack.averageVal() with
+    // catch ∝ exp(−forceDotFil·xCatch/kT) and slip ∝ exp(+forceDotFil·
+    // xSlip/kT) — flipping the sign inverts catch↔slip. The motor kernel's
+    // forceDotFil exactly mirrors CPU's `Pt3D.Dot(F, seg.uVecAsPt3D())`
+    // computed BEFORE the seg-side F.scale(−1) (i.e. the dot of force-on-motor
+    // with seg.uVec, positive when motor is pushed toward seg barbed end).
+    //
+    // RMW into jointForceSum/jointTorqueSum is safe within the chained
+    // TaskGraph: the boundary kernel uses the same pattern on FilSeg slots,
+    // and the motor/seg force kernels run AFTER joints+chain+boundary and
+    // BEFORE move. Motor slots got their initial SET from jointsKernel; seg
+    // slots got SET from chainPairForcesKernel and an RMW from boundaryBox.
+    // Slot disjointness with all earlier writes is unchanged from F3/F4:
+    // motorForceKernel writes only motor slots; segMotorForceKernel writes
+    // only FilSeg slots; both use separate per-slot accumulators on entry.
+    //
+    // Anchor for adding MyoMiniFilament later (deferred): the kernel API is
+    // unchanged. boundSegSlot[mj] = -1 for non-MyosinFixed Myosins; flip
+    // that line in packMotorBindingRange when the minifilament path needs
+    // device support.
+    // -------------------------------------------------------------------------
+    private static void motorForceKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray yVec,
+            FloatArray soaLengthArr,
+            IntArray   motorSlots,
+            IntArray   boundSegSlot,
+            FloatArray posOnSegArr,
+            IntArray   cockedFlags,
+            FloatArray myoDrags,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray motorWriteback,
+            FloatArray motorForceParams,
+            IntArray   counts) {
+
+        int M = counts.get(3);
+
+        double dt              = (double) motorForceParams.get(0);
+        double motorLen        = (double) motorForceParams.get(1);
+        double myoSpring       = (double) motorForceParams.get(2);
+        double j1FracMoveTorq  = (double) motorForceParams.get(3);
+        double uncockedAng     = (double) motorForceParams.get(4);
+        double cockedAng       = (double) motorForceParams.get(5);
+
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
+
+        for (@Parallel int mj = 0; mj < cockedFlags.getSize(); mj++) {
+            // Sentinel writebacks: keep the readback well-defined for every
+            // motor slot even when unbound, so bridgeMotorForceWriteback() is
+            // a safe no-op for those motors.
+            motorWriteback.set(mj * 2,     0.0f);
+            motorWriteback.set(mj * 2 + 1, 0.0f);
+            if (mj >= M) { return; }
+
+            int segSlot = boundSegSlot.get(mj);
+            if (segSlot < 0) { return; }   // unbound, CPU-fallback seg, or DIAG_CPU_MOTOR
+
+            int motorSlot = motorSlots.get(mj);
+
+            // Motor pose.
+            int mo3 = motorSlot * 3;
+            double mcx = coord.get(mo3),  mcy = coord.get(mo3 + 1), mcz = coord.get(mo3 + 2);
+            double mux = uVec.get(mo3),   muy = uVec.get(mo3 + 1),  muz = uVec.get(mo3 + 2);
+            double myx = yVec.get(mo3),   myy = yVec.get(mo3 + 1),  myz = yVec.get(mo3 + 2);
+
+            // Seg pose.
+            int s3 = segSlot * 3;
+            double scx = coord.get(s3),  scy = coord.get(s3 + 1), scz = coord.get(s3 + 2);
+            double sux = uVec.get(s3),   suy = uVec.get(s3 + 1),  suz = uVec.get(s3 + 2);
+            double syx = yVec.get(s3),   syy = yVec.get(s3 + 1),  syz = yVec.get(s3 + 2);
+            double segLen   = (double) soaLengthArr.get(segSlot);
+            double posOnSeg = (double) posOnSegArr.get(mj);
+
+            // Motor drags: bRotGam.y at lane 8 (motor's bRotGam.x == bRotGam.y).
+            int md9 = mj * 9;
+            double motorBRGy = (double) myoDrags.get(md9 + 8);
+            double motorBRGx = motorBRGy;
+
+            // Seg drags: bRotGam.x at lane 0, bRotGam.y at lane 1 of slot triplet.
+            double segBRGx = (double) bRotGam.get(s3);
+            double segBRGy = (double) bRotGam.get(s3 + 1);
+
+            int cocked = cockedFlags.get(mj);
+
+            double halfMotor = 0.5 * motorLen;
+            double halfSeg   = 0.5 * segLen;
+
+            // motorPt = motor.coord + 0.5·motorLen · motor.uVec
+            double mpx = mcx + halfMotor * mux;
+            double mpy = mcy + halfMotor * muy;
+            double mpz = mcz + halfMotor * muz;
+            // attachPt = seg.end1 + posOnSeg · seg.uVec
+            //          = (seg.coord − 0.5·segLen·seg.uVec) + posOnSeg·seg.uVec
+            //          = seg.coord + (posOnSeg − 0.5·segLen)·seg.uVec
+            double posOff = posOnSeg - halfSeg;
+            double apx = scx + posOff * sux;
+            double apy = scy + posOff * suy;
+            double apz = scz + posOff * suz;
+
+            // F8 — spring force.
+            double dxv = mpx - apx, dyv = mpy - apy, dzv = mpz - apz;
+            double dist = Math.sqrt(dxv*dxv + dyv*dyv + dzv*dzv);
+            double forceMag = dist * myoSpring;
+            // F_unit = (attachPt − motorPt) / dist  (CPU's unitVec(attachPt, motorPt)).
+            double invDist = (dist > 0.0) ? (1.0 / dist) : 0.0;
+            double fux = -dxv * invDist;
+            double fuy = -dyv * invDist;
+            double fuz = -dzv * invDist;
+            double Fx = forceMag * fux;
+            double Fy = forceMag * fuy;
+            double Fz = forceMag * fuz;
+            // forceDotFil = Dot(F, seg.uVec) — SIGNED, BEFORE any seg-side
+            // F-flip. Equivalent to CPU's Pt3D.Dot(F, mySeg.uVecAsPt3D())
+            // computed at MyoFilLink.java:91.
+            double forceDotFil = Fx * sux + Fy * suy + Fz * suz;
+
+            // Motor-side R×F (F8 contribution to motor torque). R_motor =
+            // (motorPt − motor.coord) · 1e-6 = 0.5e-6·motorLen·motor.uVec.
+            double Rmx = halfMotor * mux * 1.0e-6;
+            double Rmy = halfMotor * muy * 1.0e-6;
+            double Rmz = halfMotor * muz * 1.0e-6;
+            double Tmx = Rmy * Fz - Rmz * Fy;
+            double Tmy = Rmz * Fx - Rmx * Fz;
+            double Tmz = Rmx * Fy - Rmy * Fx;
+
+            // F9 — uVec alignment torque.
+            {
+                double tvx = suy * muz - suz * muy;
+                double tvy = suz * mux - sux * muz;
+                double tvz = sux * muy - suy * mux;
+                double tvMag2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                if (tvMag2 > 0.0) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                    double dotVecs = sux*mux + suy*muy + suz*muz;
+                    if (dotVecs >  1.0) dotVecs =  1.0;
+                    if (dotVecs < -1.0) dotVecs = -1.0;
+                    double angTween = accurateAcos(dotVecs) * RAD2DEG;
+                    double angRelaxed = (cocked == 1) ? cockedAng : uncockedAng;
+                    double angD = angTween - angRelaxed;
+                    double invBRG = 1.0 / motorBRGy + 1.0 / segBRGy;
+                    double torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                    // Motor side gets -torsion (seg side gets +torsion via seg kernel).
+                    Tmx -= tvx * torsionMag;
+                    Tmy -= tvy * torsionMag;
+                    Tmz -= tvz * torsionMag;
+                }
+            }
+
+            // F10 — yVec alignment torque.
+            {
+                double tvx = syy * myz - syz * myy;
+                double tvy = syz * myx - syx * myz;
+                double tvz = syx * myy - syy * myx;
+                double tvMag2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                if (tvMag2 > 0.0) {
+                    double invMag = 1.0 / Math.sqrt(tvMag2);
+                    tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                    double dotVecs = syx*myx + syy*myy + syz*myz;
+                    if (dotVecs >  1.0) dotVecs =  1.0;
+                    if (dotVecs < -1.0) dotVecs = -1.0;
+                    double angTween = accurateAcos(dotVecs) * RAD2DEG;
+                    // No angRelaxed for F10 — target is 0°.
+                    double angD = angTween;
+                    double invBRG = 1.0 / motorBRGx + 1.0 / segBRGx;
+                    double torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                    Tmx -= tvx * torsionMag;
+                    Tmy -= tvy * torsionMag;
+                    Tmz -= tvz * torsionMag;
+                }
+            }
+
+            // RMW into the motor slot's jointForceSum / jointTorqueSum. The
+            // motor slot was SET by jointsKernel earlier in the same execute()
+            // — its rod/lever/motor contributions are already in place; we add
+            // the cross-bridge contribution on top. Slot disjointness with
+            // chainPairForcesKernel / boundaryBoxKernel (both FilSeg slots
+            // only) is preserved.
+            jointForceSum.set(mo3,     (float)((double) jointForceSum.get(mo3)     + Fx));
+            jointForceSum.set(mo3 + 1, (float)((double) jointForceSum.get(mo3 + 1) + Fy));
+            jointForceSum.set(mo3 + 2, (float)((double) jointForceSum.get(mo3 + 2) + Fz));
+            jointTorqueSum.set(mo3,     (float)((double) jointTorqueSum.get(mo3)     + Tmx));
+            jointTorqueSum.set(mo3 + 1, (float)((double) jointTorqueSum.get(mo3 + 1) + Tmy));
+            jointTorqueSum.set(mo3 + 2, (float)((double) jointTorqueSum.get(mo3 + 2) + Tmz));
+
+            // Per-Myosin readback. The CPU release path (MyoFilLink.ckRelease,
+            // MyoMotor.dissociateADP) reads these on the NEXT step, after
+            // bridgeMotorForceWriteback() drains them.
+            motorWriteback.set(mj * 2,     (float) forceMag);
+            motorWriteback.set(mj * 2 + 1, (float) forceDotFil);
+        }
+    }
+
+    // Seg-side companion: one thread per FilSegment slot, walks the CSR
+    // bound-motor list and accumulates the SEG SIDE of each (motor, seg)
+    // pair's cross-bridge contribution into its own jointForceSum /
+    // jointTorqueSum slot. Force formula and angles are RECOMPUTED bit-for-bit
+    // from the same inputs via the pinned convention so the seg-side reaction
+    // is exactly anti-parallel to the motor-side action — F3/F4's
+    // unique-ownership pair pattern generalized 1:1 → many:1. No atomics, no
+    // visited flags, no cross-slot writes.
+    private static void segMotorForceKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray yVec,
+            FloatArray soaLengthArr,
+            IntArray   segMotorOffsets,
+            IntArray   segMotorMyo,
+            IntArray   motorSlots,
+            FloatArray posOnSegArr,
+            IntArray   cockedFlags,
+            FloatArray myoDrags,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray motorForceParams,
+            IntArray   counts) {
+
+        int N = counts.get(0);
+
+        double dt              = (double) motorForceParams.get(0);
+        double motorLen        = (double) motorForceParams.get(1);
+        double myoSpring       = (double) motorForceParams.get(2);
+        double j1FracMoveTorq  = (double) motorForceParams.get(3);
+        double uncockedAng     = (double) motorForceParams.get(4);
+        double cockedAng       = (double) motorForceParams.get(5);
+
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
+
+        for (@Parallel int i = 0; i < coord.getSize() / 3; i++) {
+            if (i >= N) { return; }
+
+            int start = segMotorOffsets.get(i);
+            int end   = segMotorOffsets.get(i + 1);
+            if (start >= end) { return; }
+
+            int s3 = i * 3;
+            double scx = coord.get(s3),  scy = coord.get(s3 + 1), scz = coord.get(s3 + 2);
+            double sux = uVec.get(s3),   suy = uVec.get(s3 + 1),  suz = uVec.get(s3 + 2);
+            double syx = yVec.get(s3),   syy = yVec.get(s3 + 1),  syz = yVec.get(s3 + 2);
+            double segLen = (double) soaLengthArr.get(i);
+            double halfSeg = 0.5 * segLen;
+
+            double segBRGx = (double) bRotGam.get(s3);
+            double segBRGy = (double) bRotGam.get(s3 + 1);
+
+            double halfMotor = 0.5 * motorLen;
+
+            double fxSum = 0.0, fySum = 0.0, fzSum = 0.0;
+            double txSum = 0.0, tySum = 0.0, tzSum = 0.0;
+
+            for (int k = start; k < end; k++) {
+                int mj = segMotorMyo.get(k);
+                int motorSlot = motorSlots.get(mj);
+                int mo3 = motorSlot * 3;
+                double mcx = coord.get(mo3),  mcy = coord.get(mo3 + 1), mcz = coord.get(mo3 + 2);
+                double mux = uVec.get(mo3),   muy = uVec.get(mo3 + 1),  muz = uVec.get(mo3 + 2);
+                double myx = yVec.get(mo3),   myy = yVec.get(mo3 + 1),  myz = yVec.get(mo3 + 2);
+                double posOnSeg = (double) posOnSegArr.get(mj);
+                int cocked = cockedFlags.get(mj);
+
+                int md9 = mj * 9;
+                double motorBRGy = (double) myoDrags.get(md9 + 8);
+                double motorBRGx = motorBRGy;
+
+                // motorPt and attachPt — IDENTICAL formula to motorForceKernel.
+                double mpx = mcx + halfMotor * mux;
+                double mpy = mcy + halfMotor * muy;
+                double mpz = mcz + halfMotor * muz;
+                double posOff = posOnSeg - halfSeg;
+                double apx = scx + posOff * sux;
+                double apy = scy + posOff * suy;
+                double apz = scz + posOff * suz;
+
+                double dxv = mpx - apx, dyv = mpy - apy, dzv = mpz - apz;
+                double dist = Math.sqrt(dxv*dxv + dyv*dyv + dzv*dzv);
+                double forceMag = dist * myoSpring;
+                double invDist = (dist > 0.0) ? (1.0 / dist) : 0.0;
+                double fux = -dxv * invDist;
+                double fuy = -dyv * invDist;
+                double fuz = -dzv * invDist;
+                double Fx = forceMag * fux;
+                double Fy = forceMag * fuy;
+                double Fz = forceMag * fuz;
+                // Seg side gets -F.
+                fxSum -= Fx;
+                fySum -= Fy;
+                fzSum -= Fz;
+
+                // Seg-side R × (−F). R_seg = (attachPt − seg.coord) · 1e-6
+                //                          = (posOnSeg − 0.5·segLen) · seg.uVec · 1e-6.
+                double Rsx = posOff * sux * 1.0e-6;
+                double Rsy = posOff * suy * 1.0e-6;
+                double Rsz = posOff * suz * 1.0e-6;
+                double negFx = -Fx, negFy = -Fy, negFz = -Fz;
+                txSum += Rsy * negFz - Rsz * negFy;
+                tySum += Rsz * negFx - Rsx * negFz;
+                tzSum += Rsx * negFy - Rsy * negFx;
+
+                // F9 — uVec alignment torque, seg side gets +torsion.
+                {
+                    double tvx = suy * muz - suz * muy;
+                    double tvy = suz * mux - sux * muz;
+                    double tvz = sux * muy - suy * mux;
+                    double tvMag2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                    if (tvMag2 > 0.0) {
+                        double invMag = 1.0 / Math.sqrt(tvMag2);
+                        tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                        double dotVecs = sux*mux + suy*muy + suz*muz;
+                        if (dotVecs >  1.0) dotVecs =  1.0;
+                        if (dotVecs < -1.0) dotVecs = -1.0;
+                        double angTween = accurateAcos(dotVecs) * RAD2DEG;
+                        double angRelaxed = (cocked == 1) ? cockedAng : uncockedAng;
+                        double angD = angTween - angRelaxed;
+                        double invBRG = 1.0 / motorBRGy + 1.0 / segBRGy;
+                        double torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                        txSum += tvx * torsionMag;
+                        tySum += tvy * torsionMag;
+                        tzSum += tvz * torsionMag;
+                    }
+                }
+
+                // F10 — yVec alignment torque, seg side gets +torsion.
+                {
+                    double tvx = syy * myz - syz * myy;
+                    double tvy = syz * myx - syx * myz;
+                    double tvz = syx * myy - syy * myx;
+                    double tvMag2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                    if (tvMag2 > 0.0) {
+                        double invMag = 1.0 / Math.sqrt(tvMag2);
+                        tvx *= invMag; tvy *= invMag; tvz *= invMag;
+                        double dotVecs = syx*myx + syy*myy + syz*myz;
+                        if (dotVecs >  1.0) dotVecs =  1.0;
+                        if (dotVecs < -1.0) dotVecs = -1.0;
+                        double angTween = accurateAcos(dotVecs) * RAD2DEG;
+                        double angD = angTween;
+                        double invBRG = 1.0 / motorBRGx + 1.0 / segBRGx;
+                        double torsionMag = j1FracMoveTorq * DEG2RAD * angD / (invBRG * dt);
+                        txSum += tvx * torsionMag;
+                        tySum += tvy * torsionMag;
+                        tzSum += tvz * torsionMag;
+                    }
+                }
+            }
+
+            // RMW into this seg's jointForceSum / jointTorqueSum slot. Chain
+            // SET its F3+F4 contribution, boundary RMW'd its F1 contribution;
+            // here we RMW the seg side of every bound motor's cross-bridge
+            // contribution. Disjoint from motor slots written by motorForceKernel.
+            jointForceSum.set(s3,     (float)((double) jointForceSum.get(s3)     + fxSum));
+            jointForceSum.set(s3 + 1, (float)((double) jointForceSum.get(s3 + 1) + fySum));
+            jointForceSum.set(s3 + 2, (float)((double) jointForceSum.get(s3 + 2) + fzSum));
+            jointTorqueSum.set(s3,     (float)((double) jointTorqueSum.get(s3)     + txSum));
+            jointTorqueSum.set(s3 + 1, (float)((double) jointTorqueSum.get(s3 + 1) + tySum));
+            jointTorqueSum.set(s3 + 2, (float)((double) jointTorqueSum.get(s3 + 2) + tzSum));
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Move kernel — sums the CPU-contributed forceSum and the device-side
     // joint-delta buffer to get the complete per-Thing force/torque, then
     // generates Brownian inline via Wang hash and integrates pose.
@@ -1851,6 +2323,14 @@ public class GPUMoveThing {
         boundaryTipC = new FloatArray(slotCap * 2);
         for (int i = 0; i < slotCap * 2; i++) { boundaryTipC.set(i, 1.0e6f); }
 
+        // Phase 2 F8/F9/F10 — motor cross-bridge force port.
+        boundSegSlot     = new IntArray(myoCap);
+        posOnSegArr      = new FloatArray(myoCap);
+        segMotorOffsets  = new IntArray(slotCap + 1);
+        segMotorMyo      = new IntArray(Math.max(1, myoCap));
+        motorWriteback   = new FloatArray(myoCap * 2);
+        motorForceParams = new FloatArray(6);
+
         params      = new FloatArray(2);
         jointParams = new FloatArray(13);
         chainParams = new FloatArray(7);
@@ -1903,6 +2383,9 @@ public class GPUMoveThing {
                               topoEnd1Slot, topoEnd1Side,
                               soaLengthArr,
                               boundaryActive, boundaryParams, boundaryTipC,
+                              boundSegSlot, posOnSegArr,
+                              segMotorOffsets, segMotorMyo,
+                              motorWriteback, motorForceParams,
                               jointParams, chainParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
@@ -1933,6 +2416,25 @@ public class GPUMoveThing {
         }
         // else if (boundaryShape == BOUNDARY_SHAPE_PILL) { ... // F1b }
 
+        // Phase 2 F8/F9/F10 — motor cross-bridge force (motor-side + seg-side).
+        // Order: AFTER boundary (so all FilSeg-slot writes are visible), BEFORE
+        // move (so all motor-slot writes land before integration).
+        tg = tg.task("motorForce",
+              GPUMoveThing::motorForceKernel,
+              coord, uVec, yVec, soaLengthArr,
+              motorSlots, boundSegSlot, posOnSegArr, cockedFlags,
+              myoDrags, bRotGam,
+              jointForceSum, jointTorqueSum,
+              motorWriteback, motorForceParams, counts)
+            .task("segMotorForce",
+              GPUMoveThing::segMotorForceKernel,
+              coord, uVec, yVec, soaLengthArr,
+              segMotorOffsets, segMotorMyo,
+              motorSlots, posOnSegArr, cockedFlags,
+              myoDrags, bRotGam,
+              jointForceSum, jointTorqueSum,
+              motorForceParams, counts);
+
         tg = tg.task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
                            : GPUMoveThing::moveThingKernel,
@@ -1953,20 +2455,22 @@ public class GPUMoveThing {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
                                        jointForceSum, jointTorqueSum,
-                                       boundaryTipC);
+                                       boundaryTipC, motorWriteback);
             } else {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
-                                       jointForceSum, jointTorqueSum);
+                                       jointForceSum, jointTorqueSum,
+                                       motorWriteback);
             }
         } else {
             if (boundaryShape == BOUNDARY_SHAPE_BOX) {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
-                                       boundaryTipC);
+                                       boundaryTipC, motorWriteback);
             } else {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                       coord, uVec, yVec);
+                                       coord, uVec, yVec,
+                                       motorWriteback);
             }
         }
 
@@ -1991,6 +2495,16 @@ public class GPUMoveThing {
             boundaryWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
             gridScheduler.addWorkerGrid("chained.boundary", boundaryWorker);
         }
+
+        // Phase 2 F8/F9/F10: motorForce one thread per Myosin; segMotorForce
+        // one thread per move slot. Same block sizes as the joints/chain
+        // kernels they mirror.
+        WorkerGrid motorForceWorker = new WorkerGrid1D(myoCap);
+        motorForceWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler.addWorkerGrid("chained.motorForce", motorForceWorker);
+        WorkerGrid segMotorForceWorker = new WorkerGrid1D(slotCap);
+        segMotorForceWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler.addWorkerGrid("chained.segMotorForce", segMotorForceWorker);
 
         if (DIAG_CPU_DELTA_ADD) {
             // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,
@@ -2354,6 +2868,160 @@ public class GPUMoveThing {
             double devE2 = (double) boundaryTipC.get(s * 2 + 1);
             if (devE1 < fs.end1TipC) fs.end1TipC = devE1;
             if (devE2 < fs.end2TipC) fs.end2TipC = devE2;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Motor-binding pack + CSR build (Phase 2 F8/F9/F10, 2026-06-03).
+    //
+    // For every Myosin in the joint list (mj in [0, myoJointCt)):
+    //   - read tipLink.mySeg + tipLink.posOnSeg
+    //   - boundSegSlot[mj]  = move-slot of mySeg (or -1 if unbound, the seg
+    //                        is CPU-fallback, the Myosin is not MyosinFixed,
+    //                        or DIAG_CPU_MOTOR is on)
+    //   - posOnSegArr[mj]   = (float) tipLink.posOnSeg (only meaningful when
+    //                        boundSegSlot >= 0)
+    //   - simultaneously count motors per seg-slot to seed the CSR prefix sum.
+    //
+    // Build the CSR in a second pass over the same boundSegSlot array — this
+    // is the "one binding pass" structural-duality discipline: boundSegSlot
+    // and (segMotorOffsets, segMotorMyo) are two views of the same per-motor
+    // binding, scattered from the same source array, so they can never
+    // disagree about who is bound to whom.
+    //
+    // The CSR view is a TRANSITIONAL Phase-2 device upload: it carries no
+    // new information beyond boundSegSlot. The Phase-3 device-side binding
+    // build (when MyoMotor.checkFilSegCollision moves to a kernel) will
+    // eliminate it by maintaining the CSR on device. Until then, ~25k myo
+    // CPU build per step at gliding-assay scale is O(motorCt) and negligible
+    // relative to the surrounding step-phase budget.
+    //
+    // Pre-conditions: classifyThings() has populated thingNumberToMoveSlot
+    // and jointSlotToMyoIdx. Called from moveThings() AFTER the parallel
+    // OP_PACK_JOINTS dispatch (which fills myoDrags / cockedFlags etc.) and
+    // BEFORE plan.execute().
+    // -------------------------------------------------------------------------
+    private static int[] segMotorCount;   // reused across calls
+    private static int[] segMotorCursor;  // reused across calls
+
+    private static void packMotorBinding() {
+        int M = myoJointCt;
+        int N = slotCount;
+        // boundSegSlot / posOnSegArr per-myo and counts per seg-slot.
+        if (segMotorCount == null || segMotorCount.length < N + 1) {
+            segMotorCount  = new int[N + 1];
+            segMotorCursor = new int[N + 1];
+        } else {
+            for (int s = 0; s <= N; s++) { segMotorCount[s] = 0; segMotorCursor[s] = 0; }
+        }
+
+        boolean cpuMotor = DIAG_CPU_MOTOR;
+        int[] toMyo = jointSlotToMyoIdx;
+        Myosin[] myos = Myosin.theMyosins;
+
+        for (int mj = 0; mj < M; mj++) {
+            int segSlot = -1;
+            float posOnSegF = 0f;
+            if (!cpuMotor) {
+                Myosin myo = myos[toMyo[mj]];
+                // Scope to MyosinFixed only — MyoMiniFilament path is deferred
+                // (its dimers' internal Myosins have their own tipLink, but
+                // the joint coupling that drives them is CPU-only; keeping
+                // them off the device kernel preserves correctness without
+                // any kernel change).
+                if (myo instanceof MyosinFixed) {
+                    MyoMotor motor = myo.myoMotor;
+                    if (motor != null) {
+                        MyoFilLink link = motor.tipLink;
+                        if (link != null && link.mySeg != null && !link.mySeg.removeMe) {
+                            int sIdx = link.mySeg.myThingNumber;
+                            if (sIdx >= 0 && sIdx < thingNumberToMoveSlot.length) {
+                                int s = thingNumberToMoveSlot[sIdx];
+                                if (s >= 0 && s < N) {
+                                    segSlot = s;
+                                    posOnSegF = (float) link.posOnSeg;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            boundSegSlot.set(mj, segSlot);
+            posOnSegArr.set(mj, posOnSegF);
+            if (segSlot >= 0) segMotorCount[segSlot + 1]++;
+        }
+
+        // Prefix sum into segMotorOffsets[0..N].
+        segMotorOffsets.set(0, 0);
+        for (int s = 1; s <= N; s++) {
+            segMotorOffsets.set(s, segMotorOffsets.get(s - 1) + segMotorCount[s]);
+        }
+        // Defensive: pad remaining offsets past N (kernel only indexes
+        // [0..N], but the IntArray capacity is slotCap+1 which can exceed N).
+        int padLast = segMotorOffsets.get(N);
+        for (int s = N + 1; s < segMotorOffsets.getSize(); s++) {
+            segMotorOffsets.set(s, padLast);
+        }
+
+        // Scatter mj into segMotorMyo.
+        for (int mj = 0; mj < M; mj++) {
+            int s = boundSegSlot.get(mj);
+            if (s < 0) continue;
+            int base = segMotorOffsets.get(s);
+            segMotorMyo.set(base + segMotorCursor[s], mj);
+            segMotorCursor[s]++;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Motor-force writeback bridge (Phase 2 F8/F9/F10, 2026-06-03).
+    //
+    // Drains motorWriteback (per-Myosin forceMag, forceDotFil) into the
+    // MyoFilLink fields on every bound motor, then calls
+    // forceDotFilTrack.registerValue(forceDotFil) to keep the 10-sample
+    // running mean fed for MyoMotor.dissociateADP (it reads
+    // averageVal() as the directional gate). Runs AFTER plan.execute()
+    // returns and BEFORE the next step's tipLink.step() reads these fields
+    // (the next step's MyoFilLink.ckRelease consumes forceMag and
+    // forceDotFil; dissociateADP reads the tracker).
+    //
+    // Ordering (per the implementation note): writeback drain →
+    // forceDotFilTrack.registerValue → CPU release on the next step.
+    //
+    // Sign of forceDotFil is load-bearing: the kernel computes
+    // Dot(F, seg.uVec) BEFORE the seg-side F-flip, so the value written here
+    // is sign-equivalent to CPU's MyoFilLink.java:91. Verified in the cheap
+    // probe (HeldBoundMotorDiag) before this method ever runs on a real
+    // ensemble.
+    //
+    // For non-MyosinFixed Myosins and CPU-fallback bindings, boundSegSlot was
+    // -1, so the kernel wrote (0, 0) to motorWriteback. We skip those in the
+    // drain: the CPU pair (MyoFilLink.addForces) updates the same fields on
+    // its CPU path, so we must not overwrite them with zeros.
+    // -------------------------------------------------------------------------
+    private static void bridgeMotorForceWriteback() {
+        int M = myoJointCt;
+        if (M == 0) return;
+        int[] toMyo = jointSlotToMyoIdx;
+        Myosin[] myos = Myosin.theMyosins;
+        for (int mj = 0; mj < M; mj++) {
+            int segSlot = boundSegSlot.get(mj);
+            if (segSlot < 0) continue;   // CPU pair owns this motor's forces this step
+            Myosin myo = myos[toMyo[mj]];
+            if (myo == null) continue;
+            MyoMotor motor = myo.myoMotor;
+            if (motor == null) continue;
+            MyoFilLink link = motor.tipLink;
+            if (link == null || link.mySeg == null) continue;   // released between pack and drain
+            double forceMag    = (double) motorWriteback.get(mj * 2);
+            double forceDotFil = (double) motorWriteback.get(mj * 2 + 1);
+            link.forceMag    = forceMag;
+            link.forceDotFil = forceDotFil;
+            // Keep the 10-sample running mean fed — dissociateADP reads
+            // averageVal() and would otherwise see only zeros on device path.
+            if (link.forceDotFilTrack != null) {
+                link.forceDotFilTrack.registerValue(forceDotFil);
+            }
         }
     }
 
@@ -2820,6 +3488,25 @@ public class GPUMoveThing {
         boundaryParams.set(4, (float) FilSegment.radius);
         boundaryParams.set(5, 0.1f);
 
+        // Phase 2 F8/F9/F10 — motor cross-bridge force kernel parameters.
+        // myoSpring is the hard-coded literal in MyoFilLink.java:22 (1e-9
+        // N/µm); if it ever moves to a Parameter, pick it up here.
+        motorForceParams.set(0, (float) Env.deltaT.getValue());
+        motorForceParams.set(1, (float) Env.myoMotorLength.getValue());
+        motorForceParams.set(2, (float) MyoFilLink.myoSpring);
+        motorForceParams.set(3, (float) Env.myoJ1FracMoveTorq.getValue());
+        motorForceParams.set(4, (float) Myosin.uncockedMotor_ActinAngle);
+        motorForceParams.set(5, (float) Myosin.cockedMotor_ActinAngle);
+
+        // Build per-Myosin binding view + CSR (one binding pass, structurally
+        // dual). Sets boundSegSlot[mj]/posOnSegArr[mj] for the motor kernel
+        // and segMotorOffsets[]+segMotorMyo[] for the seg kernel. Done CPU-side
+        // before plan.execute(); transitional until Phase 3 binding move to
+        // device. Cheap (O(motorCt)) at gliding-assay scale.
+        if (myoJointCt > 0) {
+            packMotorBinding();
+        }
+
         counts.set(0, slotCount);
         counts.set(1, stepCounter);
         counts.set(2, runSeed);
@@ -2922,6 +3609,18 @@ public class GPUMoveThing {
         // any sentinel).
         if (DIAG_DEVICE_BOUNDARY_TIPC && boundaryShape == BOUNDARY_SHAPE_BOX) {
             bridgeBoundaryTipC();
+        }
+        // Motor-force writeback (Phase 2 F8/F9/F10, 2026-06-03). Drain
+        // device-computed forceMag / forceDotFil into every device-handled
+        // MyoFilLink and feed forceDotFilTrack. ckRelease/dissociateADP run
+        // on the NEXT step's tipLink.step() with these values; the 1-step
+        // lag is harmless at dt=1e-4s (release is a stochastic gate and
+        // forces don't change measurably between consecutive ~100µs steps).
+        // CPU-fallback motors (boundSegSlot < 0) keep their CPU-computed
+        // values from MyoFilLink.addForces in this step — the bridge skips
+        // them via the boundSegSlot < 0 guard.
+        if (myoJointCt > 0) {
+            bridgeMotorForceWriteback();
         }
         int tc = Thing.thingCt;
         if (tc > 0) {

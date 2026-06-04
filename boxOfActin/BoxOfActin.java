@@ -232,6 +232,31 @@ public class BoxOfActin {
 				System.err.println("[F1_DIAG] DIAG_DEVICE_BOUNDARY_TIPC forced ON (tipC writeback ENABLED)");
 			}
 		}
+		// BOA_DIAG_CPU_MOTOR — toggle the Phase-2 F8/F9/F10 motor cross-bridge
+		// force source-of-truth.
+		//   default (unset)             → device motorForce+segMotorForce kernels run
+		//                                 and the CPU MyoFilLink addForces /
+		//                                 alignUVecTorque / alignYVecTorque
+		//                                 pair is gated off in MyoFilLink.step()
+		//                                 for device-handled bound motors.
+		//   "1" / "true"                → CPU pair runs and the device kernels
+		//                                 still launch but every motor
+		//                                 early-returns via boundSegSlot=-1.
+		//   "0" / "false"               → device kernels run (same as default).
+		// release kinetics (ckRelease / dissociateADP) and binding detection
+		// (Phase 3 grid) stay on CPU either way; this flag only toggles the
+		// per-step force computation (F8/F9/F10).
+		// See JOURNAL "Motor force port (F8-F10) — implementation".
+		String cpuMotorEnv = System.getenv("BOA_DIAG_CPU_MOTOR");
+		if (cpuMotorEnv != null && !cpuMotorEnv.isEmpty()) {
+			if (cpuMotorEnv.equals("0") || cpuMotorEnv.equalsIgnoreCase("false")) {
+				GPUMoveThing.DIAG_CPU_MOTOR = false;
+				System.err.println("[MOTOR_DIAG] DIAG_CPU_MOTOR forced OFF via env var (device kernels ACTIVE)");
+			} else {
+				GPUMoveThing.DIAG_CPU_MOTOR = true;
+				System.err.println("[MOTOR_DIAG] DIAG_CPU_MOTOR forced ON via env var (CPU pair runs)");
+			}
+		}
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
 			try {

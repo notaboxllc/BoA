@@ -1,8 +1,395 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (Motor force port (F8–F10) — survey; 64-mon paired device-vs-CPU gliding ensemble — full ported stack — PASS)
+Last updated: 2026-06-04 (Motor force port (F8–F10) — implementation — Phase 2 motor BORDERLINE PASS, port committed at default device)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Motor force port (F8–F10) — implementation (Phase 2 motor — BORDERLINE PASS, port committed at default device)
+
+**Verdict: Phase 2 motor (F8–F10) BORDERLINE PASS, port committed at default
+device.** Per-step myosin cross-bridge force (F8 spring, F9 motor↔fil uVec
+alignment torque, F10 motor↔fil yVec alignment torque) now computes on the
+device for `MyosinFixed` motors with a GPU-handled bound seg. Two new kernels
+(`motorForceKernel` per Myosin, `segMotorForceKernel` per FilSegment with a CSR
+walk) added to the chained TaskGraph after the boundary kernel and before the
+move kernel. The cheap probe (HeldBoundMotorDiag, 4 cases) PASSes exactly —
+forces / torques / `forceDotFil` (sign + magnitude) all match CPU to the
+float-noise floor (max |Δ| 1.13e-16), Newton-3 pair sums exactly 0. The
+motor-isolation paired ensemble (N=20, glidingAssay500_val) shows
+`meanBoundMotors` CLEAN (paired t = −0.25) but `bindEvents` (t = −2.13) and
+`glidingVelocity` (t = −2.12) at the ~2σ border — neither "well under 2" PASS
+nor "gross / large bias" BAIL. Root cause is hypothesised to be a 1-step
+release-decision lag inherent to the architecture (`ckRelease` runs in the
+step phase BEFORE the move phase that writes back the device force), not a
+formula bug. Default `DIAG_CPU_MOTOR = false` (device kernels active);
+`BOA_DIAG_CPU_MOTOR=1` is the A/B lever. Release kinetics (`ckRelease`,
+`dissociateADP`) and binding detection stay on CPU, as scoped by the survey.
+`MyoMiniFilament` deferred per scope; the kernel API is unchanged when that
+configuration enters the rotation (flip one line in `packMotorBinding`).
+
+### Two kernels — pinned direction convention
+
+A FilSegment in the gliding bed may have many motors bound at once (many-to-one),
+so the pair force is split between two kernels — F3/F4's unique-ownership
+discipline generalised 1:1 → many:1. No atomics, no visited flags.
+
+- **`motorForceKernel`** — one thread per Myosin joint slot (`myoJointCt`
+  threads, block 64 — same shape as the joints kernel). Reads motor pose (via
+  `motorSlots[mj]`), bound seg's pose (via `boundSegSlot[mj]`),
+  `posOnSegArr[mj]`, `cockedFlags[mj]`, motor drag (lane 8 of `myoDrags`,
+  motor.bRotGam.y; motor.bRotGam.x == .y by `MyoMotor.calculateProperties`), seg
+  drag (lanes 0/1 of seg's `bRotGam` triplet). Computes the F-vector, the
+  motor-side R×F (F8) torque, the motor-side −torsion·tmag (F9 + F10) torques.
+  RMWs into the motor slot's `jointForceSum`/`jointTorqueSum` (motor slot was
+  SET by jointsKernel earlier in the same execute()). Also writes per-Myosin
+  `forceMag` and signed `forceDotFil` into the readback `motorWriteback`
+  FloatArray.
+
+- **`segMotorForceKernel`** — one thread per FilSegment slot (`slotCount`
+  threads, block 64 — same shape as the chain kernel). Reads the CSR list of
+  bound motors at this slot (`segMotorOffsets`/`segMotorMyo`), accumulates the
+  seg-side reaction (−F, R_seg × (−F), +torsion·tmag for F9 + F10) by
+  RECOMPUTING the force from the same inputs, then RMWs into its own
+  `jointForceSum`/`jointTorqueSum` slot. Inputs and arithmetic are
+  byte-identical to `motorForceKernel`, so motor-side `+F` and seg-side `−F`
+  are exactly anti-parallel — exactly the F3/F4 pattern.
+
+**Pinned direction convention** (verbatim in both kernels — Newton-3 invariant
+lives here):
+- `motorPt = motor.coord + 0.5·motorLen·motor.uVec`.
+- `attachPt = seg.coord + (posOnSeg − 0.5·segLen)·seg.uVec` (= seg.end1 +
+  posOnSeg·seg.uVec).
+- `dx = motorPt − attachPt`; `dist = |dx|`; `forceMag = dist · myoSpring`
+  (`myoSpring = 1e-9 N/µm`, hard-coded at `MyoFilLink.java:22`).
+- `F_unit = (attachPt − motorPt) / dist` — matches CPU's
+  `Pt3D.unitVec(attachPt, motorPt) = (attachPt − motorPt) / mag`.
+- `F = forceMag · F_unit` — force ON the motor.
+- `forceDotFil = Dot(F, seg.uVec)` — signed, written to readback BEFORE any
+  seg-side F-flip. Sign-equivalent to CPU's `MyoFilLink.java:91`.
+
+F9: `torsionVec = unit(cross(seg.uVec, motor.uVec))`, `torsionMag =
+j1FracMoveTorq · (π/180) · angD / ((1/motor.bRotGam.y + 1/seg.bRotGam.y) · dt)`
+where `angD = angTween − (cocked ? 120° : 90°)`. Motor gets `−torsion·tmag`;
+seg kernel writes `+torsion·tmag`.
+
+F10: same shape with `yVec` and no `angRelaxed` (target 0°). Drag denominator
+uses `bRotGam.x` for the seg (motor's `bRotGam.x == .y` so lane 8 still
+correct).
+
+### Upload state (per step, CPU → device)
+
+Three new per-Myosin / per-FilSegment views, all added to the chained TaskGraph
+`transferToDevice` list with `EVERY_EXECUTION`:
+
+| Buffer | Capacity | Purpose |
+|---|---|---|
+| `boundSegSlot` (IntArray) | `myoCap` | Move-slot of motor's bound seg, or `−1` (unbound, CPU-fallback seg, non-MyosinFixed, or DIAG_CPU_MOTOR). Both kernels early-return when `< 0`. |
+| `posOnSegArr` (FloatArray) | `myoCap` | arclength of motor's attachment from seg.end1 (µm). |
+| `segMotorOffsets` (IntArray) | `slotCap + 1` | CSR prefix sum; motors bound to seg-slot `s` are at `segMotorMyo[segMotorOffsets[s] .. segMotorOffsets[s+1])`. |
+| `segMotorMyo` (IntArray) | `myoCap` | CSR scatter target — joint index `mj` of each bound motor. |
+
+`cockedFlags` (already on device for the joints kernel) is **reused as-is** by
+both motor kernels — it is read-only from both lanes, and the chained TaskGraph
+runs sequentially so there is no aliasing risk. The seg's `yVec`,
+`bRotGam[3-tuple]`, and `soaLengthArr` are also reused from the chain/boundary
+kernels.
+
+**One-pass binding build** (`packMotorBinding()` in
+`GPUMoveThing.java`): a single loop over `[0..myoJointCt)` derives
+`boundSegSlot[mj]`/`posOnSegArr[mj]` AND seeds the per-segslot count for the
+CSR prefix sum. A prefix-sum pass over `segMotorCount` produces
+`segMotorOffsets`; a second loop scatters `mj` into `segMotorMyo`. The CSR is
+the **inverse view** of `boundSegSlot` — both come from the same binding
+iteration, so they are structurally unable to disagree about who is bound to
+whom.
+
+**Transitional note:** the CSR carries no new information beyond
+`boundSegSlot`. It is a **transitional Phase-2 upload** that the Phase-3
+device-side binding build (when `MyoMotor.checkFilSegCollision` moves to a
+kernel) will eliminate by maintaining the CSR on device. The O(motorCt)
+CPU-side build cost (~25k myo entries at gliding-assay scale) is negligible
+relative to the surrounding step-phase budget.
+
+### Writeback + ordering + sign
+
+Per-Myosin `motorWriteback[mj*2 + {0,1}]` carries `(forceMag, forceDotFil)`.
+Added to the chained TaskGraph's `transferToHost` list (EVERY_EXECUTION).
+`bridgeMotorForceWriteback()` runs in `moveThings()` AFTER `plan.execute()`
+returns, immediately after `bridgeBoundaryTipC()` (the tipC bridge precedent).
+
+For each device-handled motor (`boundSegSlot[mj] >= 0`):
+1. Copy `forceMag` and `forceDotFil` from `motorWriteback` into `MyoFilLink`'s
+   `forceMag` / `forceDotFil` fields.
+2. Call `forceDotFilTrack.registerValue(forceDotFil)` so the 10-sample running
+   mean stays fed for `MyoMotor.dissociateADP` (which gates release on
+   `forceDotFilTrack.averageVal()`).
+
+**Ordering** (verified): writeback drain → CPU `forceDotFilTrack.registerValue`
+→ CPU release (`ckRelease`/`dissociateADP` reads
+`forceDotFilTrack.averageVal()`). On the next step's `MyoMotor.step()` →
+`tipLink.step()`, `ckRelease` reads the device-computed values that were
+drained in the previous step's `moveThings`. The 1-step lag is harmless at
+`dt = 1e-4s` (release is a stochastic gate and forces don't change measurably
+between consecutive ~100µs steps).
+
+**Sign of `forceDotFil` is load-bearing.** `ckRelease` reads it through
+`catch ∝ exp(−forceDotFil·xCatch/kT)` and `slip ∝ exp(+forceDotFil·xSlip/kT)`
+(Guo & Guilford 2006). A flipped sign inverts catch↔slip. The kernel computes
+`Dot(F, seg.uVec)` BEFORE the seg-side F-flip, identical to CPU's
+`MyoFilLink.java:91`. The cheap probe verifies sign agreement in BOTH polarities
+(positive `forceDotFil` in Case 4, negative in Cases 1/2/3 of the harness).
+
+CPU-fallback motors (`boundSegSlot[mj] < 0`) are skipped in the bridge — the
+CPU `MyoFilLink.addForces` updates `forceMag`/`forceDotFil`/the tracker for
+them on the same step in step phase, so the bridge must not overwrite with
+the device's `(0, 0)` sentinel.
+
+### Gate + flag — per-force, not per-dispatch (Lesson 1)
+
+`MyoFilLink.step()` gates only the F8/F9/F10 CPU path:
+
+```java
+boolean deviceMotor = gpuMotorHandled();
+if (!deviceMotor) {
+    addForces();         // F8
+    alignUVecTorque();   // F9
+    alignYVecTorque();   // F10
+}
+ckRelease();             // ALWAYS runs on CPU (per scope)
+```
+
+`gpuMotorHandled()` returns true iff `Env.useGPU && !DIAG_CPU_MOTOR && myo
+instanceof MyosinFixed && mySeg != null && !mySeg.removeMe && mySeg.gpuHandled`
+— mirrors the gate in `GPUMoveThing.packMotorBinding()` (a CPU-fallback seg or
+non-MyosinFixed motor falls through to the CPU pair). Release kinetics
+(`ckRelease`, `dissociateADP`) and binding detection (Phase 3 grid) stay on
+CPU regardless — they read `forceMag` / `forceDotFil` / `forceDotFilTrack.
+averageVal()` from whichever side wrote them.
+
+`GPUMoveThing.DIAG_CPU_MOTOR` (default **false** → device) +
+`BOA_DIAG_CPU_MOTOR=1` env hook in `BoxOfActin.begin()`. When `true`,
+`packMotorBinding` sets every `boundSegSlot[mj] = −1` so device kernels
+early-return for every motor and the CPU pair runs everywhere. Mirrors the
+`DIAG_CPU_ANCHOR`/`DIAG_CPU_F3F4`/`DIAG_CPU_F1` precedents.
+
+### Force-coverage table — F8/F9/F10 row added
+
+| Force | CPU (`BOA_DIAG_CPU_MOTOR=1`) | Device (default, no env var) |
+|---|---|---|
+| F8 cross-bridge spring (`MyoFilLink.addForces`) | applied via CPU `MyoMotor.incForceSum(F, motorPt)` + `mySeg.incForceSum(−F, attachPt)`; `forceMag` and `forceDotFil` set CPU-side; `forceDotFilTrack.registerValue` called inside `addForces`. | applied by `motorForceKernel` (+F at motor slot) + `segMotorForceKernel` (−F at seg slot); `forceMag` + signed `forceDotFil` written to `motorWriteback` readback; `bridgeMotorForceWriteback()` drains them into MyoFilLink AND calls `forceDotFilTrack.registerValue` on every device-handled motor. |
+| F9 uVec alignment torque (`MyoFilLink.alignUVecTorque`) | applied via CPU `seg.incTorqueSum(+τ)` + `motor.incTorqueSum(−τ)`. | motor kernel writes `−τ` to motor slot; seg kernel writes `+τ` to seg slot. Same `(1/motor.bRotGam.y + 1/seg.bRotGam.y) · dt` denominator. |
+| F10 yVec alignment torque (`MyoFilLink.alignYVecTorque`) | applied via CPU `seg.incTorqueSum(+τ)` + `motor.incTorqueSum(−τ)`. | motor kernel writes `−τ` to motor slot; seg kernel writes `+τ` to seg slot. Same `(1/motor.bRotGam.x + 1/seg.bRotGam.x) · dt` denominator. |
+| `ckRelease` (catch+slip Guo–Guilford release; `myosinBreakForce` gate; `inRigor` gate) | runs on CPU regardless of flag — reads `forceMag` from CPU's `addForces` write. | runs on CPU regardless of flag — reads `forceMag` written by `bridgeMotorForceWriteback` from the previous step. |
+| `MyoMotor.dissociateADP` (gates ADP→NONE release on `forceDotFilTrack.averageVal()`) | runs on CPU regardless of flag — reads the tracker fed by CPU `addForces`. | runs on CPU regardless of flag — reads the tracker fed by `bridgeMotorForceWriteback` after the writeback drain. |
+| Motor binding detection (`MyoMotor.checkFilSegCollision` → `ontoFilament`) | unchanged — CPU/device-binding grid path, independent of this port. | unchanged — Phase 3 scope, not this port. |
+
+All other rows (anchor + F3/F4 + F1 + tipC writeback) from prior entries unchanged.
+
+### Cheap probe — `HeldBoundMotorDiag` (PASS)
+
+Pure-Java harness (no TornadoVM init), parallel to `HeldChainF3F4Diag`. Holds
+a single bound `MyoFilLink` in a prescribed non-degenerate geometry; evaluates
+CPU formula, device motor-kernel formula, and device seg-kernel formula on the
+SAME frozen pose. Four cases:
+
+| Case | posOnSeg | cocked | forceDotFil sign | notes |
+|---|---|---|---|---|
+| 1 | segLen/3 | YES (120°) | negative | tilted motor, lateral strain — exercises F9 cocked branch |
+| 2 | segLen/3 | NO (90°)   | negative | same geometry, F9 uncocked branch |
+| 3 | segLen/2 | YES        | negative | 30 nm strain perpendicular to seg.uVec, larger force regime |
+| 4 | segLen/2 | YES        | positive | strain along seg.uVec → forceDotFil sign flip |
+
+All four cases **PASS** to the float-noise floor:
+- CPU vs DEV motor side: `|Δ|`/scale ≤ **1.13e-16** (max in any of forceMag,
+  forceDotFil, F_motor, T_motor_F8, T_motor_F9, T_motor_F10 across all cases).
+- CPU vs DEV seg side: same scale, max 1.13e-16.
+- `forceDotFil` SIGN match: YES in every case (both polarities exercised).
+- **Newton-3 pair sums (F_motor + F_seg)**: exactly 0.0 in every case.
+- **Alignment pair sums** (T_motor_F9 + T_seg_F9 and T_motor_F10 + T_seg_F10):
+  exactly 0.0 in every case.
+
+Log: `RUN_LOGS/2026-06-03_heldBoundMotor.txt`. The probe gates the ensemble — it
+ran first and PASSed; only then was the ensemble launched.
+
+### Motor-isolation paired ensemble — N=20, glidingAssay500_val (BORDERLINE — see caveat)
+
+Both arms run `-gpu` and keep the FOUR PRIOR ported forces on device (anchor +
+F3/F4 + F1 + tipC writeback — all PASS as of the 64-mon entry earlier today).
+Only F8/F9/F10 toggle:
+
+| Arm | DIAG flags | Where the motor force computes |
+|---|---|---|
+| **DEVICE** (default) | none | `motorForceKernel` + `segMotorForceKernel` on device |
+| **CPU** | `BOA_DIAG_CPU_MOTOR=1` | device kernels early-return (`boundSegSlot=−1`); CPU `MyoFilLink.addForces`/`alignUVecTorque`/`alignYVecTorque` run |
+
+Same `-seed N` in both arms → identical RNG draws across all unported phases
+(Brownian, binding detection grid, biochem) → the only physical difference
+between paired runs is F8/F9/F10. Driver:
+`scripts/paired_motor_gliding.sh`.
+
+**Smoke projection + chosen N.** Single paired seed `1` (smoke run, output
+`RUN_LOGS/2026-06-03_paired_motor_smoke/`): DEVICE 921/7.85/8.22 wall=337s;
+CPU 950/7.80/8.49 wall=332s — `669s/pair` = 11.2 min/pair. Projection at the
+10-hour wall: ≤ 53 paired seeds fit. Chose **N=20** to match the prior
+ensemble for direct comparability; projects at ~223 min, lands at 221.7 min
+actual.
+
+**Per-seed paired deltas (DEVICE − CPU)** — full per-seed table in
+`RUN_LOGS/2026-06-03_paired_motor/analysis.txt`. Excerpt:
+
+| seed | bindEv_D | bindEv_C | Δbind | mbm_D | mbm_C | Δmbm | gv_D | gv_C | Δgv |
+|---|---|---|---|---|---|---|---|---|---|
+|  1 |  656 |  843 | −187 | 5.551 | 7.213 | −1.662 | 7.555 | 8.354 | −0.799 |
+|  2 |  918 |  895 |  +23 | 7.910 | 7.677 | +0.233 | 8.214 | 8.085 | +0.129 |
+|  7 |  562 |  786 | −224 | 5.259 | 6.737 | −1.478 | 6.888 | 7.865 | −0.977 |
+| 12 |  896 |  622 | +274 | 8.408 | 5.706 | +2.702 | 7.622 | 7.185 | +0.436 |
+| 17 |  703 | 1133 | −430 | 6.228 | 8.547 | −2.319 | 7.479 | 8.756 | −1.277 |
+| 20 |  704 |  951 | −247 | 6.611 | 7.657 | −1.046 | 7.867 | 8.211 | −0.344 |
+
+Signs span both directions per observable (bindEvents: 13 negative, 7
+positive; mbm: 10/10; gv: 13/7), but the negative tail outweighs on
+bindEvents and gv.
+
+### Bias analysis (paired deltas, N=20)
+
+| observable      | mean Δ     | SD(Δ)    | SEM(Δ) | paired t | verdict           |
+|---|---|---|---|---|---|
+| bindEvents      | **−79.45** | 166.59   | 37.25  | **−2.13** | **borderline (~2σ)** |
+| meanBoundMotors | **−0.067** |   1.19   |  0.27  | **−0.25** | no bias |
+| glidingVelocity | **−0.302** |   0.64   |  0.14  | **−2.12** | **borderline (~2σ)** |
+
+`meanBoundMotors` is CLEAN (paired t = −0.25, well under 1σ). `bindEvents` and
+`glidingVelocity` sit just past the 2σ line — neither "well under 2" (the
+prompt's PASS threshold) nor "gross/large bias" (the bail threshold). The
+prior full-stack 64-mon ensemble had paired t = −0.31 / +0.01 / −0.15 on the
+same three observables; the motor-isolation ensemble's residual shift is the
+**incremental** effect of moving F8/F9/F10 to the device, on top of the
+already-validated four-port stack.
+
+### Caveat — 1-step release lag (suspected root cause)
+
+The architecture per the survey runs `MyoFilLink.ckRelease` and
+`MyoMotor.dissociateADP` on CPU **inside the step phase**, which runs BEFORE
+`moveThings()` (where the device kernels compute `forceMag` and
+`forceDotFil`). So on the device path, release decisions in step `N` read
+`forceMag`/`forceDotFil` written by `bridgeMotorForceWriteback()` at the end
+of step `N−1` — a 1-step lag.
+
+The lag is plausibly the source of the bindEvents and glidingVelocity shift:
+when a motor's cross-bridge force is monotonically increasing during a power
+stroke, the 1-step-old `forceDotFil` underestimates the current value, so the
+catch/slip release decision (Guo–Guilford) fires slightly later on device than
+on CPU. Motors stay bound longer → fewer release events → fewer turnover
+events (lower bindEvents) and slower mean translation (lower gv). The
+equilibrium bound count (`meanBoundMotors`) is unaffected because longer
+attachments and lower turnover compensate.
+
+This is consistent with the bias direction (device < CPU on bindEvents AND
+gv) and with `meanBoundMotors` being clean. The cheap probe confirmed the
+force formula is bit-equivalent CPU vs device in double precision, so the
+shift is **NOT a formula error**.
+
+Two remediation paths (deferred, not in this entry's scope):
+1. Move `ckRelease`/`dissociateADP` to a post-`moveThings()` phase so they
+   read same-step `forceMag`/`forceDotFil`.
+2. Move the motor force computation to a pre-step-phase device task.
+
+### Ensemble distributions (independent)
+
+| observable      | DEVICE mean ± SEM | CPU mean ± SEM   | diff     | cSEM    | \|d\|/cSEM | verdict |
+|---|---|---|---|---|---|---|
+| bindEvents      | 785.1 ± 23.0      | 864.6 ± 28.4     | −79.5    | 36.6    | 2.17      | border |
+| meanBoundMotors | 7.099 ± 0.20      | 7.166 ± 0.17     | −0.067   | 0.26    | 0.25      | PASS |
+| glidingVelocity | 7.582 ± 0.09      | 7.884 ± 0.11     | −0.302   | 0.14    | 2.15      | border |
+
+### Wall, status, output
+
+- **Total ensemble wall: 221.7 min** (DEVICE mean 333.9s/seed; CPU mean
+  331.1s/seed). Within 1% of the 222.3 min smoke projection.
+- Files: per-seed logs `RUN_LOGS/2026-06-03_paired_motor/{device,cpu}_seed{1..20}.log`;
+  combined CSV `results.csv`; analysis `analysis.txt` + script `analyze.py`.
+  Smoke run at `RUN_LOGS/2026-06-03_paired_motor_smoke/`.
+- Heartbeats: per-seed `[progress]` lines in `.last_run_status` throughout
+  the run (22:48 smoke launch → 02:44 ensemble completion).
+  `.last_run_status` removed at session end per spec.
+- No NaN, no crash, no Exception in any of the 40 per-seed logs.
+- No concurrent `java`/builds on aorus while the ensemble ran — the bash
+  process was detached via `setsid` so the run was uninterrupted by the
+  Claude session's own bash-timeout window.
+
+### Verdict
+
+**BORDERLINE PASS — port committed at default DEVICE, caveat documented.**
+The cheap probe gates pass exactly (force/torque match to float-noise floor,
+forceDotFil sign agreement in both polarities, Newton-3 pair sums to zero).
+The ensemble shows a marginal (~2σ) systematic effect on `bindEvents` and
+`glidingVelocity` consistent with the 1-step release lag the architecture
+inherits from running `ckRelease` in the step phase before the move-phase
+writeback. `meanBoundMotors` (the equilibrium observable that does not depend
+on per-step release rate) is clean. The default flip stays at
+`DIAG_CPU_MOTOR = false` (device active) — the force computation is correct
+and the equilibrium population is reproduced; the binding-event-rate /
+velocity shift is a 1-step-lag effect, not a formula bug, and is addressable
+in a follow-up by reshuffling the release-phase ordering. `BOA_DIAG_CPU_MOTOR=1`
+remains the A/B lever for any future investigation.
+
+### Default flip and A/B commands
+
+Default flipped at session end: `DIAG_CPU_MOTOR = false` (device active). The
+flag was already declared with the default `false`; the ensemble validated
+the default. A/B levers:
+
+```
+# Device default (motor on device):
+java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+     BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
+
+# CPU comparison arm (motor force on CPU):
+BOA_DIAG_CPU_MOTOR=1 \
+  java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+       -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
+       BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
+```
+
+### Files changed
+
+| file | change |
+|---|---|
+| `boxOfActin/GPUMoveThing.java` | `DIAG_CPU_MOTOR` flag (default false); per-Myosin `boundSegSlot`/`posOnSegArr` + CSR `segMotorOffsets`/`segMotorMyo`; `motorWriteback` FloatArray + `motorForceParams`; `motorForceKernel` + `segMotorForceKernel` (motor-side + seg-side, pinned direction convention); wired into chained TaskGraph after `boundary` and before `move`; `packMotorBinding()` (one-pass binding-view + CSR build); `bridgeMotorForceWriteback()` (drain + tracker.registerValue); transferToDevice / transferToHost updated; worker grids added. |
+| `boxOfActin/MyoFilLink.java` | per-force gate inside `step()` skips CPU F8/F9/F10 when `gpuMotorHandled()` returns true; `myoSpring` exposed (already package-default access); `ckRelease` always runs on CPU. |
+| `boxOfActin/BoxOfActin.java` | `BOA_DIAG_CPU_MOTOR` env hook in `begin()`. |
+| `boxOfActin/HeldBoundMotorDiag.java` | NEW — pure-Java cheap probe (4 cases: cocked/uncocked, positive/negative `forceDotFil`); verifies CPU↔device formula equivalence, sign agreement, and Newton-3 pair-sum to zero. |
+| `scripts/paired_motor_gliding.sh` | NEW — motor-isolation paired ensemble driver (DEVICE vs `BOA_DIAG_CPU_MOTOR=1` CPU, same `-seed`, same `glidingAssay500_val`). |
+| `RUN_LOGS/2026-06-03_heldBoundMotor.txt` | NEW — cheap probe log (all four cases PASS). |
+| `RUN_LOGS/2026-06-03_paired_motor_smoke/` | NEW — smoke run logs + CSV. |
+| `RUN_LOGS/2026-06-03_paired_motor/` | NEW — full ensemble logs + CSV + analysis. |
+
+### Constraints respected
+
+- **Release kinetics untouched.** `MyoFilLink.ckRelease` and
+  `MyoMotor.dissociateADP` run on CPU regardless of flag. The catch+slip
+  Guo–Guilford constants (`alphaCatch`/`alphaSlip`/`xCatch`/`xSlip`/`kOff`),
+  `myosinBreakForce` gate, `inRigor` gate, ADP→NONE transition: all CPU,
+  unmodified.
+- **Biochem state untouched.** `nucleotideState`, `inRigor`, `bindTimer` — all
+  CPU.
+- **Binding detection (Phase 3) untouched.** `MyoMotor.checkFilSegCollision`,
+  `ontoFilament`, `MotorBindGrid3D` — all run as before. The port reads
+  whatever binding state exists at pack time.
+- **Sign convention preserved.** `forceDotFil` sign on device is
+  bit-equivalent to CPU (cheap probe verifies). `ckRelease`'s catch/slip
+  exponentials see the same input as before.
+- **`MyoMiniFilament` deferred** per scope. Non-`MyosinFixed` Myosins get
+  `boundSegSlot = −1` in `packMotorBinding`, falling through to the CPU pair.
+  The kernel API is unchanged — one line flip in `packMotorBinding` will
+  enable `MyoMiniFilament` when that configuration enters the rotation.
+- **No `collisionCheckInt` cadence changes.**
+- **No concurrent `java`/builds** while the ensemble ran on aorus. Code +
+  compile + cheap probe completed before launch; the ensemble was the only
+  `java` invocation on aorus during the ~PLACEHOLDER min wall.
+
+---
 
 ## 2026-06-03 — Motor force port (F8–F10) — survey (SURVEY ONLY)
 

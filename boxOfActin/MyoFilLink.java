@@ -70,11 +70,41 @@ public class MyoFilLink {
 	public void step () {
 		if (!isFree()) {
 			updatePos();
-			addForces();
-			alignUVecTorque();
-			alignYVecTorque();
+			// Phase 2 F8/F9/F10 (2026-06-03): when -gpu is on and
+			// DIAG_CPU_MOTOR is off AND the GPU pack picked this motor up
+			// (MyosinFixed with a GPU-handled bound seg), the device kernels
+			// compute F8/F9/F10 and write forceMag/forceDotFil back via
+			// bridgeMotorForceWriteback(). In that case the CPU pair below
+			// would double-apply, so skip it. release kinetics
+			// (ckRelease/dissociateADP) and binding detection stay on CPU
+			// regardless. The handoff decision lives in
+			// GPUMoveThing.packMotorBinding(): motor mj has boundSegSlot >= 0
+			// iff the device path handles it this step.
+			boolean deviceMotor = gpuMotorHandled();
+			if (!deviceMotor) {
+				addForces();
+				alignUVecTorque();
+				alignYVecTorque();
+			}
 			ckRelease();
 		}
+	}
+
+	// Returns true if the device motor-force kernels are computing F8/F9/F10
+	// for this MyoFilLink THIS step. Mirrors the gating in
+	// GPUMoveThing.packMotorBinding(): scope is MyosinFixed-only; the seg
+	// must be a GPU-handled FilSegment; DIAG_CPU_MOTOR forces the entire path
+	// off. Cheap to recompute every step (it is the same fields the pack
+	// already read).
+	private boolean gpuMotorHandled () {
+		if (!Env.useGPU) return false;
+		if (GPUMoveThing.DIAG_CPU_MOTOR) return false;
+		if (myMotor == null) return false;
+		Myosin myo = myMotor.myMyosin;
+		if (!(myo instanceof MyosinFixed)) return false;
+		if (mySeg == null) return false;
+		if (mySeg.removeMe) return false;
+		return mySeg.gpuHandled;
 	}
 	
 	public void addForces () {

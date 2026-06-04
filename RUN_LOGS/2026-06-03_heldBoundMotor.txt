@@ -1,0 +1,117 @@
+HeldBoundMotorDiag — Phase 2 F8/F9/F10 cheap probe.
+Constants: aeta=0.100000  dt=0.000100000  motorLen=0.0200000  segLen=0.0891000 µm  myoSpring=1.00000e-09 N/µm
+           j1FracMoveTorq=0.500000  uncockedAng=90.0000°  cockedAng=120.000°  RELATIVE_TOL=0.00100000
+
+================================================================
+  Case 1 — tilted bound motor at posOnSeg=segLen/3, COCKED
+================================================================
+  seg:   c=(0.000000e+00,0.000000e+00,0.000000e+00) u=(1.000000e+00,0.000000e+00,0.000000e+00) y=(0.000000e+00,1.000000e+00,0.000000e+00) L=8.910000e-02
+  motor: c=(-1.485000e-02,-4.000000e-03,-2.242641e-03) u=(1.000000e-01,9.000000e-01,4.242641e-01) y=(-9.938837e-01,1.104315e-01,0.000000e+00)
+  posOnSeg = 2.970000e-02 µm   cocked=true
+  seg drag: bTransGam.x=2.388515e-08 bTransGam.y=3.308846e-08 bRotGam.x=3.591888e-26 bRotGam.y=3.936198e-23
+  motor drag: bTransGam.x=1.884956e-08 bRotGam.y=2.513274e-24
+
+    [CPU] forceMag    = 5.477226e-12 N
+    [CPU] forceDotFil = -1.000000e-12 N
+    [CPU] F_motor     = (-1.000000e-12, -5.000000e-12, -2.000000e-12)
+    [CPU] T_motor_F8  = (3.213203e-21, -2.242641e-21, 4.000000e-21)
+    [CPU] T_motor_F9  = (0.000000e+00, -3.141737e-21, 6.664631e-21)
+    [CPU] T_motor_F10 = (-0.000000e+00, 0.000000e+00, -2.585378e-22)
+    [CPU] F_seg       = (1.000000e-12, 5.000000e-12, 2.000000e-12)
+    [CPU] T_seg_F8    = (0.000000e+00, 2.970000e-20, -7.425000e-20)
+    [CPU] T_seg_F9    = (-0.000000e+00, 3.141737e-21, -6.664631e-21)
+    [CPU] T_seg_F10   = (0.000000e+00, -0.000000e+00, 2.585378e-22)
+    [DEV.motor] forceMag    = 5.477226e-12 N
+    [DEV.motor] forceDotFil = -1.000000e-12 N
+    [DEV.motor] F_motor     = (-1.000000e-12, -5.000000e-12, -2.000000e-12)
+    [DEV.motor] T_motor_F8  = (3.213203e-21, -2.242641e-21, 4.000000e-21)
+    [DEV.motor] T_motor_F9  = (0.000000e+00, -3.141737e-21, 6.664631e-21)
+    [DEV.motor] T_motor_F10 = (-0.000000e+00, 0.000000e+00, -2.585378e-22)
+    [DEV.seg] F_seg     = (1.000000e-12, 5.000000e-12, 2.000000e-12)
+    [DEV.seg] T_seg_F8  = (0.000000e+00, 2.970000e-20, -7.425000e-20)
+    [DEV.seg] T_seg_F9  = (-0.000000e+00, 3.141737e-21, -6.664631e-21)
+    [DEV.seg] T_seg_F10 = (0.000000e+00, -0.000000e+00, 2.585378e-22)
+  [A] CPU vs DEV motor side (|Δ| / scale):
+      forceMag    Δ=0.000e+00   |CPU|=5.477e-12   rel=0.000e+00
+      forceDotFil Δ=0.000e+00   |CPU|=1.000e-12   rel=0.000e+00   signMatch=YES
+      F_motor     Δmax=0.000e+00 |CPU|max=5.000e-12 rel=0.000e+00
+      T_motor_F8  Δmax=0.000e+00 |CPU|max=4.000e-21 rel=0.000e+00
+      T_motor_F9  Δmax=7.523e-37 |CPU|max=6.665e-21 rel=1.129e-16
+      T_motor_F10 Δmax=0.000e+00 |CPU|max=2.585e-22 rel=0.000e+00
+  [C] CPU vs DEV seg side  (|Δ| / scale):
+      F_seg       Δmax=0.000e+00 |CPU|max=5.000e-12 rel=0.000e+00
+      T_seg_F8    Δmax=0.000e+00 |CPU|max=7.425e-20 rel=0.000e+00
+      T_seg_F9    Δmax=7.523e-37 |CPU|max=6.665e-21 rel=1.129e-16
+      T_seg_F10   Δmax=0.000e+00 |CPU|max=2.585e-22 rel=0.000e+00
+  [D] Newton-3 pair sums (|Δ| / scale):
+      F_motor + F_seg          max=0.000e+00   |F|=5.000e-12   rel=0.000e+00
+      T_motor_F9 + T_seg_F9    max=0.000e+00   |T9|=6.665e-21  rel=0.000e+00
+      T_motor_F10 + T_seg_F10  max=0.000e+00   |T10|=2.585e-22 rel=0.000e+00
+  VERDICT: PASS
+
+================================================================
+  Case 2 — same geometry, UN-COCKED
+================================================================
+  [A] CPU vs DEV motor side (|Δ| / scale):
+      forceMag    Δ=0.000e+00   |CPU|=5.477e-12   rel=0.000e+00
+      forceDotFil Δ=0.000e+00   |CPU|=1.000e-12   rel=0.000e+00   signMatch=YES
+      F_motor     Δmax=0.000e+00 |CPU|max=5.000e-12 rel=0.000e+00
+      T_motor_F8  Δmax=0.000e+00 |CPU|max=4.000e-21 rel=0.000e+00
+      T_motor_F9  Δmax=1.881e-37 |CPU|max=1.070e-21 rel=1.757e-16
+      T_motor_F10 Δmax=0.000e+00 |CPU|max=2.585e-22 rel=0.000e+00
+  [C] CPU vs DEV seg side  (|Δ| / scale):
+      F_seg       Δmax=0.000e+00 |CPU|max=5.000e-12 rel=0.000e+00
+      T_seg_F8    Δmax=0.000e+00 |CPU|max=7.425e-20 rel=0.000e+00
+      T_seg_F9    Δmax=1.881e-37 |CPU|max=1.070e-21 rel=1.757e-16
+      T_seg_F10   Δmax=0.000e+00 |CPU|max=2.585e-22 rel=0.000e+00
+  [D] Newton-3 pair sums (|Δ| / scale):
+      F_motor + F_seg          max=0.000e+00   |F|=5.000e-12   rel=0.000e+00
+      T_motor_F9 + T_seg_F9    max=0.000e+00   |T9|=1.070e-21  rel=0.000e+00
+      T_motor_F10 + T_seg_F10  max=0.000e+00   |T10|=2.585e-22 rel=0.000e+00
+  VERDICT: PASS
+
+================================================================
+  Case 3 — 30 nm lateral strain along seg.uVec (forceDotFil > 0)
+================================================================
+  [A] CPU vs DEV motor side (|Δ| / scale):
+      forceMag    Δ=0.000e+00   |CPU|=3.606e-11   rel=0.000e+00
+      forceDotFil Δ=0.000e+00   |CPU|=3.000e-11   rel=0.000e+00   signMatch=YES
+      F_motor     Δmax=0.000e+00 |CPU|max=3.000e-11 rel=0.000e+00
+      T_motor_F8  Δmax=0.000e+00 |CPU|max=3.000e-19 rel=0.000e+00
+      T_motor_F9  Δmax=0.000e+00 |CPU|max=6.185e-21 rel=0.000e+00
+      T_motor_F10 Δmax=0.000e+00 |CPU|max=2.781e-22 rel=0.000e+00
+  [C] CPU vs DEV seg side  (|Δ| / scale):
+      F_seg       Δmax=0.000e+00 |CPU|max=3.000e-11 rel=0.000e+00
+      T_seg_F8    Δmax=0.000e+00 |CPU|max=0.000e+00 rel=0.000e+00
+      T_seg_F9    Δmax=0.000e+00 |CPU|max=6.185e-21 rel=0.000e+00
+      T_seg_F10   Δmax=0.000e+00 |CPU|max=2.781e-22 rel=0.000e+00
+  [D] Newton-3 pair sums (|Δ| / scale):
+      F_motor + F_seg          max=0.000e+00   |F|=3.000e-11   rel=0.000e+00
+      T_motor_F9 + T_seg_F9    max=0.000e+00   |T9|=6.185e-21  rel=0.000e+00
+      T_motor_F10 + T_seg_F10  max=0.000e+00   |T10|=2.781e-22 rel=0.000e+00
+  VERDICT: PASS
+
+================================================================
+  Case 4 — −30 nm strain along seg.uVec (forceDotFil < 0)
+================================================================
+  [A] CPU vs DEV motor side (|Δ| / scale):
+      forceMag    Δ=0.000e+00   |CPU|=3.606e-11   rel=0.000e+00
+      forceDotFil Δ=0.000e+00   |CPU|=3.000e-11   rel=0.000e+00   signMatch=YES
+      F_motor     Δmax=0.000e+00 |CPU|max=3.000e-11 rel=0.000e+00
+      T_motor_F8  Δmax=0.000e+00 |CPU|max=3.000e-19 rel=0.000e+00
+      T_motor_F9  Δmax=0.000e+00 |CPU|max=6.185e-21 rel=0.000e+00
+      T_motor_F10 Δmax=0.000e+00 |CPU|max=2.781e-22 rel=0.000e+00
+  [C] CPU vs DEV seg side  (|Δ| / scale):
+      F_seg       Δmax=0.000e+00 |CPU|max=3.000e-11 rel=0.000e+00
+      T_seg_F8    Δmax=0.000e+00 |CPU|max=0.000e+00 rel=0.000e+00
+      T_seg_F9    Δmax=0.000e+00 |CPU|max=6.185e-21 rel=0.000e+00
+      T_seg_F10   Δmax=0.000e+00 |CPU|max=2.781e-22 rel=0.000e+00
+  [D] Newton-3 pair sums (|Δ| / scale):
+      F_motor + F_seg          max=0.000e+00   |F|=3.000e-11   rel=0.000e+00
+      T_motor_F9 + T_seg_F9    max=0.000e+00   |T9|=6.185e-21  rel=0.000e+00
+      T_motor_F10 + T_seg_F10  max=0.000e+00   |T10|=2.781e-22 rel=0.000e+00
+  VERDICT: PASS
+
+================================================================
+  CHEAP PROBE: PASS (all cases)
+================================================================
