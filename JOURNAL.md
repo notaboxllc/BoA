@@ -1,8 +1,172 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (64-mon paired device-vs-CPU gliding ensemble — full ported stack — PASS; Phase-1 2σ shift resolved as RNG-sampling)
+Last updated: 2026-06-03 (Motor force port (F8–F10) — survey; 64-mon paired device-vs-CPU gliding ensemble — full ported stack — PASS)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — Motor force port (F8–F10) — survey (SURVEY ONLY)
+
+**Scope.** Pre-port survey of the next Phase-2 force port: the per-step **myosin cross-bridge force** (F8 cross-bridge spring, F9 motor↔fil uVec alignment torque, F10 motor↔fil yVec alignment torque) — all three live in `MyoFilLink`. The release kinetics (`MyoFilLink.ckRelease`, `MyoMotor.dissociateADP`) and the binding *detection* path (Phase 3 grid) are **explicitly out of scope** — they stay on CPU. This survey scopes the **force computation only**, on the gliding-assay path (`MyosinFixed`).
+
+Read-only. No edits. No runs.
+
+### 1. F8/F9/F10 — definition and location map
+
+| Tag | Method | Bodies it writes | Quantity computed |
+|---|---|---|---|
+| **F8** | `MyoFilLink.addForces()` (`MyoFilLink.java:80`) | `myMotor.forceSum` + `mySeg.forceSum` (each via `incForceSum(F, pt)` so both also get an `R × F` torque entry) | Linear cross-bridge spring `F = (myoSpring · dist) · unit(motorPt − attachPt)` |
+| **F9** | `MyoFilLink.alignUVecTorque()` (`MyoFilLink.java:116`) | `mySeg.torqueSum` + `myMotor.torqueSum` | Torque restoring `dot(seg.uVec, motor.uVec)` toward the relaxed motor↔actin angle (90° uncocked, 120° cocked) |
+| **F10** | `MyoFilLink.alignYVecTorque()` (`MyoFilLink.java:144`) | `mySeg.torqueSum` + `myMotor.torqueSum` | Torque restoring `dot(seg.yVec, motor.yVec)` toward zero (no `angRelaxed` — just `angTween`) |
+
+Dispatch: `MyoMotor.step()` → `updateMyoFilLinks()` → `tipLink.step()`. `MyoFilLink.step()` runs `updatePos → addForces → alignUVecTorque → alignYVecTorque → ckRelease`. Each Myosin owns exactly one `tipLink` (`MyoMotor.tipLink`, created once in `makeMyoFilLinks()` — never multiple per motor). `MyoRod.step()`/`MyoLever.step()` are empty bodies; rod/lever forces all come from the joints phase, not step().
+
+### 2. Cross-bridge force chain — geometry and signs
+
+`MyoFilLink.updatePos()`:
+- `attachPt = seg.end1AsPt3D() + posOnSeg · seg.uVec` — re-derives per step (cheap; once-per-counter guard).
+- `motorPt` is the `MyoMotor.bindTip` Pt3D = motor's `end2AsPt3D() = motor.coord + 0.5·motorLen·motor.uVec`.
+
+`MyoFilLink.addForces()`:
+1. `dist = ‖motorPt − attachPt‖`; `forceMag = dist · myoSpring` (`myoSpring = 1e-9 N/µm`, hard-coded at `MyoFilLink.java:22`).
+2. `F = forceMag · unit(motorPt − attachPt)` — force vector on the **motor** (toward attachPt? No: `Pt3D.unitVec(attachPt, motorPt) = unit(attachPt − motorPt)` per Pt3D convention in this codebase; CPU here calls `F.unitVec(attachPt, motorPt)` then `F.scale(forceMag)` → F points from motorPt toward attachPt, i.e. pulls the motor toward the binding point).
+3. `myMotor.incForceSum(F, motorPt)` → adds F to motor.forceSum and `R × F` (R = motorPt − motor.coord = 0.5·motorLen·motor.uVec) to motor.torqueSum.
+4. `forceDotFil = Pt3D.Dot(F, seg.uVec)` — **signed scalar**, the component of force-on-motor along seg.uVec (positive = toward filament barbed end). `forceDotFilTrack.registerValue(forceDotFil)` updates a 10-sample running mean used by `dissociateADP`.
+5. `F.scale(-1)` then `mySeg.incForceSum(-F, attachPt)` → adds −F to seg.forceSum and `R × (−F)` (R = attachPt − seg.coord) to seg.torqueSum.
+
+F9 (`alignUVecTorque`):
+- `torsionVec = unit(cross(seg.uVec, motor.uVec))`.
+- `dotVecs = clamp(dot(seg.uVec, motor.uVec), −1, 1)`; `angTween = fastAcos(dotVecs)·180/π`.
+- `angRelaxed = isCocked ? cockedMotor_ActinAngle (120°) : uncockedMotor_ActinAngle (90°)`. (Both static fields on `Myosin.java:9-10`.)
+- `angD = angTween − angRelaxed`.
+- `torsionMag = myoJ1FracMoveTorq · (π/180) · angD / ((1/motor.bRotGam.y + 1/seg.bRotGam.y) · dt)`.
+- Writes: `seg.torqueSum += torsionVec·torsionMag`; `motor.torqueSum −= torsionVec·torsionMag`. Newton-3 anti-parallel pair, anchored on the cross-product unit vector.
+
+F10 (`alignYVecTorque`): identical structure with yVec, no `angRelaxed` (target angle = 0°), drag denominator uses `bRotGam.x` instead of `bRotGam.y`. Same Newton-3 anti-parallel write pattern.
+
+### 3. Gliding-motor scope — `MyosinFixed`; `MyoMiniFilament` deferred
+
+In the gliding assay every motor is a **`MyosinFixed`**:
+- `MyosinFixed.fillPlaneWithFixedMyosins()` places `MyosinFixed` instances at `(rand x, rand y, fixedMyosinZValue)` pointing +z (`MyosinFixed.java:97-110`).
+- Anchor spring (`applyRodFixedPtForce`) is in Phase-1 device kernel (folded into `GPUMoveThing.jointsKernel`, the A7.b code path).
+- `MyosinFixed extends Myosin`, so it has the same three sub-Things (`myoRod`, `myoLever`, `myoMotor`), the same `tipLink` on `myoMotor`, and the same F8/F9/F10 chain via `myoMotor.step()`.
+
+`MyoMiniFilament` is the free-diffusing bipolar bundle case (`MyoMiniFilament.java`). It bundles `MyosinDimer` objects on each end (`numMyoDimersEachEnd`), and each dimer has two `Myosin` sub-objects with their own `MyoMotor` + `tipLink`. F8/F9/F10 still apply per `MyoFilLink` — the cross-bridge force code path is the same; only the dimer joint coupling (`MyosinDimer.jointConstraints`) is different. The gliding assay does not instantiate `MyoMiniFilament` (`fillPlaneWithFixedMyosins` constructs `MyosinFixed` only); `MyoMiniFilament` is the cortical-network use case.
+
+**Recommendation: scope the port to the gliding (`MyosinFixed`) F8/F9/F10 only.** `MyoMiniFilament`'s `MyoFilLink` chain has identical force code — the same kernel will work for any `MyoMotor`-owning Myosin once the per-Myosin binding upload state is in place. But `MyoMiniFilament` does not appear in the gliding-assay validation rotation and its `MyosinDimer.jointConstraints` is CPU-only. Treat the port as gliding-first, with the kernel reusable for `MyoMiniFilament` later (no API change needed when that config enters the rotation).
+
+### 4. Minimal per-motor upload state (the "int + float")
+
+The force kernel needs to know, **per Myosin (or per joint slot)**:
+
+| Field | Type | Source on CPU | Why uploaded each step |
+|---|---|---|---|
+| `boundSegSlot` | int (`−1` = unbound or CPU-fallback seg) | `thingNumberToMoveSlot[mySeg.myThingNumber]` if `tipLink.mySeg != null` else `−1` | Binding decisions still happen on CPU each step (`MyoMotor.ontoFilament`, `tipLink.release`); slot id can change |
+| `posOnSeg` | float (µm) | `tipLink.posOnSeg` | Set at bind time; constant until release. Uploaded with the slot id for simplicity |
+| `cockedFlag` | int (0/1) | `myoMotor.isCocked()` (already uploaded for `jointsKernel`) | Drives F9's `angRelaxed` switch — **reuse the existing `cockedFlags` IntArray** |
+
+That's the "one int + one float per motor while binding detection is still on CPU" referenced in `RESIDENCY_PLAN.md` Phase 2. Drags (`motor.bRotGam.x/.y`) are already in the `myoDrags` FloatArray (positions 6,7,8 of each 9-tuple). Seg pose + drags arrive via the topology lookup into the shared `coord`/`uVec`/`yVec` plus the F3/F4 `bTransGam`/`bRotGam` per-slot arrays — all already on device.
+
+**Per-step writeback needed** (for the CPU-side `ckRelease` to function): `forceMag` and `forceDotFil` per bound motor link. The **tipC device writeback** mechanism committed today (`commit e8042b5`, "Phase 2 F1 — tipC device writeback") is the precedent: write per-bound-motor scalars to a small device FloatArray that the host reads each step. The CPU then runs `MyoFilLink.ckRelease` against device-computed values; `forceDotFilTrack.registerValue(forceDotFil)` is updated CPU-side. No release logic moves.
+
+What is **NOT** needed for the force kernel: `nucleotideState`, `inRigor`, `bindTimer`. Those are biochem and stay CPU.
+
+### 5. Motor↔filament link indexing on device
+
+The F3/F4 chain port pattern (`GPUMoveThing.java:2233–2298`): per FilSegment slot, store `topoEnd2Slot[i]` = the move-slot of its end2 chain neighbour, sentinel `−1` if absent or CPU-fallback. Built in `classifyThings()` on `topologyDirty`. This pattern **maps directly** onto motor↔seg links:
+
+- Each Myosin already has a joint slot in `[0..myoJointCt)`. Extend `packJointsRange()` to populate two new arrays alongside `cockedFlags`/`anchoredFlags`:
+  - `boundSegSlot[mj]` (IntArray, `myoCap`)
+  - `posOnSegArr[mj]` (FloatArray, `myoCap`)
+- Look up `mySeg.myThingNumber → thingNumberToMoveSlot[]` at pack time; if the seg is CPU-fallback (`< 0`), set `boundSegSlot[mj] = −1` and the kernel early-returns for that motor (CPU `tipLink.step()` runs in a reduced pass).
+
+**Scale.** At 64-mon production glidingAssay500_val with `fixedMyosinDensity ≈ 500/µm²` over ~50µm² ≈ 25000 myosins. Each has at most one bound seg. The IntArray+FloatArray per Myosin is **negligible** memory. Kernel sizing fits inside the existing `JOINTS_KERNEL_BLOCK_SIZE = 64`.
+
+**15-arg / arg-cap implication.** Current `jointsKernel` already takes **13 args**; `chainPairForcesKernel` takes **13 args**. A separate motor-force kernel can re-use the same 13-arg structural ceiling: `(coord, uVec, yVec, jointForceSum, jointTorqueSum, rodSlots, motorSlots, boundSegSlot, posOnSegArr, cockedFlags, segDrags_bTransGam, segDrags_bRotGam, motorParams, counts)` — roughly 13–14 args. **Flag: yVec is not currently passed to the joints kernel — F10 needs it as a new device input.** Either widen the existing `jointsKernel` signature (close to the practical PTX limit) or — cleaner — make F8/F9/F10 a new kernel task in the chained TaskGraph that receives only what it needs.
+
+### 6. Pair-force structure and ownership — concrete recommendation
+
+Each `MyoFilLink` is a **one-motor ↔ one-seg pair**. Ownership candidates:
+- **Motor-owned (one thread per Myosin):** writes motor-side jointForceSum entry (unique) and reads-and-writes seg's jointForceSum entry (**collision risk**: multiple gliding motors can bind the same seg simultaneously).
+- **Seg-owned (one thread per FilSegment slot):** writes its own jointForceSum entry (unique) and writes each bound motor's jointForceSum entry. Needs a per-step CSR-like "list of motor links per seg" built CPU-side.
+
+**Recommended pattern: split into two kernels** to keep the F3/F4 unique-ownership discipline (no atomics, no visited flags):
+
+- **Kernel M (per Myosin / per joint slot):** computes F vector + alignment torque vectors. Writes ONLY the motor's three sub-slots (rod is irrelevant for F8/F9/F10 — the force lands on motor, not rod). Also writes per-link `forceMag` / `forceDotFil` to the tipC writeback FloatArray. No seg writes from this kernel.
+- **Kernel S (per FilSegment slot):** reads a per-step CSR "bound motor list" (`segMotorOffsets[i+1] − segMotorOffsets[i]` bound motors at seg slot `i`, indexed into a `boundMotorLinkIdx[]`). For each bound motor, re-derives `attachPt`, recomputes `F` (same arithmetic — pair-symmetric, both kernels match bit-for-bit when computed in double), and accumulates `−F` and the alignment-torque counterparts into the seg's own jointForceSum/jointTorqueSum slot. Writes are slot-disjoint (each seg-thread writes only its own slot).
+
+**Justification for the redundant per-pair arithmetic in Kernel S:** the F3/F4 chain kernel uses the exact same idiom — each thread of a pair re-computes the pair force from scratch and applies it to *its own* side. The cost is one extra pair arithmetic per link (single-digit microseconds for the gliding-assay scale; verifiable later); the win is no atomics and zero cross-slot writes, identical to the F3/F4 discipline that just passed.
+
+**Owner + direction convention (committed up front, to avoid the F3 near-miss):**
+- **Kernel M writes motor side: positive `F` and positive torsion** (matches CPU `myMotor.incForceSum(F, motorPt)` and `myMotor.incTorqueSum(−torsionVec)`).
+- **Kernel S writes seg side: negative `F` and positive torsion** (matches CPU `mySeg.incForceSum(−F, attachPt)` and `mySeg.incTorqueSum(+torsionVec)`).
+- **Bit-for-bit invariant to enforce by inspection during implementation:** the F-vector sign at the moment it is added on each side must equal what CPU does at the corresponding `incForceSum` call. Write this down once in the kernel comment; verify in the cheap-probe diagnostic.
+
+CSR build cost (CPU-side, once per step before pack): a single pass over `MyoMotor.theMotors[]` counting bound motors per `boundSegSlot`, prefix sum, second pass scattering link indices. O(motorCt). Already cheap relative to current step-phase budgets at gliding scale.
+
+### 7. CPU/device split — clean separability
+
+**`addForces()` mutates only `forceMag`, `forceDotFil`, `forceDotFilTrack` and the force/torque accumulators on motor and seg.** It does **not** touch nucleotide state, does not call `release()`, does not touch `bindTimer`, `inRigor`, or any of the biochem state. The release decision is fully isolated in `ckRelease()` (called after the three force methods, reads `forceMag` and `forceDotFil` as state).
+
+Caveat: `forceDotFilTrack` is a `ValueTracker(10)` — a 10-sample circular buffer mean — updated *inside* `addForces()`. If the device kernel computes `forceDotFil` and writes it back, the CPU side must still call `forceDotFilTrack.registerValue(forceDotFil)` to keep `dissociateADP`'s averaging logic working (`MyoMotor.dissociateADP` reads `tipLink.forceDotFilTrack.averageVal()` as the directional gate). The tipC writeback already supplies the scalar — wire one extra CPU-side call to `forceDotFilTrack.registerValue()` after the writeback drain.
+
+**Scoping verdict: cleanly separable.** No entanglement with `ckRelease`/`dissociateADP`. The force can be ported in isolation.
+
+### 8. Sign-convention caution — replicate, do not touch
+
+Per `SURVEY_MYOSIN_AND_GLIDING.md` (deferred question): `forceDotFil` is signed and that sign drives `ckRelease`'s Guo–Guilford catch (`exp(−forceDotFil·xCatch/kT)`) and slip (`exp(+forceDotFil·xSlip/kT)`) terms. The BoA mainline convention computes `forceDotFil = Dot(F, seg.uVec)` **before** flipping F for the seg-side write, so `forceDotFil` is the dot of force-on-motor with seg.uVec — positive when the motor is pushed toward the seg barbed end.
+
+Both kernels (M and S) recompute `F` from `unit(motorPt − attachPt) · forceMag`. **Both must match the CPU's `unitVec(attachPt, motorPt)` direction** (CPU's `Pt3D.unitVec(from, to)` convention: result points `from → to`'s opposite — read the CPU code carefully when porting; this is exactly the kind of subtle directional flip that the F3 inter-endpoint near-miss exposed). Recommend computing `dx = motorPt − attachPt` once, normalising, and applying with the documented sign in both kernels' comments. The device kernel's `forceDotFil` must end up bit-equivalent to CPU's `Pt3D.Dot(F_cpu, seg.uVec)`.
+
+The release logic itself is **not touched**; `forceDotFil` is written back to CPU and `ckRelease` runs unmodified. The port's only obligation is: the device-side `forceDotFil` has the same sign as the CPU's. If it does not, the catch/slip exponentials invert and gliding ensembles will diverge in a way that looks like a velocity-vs-load anomaly (per the SURVEY_MYOSIN_AND_GLIDING note) — exactly the failure mode to guard against.
+
+### 9. Cheap-probe validation — before the gliding ensemble
+
+Three options, in increasing setup cost:
+
+**Option A — extend `SingleMyoDiag`.** `SingleMyoDiag` already supports a "minimal-system" reproduction (`MyosinFixed.setUpSingleMyosinDiag` creates one anchored myosin, no filaments). Add a "single bound motor" variant: one `MyosinFixed` + one short 11-segment fixed filament + a pre-bound `MyoFilLink` at a chosen `posOnSeg`. With `myosinsOff` selectively gating only the binding/unbinding statistics, freeze the link bound and measure per-step `forceMag`, `forceDotFil`, and the torque components on motor and seg from both CPU and device. Bit-equal compare per step (or float-tolerance).
+
+**Option B — `SingleBoundMotorDiag`** (new): a dedicated harness pinning a single `MyoFilLink` with a held bound state, no Brownian, no release. Smaller surface than A but more new code.
+
+**Option C — JointDiag-style sampler in the existing config.** Add a diagnostic in `MyoFilLink` that dumps per-link `forceMag`/`forceDotFil`/torque components every N steps for the first K Myosins; run gliding for a few thousand steps with the device path and the `DIAG_CPU_MOTOR` flag (mirror of `DIAG_CPU_F3F4`/`DIAG_CPU_F1`). Compare the dumps line-by-line.
+
+**Recommendation: Option A** (extend `SingleMyoDiag`). Lowest new-code surface, reuses the SingleMyoDiag dump scaffolding, exercises the exact tipC writeback path in the smallest possible system. Cheap enough to run at every kernel-implementation iteration. The gliding 10-seed paired ensemble (the 2026-06-03 driver) is the expensive **gate**, not the localiser.
+
+### 10. GPU-port recommendation — kernel structure and slotting
+
+**Kernel structure:** two kernels added to the existing chained TaskGraph.
+
+- **Kernel M** (per Myosin / per joint slot, `myoJointCt` threads): F8 motor-side force write + F9/F10 motor-side torque writes + tipC writeback (`forceMag`, `forceDotFil`). Reads motor pose + seg pose via `boundSegSlot[mj]`. Early return on `boundSegSlot < 0`. Block size 64, same as `jointsKernel`.
+- **Kernel S** (per FilSegment slot, `slotCount` threads with seg-only filter): F8 seg-side force write + F9/F10 seg-side torque writes. Reads its CSR-style bound-motor list. Early return on empty list. Block size 64, same as `chainPairForcesKernel`.
+
+**TaskGraph slotting** (`GPUMoveThing.java:1900`-ish, where the chained graph is built):
+- After `jointsKernel` and `chainPairForcesKernel` (they have already deposited the F3/F4/anchor/joint contributions to jointForceSum/jointTorqueSum).
+- After F1 boundary kernel (already on device for the box case).
+- Before `moveKernel` (which sums `cpuForceSum + jointForceSum` to integrate).
+- Order between M and S does not matter — they write to disjoint slots.
+
+**Infra reuse from F3/F4 and Phase-1 anchor:**
+- `thingNumberToMoveSlot[]` reverse map → `boundSegSlot[mj]` lookup.
+- `jointSlotToMyoIdx[]`, `rodSlots`/`leverSlots`/`motorSlots` IntArrays → motor pose access.
+- `cockedFlags` IntArray → reuse as-is for F9's `angRelaxed` selector.
+- `myoDrags` FloatArray → motor `bRotGam.x/.y` already at offsets 8 / 7 of the 9-tuple.
+- F3/F4's per-FilSegment `bRotGam` FloatArray (already on device for chain torsion) → reuse for seg-side F9/F10 torsion denominator.
+- tipC device writeback (committed today, `commit e8042b5`) → reuse the writeback FloatArray for `forceMag` and `forceDotFil` per joint slot.
+
+**PTX/arg-cap constraint to watch.** Adding yVec to the device kernel set is new (current `jointsKernel`/`chainPairForcesKernel` don't read yVec, but yVec is already in the device pose buffers via the OP_UNPACK path — no new upload, only a new kernel argument). Kernel M arg count ≈ 14, Kernel S arg count ≈ 13. Within the working envelope. If a future port needs more state, fold related arrays into AoS-by-attribute (e.g., interleave `boundSegSlot` and `posOnSeg`) — but not yet.
+
+**Reduced CPU pass.** Following the established pattern (`MyosinFixed.applyGPUDroppedForces` for anchor; `DIAG_CPU_F3F4` for chain): a `DIAG_CPU_MOTOR` flag forces both kernels to early-return (all `boundSegSlot[mj]` → `−1` at pack; the CSR is empty). The CPU then runs the existing `MyoMotor.step() → tipLink.step()` → F8/F9/F10 in the unmodified step() dispatch. Mixed-state per-Myosin: when the bound seg is CPU-fallback (e.g., `motherFil != null`, `actAOn`, `isLpSeg && lpActive==0`), `boundSegSlot[mj] = −1` and the CPU code handles that motor's link — same pattern as the F3/F4 mixed-chain fallback.
+
+### Recommended next executable step (NOT a green light to start — planner decides)
+
+Build **Option A — extended `SingleMyoDiag` single-bound-motor harness** *before* writing either kernel. The cheap-probe-then-ensemble discipline applies: the cheap probe must exist and pass on the CPU path first (no device code involved) so it is known to be sensitive to the right quantities. Then implement Kernel M and Kernel S in series, gated by `DIAG_CPU_MOTOR`, validate against the harness, then run the gliding 10-seed paired ensemble (the 2026-06-03 driver) as the production gate.
+
+### Constraints honoured
+- Read-only. No edits to source. No runs.
+- Sign conventions untouched. Release kinetics (`ckRelease`, `dissociateADP`) stay on CPU.
+- `MyoMiniFilament` deferred (gliding-only scope), with the kernel structure designed to extend without API change.
+- Cross-bridge force confirmed cleanly separable from biochem state — no scoping risk to flag to the planner.
+
+---
 
 ## 2026-06-03 — 64-mon paired device-vs-CPU gliding ensemble — full ported stack (PASS)
 
