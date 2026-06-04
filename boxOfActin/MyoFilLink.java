@@ -81,18 +81,22 @@ public class MyoFilLink {
 			// (MyosinFixed with a GPU-handled bound seg), the device kernels
 			// compute F8/F9/F10 and write forceMag/forceDotFil back via
 			// bridgeMotorForceWriteback(). In that case the CPU pair below
-			// would double-apply, so skip it. release kinetics
-			// (ckRelease/dissociateADP) and binding detection stay on CPU
-			// regardless. The handoff decision lives in
+			// would double-apply, so skip it. The handoff decision lives in
 			// GPUMoveThing.packMotorBinding(): motor mj has boundSegSlot >= 0
 			// iff the device path handles it this step.
+			// 2026-06-04 release-read reconciliation: ckRelease is also
+			// deferred for device-handled motors — it now runs from
+			// bridgeMotorForceWriteback() immediately after the fresh
+			// forceMag/forceDotFil are written, so step-N ckRelease consumes
+			// step-N forces (matching the CPU arm). The CPU path below keeps
+			// ckRelease here because addForces has just written fresh forces.
 			boolean deviceMotor = gpuMotorHandled();
 			if (!deviceMotor) {
 				addForces();
 				alignUVecTorque();
 				alignYVecTorque();
+				ckRelease();
 			}
-			ckRelease();
 		}
 	}
 

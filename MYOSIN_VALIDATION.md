@@ -211,3 +211,48 @@ warrants). Use longWindowSpeedXY (or net-displacement / time) for honest compari
 - **JOURNAL.md** — session-by-session work log including this validation work (2026-05-27 entry).
 - **NMII_BIOLOGY.md** — biology background on non-muscle myosin II.
 - **SURVEY_MYOSIN_AND_GLIDING.md** — earlier survey of gliding-assay-related code.
+
+## Deferred model change — running-average release rate as a tuning knob
+
+*Recorded 2026-06-04. **Not part of the release-lag reconciliation fix** (that fix
+only made the device arm's `ckRelease` read the step-N force the CPU arm already
+reads; the per-decision release rate formula was untouched). Listed here as a
+deferred candidate model change to be considered separately, with no current
+implementation commitment.*
+
+Candidate change to the release rate law: base `ckRelease` on a smoothing
+running average of the motor–filament bond force-state with a **physical-time-
+anchored** time constant τ (α = dt/τ per step) instead of evaluating the
+instantaneous overdamped force each step.
+
+**Rationale.**
+
+1. The instantaneous overdamped cross-bridge load is dt-sensitive. Brownian
+   force amplitude scales as 1/√dt, and the 2026-06-04 release-read diagnosis
+   (`RELEASE_LAG_DIAGNOSIS.md`, Section 1) measured step-to-step
+   |Δ(forceDotFil)| ≈ 4.45 × 10⁻¹² N vs steady-state mean |forceDotFil|
+   ≈ 1.5 × 10⁻¹³ N — i.e., the per-step change is the same order as the signal
+   itself. A rate law on the bare instantaneous force has no clean continuum
+   limit; an average over a fixed *physical* time is the dt-robust object.
+
+2. With τ as a parameter, release rate has a physically-principled tuning knob
+   for the duty ratio and the gliding velocity, so the calibration target
+   becomes published NMII values rather than ad-hoc per-experiment fitting.
+
+**Cost / caveat.** This changes release kinetics for **both** code paths (CPU
+and device), so it requires re-checking the gliding velocity match against
+published NMII data, not merely device-vs-CPU agreement (which is the success
+criterion of the reconciliation fix). The current gliding-velocity match
+against published values is rough; that match would need to be re-validated
+after the law change, not assumed to hold.
+
+**Open sub-question — already resolved:** Is `forceDotFilTrack`'s averaging
+window currently anchored in physical time or in step count? **Step count.**
+`ValueTracker` (`boxOfActin/ValueTracker.java`) is a fixed-size circular
+buffer of `stepsToTrack` samples (size 10 in `MyoFilLink`), and
+`averageVal()` divides by `stepsToTrack` directly. So the existing release
+law that `dissociateADP` uses via `forceDotFilTrack.averageVal()` is
+**already quietly dt-dependent** — the same change of variable that motivates
+the new release law would also need to apply to the existing tracker (or the
+new law would replace it). Any future principled rewrite of the release-rate
+law should subsume both code paths simultaneously.

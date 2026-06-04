@@ -300,6 +300,30 @@ public class BoxOfActin {
 				System.err.println("[RELEASE_READ_DIAG] failed to open " + releaseReadEnv + ": " + ioe);
 			}
 		}
+		// Phase 3 validation companion (2026-06-04). When BOA_DIAG_RELEASE_READ_WB
+		// is set to a file path, GPUMoveThing.bridgeMotorForceWriteback writes one
+		// record per per-motor bridge call:
+		//   step,motorId,segId,wbForceMag,wbForceDotFil
+		// Matching on (step, motorId) against BOA_DIAG_RELEASE_READ's CSV lets us
+		// confirm post-fix that ckRelease's read at step N == the bridge writeback
+		// at step N (i.e., current-step), not step N-1.
+		String releaseWbEnv = System.getenv("BOA_DIAG_RELEASE_READ_WB");
+		if (releaseWbEnv != null && !releaseWbEnv.isEmpty()) {
+			try {
+				java.io.File f = new java.io.File(releaseWbEnv);
+				java.io.File parent = f.getParentFile();
+				if (parent != null) parent.mkdirs();
+				java.io.PrintWriter pw = new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.FileWriter(f, false)));
+				pw.println("step,motorId,segId,wbForceMag,wbForceDotFil");
+				GPUMoveThing.DIAG_RELEASE_WB_WRITER = pw;
+				System.err.println("[RELEASE_READ_WB_DIAG] logging writebacks to " + releaseWbEnv);
+				Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+					try { GPUMoveThing.diagReleaseWbFlush(); pw.close(); } catch (Throwable ignored) {}
+				}));
+			} catch (java.io.IOException ioe) {
+				System.err.println("[RELEASE_READ_WB_DIAG] failed to open " + releaseWbEnv + ": " + ioe);
+			}
+		}
 
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {

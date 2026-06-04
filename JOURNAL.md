@@ -1,8 +1,236 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Motor-port borderline — release-lag confirmation — hypothesis NOT CONFIRMED, partial N=8, stopped early)
+Last updated: 2026-06-04 (Release-read reconciliation — device ckRelease force-read fix — Phase 3 mechanism PASS, Phase 4 ensemble FAIL: gap not closed)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Release-read reconciliation — device ckRelease force-read fix (Phase 3 mechanism PASS, Phase 4 ensemble FAIL — gap not closed, planner decision required)
+
+**Verdict.** The minimal surgical reorder that makes the device arm's
+`ckRelease` read the step-N motor-force writeback (instead of step-N-1) is
+**mechanically correct and confirmed by the per-step matched-key probe (Phase
+3)** but **did not close the device-vs-CPU empirical gap** on the
+`glidingAssay500_val` N=8 paired ensemble (Phase 4). The post-fix gap is
+similar magnitude or wider than pre-fix on `bindEvents`, `meanBoundMotors`,
+and `glidingVelocity`. Per the prompt's bail-out convention, no further fixes
+attempted; the change is committed for the planner to decide whether to
+keep, revert, or extend.
+
+### Scope
+
+The fix is the "surgical reorder" defined in the planner prompt: make the
+device's `ckRelease` at step N consume the step-N motor-force writeback the
+CPU arm already reads at step N, not the step-(N-1) writeback that the
+pre-fix structural lag forced it to read. It is **not** the larger Path-B
+remediation (moving the motor-force compute into a pre-step device task) and
+it is **not** the deferred running-average release-rate model change
+(recorded as a deferred note in `MYOSIN_VALIDATION.md`, separate item).
+`forceDotFilTrack` is untouched (the 2026-06-04 diagnosis showed it is
+already fresh on both arms via `bridgeMotorForceWriteback` registering before
+biochem). The CPU/reference path is untouched.
+
+### Phase 1 — ordering trace (confirmed)
+
+Pre-fix per-step ordering on the device arm, verified at HEAD by tracing
+`BoxOfActin.doLoop`:
+
+1. `BoxOfActin.doLoop:963` — `startAllThreadSets(Env.stepStart)` runs
+   `Thing.step()` on every Thing. For each `MyoMotor`, `MyoMotor.step()`
+   (`MyoMotor.java:170`) calls `updateMyoFilLinks()` (`MyoMotor.java:181`)
+   → `tipLink.step()` (`MyoMotor.java:455`). In `MyoFilLink.step()`
+   (`MyoFilLink.java:76` pre-fix), the `gpuMotorHandled()` branch skips
+   `addForces`/`alignUVecTorque`/`alignYVecTorque` for device motors, then
+   **`ckRelease()` is invoked unconditionally at line 95**, reading
+   `forceMag`/`forceDotFil` from the link fields.
+2. `BoxOfActin.doLoop:1000` — `GPUMoveThing.moveThings()`. `plan.execute()`
+   runs the motor-force kernel which writes `motorWriteback[mj*2+0..1] =
+   (forceMag, forceDotFil)` (`GPUMoveThing.java:1842-1843`). At
+   `GPUMoveThing.java:3676`, `bridgeMotorForceWriteback()` drains those
+   into `link.forceMag` / `link.forceDotFil` and
+   `link.forceDotFilTrack.registerValue(forceDotFil)`.
+3. `BoxOfActin.doLoop:1015` — biochem; `dissociateADP` reads the tracker.
+
+Where the staleness enters: `ckRelease` runs in (1) BEFORE the bridge in (2).
+Its read of `link.forceDotFil` is the *previous* step's bridge output —
+i.e., forces computed by `moveThings(N-1)`'s motor kernel from
+end-of-`moveThings(N-2)` positions. CPU arm's `addForces` at the same step
+phase computes forces from current (= end-of-`moveThings(N-1)`) positions,
+so the device arm is **1 step pose-lagged** on the release read. The
+tracker is fresh on both arms (bridge registers it in the same step before
+biochem).
+
+Existing code comment at `GPUMoveThing.java:3666-3671` corroborates this
+("ckRelease/dissociateADP run on the **NEXT step's** tipLink.step() with
+these values").
+
+### Phase 2 — the minimal device-only reorder (committed)
+
+Two surgical edits, both confined to the device-handled-motor branch:
+
+- **`MyoFilLink.step` (`MyoFilLink.java:76-101`):** move `ckRelease()`
+  *inside* the existing `if (!deviceMotor)` block. CPU runs (`!Env.useGPU`),
+  CPU-fallback motors on a `-gpu` run (non-`MyosinFixed`, or
+  `mySeg.gpuHandled=false`), and the freshCPU diagnostic
+  (`BOA_DIAG_CPU_MOTOR=1` → `gpuMotorHandled()=false`) still execute the
+  same `updatePos → addForces → alignUVecTorque → alignYVecTorque →
+  ckRelease` sequence in the same order they did pre-fix — byte-for-byte
+  unchanged for those paths.
+
+- **`GPUMoveThing.bridgeMotorForceWriteback` (`GPUMoveThing.java:3055-3110`):**
+  after writing `link.forceMag` / `link.forceDotFil` and registering the
+  tracker, invoke `link.ckRelease()` for each device-handled motor. This
+  runs single-threaded inside `moveThings`, immediately after the fresh
+  step-N writeback, so the read consumes the step-N force computed by the
+  same step's motor kernel.
+
+Scope guard satisfied: no wave reorder, no motor-force compute moved to a
+pre-step task. The `move`/`biochem` waves remain in their original places.
+
+### Phase 3 — gating validation (PASS for mechanism; CPU bit-identity infeasible — see below)
+
+Phase 3.1 (device-side current-step read) — **PASS, decisively.** Added
+`BOA_DIAG_RELEASE_READ_WB` env hook and `DIAG_RELEASE_WB_WRITER` /
+`diagReleaseWbLog` in `GPUMoveThing` that, when enabled, records every
+per-motor writeback at the moment the bridge stores `link.forceMag` /
+`link.forceDotFil`. Re-ran `glidingAssay500_val_releaseread` (seed 1) on
+the post-fix device arm with both writers on. Matched-key analysis (Python
+on the two CSVs by `(step, motorId)`):
+
+| pairing | match count | bit-exact | diff_max |
+|---|---:|---:|---:|
+| ckRelease read[N] vs writeback[N]   | 17260 / 17260 | **17260** | **0.0** |
+| ckRelease read[N] vs writeback[N-1] | 17026         | 0         | (every pair differs) |
+
+Post-fix the device arm's release decision at step N reads the bridge's
+step-N output exactly; the lag is gone. Pre-fix this same probe would show
+0/17260 same-step match and 17026/17026 lag-1 match (by construction of the
+pre-fix code path).
+
+Phase 3.2 (CPU arm bit-identity to pre-fix) — **infeasible on this
+harness.** The literal test the prompt requested (rerun freshCPU same-seed
+and confirm byte-identical CSV vs the committed pre-fix freshCPU CSV) fails
+not because the fix leaked but because BOA's parallel ThreadSets are
+**inherently run-to-run nondeterministic**. Verified empirically by running
+the post-fix code twice with the same seed in both configurations: (a)
+`-gpu` + `BOA_DIAG_CPU_MOTOR=1` (freshCPU) — two same-code runs differ
+(rows 19793 vs 15842); (b) no `-gpu`, fully CPU — two same-code runs also
+differ (rows 18976 vs 18719). The CPU-path-unchanged claim therefore falls
+back to a direct code-trace argument: the only `MyoFilLink.step` change
+moves `ckRelease()` from one side of an existing `}` to inside the same
+`if (!deviceMotor)` block; for `deviceMotor=false` (which is unconditionally
+true under `!Env.useGPU` *or* `DIAG_CPU_MOTOR=true`), the execution sequence
+is byte-identical. The new `link.ckRelease()` inside the bridge is reached
+only when `boundSegSlot >= 0`, impossible for the freshCPU configuration
+(`packMotorBinding` forces `-1` for every motor under `DIAG_CPU_MOTOR`).
+
+Phase 3 outcome for the purposes of proceeding: mechanism gate PASS; CPU
+bit-identity replaced by code-trace argument; ran Phase 4 as the empirical
+backstop.
+
+### Phase 4 — paired N=8 device-vs-CPU ensemble (FAIL — gap not closed)
+
+`scripts/phase4_release_fix_ensemble.sh` (wraps the existing
+`paired_motor_gliding.sh` with a 30 s heartbeat ticker writing to
+`.last_run_status`). N=8 seeds (1..8, same as the prior motor-port
+ensemble), `-gpu` both arms, freshCPU arm = `BOA_DIAG_CPU_MOTOR=1`,
+`glidingAssay500_val` (run length 0.1 s sim, ~5.5 min wall/run, ~90 min
+total). Run unattended. Output:
+`RUN_LOGS/2026-06-04_release_lag_fix/results.csv` (raw),
+`RUN_LOGS/2026-06-04_release_lag_fix_driver.log` (driver log).
+
+Paired-t per observable, compared against the matched 8-seed pre-fix
+baseline at commit `a0fe20f` (motor-port ensemble, seeds 1..8):
+
+| observable        | pre-fix N=8 (a0fe20f)     | post-fix N=8 (this fix)     |
+|---|---|---|
+| `bindEvents`      | −93 ± 48  (t = −1.93)     | **−179 ± 44  (t = −4.10)**  |
+| `meanBoundMotors` | −0.35 ± 0.34 (t = −1.03, clean) | **−0.93 ± 0.27 (t = −3.49)** |
+| `glidingVelocity` | −0.31 ± 0.17 (t = −1.82)  | −0.34 ± 0.12 (t = −2.85)    |
+
+The post-fix gap is **the same direction and similar-or-wider magnitude on
+every observable**. `bindEvents`'s |t| went from 1.9 to 4.1; `mbm` went
+from "clean" (|t|=1.0) to a 3.5σ gap. The expected post-fix |t| ≲ 1 (gap
+collapsed to noise) is **not** observed.
+
+**Important caveat — what the comparison can and cannot say.** BOA
+nondeterminism dominates the cross-ensemble single-arm means:
+
+- Pre-fix device mean = 789 (sd 117, sem 41); post-fix device mean = 762
+  (sd 59, sem 21). Difference = −27 ± 46 → |t| = 0.6, **not significant**.
+- Pre-fix CPU mean = 882 (sd 102, sem 36); post-fix CPU mean = 941 (sd
+  142, sem 50). Difference = +59 ± 62 → |t| = 1.0, **not significant**.
+
+That is: neither the device arm nor the CPU arm changed in mean by an
+amount the data can resolve. The widened paired-t signal comes from the
+post-fix gaps all having the same sign (8/8 negative) whereas pre-fix had
+three positive (seeds 2, 4, 5). The pairing tightened, not the magnitudes.
+
+Per the prompt's failure-handling convention: "If the gap does **not**
+close, report the residual magnitude and direction; do not improvise
+further fixes." Reporting; not improvising.
+
+### IC pad check
+
+`FilSegment.makeGlidingAssayFilament` (`FilSegment.java:3381`) — the
+half-`stdFilSegLengthUM` pad is **present** as
+`Pt3D loc = new Pt3D(boxXDim/2 - filLength/2 - stdFilSegLengthUM/2, 0, 0)`.
+IC pad verified present.
+
+### Phase 5 — deferred model change recorded
+
+Note appended to `MYOSIN_VALIDATION.md` ("Deferred model change —
+running-average release rate as a tuning knob"). Documentation only; no
+code. Also resolves the prompt's open sub-question: `ValueTracker` is a
+fixed-size circular buffer keyed on `stepsToTrack` (10 in `MyoFilLink`)
+and `averageVal()` divides by that count directly, so the existing
+`dissociateADP` averaging is **already step-count-anchored** and therefore
+already quietly dt-dependent — a future principled rewrite would need to
+subsume both code paths simultaneously.
+
+### Files modified / added (this entry)
+
+| file | change |
+|---|---|
+| `boxOfActin/MyoFilLink.java` | `step()` — `ckRelease()` moved inside the `if (!deviceMotor)` block; deferred for device-handled motors. Comment updated. Diagnostic snapshot from the prior commit unchanged. |
+| `boxOfActin/GPUMoveThing.java` | `bridgeMotorForceWriteback()` — invokes `link.ckRelease()` after the per-motor writeback. Added `DIAG_RELEASE_WB_WRITER` static + `diagReleaseWbLog` / `diagReleaseWbFlush` helpers (Phase 3 instrument, default off). |
+| `boxOfActin/BoxOfActin.java` | `BOA_DIAG_RELEASE_READ_WB=<path>` env hook to enable the writeback CSV (Phase 3 instrument). |
+| `MYOSIN_VALIDATION.md` | Deferred-model-change note appended (Phase 5). |
+| `scripts/release_read_probe_phase3.sh` | NEW — Phase 3 paired probe with WB logging on (1 seed). |
+| `scripts/phase4_release_fix_ensemble.sh` | NEW — Phase 4 driver wrapping `paired_motor_gliding.sh` with 30 s heartbeat. |
+| `RUN_LOGS/2026-06-04_release_read_phase3/` | NEW — Phase 3 device+freshCPU CSVs and writeback log. |
+| `RUN_LOGS/2026-06-04_release_lag_fix/` | NEW — Phase 4 paired ensemble results. |
+| `RUN_LOGS/2026-06-04_release_lag_fix_driver.log` | NEW — driver log. |
+
+### What the planner needs to decide
+
+This fix is **mechanically correct** (Phase 3 confirms the device read is
+current-step) and structurally cleaner (the two arms now consume the same
+step's force for the release decision, removing the "device read is one
+step pose-lagged from CPU" structural asymmetry called out in the
+diagnosis). But it **does not** close the device-vs-CPU gliding gap that
+motivated the work. Three plausible reasons:
+
+1. The lag was a real per-decision force-input divergence (verified
+   numerically in the diagnosis at ~29 % expected-release-rate reduction)
+   but is not the dominant driver of the bindEvents/gv gap. The float32
+   device kernel computations vs the double CPU computations may
+   contribute even after the read timing is reconciled.
+2. There is an additional unidentified ordering or model difference
+   between the arms that the prompt's structural-lag analysis missed.
+3. Run-to-run nondeterminism is hiding the true effect; an N >> 8
+   ensemble might reveal a smaller residual.
+
+Options for the planner:
+- **Revert the fix.** It's mechanically correct but didn't recover the
+  gap; the existing pre-fix code path is documented and understood.
+- **Keep the fix and continue investigating.** The two arms are now
+  structurally identical at the release decision, which is a valuable
+  cleanup independent of whether it closed the empirical gap.
+- **Extend to N=16 or N=20.** Cheap; would resolve whether the apparent
+  widening is real or a nondet artifact (with N=16 the SEM tightens
+  enough to distinguish).
+
+No further fixes attempted per the prompt's "do not improvise" clause.
 
 ## 2026-06-04 — Motor-port borderline — release-lag confirmation (NOT CONFIRMED, partial N=8 — diagnostic only, no fix)
 

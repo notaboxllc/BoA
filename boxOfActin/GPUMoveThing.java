@@ -288,6 +288,37 @@ public class GPUMoveThing {
         synchronized (DIAG_RELEASE_READ_LOCK) { w.flush(); }
     }
 
+    /**
+     * Phase 3 gating-validation companion to DIAG_RELEASE_READ_WRITER.
+     * Logs every per-motor writeback from bridgeMotorForceWriteback at the
+     * moment the bridge stores forceMag/forceDotFil into MyoFilLink. Schema:
+     *   step,motorId,segId,wbForceMag,wbForceDotFil
+     * Default null. Enabled via BOA_DIAG_RELEASE_READ_WB=<path> in
+     * BoxOfActin.begin(). Pairing rule: post-fix, for every (step, motorId)
+     * pair present in BOTH the writeback log and the ckRelease read log,
+     * wbForceDotFil should equal forceDotFil (ckRelease reads the just-written
+     * value). Pre-fix the ckRelease read at step N matches the writeback at
+     * step N-1.
+     */
+    public static java.io.PrintWriter DIAG_RELEASE_WB_WRITER = null;
+    private static final Object DIAG_RELEASE_WB_LOCK = new Object();
+
+    public static void diagReleaseWbLog(int step, int motorId, int segId,
+                                        double forceMag, double forceDotFil) {
+        java.io.PrintWriter w = DIAG_RELEASE_WB_WRITER;
+        if (w == null) return;
+        synchronized (DIAG_RELEASE_WB_LOCK) {
+            w.printf("%d,%d,%d,%.10e,%.10e%n",
+                     step, motorId, segId, forceMag, forceDotFil);
+        }
+    }
+
+    public static void diagReleaseWbFlush() {
+        java.io.PrintWriter w = DIAG_RELEASE_WB_WRITER;
+        if (w == null) return;
+        synchronized (DIAG_RELEASE_WB_LOCK) { w.flush(); }
+    }
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {
@@ -3075,6 +3106,21 @@ public class GPUMoveThing {
             if (link.forceDotFilTrack != null) {
                 link.forceDotFilTrack.registerValue(forceDotFil);
             }
+            // Phase 3 validation log (gated, default off): record what was
+            // just written so it can be matched against ckRelease's read for
+            // the same (step, motorId). See DIAG_RELEASE_WB_WRITER.
+            if (DIAG_RELEASE_WB_WRITER != null) {
+                int mid = (motor.thingInstanceId);
+                int sid = link.mySeg.thingInstanceId;
+                diagReleaseWbLog(Env.counter, mid, sid, forceMag, forceDotFil);
+            }
+            // 2026-06-04 release-read reconciliation: for device-handled motors
+            // MyoFilLink.step() defers ckRelease — invoke it here so the
+            // step-N release decision reads the step-N forces just written
+            // above. Pre-fix it ran in the prior step phase against the
+            // moveThings(N-1) writeback (1-step stale). The CPU pair path is
+            // unchanged (it still calls ckRelease in MyoFilLink.step()).
+            link.ckRelease();
         }
     }
 
