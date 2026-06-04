@@ -254,6 +254,40 @@ public class GPUMoveThing {
      */
     public static boolean DIAG_RELEASE_LAG = false;
 
+    /**
+     * Diagnostic instrumentation (2026-06-04 — release-read divergence probe).
+     * Pure observation, behind an env flag. When non-null, MyoFilLink.ckRelease
+     * emits one CSV record per call to this writer:
+     *   step,motorId,segId,forceMag,forceDotFil,trackedAvg,releaseFired
+     * Decision logic (the catch+slip roll, the breakForce gate, the inRigor
+     * gate) is unchanged — only the values the existing roll already reads are
+     * captured at function exit. Logging happens regardless of whether the
+     * release actually fired. PRNG state and trajectory are unperturbed when
+     * BOA_DIAG_RELEASE_READ is unset (writer stays null). Set via
+     * BOA_DIAG_RELEASE_READ=<path> in BoxOfActin.begin(). Thread-safe via
+     * synchronized on the writer.
+     */
+    public static java.io.PrintWriter DIAG_RELEASE_READ_WRITER = null;
+    private static final Object DIAG_RELEASE_READ_LOCK = new Object();
+
+    public static void diagReleaseReadLog(int step, int motorId, int segId,
+                                          double forceMag, double forceDotFil,
+                                          double trackedAvg, int releaseFired) {
+        java.io.PrintWriter w = DIAG_RELEASE_READ_WRITER;
+        if (w == null) return;
+        synchronized (DIAG_RELEASE_READ_LOCK) {
+            w.printf("%d,%d,%d,%.10e,%.10e,%.10e,%d%n",
+                     step, motorId, segId,
+                     forceMag, forceDotFil, trackedAvg, releaseFired);
+        }
+    }
+
+    public static void diagReleaseReadFlush() {
+        java.io.PrintWriter w = DIAG_RELEASE_READ_WRITER;
+        if (w == null) return;
+        synchronized (DIAG_RELEASE_READ_LOCK) { w.flush(); }
+    }
+
     // Phase-0 dependency forcing (must run AFTER the `= false` initializers
     // above so we win the ordering race).
     static {

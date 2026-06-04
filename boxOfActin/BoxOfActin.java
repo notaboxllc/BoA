@@ -275,6 +275,32 @@ public class BoxOfActin {
 				System.err.println("[RELEASE_LAG_DIAG] DIAG_RELEASE_LAG forced ON (CPU release reads prior-step forceDotFil; mimics device lag)");
 			}
 		}
+		// BOA_DIAG_RELEASE_READ — when set to a file path, MyoFilLink.ckRelease
+		// emits one CSV record per call to that file:
+		//   step,motorId,segId,forceMag,forceDotFil,trackedAvg,releaseFired
+		// Decision logic is unchanged (the same forceMag/forceDotFil the roll
+		// already reads are captured at function exit; the catch+slip roll,
+		// breakForce gate, and inRigor gate are unmodified). Used to measure
+		// the actual per-step read divergence between device and fresh-CPU arms
+		// at the moment ckRelease consumes the force values.
+		String releaseReadEnv = System.getenv("BOA_DIAG_RELEASE_READ");
+		if (releaseReadEnv != null && !releaseReadEnv.isEmpty()) {
+			try {
+				java.io.File f = new java.io.File(releaseReadEnv);
+				java.io.File parent = f.getParentFile();
+				if (parent != null) parent.mkdirs();
+				java.io.PrintWriter pw = new java.io.PrintWriter(new java.io.BufferedWriter(new java.io.FileWriter(f, false)));
+				pw.println("step,motorId,segId,forceMag,forceDotFil,trackedAvg,releaseFired");
+				GPUMoveThing.DIAG_RELEASE_READ_WRITER = pw;
+				System.err.println("[RELEASE_READ_DIAG] logging to " + releaseReadEnv);
+				Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+					try { GPUMoveThing.diagReleaseReadFlush(); pw.close(); } catch (Throwable ignored) {}
+				}));
+			} catch (java.io.IOException ioe) {
+				System.err.println("[RELEASE_READ_DIAG] failed to open " + releaseReadEnv + ": " + ioe);
+			}
+		}
+
 		String dumpChainEnv = System.getenv("BOA_DIAG_DUMP_CHAIN_STEP");
 		if (dumpChainEnv != null && !dumpChainEnv.isEmpty()) {
 			try {

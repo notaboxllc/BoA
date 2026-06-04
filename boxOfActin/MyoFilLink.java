@@ -245,28 +245,48 @@ public class MyoFilLink {
 	}
 	
 	public void ckRelease () {
+		// Diagnostic snapshot (2026-06-04 — release-read divergence probe).
+		// Captures the values the release roll about to read. Decision logic
+		// below is unchanged.
+		boolean diag = (GPUMoveThing.DIAG_RELEASE_READ_WRITER != null);
+		double snapForceMag = 0, snapForceDot = 0, snapAvg = 0;
+		int snapMotorId = -1, snapSegId = -1;
+		if (diag) {
+			snapForceMag = forceMag;
+			snapForceDot = forceDotFil;
+			snapAvg = (forceDotFilTrack != null) ? forceDotFilTrack.averageVal() : 0.0;
+			snapMotorId = (myMotor != null) ? myMotor.thingInstanceId : -1;
+			snapSegId = (mySeg != null) ? mySeg.thingInstanceId : -1;
+		}
+		int snapStep = diag ? Env.counter : 0;
+
 		if (forceMag > Env.myosinBreakForce.getValue()*1e-12) { // combat stiffness and force insanity
 			release();
 			myoBreakForceRelease++;
 			//System.out.println("**released myoFilLink because break force exceeded!");
+			if (diag) GPUMoveThing.diagReleaseReadLog(snapStep, snapMotorId, snapSegId, snapForceMag, snapForceDot, snapAvg, 1);
 			return;
 		}
-		
-		if (myMotor.inRigor) { return; } // don't release a filament normally if this flag is set, only if large force as above
-		
+
+		if (myMotor.inRigor) {
+			if (diag) GPUMoveThing.diagReleaseReadLog(snapStep, snapMotorId, snapSegId, snapForceMag, snapForceDot, snapAvg, 0);
+			return; // don't release a filament normally if this flag is set, only if large force as above
+		}
+
 		double guoCatchTerm = Env.alphaCatch.getValue()*Math.exp(-forceDotFil*Env.xCatch.getValue()/(Env.Boltz*Env.tempK));
-		double guoSlipTerm = Env.alphaSlip.getValue()*Math.exp(forceDotFil*Env.xSlip.getValue()/(Env.Boltz*Env.tempK));  
+		double guoSlipTerm = Env.alphaSlip.getValue()*Math.exp(forceDotFil*Env.xSlip.getValue()/(Env.Boltz*Env.tempK));
 		double guoCatchSlipProb =  Env.kOff.getValue()*(guoCatchTerm + guoSlipTerm);
-		
-		
+
+
 		//System.out.println("Motor state is " + myMotor.getState() + " forceDotFil = " + forceDotFil + " ; guoCatchSlipProb = " + guoCatchSlipProb);
 		//System.out.println("Motor state is " + myMotor.getState() + " ForceMag = " + forceMag+ " ; forceDotFil = " + forceDotFil + " ; ReleaseProb = " + releaseProb + " ; guoCatchSlipProb = " + guoCatchTerm + " ; " +  guoSlipTerm + " ; " + guoCatchSlipProb);
-		
-		if (myMotor.myPRNG.nextDouble() < guoCatchSlipProb*Env.deltaT.getValue()) { 
-			release(); 
+
+		boolean fired = (myMotor.myPRNG.nextDouble() < guoCatchSlipProb*Env.deltaT.getValue());
+		if (fired) {
+			release();
 			normalRelease++;
 		}
-		
+		if (diag) GPUMoveThing.diagReleaseReadLog(snapStep, snapMotorId, snapSegId, snapForceMag, snapForceDot, snapAvg, fired ? 1 : 0);
 	}
 	
 	/*public void ckRelease () {

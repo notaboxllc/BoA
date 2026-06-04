@@ -1,0 +1,36 @@
+Constants used: alphaCatch=0.92 alphaSlip=0.08 kOff=100.0 xCatch=2.5e-09 xSlip=4e-10 tempK=298.15 Boltz=1.380662e-23 dt=1e-05
+
+====== PER-SEED, PER-ARM SUMMARY ======
+  device seed=1: rows= 20129  motors=  65  fired=278
+  device seed=2: rows= 16204  motors=  64  fired=189
+  device seed=3: rows= 16258  motors=  58  fired=227
+  freshCPU seed=1: rows= 14350  motors=  50  fired=172
+  freshCPU seed=2: rows= 15678  motors=  53  fired=216
+  freshCPU seed=3: rows= 14659  motors=  52  fired=164
+  freshCPU totals: rows=44687  motors=155  fired=552
+
+====== MATCHED-KEY (device vs freshCPU at same motorId+step) ======
+  seed=1: common motors    1  matched (mid,step) records 261
+  seed=2: common motors    0  matched (mid,step) records 0
+  seed=3: common motors    1  matched (mid,step) records 88
+  ALL seeds: common motors 2  matched records 349
+  segId agreement on matched (mid,step): 0/349
+  cpu[N]      - cpu[N-1] (same seg, step-to-step):   n=347 <|.|>=4.350e-12
+
+====== AGGREGATE FORCEDOTFIL DISTRIBUTION (per arm, all bound-motor records) ======
+  device: n=52591  forceDotFil mean=1.656e-13 sd=3.582e-12  forceMag mean=5.110e-12 sd=2.310e-12  trackedAvg mean=1.889e-13 sd=1.162e-12
+  freshCPU: n=44687  forceDotFil mean=1.542e-13 sd=3.518e-12  forceMag mean=5.150e-12 sd=2.211e-12  trackedAvg mean=1.786e-13 sd=1.158e-12
+  diff device - freshCPU = 1.140e-14   z = 0.50
+
+====== SINGLE-ARM CPU COUNTERFACTUAL (lag direction test) ======
+  CPU-only n_pairs (mid,step) with bound at N and N-1: 44222
+  sum p_now    = 388.4687      (expected releases at N)
+  sum p_prev   = 274.4325      (expected releases if lag)
+  sum p_prev - p_now = -1.1404e+02   (net counterfactual fired change under lag)
+  # (mid,step) where p[N-1] < p[N]: 22161   (lag would DROP a release: fewer releases)
+  # (mid,step) where p[N-1] > p[N]: 22061   (lag would ADD a release: more releases)
+  actual fired_at_N records: 550
+    of which would still fire under lag (p_prev >= p_now): 157
+    of which might be lost under lag    (p_prev <  p_now): 393
+
+  CPU forceDotFil per-step change (same seg): n=44214 mean=-4.166e-14 <|.|>=4.454e-12 sd=5.593e-12
