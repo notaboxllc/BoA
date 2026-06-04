@@ -1,8 +1,123 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-03 (tipC device writeback (box) PASS; polymerizing box workloads now valid on `-gpu` default)
+Last updated: 2026-06-03 (64-mon paired device-vs-CPU gliding ensemble — full ported stack — PASS; Phase-1 2σ shift resolved as RNG-sampling)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-03 — 64-mon paired device-vs-CPU gliding ensemble — full ported stack (PASS)
+
+**Verdict: PASS.** The full Phase-2 ported force stack (anchor A7.b + F3/F4 chain bending + F1 box boundary + tipC device writeback) reproduces the CPU at the **64-monomer production gliding regime**. Per-seed paired deltas across all three gliding observables center on zero (paired |t| < 0.32), the device and CPU ensemble distributions agree on |d|/cSEM < 0.28 across the board, and the deferred Phase-1 ~2σ binding question is resolved: it was post-Phase-0 RNG sampling on the small N=10 seed set, **not** a device-arm effect.
+
+Pre-motor-port confirmatory gate at the 64-mon production regime cleared. Ported forces were validated at the 32-mon bench earlier today; the gliding ensemble runs them at 64-mon, which this entry confirms.
+
+### Setup
+
+Both arms run `-gpu` on `glidingAssay500_val`; only difference is where the four ported forces compute.
+
+| Arm | DIAG flags | Where the ported forces run |
+|---|---|---|
+| **DEVICE** (default) | all four flags off | anchor + F3/F4 + F1 + tipC writeback on device |
+| **CPU** | `BOA_DIAG_CPU_ANCHOR=1` `BOA_DIAG_CPU_F3F4=1` `BOA_DIAG_CPU_F1=1` `BOA_DIAG_DEVICE_BOUNDARY_TIPC=0` | device kernels early-return; CPU paths apply the same forces |
+
+Same `-seed N` in both arms → same `Env.mtRNG` state → same `runSeed` → same Brownian / motor-binding RNG draws (those phases are unported and stay on device in both arms). The only physical difference between paired runs is the four ported forces. Phases not yet ported (motor binding, biochem, Brownian, grid) run on CPU/GPU identically in both arms and are not under test.
+
+Driver: `scripts/paired_64mon_gliding.sh` (new) — interleaves DEVICE / CPU per seed and writes `RUN_LOGS/2026-06-03_paired_devVsCpu/results.csv`. Both arms run `BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val -seed N`; the CPU arm prepends the four `BOA_DIAG_*` env vars above.
+
+### Smoke projection + chosen N
+
+Single paired seed `1` ran in **326s (DEVICE) + 334s (CPU) = 660s per pair** (`RUN_LOGS/2026-06-03_paired_smoke/`). Projection at the 10-hour wall boundary: ≤ 54 paired seeds fit. Chose **N=20** (paired) — doubles Phase-1's N=10, tightens SEMs by √2, projects at ~220 min, fits comfortably. No bail.
+
+Smoke also verified: no NaN, no crash, observables in the expected range, single-seed device-CPU deltas inside the ordinary seed-scatter regime (Phase-1 already had seed 7 = 320 binds vs ensemble-mean 762).
+
+### Per-seed paired deltas (DEVICE − CPU)
+
+Production: seeds 1..20, walls 322–329s/seed device and 332–336s/seed CPU; **total ensemble wall = 220.0 min** (matches projection within 1%).
+
+| seed | bindEv_D | bindEv_C | Δbind | mbm_D | mbm_C | Δmbm   | gv_D   | gv_C   | Δgv     |
+|---|---|---|---|---|---|---|---|---|---|
+|  1 |  743 |  777 |  −34 | 6.762 | 6.653 | +0.109 | 7.3729 | 8.4786 | −1.1057 |
+|  2 | 1033 |  918 | +115 | 8.477 | 7.253 | +1.224 | 8.5921 | 8.5407 | +0.0514 |
+|  3 |  766 |  899 | −133 | 7.098 | 7.248 | −0.150 | 7.8036 | 7.7525 | +0.0511 |
+|  4 | 1121 | 1000 | +121 | 8.393 | 8.529 | −0.136 | 8.9457 | 8.1011 | +0.8446 |
+|  5 |  694 |  913 | −219 | 6.811 | 7.164 | −0.353 | 8.5238 | 8.1382 | +0.3856 |
+|  6 |  868 | 1235 | −367 | 7.191 | 8.930 | −1.739 | 7.3966 | 8.8726 | −1.4760 |
+|  7 |  785 |  843 |  −58 | 6.544 | 6.896 | −0.352 | 8.0263 | 8.4168 | −0.3905 |
+|  8 |  839 |  608 | +231 | 7.559 | 5.298 | +2.261 | 8.3697 | 7.5532 | +0.8165 |
+|  9 |  896 |  886 |  +10 | 7.928 | 7.641 | +0.287 | 8.0357 | 8.2590 | −0.2233 |
+| 10 |  856 |  818 |  +38 | 7.216 | 7.230 | −0.014 | 8.1743 | 7.2781 | +0.8962 |
+| 11 |  601 |  841 | −240 | 5.979 | 7.877 | −1.898 | 7.1534 | 7.9461 | −0.7927 |
+| 12 |  764 |  861 |  −97 | 6.681 | 7.191 | −0.510 | 7.3390 | 8.3973 | −1.0583 |
+| 13 | 1059 |  809 | +250 | 8.608 | 6.887 | +1.721 | 8.2991 | 7.7420 | +0.5571 |
+| 14 |  963 |  748 | +215 | 8.196 | 6.412 | +1.784 | 8.1464 | 7.3451 | +0.8013 |
+| 15 |  827 |  757 |  +70 | 6.917 | 6.982 | −0.065 | 7.3745 | 7.3997 | −0.0252 |
+| 16 |  916 |  970 |  −54 | 6.923 | 8.098 | −1.175 | 8.2647 | 8.0842 | +0.1805 |
+| 17 |  916 |  933 |  −17 | 7.786 | 7.657 | +0.129 | 8.3862 | 7.9098 | +0.4764 |
+| 18 |  785 |  862 |  −77 | 6.850 | 7.257 | −0.407 | 7.9237 | 8.1657 | −0.2420 |
+| 19 | 1024 |  925 |  +99 | 7.780 | 7.574 | +0.206 | 8.0401 | 8.5700 | −0.5299 |
+| 20 |  750 |  829 |  −79 | 6.515 | 7.405 | −0.890 | 7.9491 | 7.6215 | +0.3276 |
+
+Signs span both directions per observable; no run-of-sign suggestive of a systematic bias.
+
+### Bias analysis (paired deltas, N=20)
+
+The primary test: do paired deltas center on zero?
+
+| observable      | mean Δ   | SD(Δ)    | SEM(Δ) | paired t | verdict   |
+|---|---|---|---|---|---|
+| bindEvents      | **−11.3**  | 160.74 | 35.94  | **−0.314** | no bias |
+| meanBoundMotors | **+0.0016** |   1.09 |  0.243 | **+0.007** | no bias |
+| glidingVelocity | **−0.023** |   0.70 |  0.157 | **−0.145** | no bias |
+
+All three paired t-statistics |t| < 0.32 — well inside zero-centered scatter; nothing approaching the ±2σ threshold. **The full ported stack introduces no systematic bias relative to the CPU at the 64-mon regime.**
+
+### Ensemble distributions (independent)
+
+Statistical-agreement view (not seed-level bit-reproducibility — float32 force noise integrating over a trajectory makes that not expected):
+
+| observable      | DEVICE mean ± SEM | CPU mean ± SEM   | diff     | cSEM    | \|d\|/cSEM | verdict |
+|---|---|---|---|---|---|---|
+| bindEvents      | 860.30 ± 29.65    | 871.60 ± 27.49   | −11.30   | 40.43   | 0.279     | PASS |
+| meanBoundMotors | 7.311 ± 0.166     | 7.309 ± 0.171    | +0.0016  | 0.238   | 0.007     | PASS |
+| glidingVelocity | 8.006 ± 0.107     | 8.029 ± 0.101    | −0.023   | 0.147   | 0.155     | PASS |
+
+All three |d|/cSEM < 0.28 — clean PASS by the project's <2σ statistical-agreement criterion. The two ensembles overlap almost exactly across all three observables.
+
+### Deflection ratio — clarification
+
+The prompt listed "deflection ratio" as a fourth observable. **Deflection ratio is a benchmark-mode observable** (`-bm` / `-bmManual` / `-bmDiag`, the static deflection bench described in `CLAUDE.md` under Benchmark Modes), **not produced by the gliding assay.** The gliding assay emits exactly three `[STATS]` lines (`bindEvents`, `meanBoundMotors`, `glidingVelocity`; see `boxOfActin/BoxOfActin.java:1381-1425`). Deflection ratio at the 32-mon held-chain was already PASS on the Phase 2 F3/F4 owner-perspective-`linkUVec` fix (2026-06-03 entry) and is the stiffness gate for that port. This ensemble is the gliding gate at the 64-mon production regime.
+
+### Phase-1 2σ resolution
+
+Phase-1's N=10 ensemble (`856.80 / 7.30 / 8.22` baseline; `717.9 / 6.21 / 8.07` Phase-1) showed bindEvents −2.02σ and meanBoundMotors −2.21σ below baseline, with glidingVelocity clean. Phase-1 flagged three candidates: outlier seed 7 (320 binds), Phase-0 RNG-remap sampling, or a real device anchor effect.
+
+The N=20 paired data resolves it:
+
+| observable      | Phase-2 DEVICE (N=20) | Phase-2 CPU (N=20) | Phase-1 baseline (n=10) | DEVICE \|d\|/cSEM | CPU \|d\|/cSEM |
+|---|---|---|---|---|---|
+| bindEvents      | 860.30 ± 29.65        | 871.60 ± 27.49     | 856.80 ± 45.72          | **+0.064**        | **+0.277**     |
+| meanBoundMotors | 7.311 ± 0.166         | 7.309 ± 0.171      | 7.30 ± 0.30             | **+0.031**        | **+0.026**     |
+| glidingVelocity | 8.006 ± 0.107         | 8.029 ± 0.101      | 8.22 ± 0.15             | −1.161            | −1.060         |
+
+Both arms land essentially on Phase-1's binding baseline (|d|/cSEM ≤ 0.28). The CPU arm — which has **none** of the Phase-1 device-anchor compute — is at +0.28σ from baseline, not −2.02σ. **The Phase-1 ~2σ binding shift was post-Phase-0 RNG sampling on the small N=10 seed set, not a device-arm effect.** The N=20 paired sample averaged the seed-7-style outliers (now joined by seed 11's 601 and seed 5's 694) against above-baseline seeds (8, 13, 14, 4) to land cleanly on the population mean. Phase 1 cleanly closed retroactively.
+
+The 1.16σ residual on glidingVelocity (8.01 vs 8.22 cited) appears in **both arms equally** and is therefore not a device-arm effect either; it's a small population shift between the pre-Phase-0 baseline (8.22, with the pre-Phase-0 RNG mapping) and the post-Phase-0 mean (~8.02 in both arms). The cited 8.22 ± 0.15 (post-fix 2026-06-01) was on n=10 seeds under a different RNG plumbing; the N=20 post-Phase-0 estimate is the better population estimate.
+
+### Wall, status, output
+
+- **Total ensemble wall: 220.0 min** (DEVICE mean 325.5s/seed; CPU mean 334.4s/seed; CPU arm marginally slower because the device kernels still launch then early-return for inactive slots, but the difference is small).
+- Heartbeats: per-seed `[progress]` lines in `.last_run_status` throughout the run (smoke 16:04–16:15, production 16:16–19:56), as required. `.last_run_status` removed at session end per spec.
+- Files: per-seed logs `RUN_LOGS/2026-06-03_paired_devVsCpu/{device,cpu}_seed{1..20}.log`; combined CSV `results.csv`; analysis `analysis.txt` + script `analyze.py`. Smoke run at `RUN_LOGS/2026-06-03_paired_smoke/`. Driver `scripts/paired_64mon_gliding.sh`.
+
+### Constraints respected
+
+- **No code changes.** `git status` clean except untracked `.diag_dump_*.txt` / `.journal_skel.txt` from prior sessions; HEAD = `e8042b5` (tipC device writeback box) built clean once before the smoke run, no further `javac` during the ensemble.
+- **No concurrent `java` on aorus.** Only the ensemble's JVM ran; no other build, bench, or production job touched aorus during the 220-min window.
+- `collisionCheckInt` cadence unchanged; `glidingAssay500_val` parameter file unchanged.
+- Both arms run `-gpu`; the CPU arm is not a "no-GPU run", it's a "GPU run with the four ported force kernels gated off" — the deferred-port phases (motor binding, joints rod-lever/lever-motor, Brownian, etc.) remain on the device in both arms.
+
+### Verdict
+
+**PASS — statistical agreement.** Paired |t| < 0.32 across all three gliding observables; independent |d|/cSEM < 0.28; the full ported force stack (anchor + F3/F4 + F1 + tipC) reproduces the CPU at the 64-mon production gliding regime. The deferred Phase-1 ~2σ binding question is resolved as RNG-sampling on the small seed set; the device path was not at fault. With the stack confirmed at 64-mon, the **pre-motor-port confirmatory gate is cleared**; subsequent Phase-3 (binding detection) and Phase-4 (residency flip) work can proceed against this ensemble as the reference.
 
 ## 2026-06-03 — tipC device writeback (box) — implementation (PASS)
 
