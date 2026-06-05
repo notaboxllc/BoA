@@ -616,7 +616,7 @@ public class GPUMoveThing {
     // 2026-05-31 conformation diagnostic should vanish. Caller may pass any
     // double; the helper clamps to [−1, 1] internally.
     // -------------------------------------------------------------------------
-    private static double accurateAcos(double x) {
+    static double accurateAcos(double x) {
         if (x > 1.0)  x = 1.0;
         if (x < -1.0) x = -1.0;
         double y;

@@ -171,7 +171,7 @@ public class MyoFilLink {
 		double dotVecs = Pt3D.Dot(mySeg.uVecAsPt3D(),myMotor.uVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
-		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
+		double angTween = GPUMoveThing.accurateAcos(dotVecs)*180/Math.PI;
 
 		double angRelaxed = Myosin.uncockedMotor_ActinAngle;
 		if (myMotor.isCocked()) { angRelaxed = Myosin.cockedMotor_ActinAngle; }
@@ -199,7 +199,7 @@ public class MyoFilLink {
 		double dotVecs = Pt3D.Dot(mySeg.yVecAsPt3D(),myMotor.yVecAsPt3D());
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
-		double angTween = Pt3D.fastAcos(dotVecs)*180/Math.PI;
+		double angTween = GPUMoveThing.accurateAcos(dotVecs)*180/Math.PI;
 			
 		//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
 		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angTween/((1/myMotor.bRotGam.x + 1/mySeg.bRotGam.x)*Env.deltaT.getValue());

@@ -1,8 +1,87 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Release-read reconciliation — device ckRelease force-read fix — Phase 3 mechanism PASS, Phase 4 ensemble FAIL: gap not closed)
+Last updated: 2026-06-04 (Motor-gap CONFIRMED + FIXED — F9/F10 acos formula divergence; CPU pair now calls kernel's accurateAcos)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Motor-gap confirmed and fixed — CPU F9/F10 alignment torques now call kernel's `accurateAcos`
+
+**Verdict.** The residual device-vs-CPU motor gap that survived the
+release-read reorder is **caused by a formula divergence in the F9/F10
+alignment torques**: CPU's `Pt3D.fastAcos` uses a small-angle approximation
+inside the `|dot| > 0.95` band, while the kernel uses `accurateAcos`
+(Newton-refined fp64). F10 (yVec alignment, target 0°) lives inside that
+band at equilibrium, so the kernel is systematically ~0.4 % stiffer. The
+`HeldBoundMotorDiag` probe absorbed this with a 1e-3 tolerance; the live
+ensemble does not. Swapping the two CPU sites
+(`MyoFilLink.java:174, 202`) from `Pt3D.fastAcos` to
+`GPUMoveThing.accurateAcos` (the same source method the kernel calls — not
+a lookalike) **collapsed the gap on all three observables**.
+
+### The change
+
+- `boxOfActin/GPUMoveThing.java:619` — widened `accurateAcos` from
+  `private static` to package-private `static` so `MyoFilLink` (same
+  `boxOfActin` package) can call the identical source method.
+- `boxOfActin/MyoFilLink.java:174` — `alignUVecTorque`: `Pt3D.fastAcos`
+  → `GPUMoveThing.accurateAcos`.
+- `boxOfActin/MyoFilLink.java:202` — `alignYVecTorque`: same swap.
+
+No other `fastAcos` site touched; kernel call sites unchanged; the
+release-reorder fix untouched.
+
+### Confirming ensemble
+
+`scripts/acos_confirm_ensemble.sh` (driver wrapping
+`paired_motor_gliding.sh`), N=8 seeds 1..8, `glidingAssay500_val`, both
+arms `-gpu`, freshCPU = `BOA_DIAG_CPU_MOTOR=1`. Wall 89 min on aorus.
+Output: `RUN_LOGS/2026-06-04_acos_confirm/results.csv`.
+
+Paired-t (device − cpu, N=8):
+
+| observable        | post-reorder baseline | post-acos-swap (this entry) |
+|---|---|---|
+| `bindEvents`      | t = **−4.10**         | t = **−0.78** |
+| `meanBoundMotors` | t = **−3.49**         | t = **−0.99** |
+| `glidingVelocity` | t = **−2.85**         | t = **+0.28** |
+
+All three |t| < 1.0. The 8/8 same-sign pattern from the baseline broke to
+(5/8, 4/8, 2/8 negative) — pairing looks like noise around zero rather
+than a systematic offset. Absolute gv: device 7.79 ± 0.45, cpu 7.73 ± 0.70.
+
+### Why this is the fix and not a lookalike
+
+The prompt was explicit: "we need the identical algorithm on both arms,
+not a lookalike." `accurateAcos` is a single Java method defined in
+`GPUMoveThing`; widening its visibility (no body change) and calling it
+from the CPU site means both arms execute the same bytecode. Float32
+truncation of `forceDotFil` reaching `ckRelease` on the device arm
+remains (Q1 of the diagnosis) but is sub-leading by ~6 orders of
+magnitude and not amplified into the observables — consistent with the
+`GPU_MIGRATION_LESSONS.md` Appendix B framing that float32 keeps being
+the wrong suspect.
+
+### Notes on what remains
+
+- Open question for future work: a clean post-residency baseline run
+  will regenerate the gliding-velocity calibration; the absolute gv
+  numbers from this confirming test (~7.7–7.8 µm/s both arms) are an
+  input to that, not a gate on this change.
+- Other CPU `fastAcos` sites (`MyoLever.java:147`, `Arp23.java:238`)
+  remain on `fastAcos`. They were not implicated by the diagnosis and
+  were not touched. If a future investigation finds joint or branch
+  bias from those, the same swap pattern applies.
+
+### Files modified / added (this entry)
+
+| file | change |
+|---|---|
+| `boxOfActin/MyoFilLink.java` | F9/F10 alignment torques: `Pt3D.fastAcos` → `GPUMoveThing.accurateAcos` (2 lines). |
+| `boxOfActin/GPUMoveThing.java` | `accurateAcos` widened from `private static` to package-private `static` (visibility only). |
+| `MOTOR_GAP_DIAGNOSIS.md` | Appended confirming-test paired-t table, absolute gv, verdict, commit hash. |
+| `scripts/acos_confirm_ensemble.sh` | NEW — Phase-4-style driver, N=8 paired heartbeat. |
+
+---
 
 ## 2026-06-04 — Release-read reconciliation — device ckRelease force-read fix (Phase 3 mechanism PASS, Phase 4 ensemble FAIL — gap not closed, planner decision required)
 

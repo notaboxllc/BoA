@@ -349,3 +349,64 @@ Bounds for the confirming test:
 - `glidingAssay500_val` is the regime of record.
 - No new files added beyond this report.
 - All file/line references are at the current HEAD as inspected.
+
+---
+
+## Confirming test — result (2026-06-04)
+
+The decisive test proposed at the end of this report was executed with one
+adjustment to the prompt's literal namespace: the swap target is the **same
+source method** the kernel calls, not a lookalike. `accurateAcos` lives at
+`GPUMoveThing.java:619`; the kernel invokes it from F9/F10
+(`GPUMoveThing.java:1822, 1846`) and the joint kernels. Making the CPU
+call the identical source method required widening that method from
+`private static` to package-private `static` so `MyoFilLink` (same
+`boxOfActin` package) can reference it. The two CPU sites
+(`MyoFilLink.java:174, 202`) were then swapped from `Pt3D.fastAcos(dotVecs)`
+to `GPUMoveThing.accurateAcos(dotVecs)`. No other `fastAcos` call site was
+touched; the kernel and the release-reorder fix are unchanged.
+
+Compile clean (Java 21 + `--enable-preview`, TornadoVM 4.0.1-dev PTX on
+`aorus1`). Ensemble: `scripts/acos_confirm_ensemble.sh` (driver wrapping
+`scripts/paired_motor_gliding.sh` with a 30 s heartbeat), N=8 seeds 1..8,
+`glidingAssay500_val`, both arms `-gpu`, freshCPU = `BOA_DIAG_CPU_MOTOR=1`.
+Wall: 89 min. Raw output:
+`RUN_LOGS/2026-06-04_acos_confirm/results.csv`,
+`RUN_LOGS/2026-06-04_acos_confirm_driver.log`.
+
+### Paired-t (device − cpu), N=8
+
+| observable        | post-reorder baseline (release_lag_fix) | post-acos-swap (this test) | sign of (dev−cpu) post-swap |
+|---|---|---|---|
+| `bindEvents`      | mean −179.25, sd 123.6, **t = −4.10** | mean −65.13, sd 236.5, **t = −0.78** | 3 +, 5 − |
+| `meanBoundMotors` | mean −0.928, sd 0.752, **t = −3.49**  | mean −0.500, sd 1.433, **t = −0.99** | 4 +, 4 − |
+| `glidingVelocity` | mean −0.343, sd 0.341, **t = −2.85**  | mean +0.064, sd 0.651, **t = +0.28** | 6 +, 2 − |
+
+### Absolute gliding velocity, both arms (for the record)
+
+| arm    | mean (µm/s) | sd     |
+|---|---|---|
+| device | 7.7897      | 0.4463 |
+| cpu    | 7.7259      | 0.6978 |
+
+(`bindEvents` means: device 791.2, cpu 856.4. `meanBoundMotors` means:
+device 6.952, cpu 7.452. Per-arm sd's roughly double vs the baseline
+ensemble, consistent with the per-seed pairing tightening losing its
+same-sign systematic bias — the kept pairing now looks like noise around
+zero rather than a same-sign offset.)
+
+### Verdict
+
+**Gap collapsed on all three observables.** Paired-t goes from
+(−4.10, −3.49, −2.85) to (−0.78, −0.99, +0.28); the 8/8 same-sign pattern
+breaks to (5/8, 4/8, 2/8 negative). All three |t| < 1.0, well below the
+prompt's ≲ 1–2 success threshold. The `fastAcos` vs `accurateAcos`
+divergence in F9/F10 (with F10 sitting inside the |dot| > 0.95 fastAcos
+band at equilibrium) is **confirmed** as the residual cause of the
+device-vs-CPU motor gap. The `accurateAcos` swap is the fix.
+
+### Change committed
+
+Two-line MyoFilLink swap plus the package-private widening of
+`GPUMoveThing.accurateAcos`. Commit hash recorded in the JOURNAL.md entry
+for this date. Pushed to `origin/main`.
