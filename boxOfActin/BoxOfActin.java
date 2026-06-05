@@ -119,6 +119,13 @@ public class BoxOfActin {
 	static DeflectionTunerV25 deflTunerV25 = null;  // armed when -bmTunerV25 flag is present
 	static int autoTuneStepCounter = 0;
 
+	// Phase 4.5 scoping — when BOA_PHASE45_BIND_PROFILE=1, time the per-step
+	// MyoMotor.fillSoaArrays + FilSegment.fillSoaArrays calls (P1.a + P1.b).
+	// These feed the binding pose pack and are the Phase 4.5 retirement target
+	// alongside the in-graph P4 pack inside GPUMotorBinding.detectBindings.
+	static long fillSoaArraysNanos = 0;
+	static int  fillSoaArraysCalls = 0;
+
 	public BoxOfActin (String[] args) {
 		
 	}
@@ -907,8 +914,14 @@ public class BoxOfActin {
 				// used to live in resetCounters — one memset over thingCt*3 floats.
 				Thing.clearSoaForcesTorques(Thing.thingCt);
 				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
+				long _fillSoaT0 = (Env.useGPU && GPUMotorBinding.isBindProfileEnabled())
+				                  ? System.nanoTime() : 0L;
 				MyoMotor.fillSoaArrays();
 				FilSegment.fillSoaArrays();
+				if (Env.useGPU && GPUMotorBinding.isBindProfileEnabled()) {
+					fillSoaArraysNanos += System.nanoTime() - _fillSoaT0;
+					fillSoaArraysCalls++;
+				}
 				// iter2c: classify Things for the GPU moveThing kernel before the
 				// Brownian phase, so calcRandomForces() can skip GPU-handled Things.
 				// No-op on topology-stable steps after the first call.
@@ -1029,6 +1042,13 @@ public class BoxOfActin {
 					// AnchorNode have empty moveThing overrides and the fallback
 					// dispatch is a no-op for them.
 					GPUMoveThing.moveThings();
+					// Phase 4.5 scoping — poison the frame-only host mirrors
+					// (Thing.soaEnd1/End2/ZVec/TransXTox + per-FilSegment
+					// xRange/end1Pt/end2Pt + per-MyoMotor bindTip) so any
+					// per-step reader between frames sees a sentinel offset.
+					// No-op unless BOA_PHASE45_POISON=1. refresh restores
+					// before any output-frame dispatch.
+					GPUMoveThing.poisonFrameOnlyMirrors();
 				} else {
 					startAllThreadSets(Env.moveStart);
 					waitOnAllThreadSets(Env.moveStop);
@@ -1492,6 +1512,59 @@ public class BoxOfActin {
 			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs gridPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk, gp, ex, un);
 			GPUMotorBinding.reportCheckpointSummary();
+			// Phase 4.5 scoping — per-task TornadoVM profile breakdown of the
+			// .execute() block, alongside the per-step fillSoaArrays time
+			// (P1.a + P1.b CPU pose snapshot that feeds the binding pack).
+			if (GPUMotorBinding.isBindProfileEnabled()
+			    && GPUMotorBinding.getBindProfileSamples() > 0) {
+				int samples = GPUMotorBinding.getBindProfileSamples();
+				double fillSoa = fillSoaArraysNanos / 1.0e9;
+				double pcieIn  = GPUMotorBinding.getBindWriteNanos()              / 1.0e9;
+				double pcieOut = GPUMotorBinding.getBindReadNanos()               / 1.0e9;
+				double kSeg    = GPUMotorBinding.getBindSegBboxKernelNanos()      / 1.0e9;
+				double kGrid   = GPUMotorBinding.getBindGridAssembleKernelNanos() / 1.0e9;
+				double kBind   = GPUMotorBinding.getBindBindKernelNanos()         / 1.0e9;
+				double kAll    = GPUMotorBinding.getBindDeviceKernelTotalNanos()  / 1.0e9;
+				double bindTot = GPUMotorBinding.getTotalNanos()                  / 1.0e9;
+				double msScale = 1000.0 / Math.max(1, samples);
+				System.out.printf("[PHASE45_BIND_PROFILE] samples=%d bindTotal=%.3fs  "
+				                + "fillSoa(P1.ab)=%.3fs/%.3fms  cpuPack(P4)=%.3fs/%.3fms  "
+				                + "pcieWrite=%.3fs/%.3fms  segBboxK=%.3fs/%.3fms  "
+				                + "gridAssembleK=%.3fs/%.3fms  bindK=%.3fs/%.3fms  "
+				                + "kernelsAll=%.3fs/%.3fms  pcieRead=%.3fs/%.3fms  "
+				                + "cpuUnpack=%.3fs/%.3fms%n",
+				    samples, bindTot,
+				    fillSoa, fillSoa * msScale,
+				    pk,      pk      * msScale,
+				    pcieIn,  pcieIn  * msScale,
+				    kSeg,    kSeg    * msScale,
+				    kGrid,   kGrid   * msScale,
+				    kBind,   kBind   * msScale,
+				    kAll,    kAll    * msScale,
+				    pcieOut, pcieOut * msScale,
+				    un,      un      * msScale);
+				// Percent-of-bindTotal split of the four buckets the scoping
+				// prompt asked for. fillSoa+cpuPack+pcieWrite = "pose pack /
+				// transfer" (Phase 4.5 retires); segBbox+gridAssemble = "grid
+				// build"; bind = "bind kernel"; pcieRead+cpuUnpack = "CSR /
+				// result transfer". The unaccounted remainder is JVM/profile
+				// overhead + plan dispatch.
+				double pose  = fillSoa + pk + pcieIn;
+				double grid  = kSeg + kGrid;
+				double bind  = kBind;
+				double csr   = pcieOut + un;
+				if (bindTot > 0) {
+					System.out.printf("[PHASE45_BIND_BUCKETS] pose=%.3fs(%.1f%%)  "
+					                + "grid=%.3fs(%.1f%%)  bind=%.3fs(%.1f%%)  "
+					                + "csr=%.3fs(%.1f%%)  acct=%.3fs(%.1f%%)%n",
+					    pose, 100.0 * pose / bindTot,
+					    grid, 100.0 * grid / bindTot,
+					    bind, 100.0 * bind / bindTot,
+					    csr,  100.0 * csr  / bindTot,
+					    (pose + grid + bind + csr),
+					    100.0 * (pose + grid + bind + csr) / bindTot);
+				}
+			}
 		}
 		if (Env.useGPU && GPUMoveThing.getCallCount() > 0) {
 			int    calls = GPUMoveThing.getCallCount();

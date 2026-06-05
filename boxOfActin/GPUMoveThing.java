@@ -3030,6 +3030,91 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Phase 4.5 scoping — POISON the frame-only host mirrors between frames.
+    //
+    // Armed via env var BOA_PHASE45_POISON=1. Call from doLoop() AFTER
+    // GPUMoveThing.moveThings() returns (demand-sync has overwritten
+    // soaCoord/UVec/YVec; what remains stale until output frame is the
+    // derived* arrays and the per-Thing Pt3D mirrors).
+    //
+    // The poison adds +POISON_OFFSET to every float of:
+    //  - Thing.soaEnd1[], soaEnd2[], soaZVec[], soaTransXTox[]
+    //  - FilSegment.{xRange,yRange,zRange,end1Pt.x/y/z,end2Pt.x/y/z}
+    //  - MyoMotor.bindTip.x/y/z
+    //
+    // refreshHostMirrorsForOutput() restores these before any
+    // ThreeJSWriter/inspect dispatch, so frame contents stay correct.
+    //
+    // PASS = observables unchanged within run-to-run noise → no per-step
+    // path reads these mirrors. FAIL = observable shifts → a per-step
+    // reader exists; localize via per-field poisoning.
+    //
+    // POISON_OFFSET is chosen large enough to taint any consumer (>1 µm
+    // shifts every Pt3D way outside its mesh cell, every bbox test fails)
+    // but small enough to avoid blowing up out-of-bounds array indexing.
+    // -------------------------------------------------------------------------
+    private static final boolean POISON_FRAME_MIRRORS =
+        "1".equals(System.getenv("BOA_PHASE45_POISON"));
+    private static final float POISON_OFFSET = 1.0f;
+
+    public static boolean isPoisonEnabled() { return POISON_FRAME_MIRRORS; }
+
+    public static void poisonFrameOnlyMirrors() {
+        if (!POISON_FRAME_MIRRORS) return;
+        int tc = Thing.thingCt;
+        if (tc <= 0) return;
+
+        float[] e1 = Thing.soaEnd1;
+        float[] e2 = Thing.soaEnd2;
+        float[] zv = Thing.soaZVec;
+        float[] tx = Thing.soaTransXTox;
+        int n3 = tc * 3;
+        int n9 = tc * 9;
+        if (e1.length >= n3 && e2.length >= n3 && zv.length >= n3) {
+            for (int i = 0; i < n3; i++) {
+                e1[i] += POISON_OFFSET;
+                e2[i] += POISON_OFFSET;
+                zv[i] += POISON_OFFSET;
+            }
+        }
+        if (tx.length >= n9) {
+            for (int i = 0; i < n9; i++) tx[i] += POISON_OFFSET;
+        }
+
+        // Per-FilSegment Pt3D mirrors + bbox ranges (the P7 outputs).
+        int filCt = FilSegment.filSegmentCt;
+        FilSegment[] fils = FilSegment.theFilSegments;
+        for (int i = 0; i < filCt; i++) {
+            FilSegment fs = fils[i];
+            if (fs == null || fs.removeMe) continue;
+            fs.xRange += POISON_OFFSET;
+            fs.yRange += POISON_OFFSET;
+            fs.zRange += POISON_OFFSET;
+            if (fs.end1Pt != null) {
+                fs.end1Pt.x += POISON_OFFSET;
+                fs.end1Pt.y += POISON_OFFSET;
+                fs.end1Pt.z += POISON_OFFSET;
+            }
+            if (fs.end2Pt != null) {
+                fs.end2Pt.x += POISON_OFFSET;
+                fs.end2Pt.y += POISON_OFFSET;
+                fs.end2Pt.z += POISON_OFFSET;
+            }
+        }
+
+        // Per-MyoMotor bindTip Pt3D mirror (the P8 output).
+        int motorCt = MyoMotor.motorCt;
+        MyoMotor[] motors = MyoMotor.theMotors;
+        for (int i = 0; i < motorCt; i++) {
+            MyoMotor m = motors[i];
+            if (m == null || m.removeMe || m.bindTip == null) continue;
+            m.bindTip.x += POISON_OFFSET;
+            m.bindTip.y += POISON_OFFSET;
+            m.bindTip.z += POISON_OFFSET;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Classify Things into GPU vs CPU fallback, and build Myosin joint list.
     // -------------------------------------------------------------------------
     private static void classifyThings() {

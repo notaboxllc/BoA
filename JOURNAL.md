@@ -1,8 +1,91 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-05 (Phase 4 flip — pose+derived residency, half-flip with cross-graph scoped to 4.5)
+Last updated: 2026-06-05 (Phase 4.5 scoping — not-stale FAIL + binding-phase breakdown)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-05 — Phase 4.5 scoping — not-stale confirm + binding-phase breakdown
+
+**Verdict.** Two diagnostics ran on top of the half-flip commit
+(`ec789f2`). See `PHASE45_SCOPING.md` for the full write-up.
+
+**Part 1 — not-stale FAIL, stale reader localized.** A poison hook in
+`GPUMoveThing.poisonFrameOnlyMirrors()` (env-armed via
+`BOA_PHASE45_POISON=1`, called from `doLoop` after `moveThings()`) adds
++1.0 µm to every float of the frame-only host mirrors that the half-flip
+left to `refreshHostMirrorsForOutput` (`Thing.soaEnd1/End2/ZVec/TransXTox`
++ per-FilSegment `xRange/yRange/zRange/end1Pt/end2Pt` + per-MyoMotor
+`bindTip`). Two paired seeds at 10101 steps:
+
+| seed | metric | baseline | poisoned | Δ% |
+|---|---|---|---|---|
+| 1 | bindEvents | 712 | 249 | **-65%** |
+| 1 | meanBoundMotors | 6.64 | 2.28 | **-66%** |
+| 1 | glidingVelocity | 7.86 | 13.14 | **+67%** |
+| 2 | bindEvents | 733 | 214 | **-71%** |
+| 2 | meanBoundMotors | 5.91 | 1.75 | **-70%** |
+| 2 | glidingVelocity | 7.75 | 13.59 | **+75%** |
+
+Sign-aligned across seeds; deterministic shift well outside the
+half-flip's |t| ≲ 2 gate band. **Per-step reader exists.**
+
+Localized to **`Crucible.keepMyosinOnSurface(int)`** (`Crucible.java:115`)
+and **`Crucible.keepMyosinDimerOnSurface(int)`** (`Crucible.java:137`).
+Dispatched every step from `myoJoints2Start` (`ChamberMyo[D]Threads`).
+Both compute a surface-tether spring strain via
+`curRod.end1AsPt3D()` → `Thing.soaEnd1[]`. **Not gated** on
+`useGPU` / `gpuHandled` / `gpuMotorHandled`. After the half-flip
+retired the per-step `recomputeDerivedSoA`, `Thing.soaEnd1` is refreshed
+only at output-frame boundaries → between frames it drifts.
+
+`fixedMyosinDensity=500` in `glidingAssay500_val` → ~500 chamber-fixed
+myosin rods × every step driving force from a stale `end1`. The natural
+between-frame drift (~7e-3 µm at gliding speed × 100-step frame
+interval) is ~150× smaller than the +1 µm poison and produces a small
+biased force that the half-flip's N=4 paired-t absorbed in noise
+(|t|=-1.21 on bindEvents, mean Δ=-69.5/700=-10%). The poison test
+amplified the same path's effect into a 65–70% observable shift,
+exposing the latent bug.
+
+Fix surface (out of scope for this prompt): smallest touch is to
+refresh just `Thing.soaEnd1[rodSlot]` for chamber-fixed myosin rods
+inline before `myoJoints2Start` dispatch. Cleanest is to port
+`keepMyosinOnSurface` to a device kernel reading the resident
+`coord/uVec/length` — folds naturally into the chained move plan ahead
+of `move`. Deferred to a Phase 4.5 fix prompt.
+
+**Part 2 — binding-phase breakdown: strongly pack-dominated (75%).**
+TornadoVM `withProfiler(SILENT)` on the binding plan (env-armed via
+`BOA_PHASE45_BIND_PROFILE=1`) gives per-task `TASK_KERNEL_TIME` for
+`motorBinding.{segBbox,gridAssemble,bind}` parsed out of
+`getProfileLog()` JSON, plus aggregate `getDeviceWriteTime()` /
+`getDeviceReadTime()`. Inline timer on `MyoMotor.fillSoaArrays +
+FilSegment.fillSoaArrays` (P1.a + P1.b) added in `BoxOfActin.doLoop`.
+Honest absolutes from the no-profiler baseline (89s total binding,
+8.82 ms/call), shares from the profiler run:
+
+| bucket | ms/call | % of binding total | Phase 4.5 retires? |
+|---|---|---|---|
+| pose pack / transfer (fillSoa + cpuPack + pcieWrite) | **6.63** | **75.1%** | **YES** — cross-graph residency removes all three. |
+| grid build (segBbox + gridAssemble kernels) | 0.18 | 2.1% | no (pure device compute) |
+| bind kernel (27-cell narrow phase) | 0.023 | 0.3% | no (pure device compute) |
+| CSR / result transfer (pcieRead + cpuUnpack) | 1.96 | 22.3% | partial (gridCellOffsets/Contents can move UNDER_DEMAND) |
+
+The bindKernel itself is **0.023 ms/call** — 1/250th of the binding
+total. Optimizing it is not a useful lever; PCIe + CPU pack is the
+75% bucket. Phase 4.5 cross-graph residency is the speed lever, not
+just a goal-completion step. Projected post-4.5 GPU phase
+~7 ms/step (2.1× over half-flip, 2.8× over pre-flip).
+
+**Instrumentation kept** — both env vars off by default; no hot-path
+overhead in production. The poison hook and the bind-profile timers are
+reusable for the Phase 4.5 fix-and-validate prompt (the same poison
+test must PASS post-fix; the same bucket table must show pose ≈ 0%).
+
+Logs:
+- `RUN_LOGS/2026-06-05_phase45_scoping/baseline_seed{1,2}.log`
+- `RUN_LOGS/2026-06-05_phase45_scoping/poison_seed{1,2}.log`
+- `RUN_LOGS/2026-06-05_phase45_scoping/bindprofile_seed1.log`
 
 ## 2026-06-05 — Phase 4 — the residency flip (half-flip)
 

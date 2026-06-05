@@ -124,6 +124,38 @@ public class GPUMotorBinding {
     private static int  callCount       = 0;
 
     // -------------------------------------------------------------------------
+    // Phase 4.5 scoping — per-task TornadoVM profiler accumulators.
+    // Armed via BOA_PHASE45_BIND_PROFILE=1. When on, the plan runs with
+    // ProfilerMode.SILENT and each .execute() returns a TornadoExecutionResult
+    // whose getProfileLog() JSON carries per-task TASK_KERNEL_TIME entries.
+    // We parse out the per-task kernel time (segBbox + gridAssemble + bind)
+    // plus the aggregate device write/read time (PCIe push/pull from this
+    // plan's transferTo* declarations).
+    //
+    // The split this aims to read:
+    //   - bindPoseHostPack (P4 CPU pack, already in packNanos above) +
+    //     bindWriteNanos (PCIe host→device of motPos/UVec/RodUVec/onFil/
+    //     filEnd1/End2/NodeAtEnd2/counts) → the "pose pack / transfer"
+    //     bucket that cross-graph residency (Phase 4.5) would retire.
+    //   - bindGridKernelNanos (segBbox + gridAssemble device kernel time)
+    //     → the grid build bucket; residency doesn't touch it.
+    //   - bindBindKernelNanos (bind device kernel time)
+    //     → the 27-cell narrow-phase compute bucket; residency doesn't
+    //       touch it.
+    //   - bindReadNanos (PCIe device→host of boundSegId, arcOnFilDev,
+    //     gridCellOffsets, gridCellContents) → CSR/result transfer.
+    // -------------------------------------------------------------------------
+    private static final boolean BIND_PROFILE =
+        "1".equals(System.getenv("BOA_PHASE45_BIND_PROFILE"));
+    private static long bindWriteNanos        = 0;
+    private static long bindReadNanos         = 0;
+    private static long bindSegBboxKernelNanos    = 0;
+    private static long bindGridAssembleKernelNanos = 0;
+    private static long bindBindKernelNanos       = 0;
+    private static long bindDeviceKernelTotalNanos = 0;
+    private static int  bindProfileSamples        = 0;
+
+    // -------------------------------------------------------------------------
     // Phase 3 — device-resident grid build, step 1: per-segment AABB.
     //
     // One thread per segment. Reads the segment's endpoints (filEnd1, filEnd2 —
@@ -554,6 +586,10 @@ public class GPUMotorBinding {
 
             itg  = tg.snapshot();
             plan = new TornadoExecutionPlan(itg);
+            if (BIND_PROFILE) {
+                plan = plan.withProfiler(
+                    uk.ac.manchester.tornado.api.enums.ProfilerMode.SILENT);
+            }
 
             // Per-task WorkerGrids — bind keeps its small block to fit register
             // pressure; segBbox uses a larger block (register-light). The
@@ -616,8 +652,26 @@ public class GPUMotorBinding {
         long gridEnd   = gridStart;
 
         // ---------- Execute ----------
-        plan.withGridScheduler(gridScheduler).execute();
+        uk.ac.manchester.tornado.api.TornadoExecutionResult execRes =
+            plan.withGridScheduler(gridScheduler).execute();
         long execEnd = System.nanoTime();
+        if (BIND_PROFILE && execRes != null) {
+            try {
+                uk.ac.manchester.tornado.api.TornadoProfilerResult pr =
+                    execRes.getProfilerResult();
+                bindWriteNanos += pr.getDeviceWriteTime();
+                bindReadNanos  += pr.getDeviceReadTime();
+                bindDeviceKernelTotalNanos += pr.getDeviceKernelTime();
+                // Per-task kernel time — extract from the profile-log JSON.
+                String json = pr.getProfileLog();
+                bindSegBboxKernelNanos       += extractTaskKernelTime(json, "motorBinding.segBbox");
+                bindGridAssembleKernelNanos  += extractTaskKernelTime(json, "motorBinding.gridAssemble");
+                bindBindKernelNanos          += extractTaskKernelTime(json, "motorBinding.bind");
+                bindProfileSamples++;
+            } catch (Exception e) {
+                // first-call profiler shape may be empty; ignore.
+            }
+        }
 
         // ---------- Unpack ----------
         // Walk boundSegId serially on the CPU and fire ontoFilament for each hit.
@@ -961,6 +1015,10 @@ public class GPUMotorBinding {
         }
         packNanos = gridPackNanos = execNanos = unpackNanos = totalNanos = 0;
         callCount = 0;
+        bindWriteNanos = bindReadNanos = 0;
+        bindSegBboxKernelNanos = bindGridAssembleKernelNanos = 0;
+        bindBindKernelNanos = bindDeviceKernelTotalNanos = 0;
+        bindProfileSamples = 0;
     }
 
     /** Diagnostic timing accessors — read by BoxOfActin at run end. */
@@ -970,4 +1028,45 @@ public class GPUMotorBinding {
     public static long getExecNanos()     { return execNanos;     }
     public static long getUnpackNanos()   { return unpackNanos;   }
     public static int  getCallCount()     { return callCount;     }
+
+    // Phase 4.5 scoping — accessors for the per-task profiler accumulators.
+    public static boolean isBindProfileEnabled()          { return BIND_PROFILE; }
+    public static long getBindWriteNanos()                { return bindWriteNanos; }
+    public static long getBindReadNanos()                 { return bindReadNanos; }
+    public static long getBindSegBboxKernelNanos()        { return bindSegBboxKernelNanos; }
+    public static long getBindGridAssembleKernelNanos()   { return bindGridAssembleKernelNanos; }
+    public static long getBindBindKernelNanos()           { return bindBindKernelNanos; }
+    public static long getBindDeviceKernelTotalNanos()    { return bindDeviceKernelTotalNanos; }
+    public static int  getBindProfileSamples()            { return bindProfileSamples; }
+
+    /**
+     * Phase 4.5 scoping — pull TASK_KERNEL_TIME (ns) for a named task out of
+     * TornadoVM's getProfileLog() JSON dump. The dump has shape
+     *   "<taskName>": { "BACKEND": ..., ..., "TASK_KERNEL_TIME": "<ns>", ... }
+     * We do a simple, defensive substring scan — no real JSON parser dependency
+     * and tolerant of formatting changes around the value.
+     */
+    private static long extractTaskKernelTime(String json, String taskName) {
+        if (json == null || json.isEmpty()) return 0L;
+        int keyIdx = json.indexOf("\"" + taskName + "\"");
+        if (keyIdx < 0) return 0L;
+        int braceIdx = json.indexOf('{', keyIdx);
+        if (braceIdx < 0) return 0L;
+        int endBlock = json.indexOf('}', braceIdx);
+        if (endBlock < 0) endBlock = json.length();
+        String block = json.substring(braceIdx, endBlock);
+        int tktIdx = block.indexOf("TASK_KERNEL_TIME");
+        if (tktIdx < 0) return 0L;
+        int colonIdx = block.indexOf(':', tktIdx);
+        if (colonIdx < 0) return 0L;
+        int q1 = block.indexOf('"', colonIdx);
+        if (q1 < 0) return 0L;
+        int q2 = block.indexOf('"', q1 + 1);
+        if (q2 < 0) return 0L;
+        try {
+            return Long.parseLong(block.substring(q1 + 1, q2).trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
 }
