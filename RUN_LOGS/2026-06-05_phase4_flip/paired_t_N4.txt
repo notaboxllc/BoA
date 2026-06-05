@@ -1,0 +1,24 @@
+metric             seed       base       flip      delta delta/base%
+----------------------------------------------------------------------
+bindEvents         1       757.000    781.000    +24.000     +3.17%
+bindEvents         2       754.000    649.000   -105.000    -13.93%
+bindEvents         3       802.000    822.000    +20.000     +2.49%
+bindEvents         4       685.000    468.000   -217.000    -31.68%
+
+meanBoundMotors    1         6.409      7.183     +0.774    +12.08%
+meanBoundMotors    2         6.666      5.686     -0.980    -14.70%
+meanBoundMotors    3         7.193      7.076     -0.117     -1.63%
+meanBoundMotors    4         6.040      4.178     -1.862    -30.83%
+
+glidingVelocity    1         7.391      7.645     +0.254     +3.44%
+glidingVelocity    2         7.484      7.298     -0.185     -2.47%
+glidingVelocity    3         7.592      8.304     +0.712     +9.38%
+glidingVelocity    4         7.710      6.827     -0.883    -11.45%
+
+
+=== paired t-test (N=4) ===
+metric               mean_delta     sd_delta        t   mean_pct
+-----------------------------------------------------------------
+bindEvents             -69.5000     115.1362   -1.207     -9.27%
+meanBoundMotors         -0.5463       1.1324   -0.965     -8.31%
+glidingVelocity         -0.0255       0.6790   -0.075     -0.34%

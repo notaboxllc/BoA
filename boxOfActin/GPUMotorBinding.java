@@ -682,6 +682,14 @@ public class GPUMotorBinding {
     static int    cp2MatchedHits      = 0;
     static double cp2ArcDeltaMax      = 0.0;
     static double cp2ArcDeltaSum      = 0.0;
+    // Phase 4 flip — Part D directionality fold-in (2026-06-05). The Phase-3
+    // CP recorded only |cpu - dev|; the signed mean is what disambiguates
+    // zero-mean float32 noise from a directional bias. Track signed deltas
+    // and the negative/positive split alongside the absolute statistics.
+    static double cp2SignedArcDeltaSum = 0.0;
+    static int    cp2PositiveArcDelta  = 0;
+    static int    cp2NegativeArcDelta  = 0;
+    static int    cp2ZeroArcDelta      = 0;
 
     private static int parseEnvInt(String name, int defVal) {
         String s = System.getenv(name);
@@ -713,6 +721,15 @@ public class GPUMotorBinding {
         System.err.printf("[PHASE3_CP_SUMMARY] CP2 steps=%d motorScanned=%d decisionDiffs=%d matchedHits=%d arcMaxDelta=%.3e arcMeanDelta=%.3e%n",
                           cp2StepsRan, cp2MotorScanned, cp2DecisionDiffs, cp2MatchedHits,
                           cp2ArcDeltaMax, meanArcDelta);
+        // Phase 4 — Part D fold-in: signed mean + sign split. Disambiguates
+        // zero-mean float32 noise (signed mean ~ 0, balanced +/- counts) from
+        // a directional bias (signed mean nonzero, lopsided count).
+        double meanSignedArcDelta = cp2MatchedHits > 0
+            ? cp2SignedArcDeltaSum / cp2MatchedHits : 0.0;
+        System.err.printf("[PHASE3_CP_SUMMARY] CP2 directionality: arcSignedMean=%+.3e neg=%d pos=%d zero=%d (signedSum=%+.3e)%n",
+                          meanSignedArcDelta,
+                          cp2NegativeArcDelta, cp2PositiveArcDelta, cp2ZeroArcDelta,
+                          cp2SignedArcDeltaSum);
     }
 
     private static void runCP1(int S, boolean verbose) {
@@ -880,9 +897,15 @@ public class GPUMotorBinding {
 
             if (cpuSegId == devSegId) {
                 if (cpuSegId >= 0) {
-                    double delta = Math.abs(cpuArc - devArc);
+                    double signedDelta = cpuArc - devArc;
+                    double delta = Math.abs(signedDelta);
                     if (delta > maxArcDelta) maxArcDelta = delta;
                     sumArcDelta += delta;
+                    // Phase 4 — Part D fold-in: signed delta + sign split.
+                    cp2SignedArcDeltaSum += signedDelta;
+                    if (signedDelta > 0)      cp2PositiveArcDelta++;
+                    else if (signedDelta < 0) cp2NegativeArcDelta++;
+                    else                       cp2ZeroArcDelta++;
                     matchedHits++;
                 }
             } else {

@@ -540,6 +540,11 @@ public class GPUMoveThing {
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
     private static GridScheduler        gridScheduler;
+    // Phase 4 — last execute()'s result, retained so demandSyncPoseToHost() can
+    // trigger a TornadoVM device→host copy for the UNDER_DEMAND buffers (coord,
+    // uVec, yVec, derived*). Reset to null on closePlan / reset and before the
+    // first execute of a freshly-rebuilt plan.
+    private static uk.ac.manchester.tornado.api.TornadoExecutionResult lastExecResult;
 
     // Split-plan execution for DIAG_CPU_DELTA_ADD. Built lazily when the flag
     // is on; shares the same FloatArrays as the chained plan.
@@ -562,6 +567,17 @@ public class GPUMoveThing {
     private static long totalNanos      = 0;
     private static long jointPackNanos  = 0;
     private static int  callCount       = 0;
+    // Phase 4 flip — demand-sync timing (covers the once-per-step
+    // device→host coord/uVec/yVec download that fillSoaArrays + GPUMotorBinding
+    // need; called from the doLoop's pre-step block, NOT from moveThings).
+    private static long demandSyncPoseNanos    = 0;
+    private static int  demandSyncPoseCalls    = 0;
+    private static long demandSyncDerivedNanos = 0;
+    private static int  demandSyncDerivedCalls = 0;
+    // Phase 4 flip — count of plan-rebuild events. Plan rebuild forces a
+    // FIRST_EXECUTION re-upload of coord/uVec/yVec/bTransGam/bRotGam/length so
+    // any biochem poly/depoly mutation of soaCoord (B1) is pushed to device.
+    private static int  planRebuildCount       = 0;
 
     // -------------------------------------------------------------------------
     // Phase-0 A/B profiler accumulators — populated only when MOVE_AB_PROFILE
@@ -587,6 +603,13 @@ public class GPUMoveThing {
     private static final int OP_UNPACK             = 2;
     private static final int OP_DERIVED_AND_BRIDGE = 3;
     private static final int OP_PACK_JOINTS        = 4;  // per-Myosin: slots+drags+cocked
+    // Phase 4 — per-step pack that skips pose / drags / length (all FIRST_EXECUTION
+    // on the residency-flipped plan); writes only force/torque, brownian scales,
+    // and zeroes the joint-delta buffers. Cuts the per-step CPU pack work from
+    // ~slotCap*15 floats to ~slotCap*8 floats and saves the corresponding
+    // EVERY_EXECUTION PCIe upload (the residency flip leaves coord/uVec/yVec/
+    // bTransGam/bRotGam/soaLengthArr device-resident across .execute() calls).
+    private static final int OP_PACK_DYNAMIC       = 5;
     private static final int DERIVED_BRIDGE_PARALLEL_THRESHOLD = 8000;
     private static Thread[] workers;
     private static final Object phaseLock = new Object();
@@ -2439,6 +2462,18 @@ public class GPUMoveThing {
             derivedYVecOrtho.set(i3,     yxn);
             derivedYVecOrtho.set(i3 + 1, yyn);
             derivedYVecOrtho.set(i3 + 2, yzn);
+            // Phase 4 flip — overwrite the move kernel's yVec with the
+            // re-orthogonalised yVec' so the device-resident pose stays orthonormal
+            // across .execute() calls. In the non-resident path, this re-orthog
+            // was performed CPU-side by Thing.recomputeDerivedSoA between
+            // OP_UNPACK and the next step's OP_PACK; with pose resident the next
+            // step's move kernel reads yVec directly from device, so the
+            // re-orthog must happen on device too. Order is safe: this kernel
+            // runs AFTER move within the same .execute(), so the overwrite lands
+            // before any consumer reads yVec next step.
+            yVec.set(i3,     yxn);
+            yVec.set(i3 + 1, yyn);
+            yVec.set(i3 + 2, yzn);
 
             // transXTox row-major = [uVec; yVec'; zVec].
             derivedTransXTox.set(i9,     ux);
@@ -2565,19 +2600,50 @@ public class GPUMoveThing {
         // contribution, move reads the combined sum). Inter-task RMW within
         // a single .execute() is safe because both tasks share device-resident
         // buffers and no host re-upload happens between tasks.
+        // Phase 4 flip — buffers split by transfer cadence:
+        //
+        //   FIRST_EXECUTION (resident across .execute() calls; re-uploaded on
+        //   plan rebuild only):
+        //     coord, uVec, yVec          — written by move kernel, re-orthog by
+        //                                  derived kernel; CPU only updates them
+        //                                  on biochem poly/depoly (B1 sets
+        //                                  topologyDirty → plan rebuild → re-upload).
+        //     bTransGam, bRotGam         — Thing drag tensors; only change on aeta
+        //                                  mutation (calls invalidatePlan).
+        //     soaLengthArr               — FilSegment length; only changes on
+        //                                  poly/depoly (also B1 → plan rebuild).
+        //     topo*Slot/Side, *Slots     — slot mappings populated by
+        //                                  classifyThings on plan rebuild.
+        //     velMask                    — boundary pin mask, set in classifyThings.
+        //
+        //   EVERY_EXECUTION (uploaded per step; CPU recomputes contents):
+        //     cpuForceSum, cpuTorqueSum  — CPU accumulator output.
+        //     jointForceSum, jointTorqueSum — zeroed each step (delta buffer).
+        //     brownianScales             — depends on per-step linkedToCt + mutable
+        //                                  Env.BTransCoeff/BRotCoeff.
+        //     myoDrags, cockedFlags      — re-packed in packJointsRange each step.
+        //     anchorPts, anchoredFlags   — same.
+        //     boundaryActive, boundaryParams, boundaryTipC  — per-step CPU side.
+        //     boundSegSlot, posOnSegArr, segMotorOffsets, segMotorMyo —
+        //                                  motor binding CSR (CPU pack).
+        //     motorWriteback             — output buffer for force writeback.
+        //     motorForceParams, jointParams, chainParams, params, counts —
+        //                                  per-step uniforms.
         TaskGraph tg = new TaskGraph("chained")
-            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+            .transferToDevice(DataTransferMode.FIRST_EXECUTION,
                               coord, uVec, yVec,
-                              cpuForceSum, cpuTorqueSum,
-                              jointForceSum, jointTorqueSum,
                               bTransGam, bRotGam,
-                              brownianScales, velMask,
+                              velMask,
                               rodSlots, leverSlots, motorSlots,
-                              myoDrags, cockedFlags,
-                              anchorPts, anchoredFlags,
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
-                              soaLengthArr,
+                              soaLengthArr)
+            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                              cpuForceSum, cpuTorqueSum,
+                              jointForceSum, jointTorqueSum,
+                              brownianScales,
+                              myoDrags, cockedFlags,
+                              anchorPts, anchoredFlags,
                               boundaryActive, boundaryParams, boundaryTipC,
                               boundSegSlot, posOnSegArr,
                               segMotorOffsets, segMotorMyo,
@@ -2656,16 +2722,27 @@ public class GPUMoveThing {
                   derivedYVecOrtho, derivedTransXTox,
                   counts);
 
-        // boundaryTipC is transferred to host EVERY_EXECUTION when the box
-        // kernel is wired (so bridgeBoundaryTipC() sees fresh writes). When no
-        // boundary task is wired (BOUNDARY_SHAPE_NONE — pill or unknown), the
-        // bridge is skipped and the buffer stays at its host-side 1e6
-        // sentinel.
-        // Phase 4 prep — derived-field outputs are transferred to host
-        // EVERY_EXECUTION while the prep checkpoint validates them against
-        // CPU recomputeDerivedSoA. Phase 4 (flip) keeps them device-resident
-        // (no transfer; downstream kernels read them in place) and removes
-        // these entries — the only consumer is the prep CP runner.
+        // Phase 4 flip — transferToHost split by demand:
+        //   EVERY_EXECUTION (still per-step; small):
+        //     boundaryTipC    — consumed by bridgeBoundaryTipC() each step.
+        //     motorWriteback  — consumed by bridgeMotorForceWriteback each step.
+        //
+        //   UNDER_DEMAND (= persistOnDevice; demand-synced via
+        //   lastExecResult.transferToHost(...)):
+        //     coord, uVec, yVec     — synced once per step in demandSyncPoseToHost(),
+        //                             called from BoxOfActin's pre-step block so
+        //                             fillSoaArrays + GPUMotorBinding see fresh
+        //                             pose. Replaces the per-step OP_UNPACK.
+        //     derivedEnd1..Trans    — device-resident in steady state; demand-
+        //                             synced at output-frame boundaries (where
+        //                             ThreeJSWriter / writeFrame need them).
+        //                             For per-step CPU readers of derived*,
+        //                             retired by Phase 4 (P6/P7/P8).
+        //
+        // DIAG_DUMP_* diagnostics still force EVERY_EXECUTION for the buffers
+        // they need to read mid-step (jointForceSum/jointTorqueSum + the same
+        // pose+derived buffers); leave them at EVERY_EXECUTION so the dump
+        // works without manual demand-sync calls in the diag path.
         if (DIAG_DUMP_JOINTS_STEP >= 0 || DIAG_DUMP_CHAIN_STEP >= 0) {
             if (boundaryShape == BOUNDARY_SHAPE_BOX) {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
@@ -2685,17 +2762,15 @@ public class GPUMoveThing {
         } else {
             if (boundaryShape == BOUNDARY_SHAPE_BOX) {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                       coord, uVec, yVec,
-                                       boundaryTipC, motorWriteback,
-                                       derivedEnd1, derivedEnd2, derivedZVec,
-                                       derivedYVecOrtho, derivedTransXTox);
+                                       boundaryTipC, motorWriteback);
             } else {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                       coord, uVec, yVec,
-                                       motorWriteback,
-                                       derivedEnd1, derivedEnd2, derivedZVec,
-                                       derivedYVecOrtho, derivedTransXTox);
+                                       motorWriteback);
             }
+            tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
+                                   coord, uVec, yVec,
+                                   derivedEnd1, derivedEnd2, derivedZVec,
+                                   derivedYVecOrtho, derivedTransXTox);
         }
 
         itg  = tg.snapshot();
@@ -2828,12 +2903,130 @@ public class GPUMoveThing {
             moveOnlyPlan = null;
             moveOnlyItg  = null;
         }
+        // Phase 4 flip — invalidate the captured TornadoExecutionResult; any
+        // demandSyncPoseToHost call between closePlan and the next execute is
+        // a no-op (correct: no device data to sync).
+        lastExecResult = null;
     }
 
     public static void invalidatePlan() {
         closePlan();
         topologyDirty = true;
         coordsDirty   = true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4 flip — public APIs for the residency boundary.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Mark the simulation topology dirty. Called from FilSegment.biochemStep
+     * after pushCoordToSoa (poly/depoly mutated a FilSegment's coord) and from
+     * any other CPU pose-write path on a GPU-handled Thing. The next call to
+     * onStepStart() will close + rebuild the plan so the FIRST_EXECUTION
+     * transferToDevice re-uploads the mutated host buffers onto the device.
+     *
+     * Cheap, idempotent — sets a flag.
+     */
+    public static void markTopologyDirty() {
+        topologyDirty = true;
+        coordsDirty   = true;
+    }
+
+    /**
+     * Phase 4 flip — demand-sync coord/uVec/yVec from device to host and
+     * unpack them into Thing.soaCoord/UVec/YVec. Replaces the per-step
+     * OP_UNPACK that used to run at the tail of moveThings().
+     *
+     * Call from the doLoop's pre-step block BEFORE fillSoaArrays + motor
+     * binding so the per-class SoA arrays (MyoMotor.soaX etc.) and
+     * GPUMotorBinding's CPU pack read fresh pose. On the first step (no
+     * previous .execute()), lastExecResult is null and this method is a
+     * no-op — the initial soa* arrays already hold the simulation's
+     * starting pose.
+     */
+    public static void demandSyncPoseToHost() {
+        if (lastExecResult == null || slotCount == 0) return;
+        long t0 = System.nanoTime();
+        // Trigger device → host copy of the UNDER_DEMAND pose buffers. The
+        // call blocks until the copy completes (syncRuntimeTransferToHost
+        // waits on the per-parameter event).
+        lastExecResult.transferToHost(coord, uVec, yVec);
+        // Then scatter from the slot-indexed FloatArrays to Thing.soa*
+        // arrays (reusing the existing parallel unpack workers).
+        dispatchAndWait(OP_UNPACK, slotCount);
+        demandSyncPoseNanos += System.nanoTime() - t0;
+        demandSyncPoseCalls++;
+    }
+
+    /**
+     * Phase 4 flip — demand-sync the device-resident derived* buffers, then
+     * run Thing.recomputeDerivedSoA on CPU to repopulate the per-Thing
+     * soaEnd1/End2/ZVec/TransXTox + re-orthog soaYVec arrays, and refresh
+     * the FilSegment xRange/end1Pt/end2Pt and MyoMotor bindTip Pt3D mirrors
+     * (the P7/P8 work, now consolidated here).
+     *
+     * Called from BoxOfActin.logAndDraw at output-frame boundaries, where
+     * ThreeJSWriter / Simularium writers / inspect requests need fresh
+     * derived fields. Cheap relative to a full output frame; happens at the
+     * toFileInterval cadence (typically every 100–1000 steps), not per
+     * step.
+     *
+     * Note: the device's derived* buffers contain the same orthog y' /
+     * z / end1 / end2 / transXTox the CPU recompute produces (validated at
+     * 1e-7 ULP regime in Part B prep). The CPU recompute is still the
+     * source of truth for soa* arrays — the device buffers are an
+     * intra-step shortcut used by future device kernels, not by CPU
+     * readers.
+     */
+    public static void refreshHostMirrorsForOutput() {
+        // First make sure pose is fresh (output may be called without a
+        // prior demandSyncPoseToHost in the same step — be defensive).
+        demandSyncPoseToHost();
+        long t0 = System.nanoTime();
+        int tc = Thing.thingCt;
+        if (tc > 0) {
+            Thing.recomputeDerivedSoA(0, tc);
+            int filCt = FilSegment.filSegmentCt;
+            FilSegment[] fils = FilSegment.theFilSegments;
+            for (int i = 0; i < filCt; i++) {
+                FilSegment fs = fils[i];
+                if (fs == null || fs.removeMe) continue;
+                fs.xRange = Math.abs(fs.getCoordX() - fs.getEnd2X());
+                fs.yRange = Math.abs(fs.getCoordY() - fs.getEnd2Y());
+                fs.zRange = Math.abs(fs.getCoordZ() - fs.getEnd2Z());
+                fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
+                fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
+            }
+            int motorCt = MyoMotor.motorCt;
+            MyoMotor[] motors = MyoMotor.theMotors;
+            for (int i = 0; i < motorCt; i++) {
+                MyoMotor m = motors[i];
+                if (m == null || m.removeMe || m.bindTip == null) continue;
+                m.bindTip.x = m.getEnd2X(); m.bindTip.y = m.getEnd2Y(); m.bindTip.z = m.getEnd2Z();
+            }
+        }
+        demandSyncDerivedNanos += System.nanoTime() - t0;
+        demandSyncDerivedCalls++;
+    }
+
+    /**
+     * Phase 4 flip — diagnostic helper for the "not-stale" correctness
+     * checkpoint. Forces a demand-sync of pose from device, then returns a
+     * snapshot of the synced soaCoord/UVec/YVec for the gpu-handled slots.
+     * Caller compares against the resident state passed in or against a
+     * freshly-recomputed expected pose. Cheap (one PCIe + one CPU unpack).
+     */
+    public static float[][] snapshotResidentPoseToCpu() {
+        demandSyncPoseToHost();
+        int N = Thing.thingCt;
+        float[] sCoord = new float[N * 3];
+        float[] sUVec  = new float[N * 3];
+        float[] sYVec  = new float[N * 3];
+        System.arraycopy(Thing.soaCoord, 0, sCoord, 0, N * 3);
+        System.arraycopy(Thing.soaUVec,  0, sUVec,  0, N * 3);
+        System.arraycopy(Thing.soaYVec,  0, sYVec,  0, N * 3);
+        return new float[][] { sCoord, sUVec, sYVec };
     }
 
     // -------------------------------------------------------------------------
@@ -3049,11 +3242,34 @@ public class GPUMoveThing {
         int desiredMyoCap  = Math.max(1024, Myosin.myoCt   * 2);
         if (plan == null) {
             allocateAndBuildPlan(desiredSlotCap, desiredMyoCap);
+            planRebuildCount++;
         } else if (Thing.thingCt > slotCap || Myosin.myoCt > myoCap) {
             closePlan();
             int ns = (Thing.thingCt > slotCap) ? Math.max(slotCap * 2, Thing.thingCt * 2) : slotCap;
             int nm = (Myosin.myoCt  > myoCap)  ? Math.max(myoCap  * 2, Myosin.myoCt  * 2) : myoCap;
             allocateAndBuildPlan(ns, nm);
+            planRebuildCount++;
+        } else if (topologyDirty || Thing.thingCt != lastThingCt) {
+            // Phase 4 flip — pose is now FIRST_EXECUTION on the device side, so
+            // any CPU-side pose mutation (B1: biochem poly/depoly's
+            // pushCoordToSoa, or thingCt change from cleanup/spawning) must
+            // force a plan rebuild to trigger a fresh FIRST_EXECUTION upload.
+            // We reuse the existing FloatArray buffers — the rebuild only
+            // reconstructs the TaskGraph + ImmutableTaskGraph + ExecutionPlan
+            // (lightweight Java objects); the on-device memory for the
+            // buffers themselves is dropped and re-created on the upcoming
+            // first execute via the plan's transferToDevice list.
+            //
+            // Plan rebuild is amortized over many steady-state steps; in
+            // gliding rotation with biochemDeltaT=0.01s and dt=1e-5,
+            // topologyDirty fires at most every ~1000 steps from biochem
+            // poly/depoly (it does not fire in steady state in the absence of
+            // nucleation / random spawn). The cost (Java object construction
+            // + capacity-sized FIRST_EXECUTION re-upload at next execute) is
+            // a fraction of a millisecond, dwarfed by the per-step savings.
+            closePlan();
+            allocateAndBuildPlan(slotCap, myoCap);
+            planRebuildCount++;
         }
         if (topologyDirty || Thing.thingCt != lastThingCt) {
             classifyThings();
@@ -3310,6 +3526,7 @@ public class GPUMoveThing {
                         Thing.recomputeDerivedSoA(start, end);
                         break;
                     case OP_PACK_JOINTS:   packJointsRange(start, end);  break;
+                    case OP_PACK_DYNAMIC:  packDynamicRange(start, end); break;
                     default: /* no-op */ break;
                 }
             }
@@ -3467,6 +3684,101 @@ public class GPUMoveThing {
             // changes. Repacking every step keeps device coherent regardless
             // of whether the length change set topologyDirty.
             soaLengthArr.set(slot, soaLenArr[thingIdx]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4 flip — per-step dynamic pack. Writes only the per-step changing
+    // CPU-side inputs to the device-staging FloatArrays:
+    //   cpuForceSum, cpuTorqueSum  — CPU accumulator output for this step.
+    //   jointForceSum, jointTorqueSum — zeroed (delta buffer for joints kernel).
+    //   brownianScales              — depends on per-step linkedToCt + mutable
+    //                                Env.BTransCoeff/BRotCoeff.
+    //
+    // Skips coord/uVec/yVec (FIRST_EXECUTION; device-resident across steps),
+    // bTransGam/bRotGam (FIRST_EXECUTION; only changes on aeta + plan rebuild),
+    // and soaLengthArr (FIRST_EXECUTION; only changes on poly/depoly +
+    // topology-dirty plan rebuild). Cuts the per-step CPU pack work to
+    // ~slotCount*8 floats vs ~slotCount*15 for packRange(packCoords=false).
+    //
+    // Both the dispatched buffers and the work are slot-local — safe across the
+    // worker-pool partitioning the dispatchAndWait machinery uses.
+    // -------------------------------------------------------------------------
+    private static void packDynamicRange(int slotStart, int slotEnd) {
+        Thing[] theThings  = Thing.theThings;
+        int[]   indices    = gpuThingIndices;
+        int[]   rules      = brownianRule;
+        float[] soaForce   = Thing.soaForceSum;
+        float[] soaTorque  = Thing.soaTorqueSum;
+        float   bTransCoef = sBTransCoeff;
+        float   bRotCoef   = sBRotCoeff;
+        float   xLnT       = sXLinkTAttn;
+        float   xLnR       = sXLinkRAttn;
+        float   myoBr      = sMyoBrownian;
+        boolean bFilOff    = sBrownianFilOff;
+        boolean bMyoOff    = sBrownianMyoOff;
+
+        int stride2 = slotCap;
+
+        for (int slot = slotStart; slot < slotEnd; slot++) {
+            int thingIdx = indices[slot];
+            Thing t = theThings[thingIdx];
+            int s3 = thingIdx * 3;
+            int rule = rules[slot];
+
+            int aX, aY, aZ;
+            int bT, bR;
+            if (SOA_POSE) {
+                int stride = slotCap;
+                aX = slot;
+                aY = slot + stride;
+                aZ = slot + 2 * stride;
+                bT = slot;
+                bR = slot + stride2;
+            } else {
+                int i3 = slot * 3;
+                int i2 = slot * 2;
+                aX = i3; aY = i3 + 1; aZ = i3 + 2;
+                bT = i2; bR = i2 + 1;
+            }
+
+            cpuForceSum.set(aX, soaForce[s3]);
+            cpuForceSum.set(aY, soaForce[s3 + 1]);
+            cpuForceSum.set(aZ, soaForce[s3 + 2]);
+            cpuTorqueSum.set(aX, soaTorque[s3]);
+            cpuTorqueSum.set(aY, soaTorque[s3 + 1]);
+            cpuTorqueSum.set(aZ, soaTorque[s3 + 2]);
+            jointForceSum.set(aX, 0f);
+            jointForceSum.set(aY, 0f);
+            jointForceSum.set(aZ, 0f);
+            jointTorqueSum.set(aX, 0f);
+            jointTorqueSum.set(aY, 0f);
+            jointTorqueSum.set(aZ, 0f);
+
+            float tScale, rScale;
+            if (rule == RULE_FIL) {
+                FilSegment f = (FilSegment) t;
+                if (bFilOff || f.brownianOff) {
+                    tScale = 0f; rScale = 0f;
+                } else {
+                    float ts = bTransCoef;
+                    float rs = bRotCoef;
+                    if (f.linkedToCt > 0) {
+                        ts = ts / (1.0f + xLnT * f.linkedToCt);
+                        rs = rs / (1.0f + xLnR * f.linkedToCt);
+                    }
+                    tScale = ts;
+                    rScale = (f.filAtEnd1 && f.filAtEnd2) ? 0f : rs;
+                }
+            } else if (rule == RULE_MYO) {
+                if (bMyoOff) { tScale = 0f; rScale = 0f; }
+                else         { tScale = myoBr; rScale = myoBr; }
+            } else {  // RULE_LEVER
+                tScale = 0f;
+                rScale = 0f;
+            }
+            brownianScales.set(bT, tScale);
+            brownianScales.set(bR, rScale);
         }
     }
 
@@ -3674,9 +3986,19 @@ public class GPUMoveThing {
         long packStart = System.nanoTime();
         int sc = slotCount;
         if (sc > 0) {
-            int op = coordsDirty ? OP_PACK_FULL : OP_PACK_RESIDENT;
-            dispatchAndWait(op, sc);
-            coordsDirty = false;
+            // Phase 4 flip — when plan was just rebuilt (coordsDirty=true),
+            // perform OP_PACK_FULL so the host FloatArrays for the FIRST_EXECUTION
+            // buffers (coord/uVec/yVec/bTransGam/bRotGam/soaLengthArr) hold the
+            // correct values; the runtime then uploads them on the upcoming
+            // plan.execute(). On steady-state steps the pose stays
+            // device-resident, so we only pack the EVERY_EXECUTION dynamic
+            // buffers (force/torque/joint-zero/brownianScales).
+            if (coordsDirty) {
+                dispatchAndWait(OP_PACK_FULL, sc);
+                coordsDirty = false;
+            } else {
+                dispatchAndWait(OP_PACK_DYNAMIC, sc);
+            }
         }
 
         // Per-Myosin joint pack — drags + cocked flags only; slot maps were
@@ -3780,7 +4102,7 @@ public class GPUMoveThing {
             if (DIAG_CPU_DELTA_ADD) {
                 executeSplit();
             } else {
-                plan.withGridScheduler(gridScheduler).execute();
+                lastExecResult = plan.withGridScheduler(gridScheduler).execute();
             }
         }
         long execEnd = System.nanoTime();
@@ -3831,9 +4153,38 @@ public class GPUMoveThing {
             System.err.flush();
         }
 
+        // Phase 4 flip — demand-sync coord/uVec/yVec from device → host and
+        // unpack to Thing.soaCoord/UVec/YVec. Replaces the old OP_UNPACK in
+        // the same logical position (post-execute) so downstream CPU phases
+        // — biochem (which gates poly/depoly on stericHindrance and reads
+        // uVecAsPt3D for the bond direction), the cleanup phase, the
+        // output-frame writers — all see this step's freshly-integrated
+        // pose, identical to the pre-flip OP_UNPACK behaviour.
+        //
+        // The savings vs OP_UNPACK come from the input side (transferToDevice
+        // is now FIRST_EXECUTION instead of EVERY_EXECUTION for the same
+        // buffers), not from this download. The download is functionally
+        // unchanged — it is the demand-sync API path that lets us
+        // selectively turn it OFF for other UNDER_DEMAND buffers (derived*
+        // are output-frame-only) and lets future Phase 4.5 work consume the
+        // resident pose from a sibling task-graph without bringing it back
+        // to the host.
         if (sc > 0) {
-            dispatchAndWait(OP_UNPACK, sc);
+            if (DIAG_CPU_DELTA_ADD) {
+                // executeSplit's moveOnlyPlan has transferToHost
+                // EVERY_EXECUTION for coord/uVec/yVec already — just scatter.
+                dispatchAndWait(OP_UNPACK, sc);
+            } else {
+                demandSyncPoseToHost();
+            }
         }
+
+        // For CPU-fallback Things (gpuHandled == false), their moveThing()
+        // continues to run here on CPU — they were never on device so their
+        // soaCoord/UVec/YVec stay current via the CPU path. Runs AFTER the
+        // demand-sync so the per-Thing readers (linkedToCt-aware drag scale,
+        // membrane pin checks, etc.) inside cpuFallback[i].moveThing() see
+        // the fresh GPU-handled-neighbour pose if they look it up.
         for (int i = 0; i < cpuFallbackCt; i++) {
             cpuFallback[i].moveThing();
         }
@@ -3866,41 +4217,61 @@ public class GPUMoveThing {
         if (myoJointCt > 0) {
             bridgeMotorForceWriteback();
         }
-        int tc = Thing.thingCt;
-        if (tc > 0) {
-            if (tc < DERIVED_BRIDGE_PARALLEL_THRESHOLD) {
-                Thing.recomputeDerivedSoA(0, tc);
-            } else {
-                dispatchAndWait(OP_DERIVED_AND_BRIDGE, tc);
-            }
-            int filCt = FilSegment.filSegmentCt;
-            FilSegment[] fils = FilSegment.theFilSegments;
-            for (int i = 0; i < filCt; i++) {
-                FilSegment fs = fils[i];
-                if (fs == null || fs.removeMe) continue;
-                fs.xRange = Math.abs(fs.getCoordX() - fs.getEnd2X());
-                fs.yRange = Math.abs(fs.getCoordY() - fs.getEnd2Y());
-                fs.zRange = Math.abs(fs.getCoordZ() - fs.getEnd2Z());
-                fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
-                fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
-            }
-            int motorCt = MyoMotor.motorCt;
-            MyoMotor[] motors = MyoMotor.theMotors;
-            for (int i = 0; i < motorCt; i++) {
-                MyoMotor m = motors[i];
-                if (m == null || m.removeMe || m.bindTip == null) continue;
-                m.bindTip.x = m.getEnd2X(); m.bindTip.y = m.getEnd2Y(); m.bindTip.z = m.getEnd2Z();
-            }
-        }
-        // Phase 4 prep — derived-field checkpoint. Runs AFTER CPU
-        // recomputeDerivedSoA so Thing.soaEnd1/End2/ZVec/TransXTox hold the
-        // CPU reference; compares slot-by-slot against the device-resident
-        // derived* FloatArrays just transferred to host. Window-mode
-        // accumulates across many steps; reports at end of run via
-        // reportDerivedCheckpointSummary().
+        // Phase 4 flip — P6 (Thing.recomputeDerivedSoA) and P7/P8 (FilSegment
+        // xRange/end1Pt/end2Pt + MyoMotor bindTip Pt3D refresh) are retired
+        // from the per-step CPU path. The device derivedFieldsKernel emits
+        // end1/end2/zVec/yVec'/transXTox into the device-resident derived*
+        // FloatArrays after the move kernel, AND overwrites the move kernel's
+        // yVec with the re-orthogonalised y' so the device pose remains
+        // orthonormal across .execute() calls without any CPU intervention.
+        //
+        // CPU readers of soaEnd1/End2/ZVec/TransXTox + end1Pt/end2Pt/bindTip
+        // Pt3D mirrors are gliding-inert at steady state (post-Phase-3 +
+        // Part C retirements). At output-frame boundaries
+        // BoxOfActin.logAndDraw calls Thing.recomputeDerivedSoA + the Pt3D
+        // refresh below via refreshHostMirrorsForOutput(), AFTER first
+        // demand-syncing pose from device. The Phase 4 prep CP and any
+        // diagnostic that needs the CPU side mid-step must call that helper
+        // explicitly (and pay the one-shot CPU + sync cost).
         if ((DERIVED_CP_STEP >= 0 && Env.counter == DERIVED_CP_STEP) ||
             (DERIVED_CP_START >= 0 && Env.counter >= DERIVED_CP_START
              && Env.counter <= DERIVED_CP_STOP)) {
+            // For the checkpoint to compare device vs CPU we need a fresh
+            // CPU recompute on this step's just-synced pose. Demand-sync pose
+            // (cheap when buffers are UNDER_DEMAND but the runtime has
+            // already triggered transferToHost via the diag EVERY_EXECUTION
+            // path when DIAG_DUMP_* is on), then run the CPU recompute over
+            // the synced soaCoord/UVec/YVec — exactly what the prep CP needs.
+            int tcCp = Thing.thingCt;
+            if (tcCp > 0 && lastExecResult != null) {
+                lastExecResult.transferToHost(coord, uVec, yVec);
+                dispatchAndWait(OP_UNPACK, sc);
+                Thing.recomputeDerivedSoA(0, tcCp);
+                // Refresh the Pt3D mirrors so any checkpoint that reads
+                // end1Pt/end2Pt mid-loop sees fresh values.
+                int filCt = FilSegment.filSegmentCt;
+                FilSegment[] fils = FilSegment.theFilSegments;
+                for (int i = 0; i < filCt; i++) {
+                    FilSegment fs = fils[i];
+                    if (fs == null || fs.removeMe) continue;
+                    fs.xRange = Math.abs(fs.getCoordX() - fs.getEnd2X());
+                    fs.yRange = Math.abs(fs.getCoordY() - fs.getEnd2Y());
+                    fs.zRange = Math.abs(fs.getCoordZ() - fs.getEnd2Z());
+                    fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
+                    fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
+                }
+                int motorCt = MyoMotor.motorCt;
+                MyoMotor[] motors = MyoMotor.theMotors;
+                for (int i = 0; i < motorCt; i++) {
+                    MyoMotor m = motors[i];
+                    if (m == null || m.removeMe || m.bindTip == null) continue;
+                    m.bindTip.x = m.getEnd2X(); m.bindTip.y = m.getEnd2Y(); m.bindTip.z = m.getEnd2Z();
+                }
+                // Pull derived* from device for the actual comparison.
+                lastExecResult.transferToHost(derivedEnd1, derivedEnd2,
+                                              derivedZVec, derivedYVecOrtho,
+                                              derivedTransXTox);
+            }
             runDerivedFieldsCheckpoint();
         }
         long unpackEnd = System.nanoTime();
@@ -3920,6 +4291,12 @@ public class GPUMoveThing {
     public static long getExecNanos()      { return execNanos;      }
     public static long getUnpackNanos()    { return unpackNanos;    }
     public static int  getCallCount()      { return callCount;      }
+    // Phase 4 flip — stats for the residency boundary.
+    public static long getDemandSyncPoseNanos()    { return demandSyncPoseNanos;    }
+    public static int  getDemandSyncPoseCalls()    { return demandSyncPoseCalls;    }
+    public static long getDemandSyncDerivedNanos() { return demandSyncDerivedNanos; }
+    public static int  getDemandSyncDerivedCalls() { return demandSyncDerivedCalls; }
+    public static int  getPlanRebuildCount()       { return planRebuildCount;       }
 
     public static int getSlotCount()     { return slotCount;     }
     public static int getCpuFallbackCt() { return cpuFallbackCt; }
@@ -4001,6 +4378,9 @@ public class GPUMoveThing {
             = moveAB_SlotCountSum = 0;
         moveAB_CallCount = 0;
         runSeedInitialized = false;
+        demandSyncPoseNanos = demandSyncDerivedNanos = 0;
+        demandSyncPoseCalls = demandSyncDerivedCalls = 0;
+        planRebuildCount = 0;
     }
 
     // -------------------------------------------------------------------------

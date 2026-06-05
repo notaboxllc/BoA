@@ -531,6 +531,13 @@ public class FilSegment extends Thing {
 			calculateProperties(); 	// calculate new drag coefficients, etc if length has changed
 			pushCoordToSoa();		// poly/depoly mutated Pt3D coordAsPt3D() via coordAsPt3D().inc; flush before initialize() reads SoA
 			initialize();			// calculate transformation matrices, etc given the new coordinates
+			// Phase 4 flip (B1) — mark the GPU plan dirty so the next
+			// onStepStart rebuild forces a FIRST_EXECUTION re-upload of the
+			// mutated soaCoord (and soaLengthArr, which calculateProperties
+			// + pushLengthToSoa updated). Without this, the device-resident
+			// coord would stay at the pre-biochem pose while the CPU saw the
+			// new poly/depoly state — silent divergence at output frames.
+			if (Env.useGPU) { GPUMoveThing.markTopologyDirty(); }
 		}
 
 
@@ -538,6 +545,12 @@ public class FilSegment extends Thing {
 			splitSegment(this);		// setFirstHalf pushes coordAsPt3D() internally; the new FilSegment ctor handles its own pose
 			calculateProperties();	// again if split
 			initialize();
+			// Phase 4 flip (B1) — splitSegment created a new FilSegment;
+			// thingCt change already triggers a rebuild via onStepStart's
+			// (Thing.thingCt != lastThingCt) gate, but mark explicitly here
+			// for clarity and defence against any future split path that
+			// doesn't grow thingCt.
+			if (Env.useGPU) { GPUMoveThing.markTopologyDirty(); }
 		}
 		
 		//*** joining broken with branched networks right now, but who really needs it anyway

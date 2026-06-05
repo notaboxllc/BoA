@@ -1,8 +1,126 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Phase 4 prep — survey + derived-field device kernel + updatePos gate)
+Last updated: 2026-06-05 (Phase 4 flip — pose+derived residency, half-flip with cross-graph scoped to 4.5)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-05 — Phase 4 — the residency flip (half-flip)
+
+**Verdict.** The residency flip lands: GPU `coord/uVec/yVec` (plus
+`bTransGam/bRotGam/soaLengthArr/slot maps`) move to
+`FIRST_EXECUTION transferToDevice`; `coord/uVec/yVec/derivedEnd1/End2/
+ZVec/YVecOrtho/TransXTox` move to `UNDER_DEMAND transferToHost`. CPU
+`recomputeDerivedSoA` + the P7/P8 Pt3D mirror refresh retire from the
+per-step path (run only at output-frame boundaries / inspect / CP). The
+device `derivedFieldsKernel` now also writes the re-orthogonalised `y'`
+back into the device `yVec` buffer so the resident pose stays orthonormal
+across `.execute()` calls — replaces the CPU re-orthog that lived inside
+`recomputeDerivedSoA`. B1 wired via `markTopologyDirty()` called from
+`FilSegment.biochemStep` poly/depoly + splitSegment; `onStepStart` now
+rebuilds the plan on `topologyDirty` (FIRST_EXECUTION re-upload pushes
+the mutated SoA to device on next execute).
+
+**P1.a / P1.b / P4 scoped out** as Phase 4.5 — retiring those needs
+cross-graph residency (merge GPUMoveThing + GPUMotorBinding into one
+`TornadoExecutionPlan` with `consumeFromDevice` for the move plan's
+pose buffers, plus a `bindKernel` rewrite to look up motor/segment
+pose via slot maps). Substantial refactor (~2–4h), defer.
+
+### Correctness gate — paired N=4 PASS
+
+`glidingAssay500_val` (10101 steps), seeds 1..4, resident-flip vs
+non-resident device (same build, `git stash` toggle). All |t| ≤ 1.21,
+sign-scatter across observables — well within the |t| ≲ 1–2 PASS
+criterion:
+
+| metric | mean Δ | sd Δ | **t** |
+|---|---|---|---|
+| bindEvents | -69.5 | 115.1 | **-1.207** |
+| meanBoundMotors | -0.546 | 1.132 | **-0.965** |
+| glidingVelocity | -0.026 | 0.679 | **-0.075** |
+
+### Speedup — 1.76× on gpuMoveThing, 1.31× overall GPU phase
+
+Mean of 4 seeds, per-step ms:
+
+| phase | baseline | flip | speedup |
+|---|---|---|---|
+| slotPack (CPU) | 1.864 | 1.324 | 1.41× |
+| jointPack (CPU) | 0.973 | 1.020 | (noise) |
+| `.execute()` (kernel + PCIe) | 4.729 | 2.157 | **2.19×** |
+| unpack (post-execute, incl. demand-sync) | 3.159 | 1.589 | **2.00×** |
+| **gpuMoveThing total** | **10.725** | **6.092** | **1.76×** |
+
+Where the time went:
+- `.execute()` −2.57 ms/step: EVERY → FIRST upload of
+  `coord/uVec/yVec/bTransGam/bRotGam/soaLengthArr` (~7 MB/step
+  eliminated).
+- `unpack` −1.57 ms/step: EVERY → UNDER_DEMAND download of `derived*`
+  (~7 MB/step eliminated); retained `demandSyncPose` (~3 MB/step) is
+  the only pose download.
+- CPU `recomputeDerivedSoA` + P7/P8 Pt3D refresh retired from per-step.
+- `gpuMotorBinding` unchanged (~88s, 8.79 ms/call) — now the dominant
+  bottleneck at 59% of GPU time. Phase 4.5 (cross-graph residency)
+  targets it.
+
+Plan rebuild fires 11 times / 10101 steps (biochem poly/depoly only) —
+amortized overhead fractions of µs per step.
+
+### Phase 4 derived CP — re-validated with in-place yVec re-orthog
+
+```
+[PHASE4_DERIVED_CP_SUMMARY] steps=500 slotsScanned=21005455
+  end1 max=0.000e+00 mean=0.000e+00
+  end2 max=4.768e-07 mean=3.315e-10
+  zVec max=2.384e-07 mean=2.282e-08
+  yVec max=2.384e-07 mean=2.137e-08
+  trans max=2.384e-07 mean=1.473e-08
+```
+
+Same float32 noise regime as the prep (max ≤ 2.4e-7). The new yVec
+writeback into the device pose buffer doesn't degrade accuracy.
+
+### Part-D directionality — fold-in with signed CP2 + sign split
+
+Added `cp2SignedArcDeltaSum` + neg/pos/zero counters to
+`GPUMotorBinding.runCP2`; one CP-armed flip-arm seed reports:
+
+```
+[PHASE3_CP_SUMMARY] CP2 directionality:
+    arcSignedMean=-3.270e-08 neg=23 pos=11 zero=0 (signedSum=-1.112e-06)
+```
+
+23 negative : 11 positive out of 34 matched hits is binomially
+significant (p≈0.03 against H0:p=0.5). Signed mean
+arcSignedMean=-3.27e-8 with `SE ≈ 2.2e-8` gives |t|≈1.49 (p≈0.06).
+**Updated reading**: the data is borderline-suggestive of a small
+NEGATIVE arcOnFil bias, not the unconditional zero-mean noise the
+prep heuristic concluded. Direction matches the Phase-3 N=8 ensemble
+borderline-negative t-statistics (-2.02, -1.90, -1.27). The mechanism
+(single mul+sqrt) has no obvious bias source — worth a longer-window
+CP and multi-seed in a future probe to tighten the claim. Not a
+gate; the gliding observables PASS regardless.
+
+### Files
+
+- `boxOfActin/GPUMoveThing.java` — TaskGraph mode split, OP_PACK_DYNAMIC,
+  yVec writeback in derivedFieldsKernel, demandSyncPoseToHost +
+  refreshHostMirrorsForOutput, markTopologyDirty, plan rebuild on
+  topologyDirty, retired per-step CPU recompute + P7/P8.
+- `boxOfActin/FilSegment.java` — markTopologyDirty hooks on
+  pushCoordToSoa + splitSegment.
+- `boxOfActin/ThreeJSWriter.java` — refreshHostMirrorsForOutput hooks
+  in buildFrameJson + buildInspectJson.
+- `boxOfActin/BoxOfActin.java` — `[STATS] gpuMoveThing demandSyncPose/
+  demandSyncDerived/planRebuild` line.
+- `boxOfActin/GPUMotorBinding.java` — Part-D signed CP2 tracking.
+- `RUN_LOGS/2026-06-05_phase4_flip/{baseline,flip}_seed{1..4}.log` +
+  `cp_signed.log` + `smoke_seed1.log`.
+- `PHASE4_FLIP.md` — full writeup.
+
+Commit hash: `<to fill after commit>` on `main`.
+
+---
 
 ## 2026-06-04 — Phase 4 prep — bound the flip + low-risk prerequisites
 

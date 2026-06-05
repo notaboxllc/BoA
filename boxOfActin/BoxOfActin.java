@@ -1503,6 +1503,17 @@ public class BoxOfActin {
 			// pack includes jointPack — print slotPack as (pack - jointPack) for a clean breakdown.
 			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d slotPack=%.3fs jointPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk - jpk, jpk, ex, un);
+			// Phase 4 flip — residency boundary stats. demandSyncPose is the
+			// per-step device→host copy of coord/uVec/yVec (replaces OP_UNPACK).
+			// demandSyncDerived is the output-frame refresh path (cold/cheap).
+			// planRebuild counts topology-dirty rebuild events.
+			double dspN = GPUMoveThing.getDemandSyncPoseNanos()    / 1.0e9;
+			int    dspC = GPUMoveThing.getDemandSyncPoseCalls();
+			double dsdN = GPUMoveThing.getDemandSyncDerivedNanos() / 1.0e9;
+			int    dsdC = GPUMoveThing.getDemandSyncDerivedCalls();
+			int    prc  = GPUMoveThing.getPlanRebuildCount();
+			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d%n",
+				dspN, dspC, dsdN, dsdC, prc);
 			GPUMoveThing.reportDerivedCheckpointSummary();
 		}
 		GPUMoveThing.reportMoveAB();

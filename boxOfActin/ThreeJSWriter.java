@@ -120,6 +120,13 @@ public class ThreeJSWriter {
      * writeFrame() so both consumers (file and WebSocket) share one build.
      */
     public static String buildFrameJson() {
+        // Phase 4 flip — frame readers below pull getEnd1X/getEnd2X/getZVec*
+        // and friends, which read Thing.soaEnd1/End2/ZVec/TransXTox. The
+        // per-step CPU recomputeDerivedSoA was retired on the GPU path; refresh
+        // here at the output-frame cadence so the JSON reflects this step's
+        // integrated pose. No-op on the CPU path (initialize() per-Thing
+        // keeps derived current there).
+        if (Env.useGPU) { GPUMoveThing.refreshHostMirrorsForOutput(); }
         StringBuilder sb = new StringBuilder(4096);
         sb.append("{\"frame\":").append(frameNumber);
         sb.append(String.format(",\"t\":%.6g", Env.simulationTime));
@@ -263,6 +270,11 @@ public class ThreeJSWriter {
         if (t == null || t.removeMe) {
             return "{\"id\":" + requestedId + ",\"kind\":\"notFound\"}";
         }
+        // Phase 4 flip — inspect payload reads end1/end2 from soaEnd1/End2,
+        // which are stale on the GPU path between output frames. Refresh on
+        // demand. Cheap (one demand-sync + CPU recompute, runs at most once
+        // per safe-point inspect drain).
+        if (Env.useGPU) { GPUMoveThing.refreshHostMirrorsForOutput(); }
         if (t instanceof FilSegment)      return inspectFilSegment((FilSegment) t);
         if (t instanceof MyoMotor)        return inspectMyoMotor((MyoMotor) t);
         if (t instanceof MyoMiniFilament) return inspectMyoMiniFilament((MyoMiniFilament) t);
