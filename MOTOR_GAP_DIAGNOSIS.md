@@ -408,5 +408,5 @@ device-vs-CPU motor gap. The `accurateAcos` swap is the fix.
 ### Change committed
 
 Two-line MyoFilLink swap plus the package-private widening of
-`GPUMoveThing.accurateAcos`. Commit hash recorded in the JOURNAL.md entry
-for this date. Pushed to `origin/main`.
+`GPUMoveThing.accurateAcos`. Commit `cc01d96` on `main`, pushed to
+`origin/main`.

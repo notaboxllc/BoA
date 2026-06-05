@@ -18,7 +18,7 @@ ensemble does not. Swapping the two CPU sites
 `GPUMoveThing.accurateAcos` (the same source method the kernel calls — not
 a lookalike) **collapsed the gap on all three observables**.
 
-### The change
+### The change (commit `cc01d96`)
 
 - `boxOfActin/GPUMoveThing.java:619` — widened `accurateAcos` from
   `private static` to package-private `static` so `MyoFilLink` (same
