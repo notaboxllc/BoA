@@ -1499,6 +1499,9 @@ public class BoxOfActin {
 		// step() per-force profile — no-op when BOA_STEP_PROFILE unset.
 		StepProfiler.report();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
+		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
+		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
+		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
 		}

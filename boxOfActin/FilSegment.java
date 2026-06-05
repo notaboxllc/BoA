@@ -1270,11 +1270,25 @@ public class FilSegment extends Thing {
 		}
 	}
 	
+	// Phase 4.5 diag (2026-06-05): count how often checkBugCollisionFromInside
+	// actually fires on the GPU path. Hypothesis from selective poison: the
+	// `ranges` family HIT may come from end1Pt/end2Pt reads here that the gate
+	// claims are inert. If this counter > 0 on a -gpu gliding run, the gate
+	// is misfiring. Print at end of run (BoxOfActin.printStats area).
+	public static long DIAG_BUG_INSIDE_FIRE_CT = 0;
+	// Phase 4.5 diag: count addLinkForces and addTorsionSpringForces fires on
+	// the GPU path. Hypothesis: gpuChainHandled may flip false for some
+	// subset of segments at some times, leaking the CPU addLinkForces (which
+	// reads end1Pt/end2Pt and ptAtEnd1/2 — all rangesEndpt family).
+	public static long DIAG_ADDLINK_FIRE_CT = 0;
+	public static long DIAG_ADDTORSION_FIRE_CT = 0;
+
 	public void checkBugCollisionFromInside() {
+		if (Env.useGPU) DIAG_BUG_INSIDE_FIRE_CT++;
 		theBox.amICollidingOuter(cE,end1Pt,radius);
 		if (cE.delta != 0) { bugForcesFromInside(cE,end1Pt); }
-		
-		
+
+
 		theBox.amICollidingOuter(cE,end2Pt,radius);
 		if (cE.delta != 0) { bugForcesFromInside(cE,end2Pt); }
 	}
@@ -1452,6 +1466,7 @@ public class FilSegment extends Thing {
 		// version1.2 of soft lagrange multipliers; constraining forces translational and rotational.
 		// this filament takes care of both end links, if not already visited, then marks as visited on this and linked fils
 		// this method doesn't care if ptAtEnd2 is end2Fil.end1Pt or end2Fil.end2Pt
+		if (Env.useGPU) DIAG_ADDLINK_FIRE_CT++;
 
 		double dt = Env.deltaT.getValue();
 		double fracMove = Env.fracMove.getValue();
@@ -1740,6 +1755,7 @@ public class FilSegment extends Thing {
 		// rotational spring which works to straighten out the filament
 		// this filament takes care of spring at both ends, if not visited, then marks as visited for involved fils
 		// this method doesn't care if ptAtEnd2 is end2Fil.end1Pt or end2Fil.end2Pt
+		if (Env.useGPU) DIAG_ADDTORSION_FIRE_CT++;
 
 		double dt = Env.deltaT.getValue();
 		double fracMoveTorq = Env.fracMoveTorq.getValue();

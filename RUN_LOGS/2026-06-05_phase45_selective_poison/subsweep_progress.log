@@ -1,0 +1,6 @@
+[12:13] === sub: rangesScalar (xRange/yRange/zRange only) ===
+rc=0 bindEvents=851
+[12:18] === sub: rangesEndpt (end1Pt/end2Pt only) ===
+rc=0 bindEvents=125
+[12:23] sub-bisection done
+DONE rc=0

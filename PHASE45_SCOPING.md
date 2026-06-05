@@ -266,3 +266,238 @@ BOA_PHASE45_BIND_PROFILE=1 /tmp/p45_run.sh 1 \
 `/tmp/p45_run.sh` is the standard `java @$TORNADOVM_HOME/tornado-argfile
 --enable-preview -Xmx800M -cp "$TDIR/...:libs/*:." BoxOfActin -r -gpu
 -seed $1 -pf ParameterFiles/glidingAssay500_val` invocation.
+
+---
+
+# Phase 4.5 fix attempt — record correction (2026-06-05)
+
+The scoping doc above localized the per-step stale reader to
+`Crucible.keepMyosinOnSurface(int i)`. That localization is **wrong** and the
+fix attempt described here did not close the bug. The actual stale reader is
+elsewhere and is still open at the time of this writeup.
+
+## What the fix attempt found
+
+A device port of `Crucible.keepMyosinOnSurface` / `keepMyosinDimerOnSurface`
+was implemented as a new `surfaceTetherKernel` chained into the move
+TaskGraph (between `segMotorForce` and `move`), reading the resident
+`coord/uVec/soaLengthArr/bTransGam` for each chamber-fixed rod slot and
+RMW-ing the tether force into `jointForceSum`. A per-entry writeback buffer
+was added for parity. The CPU `keepMyosin*OnSurface` were gated with
+`if (Env.useGPU && curRod.gpuHandled && !GPUMoveThing.SOA_POSE) return;`
+and `computeKeepMyosin*OnSurfaceForce` helpers added for parity testing.
+
+Compile clean. Part-2 parity dump (BOA_PHASE45_TETHER_PARITY=1000) printed:
+
+```
+[PHASE45_TETHER_PARITY step=1000] compared=0 max|dev-cpu|=0.000000e+00 mean|dev-cpu|=0.000000e+00
+```
+
+`compared=0` is the smoking gun: the parity walked
+`Thing.theBox.myosins[0..numChamberFixedMyos)` and
+`Thing.theBox.myodimers[0..numChamberFixedMyoDimers)` and found
+**no entries** to compare against. Reading the param file:
+
+```
+$ grep -i 'numChamberFixed' ParameterFiles/glidingAssay500_val
+# (no match — the parameter is at its default)
+$ grep numChamberFixedMyos boxOfActin/Env.java
+static final Parameter numChamberFixedMyos = new Parameter("numChamberFixedMyos", ..., 0," ", Parameter.INT);
+```
+
+`numChamberFixedMyos` defaults to **0**. The scoping doc's table conflated
+`fixedMyosinDensity` (which controls `MyosinFixed` instances via
+`MyosinFixed.fillPlaneWithFixedMyosins()`) with `numChamberFixedMyos` (which
+controls `Thing.theBox.myosins[]`). These are different mechanisms.
+`Crucible.ChamberMyoThreads.divideAndConquer` (`Crucible.java:43-49`) short-
+circuits on `numChamberFixedMyos == 0` — so `keepMyosinOnSurface` literally
+never runs in gliding-assay. The device port is correct code for the
+function it ports, but the function is dead in this workload.
+
+## Re-poison test still shows the stale read
+
+After the no-op port, re-running the poison test (seed=1) reproduces the
+same magnitude of observable shift the original scoping flagged:
+
+| | bindEvents | meanBoundMotors | glidingVelocity |
+|---|---|---|---|
+| baseline #1 (post-port, no poison)  | 848 | 7.870 | 7.581 |
+| baseline #2 (post-port, no poison)  | 684 | 6.000 | 7.595 |
+| poison #1 (post-port, BOA_PHASE45_POISON=1) | 156 | 1.283 | 11.754 |
+
+Two same-seed baseline runs differ by 848 vs 684 — i.e. the simulation has
+run-to-run thread-scheduling noise of ~24% on bindEvents under fixed seed.
+Even with that noise, the poison shifts bindEvents from ~768 (baseline mean)
+to 156 — many noise floors. The stale read is real; the localization was
+wrong.
+
+## What we now know about the actual reader
+
+The original poison touches:
+- `Thing.soaEnd1/End2/ZVec/TransXTox` (Thing-level SoA mirrors)
+- per-FilSegment `xRange/yRange/zRange/end1Pt.{x,y,z}/end2Pt.{x,y,z}`
+- per-MyoMotor `bindTip.{x,y,z}`
+
+Per-step paths that read these on the GPU gliding path, with the gate
+status I verified:
+
+| candidate | reader | actually inert in gliding? |
+|---|---|---|
+| `Mesh.fillFilSegMesh(curSeg.end1AsPt3D(), end2AsPt3D())` | `Thing.soaEnd1/End2` | populates `FILSEG_MESH` per step. Mesh consumer (`filSegMeshCollisions → checkToLink`) gated on `Env.xLinks.isActive()`, off in gliding. **Inert.** |
+| `Mesh.fillMotorMesh(motor.bindTip)` | `MyoMotor.bindTip` | populates `MYOHEADS_MESH` per step. Mesh consumer (`motorFilMeshCollisions`) only dispatched on `!Env.useGPU` path. **Inert.** |
+| `MyoFilLink.setAttachment → updatePos → mySeg.end1AsPt3D()` | `Thing.soaEnd1` | fires on each fresh bind (~50/step in steady-state gliding). Writes poisoned `attachPt`. `addForces` reads `attachPt` but is gated off via `gpuMotorHandled() = true` on `MyosinFixed + GPU-handled seg`. **Should be inert** — but worth double-checking the gate is actually true for all 500 fixed-density motors. |
+| `MyosinFixed.applyRodFixedPtForce → myoRod.end1AsPt3D()` | `Thing.soaEnd1` | called via `applyGPUDroppedForces` from `MyosinThreads.myoJoints1Start`, but the call site at `Myosin.java:121` is gated on `DIAG_CPU_ANCHOR=true` (default false). **Inert.** |
+| `MotorBindGrid3D.fillFilSeg / fillMotor` | `end1AsPt3D / bindTip` | `FillThreads` dispatch in `BoxOfActin.doLoop:957` gated on `!Env.useGPU`. **Inert on GPU path.** |
+
+If all of these are truly inert in gliding, then the stale reader must
+either:
+
+(a) be a path the survey missed (a `getEnd1X()` / `bindTip.x` / `xRange`
+read on a code path I haven't grep'd), or
+(b) be a path that *looks* gated but the gate is actually misfiring for
+some subset of objects in steady-state (e.g. one motor whose `gpuMotorHandled`
+returns false unexpectedly because `gpuHandled` flips after a topology
+rebuild).
+
+The cheapest next step is **selective poison**: poison only one field family
+at a time (e.g. only `Thing.soaEnd1` and `soaEnd2`, or only `bindTip`, or
+only `xRange/yRange/zRange`) and re-run. Whichever subset reproduces the
+~80% bindEvents drop is the family the actual reader consumes. From there
+the grep is narrow.
+
+The no-op tether port was reverted from the working tree. The original
+scoping run logs at `RUN_LOGS/2026-06-05_phase45_tether_fix/` are retained
+as reference (no port code is committed).
+
+---
+
+# Phase 4.5 selective-poison localization (2026-06-05)
+
+Selective per-field-family poison narrowed the half-flip's stale per-step
+reader to **filament-segment endpoint positions**: poisoning either
+`Thing.soaEnd1[]/soaEnd2[]` (the Thing-level SoA mirror) or
+`FilSegment.end1Pt/end2Pt` (the per-FilSegment Pt3D mirror) — alone —
+reproduces nearly the full ~80% bindEvents drop. No other family does.
+
+## Selector instrumentation
+
+`GPUMoveThing.poisonFrameOnlyMirrors()` now branches on a static
+`BOA_PHASE45_POISON_FAMILY` env-var. Accepted values:
+`all` (default), `none`, `soaEnds`, `bindTip`, `ranges`, `rangesScalar`,
+`rangesEndpt`, `zvecTransx`. Unrecognised values fall back to `all` with a
+warning. `BOA_PHASE45_POISON=1` is still required to arm the hook; the
+family selector then restricts which fields get the +1 µm offset. A
+one-shot banner prints the active family at startup:
+
+```
+[PHASE45_POISON] armed; family=<label> (soaEnds=<b> bindTip=<b>
+  rangesScalar=<b> rangesEndpt=<b> zvecTransx=<b>)
+```
+
+## Sweep results (seed=1, gliding-assay 10101 steps)
+
+| run | bindEvents | meanBoundMotors | glidingVelocity | classification |
+|---|---:|---:|---:|---|
+| baseline #1 (no poison) | 773 | 6.581 | 7.565 | — |
+| baseline #2 (no poison) | 714 | 6.728 | 8.284 | — |
+| baseline #3 (no poison) | 759 | 6.837 | 8.210 | — |
+| poison=none (control) | 620 | 5.694 | 7.596 | within band |
+| poison=all | 155 | 1.822 | 11.929 | (reference) |
+| **soaEnds**  | **173** | 1.397 | 6.607 | **HIT** |
+| bindTip | 651 | 6.186 | 7.524 | MISS |
+| ranges | 202 | 1.842 | 9.105 | HIT (driven by Endpt; see below) |
+| zvecTransx | 759 | 6.739 | 7.724 | MISS |
+| rangesScalar | 851 | (skip) | (skip) | MISS |
+| **rangesEndpt** | **125** | (skip) | (skip) | **HIT** |
+
+Same-seed baselines span 714–773 (mean 749). poison=all is 155, the
+reference floor. Two families saturate the floor on their own:
+**soaEnds** (173) and **rangesEndpt** (125). Every other family stays in
+the baseline band. The `ranges` HIT is entirely from `rangesEndpt`:
+`rangesScalar` (xRange/yRange/zRange alone) returned 851, comfortably in
+the noise band.
+
+Because `Thing.soaEnd1[N]` and `FilSegment[N].end1Pt` are two **mirrors of
+the same physical quantity** (one is the SoA storage, the other is the
+Pt3D copy the host writes during `refreshHostMirrorsForOutput`), the two
+HITs do not stack additively. Either alone saturates because either alone
+poisons the segment endpoints the reader consumes, no matter which mirror
+the reader prefers.
+
+## Move-side end1Pt/end2Pt readers ruled out
+
+I instrumented every grep'd per-step CPU end1Pt/end2Pt reader on the GPU
+gliding path with a fire counter (`FilSegment.DIAG_BUG_INSIDE_FIRE_CT`,
+`DIAG_ADDLINK_FIRE_CT`, `DIAG_ADDTORSION_FIRE_CT`) and ran a baseline:
+
+```
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+```
+
+All three counters are exactly zero across the full 10101-step gliding
+run. The Phase-2 F1 boundary gate (`!gpuBoundaryHandled`) and the F3/F4
+chain gate (`!gpuChainHandled`) are correctly closed for every GPU-handled
+FilSegment every step — confirming the survey's gate claim empirically.
+**The stale reader is NOT on the move/step CPU path.**
+
+The Phase 1 anchor spring (`MyosinFixed.applyRodFixedPtForce`) was
+already ruled out by its `DIAG_CPU_ANCHOR=false` gate at
+`Myosin.java:121`; the chamber surface tether (`keepMyosinOnSurface`)
+was ruled out earlier by `numChamberFixedMyos=0`. The 2D `FILSEG_MESH`
+and `MYOHEADS_MESH` consumers are gated inert
+(`filSegMeshCollisions` on `xLinks.isActive()=false`,
+`motorFilMeshCollisions` on `!Env.useGPU`).
+
+## Named next target — GPUMotorBinding pose pack
+
+The remaining per-step path that reads filament endpoints on the GPU
+gliding run is **`GPUMotorBinding.detectBindings()`'s pose pack**:
+
+- `filEnd1[j..j+2] = (float) FilSegment.soaEnd1X[s]` (and `soaEnd1Y/Z`)
+  at `GPUMotorBinding.java:628–633`. Same for `soaEnd2X/Y/Z` → `filEnd2`.
+- These pack arrays are uploaded EVERY_EXECUTION (see the binding plan's
+  `transferToDevice` at `GPUMotorBinding.java:562–565`), so the binding
+  kernel reads them every step.
+- `FilSegment.soaEnd1X/Y/Z` are **rederived** from
+  `Thing.soaCoord/soaUVec` by `FilSegment.fillSoaArrays()` in
+  `BoxOfActin.doLoop` (called at `BoxOfActin.java:920`, immediately
+  before the binding dispatch).
+- `arcOnFilDev` post-process at `GPUMotorBinding.java:992–1004` recomputes
+  `(motor − seg.end1) · uVec` for the binding-event arc, also reading
+  from `FilSegment.soaEnd1X/Y/Z`.
+
+Hypothesis to verify at next session start (code-read, no run needed):
+**is `FilSegment.fillSoaArrays()` still called per-step on the GPU
+gliding path before the binding dispatch?** And, if so, **does it pull
+from a `Thing.soaCoord/soaUVec` that has actually been demand-synced
+from device this step?** A retired `fillSoaArrays()` call, or a
+demand-sync that no longer fires before it, would leave the binding's
+endpoint pack frame-stale — explaining both the `soaEnds` HIT (the
+binding pack reads them via `FilSegment.soaEnd1X` whose source is
+`Thing.soaCoord`, distinct from `Thing.soaEnd1` but indistinguishable
+under the +1 µm poison if the half-flip moved the refresh) and the
+`rangesEndpt` HIT (the same per-FilSegment endpoint info that
+`refreshHostMirrorsForOutput` writes to `fs.end1Pt/end2Pt`).
+
+The `bindTip` MISS is consistent with this hypothesis: all 500 fixed
+myosins are `MyosinFixed`, and `MyoMotor.fillSoaArrays()` rederives
+`MyoMotor.soaX/Y/Z` from `Thing.soaCoord/soaUVec` (not from `bindTip`),
+so the binding's motor pack stays fresh regardless of `bindTip` poison.
+
+## What's committed vs not
+
+- **Committed**: the selective-poison family-selector instrumentation in
+  `GPUMoveThing.poisonFrameOnlyMirrors`; the `FilSegment.DIAG_*_FIRE_CT`
+  counters; the `BoxOfActin.printStats` lines that echo them; this
+  doc + JOURNAL update.
+- **Reverted (not committed)**: the no-op `Crucible.keepMyosinOnSurface`
+  device port (the `surfaceTetherKernel` and surrounding plumbing). It
+  was confirmed mechanically correct but a runtime no-op for any
+  workload with `numChamberFixedMyos = 0` — the device-port pattern
+  is already exemplified by `motorForceKernel` / `segMotorForceKernel`
+  / `jointsKernel`'s anchor spring, and a future port can follow those.
+
+Run logs: `RUN_LOGS/2026-06-05_phase45_selective_poison/` (sweep +
+diag-counter run).

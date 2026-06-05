@@ -1,0 +1,20 @@
+[11:16] === control: baseline #1 (no poison) ===
+rc=0 bindEvents=773
+[11:21] === control: baseline #2 (no poison) ===
+rc=0 bindEvents=714
+[11:26] === control: baseline #3 (no poison) ===
+rc=0 bindEvents=759
+[11:31] === control: poison=none (selector wired but no fields touched) ===
+rc=0 bindEvents=620
+[11:36] === control: poison=all (must reproduce ~156) ===
+rc=0 bindEvents=155
+[11:41] === family: soaEnds ===
+rc=0 bindEvents=173
+[11:46] === family: bindTip ===
+rc=0 bindEvents=651
+[11:52] === family: ranges ===
+rc=0 bindEvents=202
+[11:57] === family: zvecTransx ===
+rc=0 bindEvents=759
+[12:02] sweep complete
+DONE rc=0

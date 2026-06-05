@@ -1,8 +1,106 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-05 (Phase 4.5 scoping — not-stale FAIL + binding-phase breakdown)
+Last updated: 2026-06-05 (Phase 4.5 selective-poison localization — stale reader is segment endpoints; next target named)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-05 — Phase 4.5 selective-poison: stale reader is filament endpoints; GPUMotorBinding pose pack is next target
+
+**TL;DR.** Selective per-family poison (one field family at a time, seed=1)
+narrowed the half-flip's stale per-step reader to **filament-segment
+endpoint positions**. Poisoning either `Thing.soaEnd1[]/soaEnd2[]` (SoA
+mirror) OR `FilSegment.end1Pt/end2Pt` (Pt3D mirror) alone reproduces the
+full ~80% bindEvents drop; every other family stays in the ±24%
+intrinsic-noise baseline band. The move/step CPU readers are ruled out
+via fire counters that came back 0. The named next target is
+**GPUMotorBinding's per-step pose pack** — needs a code-read at next
+session start to confirm. See `PHASE45_SCOPING.md` for the full table
+and the hypothesis.
+
+**Side note: scoping doc mislocalization (record correction).** Before
+the selective-poison sweep, the scoping doc's named candidate
+(`Crucible.keepMyosinOnSurface`) was implemented as a device port and
+confirmed to be a no-op in gliding (`numChamberFixedMyos=0` by default;
+the doc conflated `fixedMyosinDensity` with `numChamberFixedMyos`). That
+port is reverted. The misattribution is preserved in
+`PHASE45_SCOPING.md` for the audit trail.
+
+**Per-family sweep results (gliding-assay, seed=1, 10101 steps):**
+
+| run | bindEvents | classification |
+|---|---:|---|
+| baseline ×3 | 773 / 714 / 759 | band |
+| poison=all | 155 | reference floor |
+| **soaEnds** | **173** | **HIT** |
+| bindTip | 651 | MISS |
+| rangesScalar (xRange/yRange/zRange) | 851 | MISS |
+| **rangesEndpt** (end1Pt/end2Pt) | **125** | **HIT** |
+| zvecTransx | 759 | MISS |
+
+`Thing.soaEnd1` and `FilSegment.end1Pt` are mirrors of the same physical
+data; either alone saturates the reader, so the two HITs do not stack
+additively (poison=all 155 ≈ either alone). bindTip MISS is consistent
+with motors being `MyosinFixed` whose pose pack rederives from
+`Thing.soaCoord` (always fresh), not from `bindTip`.
+
+**Move-side readers ruled out (fire counters).** Instrumented every
+grep'd per-step CPU endpoint reader on the GPU gliding path with a
+DIAG_*_FIRE_CT counter and ran a baseline:
+```
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+```
+All three exactly zero across 10101 steps — confirming Phase 2 F1
+boundary and F3/F4 chain gates close cleanly for every GPU-handled
+FilSegment every step. The remaining reader is on the binding path.
+
+**Named next target: `GPUMotorBinding.detectBindings()` pose pack.**
+The binding plan transfers `filEnd1`/`filEnd2` `EVERY_EXECUTION` via the
+host pack at `GPUMotorBinding.java:628–633`, which reads
+`FilSegment.soaEnd1X/Y/Z[s]`. The host arc-recompute at
+`GPUMotorBinding.java:992–1004` reads the same arrays. The Phase 4
+half-flip retired the per-step `Thing.recomputeDerivedSoA` (P6) — and
+the question to confirm next session (code-read, no run needed):
+
+> Is `FilSegment.fillSoaArrays()` still called per-step on the GPU
+> gliding path, immediately before the binding dispatch? And does it
+> pull from a `Thing.soaCoord`/`Thing.soaUVec` that's actually been
+> demand-synced from device this step? If either fell silently to a
+> retired/conditional dispatch in the half-flip, the binding's
+> endpoint pack ingests frame-stale `soaEnd1X/Y/Z` every step.
+
+The selective-poison hits cleanly fit this hypothesis: poisoning
+`Thing.soaEnd1` taints whatever the half-flip leaves stale on the
+endpoint mirror; poisoning `FilSegment.end1Pt` taints the per-step
+fillSoaArrays pose source by the same mechanism. The bindTip MISS is
+the control — `MyoMotor.fillSoaArrays` rederives from
+`Thing.soaCoord` (fresh) and never reads `bindTip`.
+
+**Committed (this session):**
+- `boxOfActin/GPUMoveThing.java` — `BOA_PHASE45_POISON_FAMILY` selector
+  (8 values), gated poison branches, one-shot startup banner,
+  `getPoisonFamilyLabel()` accessor.
+- `boxOfActin/FilSegment.java` — `DIAG_BUG_INSIDE_FIRE_CT`,
+  `DIAG_ADDLINK_FIRE_CT`, `DIAG_ADDTORSION_FIRE_CT` static counters with
+  `Env.useGPU`-gated increments in the three move-side readers.
+- `boxOfActin/BoxOfActin.java` — three `[STATS] *FireCt=` print lines
+  in `printStats`.
+- `PHASE45_SCOPING.md` — selective-poison localization section (with
+  the next-target hypothesis spelled out).
+- This entry.
+
+**Reverted (not committed):** the no-op `Crucible.keepMyosinOnSurface`
+device port from earlier today. Mechanically correct but never fires
+in any current workload (`numChamberFixedMyos=0`); the device-port
+pattern is already exemplified by the existing `jointsKernel` anchor
+spring + `motorForceKernel`. Run logs at
+`RUN_LOGS/2026-06-05_phase45_tether_fix/` are retained as reference.
+
+**Run logs (this session):**
+`RUN_LOGS/2026-06-05_phase45_selective_poison/` —
+3 baselines, `poison=none`, `poison=all`, 4 per-family,
+2 sub-family (rangesScalar / rangesEndpt), one diag-counter run.
 
 ## 2026-06-05 — Phase 4.5 scoping — not-stale confirm + binding-phase breakdown
 

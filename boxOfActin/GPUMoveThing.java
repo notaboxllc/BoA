@@ -3057,10 +3057,66 @@ public class GPUMoveThing {
         "1".equals(System.getenv("BOA_PHASE45_POISON"));
     private static final float POISON_OFFSET = 1.0f;
 
-    public static boolean isPoisonEnabled() { return POISON_FRAME_MIRRORS; }
+    // Selective-poison family selector (2026-06-05). When BOA_PHASE45_POISON=1
+    // is set, BOA_PHASE45_POISON_FAMILY narrows the poison to a single family
+    // of frame-only mirrors so we can bisect which family the stale per-step
+    // reader consumes. Accepted values (case-insensitive):
+    //   "all"          — every family (default if unset / unrecognised).
+    //   "none"         — control: no fields poisoned even though poison armed.
+    //   "soaEnds"      — Thing.soaEnd1[] + soaEnd2[] only.
+    //   "bindTip"      — per-MyoMotor bindTip.{x,y,z} only.
+    //   "ranges"       — per-FilSegment xRange/yRange/zRange + end1Pt/end2Pt only.
+    //   "rangesScalar" — per-FilSegment xRange/yRange/zRange only.
+    //   "rangesEndpt"  — per-FilSegment end1Pt/end2Pt Pt3D only.
+    //   "zvecTransx"   — Thing.soaZVec[] + soaTransXTox[] only.
+    private static final boolean POISON_SOA_ENDS;
+    private static final boolean POISON_BIND_TIP;
+    private static final boolean POISON_RANGES_SCALAR;
+    private static final boolean POISON_RANGES_ENDPT;
+    private static final boolean POISON_ZVEC_TRANSX;
+    private static final String  POISON_FAMILY_LABEL;
+    static {
+        String raw = System.getenv("BOA_PHASE45_POISON_FAMILY");
+        String fam = (raw == null || raw.isEmpty()) ? "all" : raw.trim().toLowerCase();
+        boolean all = false, none = false;
+        boolean ends = false, tip = false, rangesAll = false;
+        boolean rangesScalar = false, rangesEndpt = false;
+        boolean zvtx = false;
+        switch (fam) {
+            case "all":          all = true; break;
+            case "none":         none = true; break;
+            case "soaends":      ends = true; break;
+            case "bindtip":      tip = true; break;
+            case "ranges":       rangesAll = true; break;
+            case "rangesscalar": rangesScalar = true; break;
+            case "rangesendpt":  rangesEndpt = true; break;
+            case "zvectransx":   zvtx = true; break;
+            default:
+                System.err.println("[PHASE45_POISON_FAMILY] unrecognised '" + raw
+                    + "' — defaulting to 'all'");
+                all = true;
+                fam = "all";
+                break;
+        }
+        POISON_SOA_ENDS      = all || ends;
+        POISON_BIND_TIP      = all || tip;
+        POISON_RANGES_SCALAR = all || rangesAll || rangesScalar;
+        POISON_RANGES_ENDPT  = all || rangesAll || rangesEndpt;
+        POISON_ZVEC_TRANSX   = all || zvtx;
+        POISON_FAMILY_LABEL  = none ? "none" : fam;
+    }
 
+    public static boolean isPoisonEnabled() { return POISON_FRAME_MIRRORS; }
+    public static String  getPoisonFamilyLabel() { return POISON_FAMILY_LABEL; }
+
+    private static boolean poisonBannerPrinted = false;
     public static void poisonFrameOnlyMirrors() {
         if (!POISON_FRAME_MIRRORS) return;
+        if (!poisonBannerPrinted) {
+            System.err.printf("[PHASE45_POISON] armed; family=%s (soaEnds=%b bindTip=%b rangesScalar=%b rangesEndpt=%b zvecTransx=%b)%n",
+                POISON_FAMILY_LABEL, POISON_SOA_ENDS, POISON_BIND_TIP, POISON_RANGES_SCALAR, POISON_RANGES_ENDPT, POISON_ZVEC_TRANSX);
+            poisonBannerPrinted = true;
+        }
         int tc = Thing.thingCt;
         if (tc <= 0) return;
 
@@ -3070,47 +3126,63 @@ public class GPUMoveThing {
         float[] tx = Thing.soaTransXTox;
         int n3 = tc * 3;
         int n9 = tc * 9;
-        if (e1.length >= n3 && e2.length >= n3 && zv.length >= n3) {
+
+        // Family: soaEnds — Thing.soaEnd1 + soaEnd2.
+        if (POISON_SOA_ENDS && e1.length >= n3 && e2.length >= n3) {
             for (int i = 0; i < n3; i++) {
                 e1[i] += POISON_OFFSET;
                 e2[i] += POISON_OFFSET;
-                zv[i] += POISON_OFFSET;
             }
         }
-        if (tx.length >= n9) {
-            for (int i = 0; i < n9; i++) tx[i] += POISON_OFFSET;
-        }
-
-        // Per-FilSegment Pt3D mirrors + bbox ranges (the P7 outputs).
-        int filCt = FilSegment.filSegmentCt;
-        FilSegment[] fils = FilSegment.theFilSegments;
-        for (int i = 0; i < filCt; i++) {
-            FilSegment fs = fils[i];
-            if (fs == null || fs.removeMe) continue;
-            fs.xRange += POISON_OFFSET;
-            fs.yRange += POISON_OFFSET;
-            fs.zRange += POISON_OFFSET;
-            if (fs.end1Pt != null) {
-                fs.end1Pt.x += POISON_OFFSET;
-                fs.end1Pt.y += POISON_OFFSET;
-                fs.end1Pt.z += POISON_OFFSET;
+        // Family: zvecTransx — Thing.soaZVec + soaTransXTox.
+        if (POISON_ZVEC_TRANSX) {
+            if (zv.length >= n3) {
+                for (int i = 0; i < n3; i++) zv[i] += POISON_OFFSET;
             }
-            if (fs.end2Pt != null) {
-                fs.end2Pt.x += POISON_OFFSET;
-                fs.end2Pt.y += POISON_OFFSET;
-                fs.end2Pt.z += POISON_OFFSET;
+            if (tx.length >= n9) {
+                for (int i = 0; i < n9; i++) tx[i] += POISON_OFFSET;
             }
         }
 
-        // Per-MyoMotor bindTip Pt3D mirror (the P8 output).
-        int motorCt = MyoMotor.motorCt;
-        MyoMotor[] motors = MyoMotor.theMotors;
-        for (int i = 0; i < motorCt; i++) {
-            MyoMotor m = motors[i];
-            if (m == null || m.removeMe || m.bindTip == null) continue;
-            m.bindTip.x += POISON_OFFSET;
-            m.bindTip.y += POISON_OFFSET;
-            m.bindTip.z += POISON_OFFSET;
+        // Family: ranges{Scalar,Endpt} — per-FilSegment bounding-box scalars
+        // and Pt3D endpoint mirrors (the P7 outputs), split for bisection.
+        if (POISON_RANGES_SCALAR || POISON_RANGES_ENDPT) {
+            int filCt = FilSegment.filSegmentCt;
+            FilSegment[] fils = FilSegment.theFilSegments;
+            for (int i = 0; i < filCt; i++) {
+                FilSegment fs = fils[i];
+                if (fs == null || fs.removeMe) continue;
+                if (POISON_RANGES_SCALAR) {
+                    fs.xRange += POISON_OFFSET;
+                    fs.yRange += POISON_OFFSET;
+                    fs.zRange += POISON_OFFSET;
+                }
+                if (POISON_RANGES_ENDPT) {
+                    if (fs.end1Pt != null) {
+                        fs.end1Pt.x += POISON_OFFSET;
+                        fs.end1Pt.y += POISON_OFFSET;
+                        fs.end1Pt.z += POISON_OFFSET;
+                    }
+                    if (fs.end2Pt != null) {
+                        fs.end2Pt.x += POISON_OFFSET;
+                        fs.end2Pt.y += POISON_OFFSET;
+                        fs.end2Pt.z += POISON_OFFSET;
+                    }
+                }
+            }
+        }
+
+        // Family: bindTip — per-MyoMotor bindTip Pt3D mirror (the P8 output).
+        if (POISON_BIND_TIP) {
+            int motorCt = MyoMotor.motorCt;
+            MyoMotor[] motors = MyoMotor.theMotors;
+            for (int i = 0; i < motorCt; i++) {
+                MyoMotor m = motors[i];
+                if (m == null || m.removeMe || m.bindTip == null) continue;
+                m.bindTip.x += POISON_OFFSET;
+                m.bindTip.y += POISON_OFFSET;
+                m.bindTip.z += POISON_OFFSET;
+            }
         }
     }
 
