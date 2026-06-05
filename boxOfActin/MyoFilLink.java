@@ -73,9 +73,19 @@ public class MyoFilLink {
 		myMotor.onFil = true;
 	}
 	
+	// Phase 4 prep (2026-06-04) — when set via env var
+	// BOA_DIAG_FORCE_UPDATEPOS=1, force updatePos() to run for every bound
+	// motor every step regardless of the GPU gate. Restores the pre-gate
+	// behaviour for a gated-vs-ungated A/B without rebuilding. Default off.
+	private static final boolean DIAG_FORCE_UPDATEPOS;
+	static {
+		String s = System.getenv("BOA_DIAG_FORCE_UPDATEPOS");
+		DIAG_FORCE_UPDATEPOS = (s != null && !s.isEmpty()
+		        && !s.equals("0") && !s.equalsIgnoreCase("false"));
+	}
+
 	public void step () {
 		if (!isFree()) {
-			updatePos();
 			// Phase 2 F8/F9/F10 (2026-06-03): when -gpu is on and
 			// DIAG_CPU_MOTOR is off AND the GPU pack picked this motor up
 			// (MyosinFixed with a GPU-handled bound seg), the device kernels
@@ -91,7 +101,18 @@ public class MyoFilLink {
 			// step-N forces (matching the CPU arm). The CPU path below keeps
 			// ckRelease here because addForces has just written fresh forces.
 			boolean deviceMotor = gpuMotorHandled();
+			// Phase 4 prep (2026-06-04): attachPt is read only by addForces
+			// (which is gated off below on the device path). The pre-existing
+			// per-bound-motor updatePos() call on the device path was dead CPU
+			// work — a small per-motor pose read every step that produced an
+			// unused field. Gate it on the device path. setAttachment() still
+			// calls updatePos() directly at bind time, so attachPt is correct
+			// for the (CPU-fallback or DIAG_CPU_MOTOR) path that does read it.
+			// DIAG_FORCE_UPDATEPOS env var restores the pre-gate behaviour
+			// (always call) for a gated-vs-ungated A/B.
+			if (DIAG_FORCE_UPDATEPOS) updatePos();
 			if (!deviceMotor) {
+				if (!DIAG_FORCE_UPDATEPOS) updatePos();
 				addForces();
 				alignUVecTorque();
 				alignYVecTorque();

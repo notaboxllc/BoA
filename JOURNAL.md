@@ -1,8 +1,136 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Phase 3 — motor-binding grid moved to device; CP1/CP2 PASS; N=8 ensemble borderline PASS)
+Last updated: 2026-06-04 (Phase 4 prep — survey + derived-field device kernel + updatePos gate)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Phase 4 prep — bound the flip + low-risk prerequisites
+
+**Verdict.** Phase 4 prep lands three pieces, none of which removes the
+per-step pose round-trip yet (that is the flip itself, the next prompt):
+(A) a survey of the remaining per-step CPU pose touches that bounds the
+flip's spec, (B) a device-side `derivedFieldsKernel` running after `move`
+in the chained TaskGraph, validated against CPU `Thing.recomputeDerivedSoA`
+on a 500-step windowed checkpoint (`end1/end2/zVec/yVec/trans max ≤
+4.77e-7`, mean ≤ 4.24e-9 — float32-precision regime, two orders of
+magnitude below the 1e-5 "formula issue" threshold), (C) a
+`MyoFilLink.updatePos` gate on `gpuMotorHandled()` retiring the P5
+dead-computation per-motor pose read, and (D) a directionality fold-in for
+the Phase-3 `arcOnFil` deltas confirming the borderline ensemble drift is
+zero-mean noise compounded by chaos, not a small float32 systematic. The
+CPU `recomputeDerivedSoA` is intentionally left in place; the flip removes
+it.
+
+### Survey (Part A)
+
+`PHASE4_PREP.md` has the per-operation table. Compared against
+`RESIDENCY_INVENTORY.md §6` (P1-P10 + B1), the picture matches to a row.
+Phase 3 retired P3 (`MotorBindGrid3D.FillThreads`), the CPU `packForGPU`,
+and the CPU `arcOnFil` recompute. This prep retires P5
+(`MyoFilLink.updatePos`). P2 / P2.b (mesh fills) are gliding-inert. The
+flip's binary criterion is: P1.a + P1.b + P4 + P6 + P7 + P8 + P9 + P10
+move off the per-step CPU path (or to a topology/output-frame boundary),
+and B1 is handled by a topology-dirty `OP_PACK_RANGE`. No scope surprises.
+
+### Derived-field device kernel (Part B)
+
+`boxOfActin/GPUMoveThing.java`:
+- New buffers `derivedEnd1/End2/ZVec/YVecOrtho/TransXTox` (per-slot,
+  `slotCap*3` / `slotCap*9`).
+- New `derivedFieldsKernel` — `@Parallel` per move slot, body identical
+  to `Thing.recomputeDerivedSoA` (`zVec = uVec × yVec` normalised; `yVec'
+  = zVec × uVec` re-orthogonalised; `transXTox` row-major `[u; y'; z]`;
+  `end1/end2 = coord ∓ halfLen·uVec`).
+- Wired as the final task of the chained plan after `move`. Reads
+  device-resident `coord/uVec/yVec` (written by the move kernel earlier in
+  the same `.execute()`) and `soaLengthArr` (packed by `packRange`).
+- `transferToHost(EVERY_EXECUTION)` for the five new buffers — kept ON
+  for the prep checkpoint; the flip removes these transfers and lets
+  downstream kernels read in place.
+- `runDerivedFieldsCheckpoint` runs after `OP_UNPACK` + CPU
+  `recomputeDerivedSoA` in `moveThings()`, walking `slotCount` slots and
+  mapping via `gpuThingIndices[slot]` → `Thing.soa*` for slot-by-slot
+  per-field `|delta|` accumulation. Env-armed via
+  `BOA_PHASE4_DERIVED_CP=<step>` or `BOA_PHASE4_DERIVED_CP_START/_STOP`.
+
+Window-mode CP on `glidingAssay500_val` over steps 1..500 (21M slot
+comparisons, real device kernel via `plan.execute()`):
+```
+[PHASE4_DERIVED_CP_SUMMARY] steps=500 slotsScanned=21005455
+  end1  max=0.000e+00  mean=0.000e+00
+  end2  max=4.768e-07  mean=3.311e-10
+  zVec  max=1.788e-07  mean=4.243e-09
+  yVec  max=2.384e-07  mean=4.227e-09
+  trans max=2.384e-07  mean=2.823e-09
+```
+end1 is bit-exact identical because the PTX backend does not fuse `cx -
+halfLen*ux` (two roundings, same as CPU); end2 uses FMA (`cx +
+halfLen*ux`) and differs by ≤ 1 ULP. Both correct. Full smoke observables
+match the gliding profile (`bindEvents=889`, `meanBoundMotors=7.486`,
+`glidingVelocity=7.82 µm/s`). Log:
+`RUN_LOGS/2026-06-04_phase4_prep/cp_smoke.log`.
+
+### `MyoFilLink.updatePos` gate (Part C)
+
+Confirmed by exhaustive grep: `attachPt`'s only runtime readers are
+`MyoFilLink.addForces` lines 122/125/147, already gated off on the device
+path by `gpuMotorHandled()`. All other matches are comments. With
+`addForces` skipped, nothing reads `attachPt`. Moved `updatePos()` inside
+the `if (!deviceMotor)` branch; `setAttachment()` still calls it at bind
+time so CPU-fallback motors see a fresh `attachPt`. Added a
+`BOA_DIAG_FORCE_UPDATEPOS=1` env-var bypass for future gated-vs-ungated
+A/B without rebuilding.
+
+Paired short smoke (`runTime=0.01`, 1000 steps, `-gpu`, seeds 1-2):
+- seed=1 gated 131/6.338/34.68; ungated 168/9.675/34.39
+- seed=2 gated 106/6.829/37.23; ungated 140/6.759/35.69
+
+Three back-to-back gated seed=1 runs span `bindEvents ∈ [95, 131]` /
+`meanBoundMotors ∈ [5.93, 8.20]` — the same-seed within-arm jitter is
+wider than the gated→ungated signal. The gather phase's float
+summation order is JVM-thread-schedule-dependent and breaks bit-exact
+determinism at this scale. Verdict: PASS by **dataflow** (the primary
+safety argument); single-seed observables are within the within-arm
+noise band, neither rejecting nor tightening the dataflow claim.
+
+### arcOnFil directionality (Part D, no new run)
+
+`runCP2` records `mean(|cpuArc - devArc|)`, not signed mean — the signed
+direction was not collected by the Phase-3 CP. From the existing log:
+```
+arcMeanDelta=1.582e-07   arcMaxDelta=4.627e-07
+ratio = 0.342
+```
+Ratio of 0.34 sits below the uniform-symmetric expectation of 0.5 and
+well below the 0.5-1.0 range a sign-aligned bias would produce. Plus
+`arcOnFil = alpha * sqrt(denom)` is a single float32 mac with no
+asymmetric clip or comparison — no mechanism for systematic sign bias.
+Verdict: existing data is **consistent with zero-mean noise**. The
+borderline N=8 ensemble negative drift (`t = (−2.02, −1.90, −1.27)` vs
+pre-Phase-3 `t = (−0.78, −0.99, +0.28)`) reads as chaos amplification of
+zero-mean float32 truncation, not a directional bias. Heuristic (existing
+log gives only |delta|); a future one-line `sumSignedArcDelta` to
+`runCP2` would tighten this if needed.
+
+### Files
+
+- `boxOfActin/GPUMoveThing.java` — `derivedFieldsKernel` + buffers +
+  TaskGraph wiring + transferToHost + GridScheduler entry +
+  `runDerivedFieldsCheckpoint` + `reportDerivedCheckpointSummary` + env
+  vars (~250 lines incl. docs).
+- `boxOfActin/MyoFilLink.java` — `updatePos()` gated on
+  `gpuMotorHandled()`; `BOA_DIAG_FORCE_UPDATEPOS` env-var bypass.
+- `boxOfActin/BoxOfActin.java` — call
+  `GPUMoveThing.reportDerivedCheckpointSummary()` after the
+  `[STATS] gpuMoveThing` line.
+- `PHASE4_PREP.md` — survey table, CP numbers, gate confirmation,
+  directionality finding.
+- `RUN_LOGS/2026-06-04_phase4_prep/{cp_smoke.log, partc_*.log,
+  partc_gated_seed1_rerun*.log, partc_summary.log}`.
+
+Commit hash: `<HASH>` on `main`.
+
+---
 
 ## 2026-06-04 — Phase 3: device-resident motor-binding grid + arcOnFil emit
 

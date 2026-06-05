@@ -1503,6 +1503,7 @@ public class BoxOfActin {
 			// pack includes jointPack — print slotPack as (pack - jointPack) for a clean breakdown.
 			System.out.printf("[STATS] gpuMoveThing total=%.3fs calls=%d slotPack=%.3fs jointPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk - jpk, jpk, ex, un);
+			GPUMoveThing.reportDerivedCheckpointSummary();
 		}
 		GPUMoveThing.reportMoveAB();
 		if (Env.useGPU && GPUMyosinJoints.getCallCount() > 0) {

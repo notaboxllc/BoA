@@ -1,0 +1,4 @@
+gated        seed=1  bindEvents=131  meanBoundMotors=6.338  glidingVelocity=34.6811
+ungated      seed=1  bindEvents=168  meanBoundMotors=9.675  glidingVelocity=34.3908
+gated        seed=2  bindEvents=106  meanBoundMotors=6.829  glidingVelocity=37.2301
+ungated      seed=2  bindEvents=140  meanBoundMotors=6.759  glidingVelocity=35.6913

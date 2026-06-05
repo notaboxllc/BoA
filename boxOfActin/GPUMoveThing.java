@@ -487,6 +487,19 @@ public class GPUMoveThing {
     // private static final int BOUNDARY_SHAPE_PILL = 1;   // future F1b
     private static int boundaryShape = BOUNDARY_SHAPE_NONE;
 
+    // ----- Phase 4 prep — derived-field device kernel buffers -----
+    // Mirrors of Thing.recomputeDerivedSoA's outputs, computed on-device after
+    // the move kernel writes coord/uVec/yVec. One thread per move slot. The
+    // CPU recomputeDerivedSoA continues to run in moveThings() — these device
+    // buffers are not yet read by any downstream kernel; they exist to be
+    // validated against the CPU recompute (Phase 4 prep) and to be the data
+    // source the residency flip will wire up.
+    private static FloatArray derivedEnd1;        // slotCap * 3 — coord − halfLen·uVec
+    private static FloatArray derivedEnd2;        // slotCap * 3 — coord + halfLen·uVec
+    private static FloatArray derivedZVec;        // slotCap * 3 — normalised uVec × yVec
+    private static FloatArray derivedYVecOrtho;   // slotCap * 3 — zVec × uVec (re-orthogonalised)
+    private static FloatArray derivedTransXTox;   // slotCap * 9 — row-major [u; y'; z]
+
     // ----- Phase 2 F3/F4 — per-FilSegment chain topology + length -----
     // Populated by classifyThings(): for each slot i, if the slot holds a
     // GPU-handled FilSegment whose chain neighbour at the corresponding end
@@ -2361,6 +2374,98 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Phase 4 prep — derived-field kernel. Mirrors Thing.recomputeDerivedSoA
+    // per-slot: zVec = uVec × yVec (normalised), yVec' = zVec × uVec (re-
+    // orthogonalised), transXTox = row-major [u; y'; z], end1/end2 = coord ∓
+    // halfLen·uVec. One thread per move slot. Reads device-resident coord/
+    // uVec/yVec written by the move kernel earlier in the same .execute(),
+    // and the device-resident soaLengthArr packed by packRange.
+    //
+    // The outputs (derivedEnd1/End2/ZVec/YVecOrtho/TransXTox) are written
+    // exclusively by this kernel and are not yet read by any downstream
+    // kernel. Phase 4 wires them into chain/boundary/motorForce/segMotorForce
+    // (which currently re-derive halfLen·uVec inline from coord+uVec+length)
+    // and retires the post-move CPU sync block. For now they exist as a
+    // device-side mirror that the prep checkpoint validates against the CPU
+    // Thing.recomputeDerivedSoA output on every step.
+    // -------------------------------------------------------------------------
+    private static void derivedFieldsKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray yVec,
+            FloatArray soaLengthArr,
+            FloatArray derivedEnd1,
+            FloatArray derivedEnd2,
+            FloatArray derivedZVec,
+            FloatArray derivedYVecOrtho,
+            FloatArray derivedTransXTox,
+            IntArray   counts) {
+
+        int N = counts.get(0);
+
+        for (@Parallel int m = 0; m < coord.getSize() / 3; m++) {
+            if (m >= N) { return; }
+
+            int i3 = m * 3;
+            int i9 = m * 9;
+
+            float ux = uVec.get(i3);
+            float uy = uVec.get(i3 + 1);
+            float uz = uVec.get(i3 + 2);
+            float yx = yVec.get(i3);
+            float yy = yVec.get(i3 + 1);
+            float yz = yVec.get(i3 + 2);
+
+            // zVec = uVec × yVec (right-handed body frame).
+            float zx = uy * yz - uz * yy;
+            float zy = uz * yx - ux * yz;
+            float zz = ux * yy - uy * yx;
+            // Normalise, mirroring Thing.recomputeDerivedSoA (which always
+            // normalises so the matrix stays orthonormal even when yVec drifted
+            // from orthogonality during integration).
+            float zmag2 = zx * zx + zy * zy + zz * zz;
+            if (zmag2 > 0f) {
+                float inv = (float) (1.0 / Math.sqrt((double) zmag2));
+                zx *= inv; zy *= inv; zz *= inv;
+            }
+            derivedZVec.set(i3,     zx);
+            derivedZVec.set(i3 + 1, zy);
+            derivedZVec.set(i3 + 2, zz);
+
+            // yVec' = zVec × uVec (restores orthogonality to the body frame).
+            float yxn = zy * uz - zz * uy;
+            float yyn = zz * ux - zx * uz;
+            float yzn = zx * uy - zy * ux;
+            derivedYVecOrtho.set(i3,     yxn);
+            derivedYVecOrtho.set(i3 + 1, yyn);
+            derivedYVecOrtho.set(i3 + 2, yzn);
+
+            // transXTox row-major = [uVec; yVec'; zVec].
+            derivedTransXTox.set(i9,     ux);
+            derivedTransXTox.set(i9 + 1, uy);
+            derivedTransXTox.set(i9 + 2, uz);
+            derivedTransXTox.set(i9 + 3, yxn);
+            derivedTransXTox.set(i9 + 4, yyn);
+            derivedTransXTox.set(i9 + 5, yzn);
+            derivedTransXTox.set(i9 + 6, zx);
+            derivedTransXTox.set(i9 + 7, zy);
+            derivedTransXTox.set(i9 + 8, zz);
+
+            // end1/end2 = coord ∓ length/2 · uVec.
+            float cx = coord.get(i3);
+            float cy = coord.get(i3 + 1);
+            float cz = coord.get(i3 + 2);
+            float halfLen = soaLengthArr.get(m) * 0.5f;
+            derivedEnd1.set(i3,     cx - halfLen * ux);
+            derivedEnd1.set(i3 + 1, cy - halfLen * uy);
+            derivedEnd1.set(i3 + 2, cz - halfLen * uz);
+            derivedEnd2.set(i3,     cx + halfLen * ux);
+            derivedEnd2.set(i3 + 1, cy + halfLen * uy);
+            derivedEnd2.set(i3 + 2, cz + halfLen * uz);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Lazy allocation + chained plan build.
     // -------------------------------------------------------------------------
     private static void allocateAndBuildPlan(int newSlotCap, int newMyoCap) {
@@ -2394,6 +2499,13 @@ public class GPUMoveThing {
         topoEnd1Slot = new IntArray(slotCap);
         topoEnd1Side = new IntArray(slotCap);
         soaLengthArr = new FloatArray(slotCap);
+
+        // Phase 4 prep — derived-field outputs (device-only for now).
+        derivedEnd1      = new FloatArray(slotCap * 3);
+        derivedEnd2      = new FloatArray(slotCap * 3);
+        derivedZVec      = new FloatArray(slotCap * 3);
+        derivedYVecOrtho = new FloatArray(slotCap * 3);
+        derivedTransXTox = new FloatArray(slotCap * 9);
 
         // Phase 2 F1: per-slot boundary-kernel gate + box-geometry uniforms.
         boundaryActive = new IntArray(slotCap);
@@ -2470,6 +2582,8 @@ public class GPUMoveThing {
                               boundSegSlot, posOnSegArr,
                               segMotorOffsets, segMotorMyo,
                               motorWriteback, motorForceParams,
+                              derivedEnd1, derivedEnd2, derivedZVec,
+                              derivedYVecOrtho, derivedTransXTox,
                               jointParams, chainParams, params, counts)
             .task("joints",
                   GPUMoveThing::jointsKernel,
@@ -2529,32 +2643,58 @@ public class GPUMoveThing {
                   brownianScales, velMask,
                   params, counts);
 
+        // Phase 4 prep — derived-field kernel runs AFTER move so it sees the
+        // new coord/uVec/yVec the move kernel just wrote into device buffers.
+        // Outputs are device-resident; today's CPU recomputeDerivedSoA still
+        // runs in moveThings() and the CPU SoA arrays remain the source of
+        // truth for downstream readers. The flip will retire the CPU
+        // recompute and wire downstream kernels to these device buffers.
+        tg = tg.task("derived",
+                  GPUMoveThing::derivedFieldsKernel,
+                  coord, uVec, yVec, soaLengthArr,
+                  derivedEnd1, derivedEnd2, derivedZVec,
+                  derivedYVecOrtho, derivedTransXTox,
+                  counts);
+
         // boundaryTipC is transferred to host EVERY_EXECUTION when the box
         // kernel is wired (so bridgeBoundaryTipC() sees fresh writes). When no
         // boundary task is wired (BOUNDARY_SHAPE_NONE — pill or unknown), the
         // bridge is skipped and the buffer stays at its host-side 1e6
         // sentinel.
+        // Phase 4 prep — derived-field outputs are transferred to host
+        // EVERY_EXECUTION while the prep checkpoint validates them against
+        // CPU recomputeDerivedSoA. Phase 4 (flip) keeps them device-resident
+        // (no transfer; downstream kernels read them in place) and removes
+        // these entries — the only consumer is the prep CP runner.
         if (DIAG_DUMP_JOINTS_STEP >= 0 || DIAG_DUMP_CHAIN_STEP >= 0) {
             if (boundaryShape == BOUNDARY_SHAPE_BOX) {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
                                        jointForceSum, jointTorqueSum,
-                                       boundaryTipC, motorWriteback);
+                                       boundaryTipC, motorWriteback,
+                                       derivedEnd1, derivedEnd2, derivedZVec,
+                                       derivedYVecOrtho, derivedTransXTox);
             } else {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
                                        jointForceSum, jointTorqueSum,
-                                       motorWriteback);
+                                       motorWriteback,
+                                       derivedEnd1, derivedEnd2, derivedZVec,
+                                       derivedYVecOrtho, derivedTransXTox);
             }
         } else {
             if (boundaryShape == BOUNDARY_SHAPE_BOX) {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
-                                       boundaryTipC, motorWriteback);
+                                       boundaryTipC, motorWriteback,
+                                       derivedEnd1, derivedEnd2, derivedZVec,
+                                       derivedYVecOrtho, derivedTransXTox);
             } else {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        coord, uVec, yVec,
-                                       motorWriteback);
+                                       motorWriteback,
+                                       derivedEnd1, derivedEnd2, derivedZVec,
+                                       derivedYVecOrtho, derivedTransXTox);
             }
         }
 
@@ -2589,6 +2729,11 @@ public class GPUMoveThing {
         WorkerGrid segMotorForceWorker = new WorkerGrid1D(slotCap);
         segMotorForceWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
         gridScheduler.addWorkerGrid("chained.segMotorForce", segMotorForceWorker);
+
+        // Phase 4 prep — derived-field kernel: one thread per move slot.
+        WorkerGrid derivedWorker = new WorkerGrid1D(slotCap);
+        derivedWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler.addWorkerGrid("chained.derived", derivedWorker);
 
         if (DIAG_CPU_DELTA_ADD) {
             // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,
@@ -3747,6 +3892,17 @@ public class GPUMoveThing {
                 m.bindTip.x = m.getEnd2X(); m.bindTip.y = m.getEnd2Y(); m.bindTip.z = m.getEnd2Z();
             }
         }
+        // Phase 4 prep — derived-field checkpoint. Runs AFTER CPU
+        // recomputeDerivedSoA so Thing.soaEnd1/End2/ZVec/TransXTox hold the
+        // CPU reference; compares slot-by-slot against the device-resident
+        // derived* FloatArrays just transferred to host. Window-mode
+        // accumulates across many steps; reports at end of run via
+        // reportDerivedCheckpointSummary().
+        if ((DERIVED_CP_STEP >= 0 && Env.counter == DERIVED_CP_STEP) ||
+            (DERIVED_CP_START >= 0 && Env.counter >= DERIVED_CP_START
+             && Env.counter <= DERIVED_CP_STOP)) {
+            runDerivedFieldsCheckpoint();
+        }
         long unpackEnd = System.nanoTime();
 
         packNanos      += packEnd       - packStart;
@@ -3845,5 +4001,167 @@ public class GPUMoveThing {
             = moveAB_SlotCountSum = 0;
         moveAB_CallCount = 0;
         runSeedInitialized = false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4 prep — derived-field checkpoint. Armed via env vars
+    //   BOA_PHASE4_DERIVED_CP=<stepNumber>            single-step verbose mode
+    //   BOA_PHASE4_DERIVED_CP_START=<n>               window mode (start step)
+    //   BOA_PHASE4_DERIVED_CP_STOP=<n>                window mode (stop step)
+    // Walks slots 0..slotCount-1 after CPU recomputeDerivedSoA has run,
+    // mapping each slot → Thing.theThings[gpuThingIndices[slot]] →
+    // Thing.soaEnd1/End2/ZVec/TransXTox[thingIdx*3..]. Compares against
+    // device-resident derivedEnd1/End2/ZVec/YVecOrtho/TransXTox just
+    // downloaded EVERY_EXECUTION. Per-field max/mean |delta| reported at
+    // end of run via reportDerivedCheckpointSummary().
+    //
+    // Reference for yVec: the CPU recomputeDerivedSoA overwrites
+    // Thing.soaYVec[i] with the re-orthogonalised y' = z × u; the kernel
+    // emits the same y' into derivedYVecOrtho.
+    // -------------------------------------------------------------------------
+    private static final int DERIVED_CP_STEP  = parseEnvInt("BOA_PHASE4_DERIVED_CP",       -1);
+    private static final int DERIVED_CP_START = parseEnvInt("BOA_PHASE4_DERIVED_CP_START", -1);
+    private static final int DERIVED_CP_STOP  = parseEnvInt("BOA_PHASE4_DERIVED_CP_STOP",  Integer.MAX_VALUE);
+
+    private static int    derivedCpStepsRan      = 0;
+    private static long   derivedCpSlotsScanned  = 0;
+    private static double derivedCpEnd1Max       = 0.0;
+    private static double derivedCpEnd1Sum       = 0.0;
+    private static double derivedCpEnd2Max       = 0.0;
+    private static double derivedCpEnd2Sum       = 0.0;
+    private static double derivedCpZVecMax       = 0.0;
+    private static double derivedCpZVecSum       = 0.0;
+    private static double derivedCpYVecMax       = 0.0;
+    private static double derivedCpYVecSum       = 0.0;
+    private static double derivedCpTransMax      = 0.0;
+    private static double derivedCpTransSum      = 0.0;
+
+    private static int parseEnvInt(String name, int defVal) {
+        String s = System.getenv(name);
+        if (s == null || s.isEmpty()) return defVal;
+        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return defVal; }
+    }
+
+    private static void runDerivedFieldsCheckpoint() {
+        if (slotCount == 0) return;
+        boolean verbose = (DERIVED_CP_STEP >= 0 && Env.counter == DERIVED_CP_STEP);
+
+        float[] cpuEnd1  = Thing.soaEnd1;
+        float[] cpuEnd2  = Thing.soaEnd2;
+        float[] cpuZVec  = Thing.soaZVec;
+        float[] cpuYVec  = Thing.soaYVec;
+        float[] cpuTrans = Thing.soaTransXTox;
+
+        double end1Max = 0, end1Sum = 0;
+        double end2Max = 0, end2Sum = 0;
+        double zVecMax = 0, zVecSum = 0;
+        double yVecMax = 0, yVecSum = 0;
+        double transMax = 0, transSum = 0;
+        long slotsScanned = 0;
+        int reported = 0;
+
+        for (int slot = 0; slot < slotCount; slot++) {
+            int thingIdx = gpuThingIndices[slot];
+            if (thingIdx < 0) continue;
+            int s3 = slot * 3;
+            int t3 = thingIdx * 3;
+            int s9 = slot * 9;
+            int t9 = thingIdx * 9;
+
+            // end1
+            for (int a = 0; a < 3; a++) {
+                double d = Math.abs((double) derivedEnd1.get(s3 + a) - (double) cpuEnd1[t3 + a]);
+                end1Sum += d;
+                if (d > end1Max) end1Max = d;
+            }
+            // end2
+            for (int a = 0; a < 3; a++) {
+                double d = Math.abs((double) derivedEnd2.get(s3 + a) - (double) cpuEnd2[t3 + a]);
+                end2Sum += d;
+                if (d > end2Max) end2Max = d;
+            }
+            // zVec
+            for (int a = 0; a < 3; a++) {
+                double d = Math.abs((double) derivedZVec.get(s3 + a) - (double) cpuZVec[t3 + a]);
+                zVecSum += d;
+                if (d > zVecMax) zVecMax = d;
+            }
+            // yVec (CPU side stores re-orthogonalised y'; kernel stores same in derivedYVecOrtho)
+            for (int a = 0; a < 3; a++) {
+                double d = Math.abs((double) derivedYVecOrtho.get(s3 + a) - (double) cpuYVec[t3 + a]);
+                yVecSum += d;
+                if (d > yVecMax) yVecMax = d;
+            }
+            // transXTox (9 floats per slot)
+            for (int a = 0; a < 9; a++) {
+                double d = Math.abs((double) derivedTransXTox.get(s9 + a) - (double) cpuTrans[t9 + a]);
+                transSum += d;
+                if (d > transMax) transMax = d;
+            }
+            slotsScanned++;
+
+            if (verbose && reported < 4) {
+                System.err.printf("[PHASE4_DERIVED_CP slot=%d thingIdx=%d] "
+                        + "dEnd1=(%.2e,%.2e,%.2e) dEnd2=(%.2e,%.2e,%.2e) "
+                        + "dZ=(%.2e,%.2e,%.2e) dY=(%.2e,%.2e,%.2e)%n",
+                    slot, thingIdx,
+                    Math.abs((double) derivedEnd1.get(s3)     - (double) cpuEnd1[t3]),
+                    Math.abs((double) derivedEnd1.get(s3 + 1) - (double) cpuEnd1[t3 + 1]),
+                    Math.abs((double) derivedEnd1.get(s3 + 2) - (double) cpuEnd1[t3 + 2]),
+                    Math.abs((double) derivedEnd2.get(s3)     - (double) cpuEnd2[t3]),
+                    Math.abs((double) derivedEnd2.get(s3 + 1) - (double) cpuEnd2[t3 + 1]),
+                    Math.abs((double) derivedEnd2.get(s3 + 2) - (double) cpuEnd2[t3 + 2]),
+                    Math.abs((double) derivedZVec.get(s3)     - (double) cpuZVec[t3]),
+                    Math.abs((double) derivedZVec.get(s3 + 1) - (double) cpuZVec[t3 + 1]),
+                    Math.abs((double) derivedZVec.get(s3 + 2) - (double) cpuZVec[t3 + 2]),
+                    Math.abs((double) derivedYVecOrtho.get(s3)     - (double) cpuYVec[t3]),
+                    Math.abs((double) derivedYVecOrtho.get(s3 + 1) - (double) cpuYVec[t3 + 1]),
+                    Math.abs((double) derivedYVecOrtho.get(s3 + 2) - (double) cpuYVec[t3 + 2]));
+                reported++;
+            }
+        }
+
+        derivedCpStepsRan     += 1;
+        derivedCpSlotsScanned += slotsScanned;
+        derivedCpEnd1Sum  += end1Sum;  if (end1Max  > derivedCpEnd1Max)  derivedCpEnd1Max  = end1Max;
+        derivedCpEnd2Sum  += end2Sum;  if (end2Max  > derivedCpEnd2Max)  derivedCpEnd2Max  = end2Max;
+        derivedCpZVecSum  += zVecSum;  if (zVecMax  > derivedCpZVecMax)  derivedCpZVecMax  = zVecMax;
+        derivedCpYVecSum  += yVecSum;  if (yVecMax  > derivedCpYVecMax)  derivedCpYVecMax  = yVecMax;
+        derivedCpTransSum += transSum; if (transMax > derivedCpTransMax) derivedCpTransMax = transMax;
+
+        if (verbose) {
+            System.err.printf("[PHASE4_DERIVED_CP step=%d] slotsScanned=%d "
+                    + "end1: max=%.3e mean=%.3e   end2: max=%.3e mean=%.3e   "
+                    + "zVec: max=%.3e mean=%.3e   yVec: max=%.3e mean=%.3e   "
+                    + "trans: max=%.3e mean=%.3e%n",
+                Env.counter, slotsScanned,
+                end1Max,  slotsScanned > 0 ? end1Sum  / (3 * slotsScanned) : 0,
+                end2Max,  slotsScanned > 0 ? end2Sum  / (3 * slotsScanned) : 0,
+                zVecMax,  slotsScanned > 0 ? zVecSum  / (3 * slotsScanned) : 0,
+                yVecMax,  slotsScanned > 0 ? yVecSum  / (3 * slotsScanned) : 0,
+                transMax, slotsScanned > 0 ? transSum / (9 * slotsScanned) : 0);
+        }
+    }
+
+    /** Print accumulated Phase 4 derived-field CP summary. Called from
+     *  BoxOfActin's end-of-run printout (alongside Phase 3 CP summary). */
+    public static void reportDerivedCheckpointSummary() {
+        if (derivedCpStepsRan == 0) return;
+        long slots = derivedCpSlotsScanned;
+        double end1Mean  = slots > 0 ? derivedCpEnd1Sum  / (3.0 * slots) : 0.0;
+        double end2Mean  = slots > 0 ? derivedCpEnd2Sum  / (3.0 * slots) : 0.0;
+        double zVecMean  = slots > 0 ? derivedCpZVecSum  / (3.0 * slots) : 0.0;
+        double yVecMean  = slots > 0 ? derivedCpYVecSum  / (3.0 * slots) : 0.0;
+        double transMean = slots > 0 ? derivedCpTransSum / (9.0 * slots) : 0.0;
+        System.err.printf("[PHASE4_DERIVED_CP_SUMMARY] steps=%d slotsScanned=%d "
+                + "end1 max=%.3e mean=%.3e   end2 max=%.3e mean=%.3e   "
+                + "zVec max=%.3e mean=%.3e   yVec max=%.3e mean=%.3e   "
+                + "trans max=%.3e mean=%.3e%n",
+            derivedCpStepsRan, slots,
+            derivedCpEnd1Max,  end1Mean,
+            derivedCpEnd2Max,  end2Mean,
+            derivedCpZVecMax,  zVecMean,
+            derivedCpYVecMax,  yVecMean,
+            derivedCpTransMax, transMean);
     }
 }
