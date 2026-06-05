@@ -66,9 +66,19 @@ public class MyoFilLink {
 		linkUVec2 = null;
 	}
 	
+	// Phase 4.5 diag (2026-06-05): split-counter for updatePos() calls. Each
+	// updatePos() reads mySeg.end1AsPt3D() => Thing.soaEnd1[] (frame-stale).
+	// FROM_BIND fires on each fresh GPUMotorBinding.detectBindings()-driven
+	// bind via ontoFilament => setAttachment. FROM_STEP fires on the gated
+	// CPU step() path or under BOA_DIAG_FORCE_UPDATEPOS.
+	public static long DIAG_UPDATEPOS_FROM_BIND_CT = 0;
+	public static long DIAG_UPDATEPOS_FROM_STEP_CT = 0;
+	public static long DIAG_VALIDATESEG_FIRE_CT    = 0;
+
 	public void setAttachment (FilSegment seg, double pos) {
 		mySeg = seg;
 		posOnSeg = pos;
+		if (Env.useGPU) DIAG_UPDATEPOS_FROM_BIND_CT++;
 		updatePos();
 		myMotor.onFil = true;
 	}
@@ -110,9 +120,15 @@ public class MyoFilLink {
 			// for the (CPU-fallback or DIAG_CPU_MOTOR) path that does read it.
 			// DIAG_FORCE_UPDATEPOS env var restores the pre-gate behaviour
 			// (always call) for a gated-vs-ungated A/B.
-			if (DIAG_FORCE_UPDATEPOS) updatePos();
+			if (DIAG_FORCE_UPDATEPOS) {
+				if (Env.useGPU) DIAG_UPDATEPOS_FROM_STEP_CT++;
+				updatePos();
+			}
 			if (!deviceMotor) {
-				if (!DIAG_FORCE_UPDATEPOS) updatePos();
+				if (!DIAG_FORCE_UPDATEPOS) {
+					if (Env.useGPU) DIAG_UPDATEPOS_FROM_STEP_CT++;
+					updatePos();
+				}
 				addForces();
 				alignUVecTorque();
 				alignYVecTorque();
@@ -253,6 +269,7 @@ public class MyoFilLink {
 	}
 	
 	public void validateSeg() {
+		if (Env.useGPU) DIAG_VALIDATESEG_FIRE_CT++;
 		if ((mySeg.end1AsPt3D() == null) | (mySeg.uVecAsPt3D() == null) | mySeg.removeMe) {
 			release();
 			return;

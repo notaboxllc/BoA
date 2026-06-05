@@ -38,6 +38,12 @@ public class MotorBindGrid3D {
     // Timestamp of last fill (compared to Env.counter to detect stale cells)
     static int lastWriteTime = 0;
 
+    // Phase 4.5 diag (2026-06-05): per-step counter for FillThreads.fillFilSeg
+    // hits on the GPU path. Reads end1AsPt3D = soaEnd1[] (frame-stale). The CPU
+    // FillThreads is normally skipped on -gpu (gated in BoxOfActin.doLoop via
+    // !Env.useGPU), so this should be 0; nonzero would point to a leaked path.
+    public static long DIAG_MBG3D_FILL_FILSEG_CT = 0;
+
     // -----------------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------------
@@ -312,6 +318,7 @@ public class MotorBindGrid3D {
             int motorStop  = motorJobDiv[threadId + 1];
             for (int i = filStart; i < filStop; i++) {
                 FilSegment fs = FilSegment.theFilSegments[i];
+                if (Env.useGPU) DIAG_MBG3D_FILL_FILSEG_CT++;
                 grid.fillFilSeg(fs.filArrayPos, fs.end1AsPt3D(), fs.end2AsPt3D());
             }
             for (int i = motorStart; i < motorStop; i++) {

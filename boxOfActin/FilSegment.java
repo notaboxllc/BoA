@@ -433,7 +433,16 @@ public class FilSegment extends Thing {
 	
 	}
 	
+	// Phase 4.5 diag (2026-06-05): count initialize() calls on the -gpu path.
+	// initialize() locally fetches getEnd1X/Y/Z and writes them into end1Pt/end2Pt.
+	// On steady-state GPU steps the GPU kernel updates device coord/uVec but does
+	// not push refreshed end1/end2 into Thing.soaEnd1[] until
+	// refreshHostMirrorsForOutput; if CPU-side initialize() runs per-step it would
+	// rewrite end1Pt with the stale soaEnd1 value, propagating the staleness.
+	public static long DIAG_FILSEG_INIT_CT = 0;
+
 	public void initialize () {
+		if (Env.useGPU) DIAG_FILSEG_INIT_CT++;
 		// Canonical pose lives in SoA arrays; derived end1/end2/zVec/transXTox
 		// are recomputed in bulk. length may have changed due to poly/depoly/split.
 		length = (monomerCt+1)*Env.actinMonoRadius;
@@ -1955,10 +1964,17 @@ public class FilSegment extends Thing {
 		return false;
 	}
 	
+	// Phase 4.5 diag (2026-06-05): meshAllSegs is the static-not-from-ThreadSet path
+	// using end1Pt/end2Pt directly (rangesEndpt family). Nominally not on the GPU
+	// gliding live path (Mesh.MeshThreads uses end1AsPt3D instead) but instrument
+	// to confirm it stays at 0.
+	public static long DIAG_MESHALLSEGS_FIRE_CT = 0;
+
 	public static void meshAllSegs () {
 		FilSegment curSeg;
 		for (int i=0;i<filSegmentCt;i++) {
 			curSeg = theFilSegments[i];
+			if (Env.useGPU) DIAG_MESHALLSEGS_FIRE_CT++;
 			Mesh.FILSEG_MESH.fillFilSegMesh(curSeg.filArrayPos, curSeg.end1Pt, curSeg.end2Pt);
 		}
 	}

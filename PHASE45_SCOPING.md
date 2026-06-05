@@ -501,3 +501,237 @@ so the binding's motor pack stays fresh regardless of `bindTip` poison.
 
 Run logs: `RUN_LOGS/2026-06-05_phase45_selective_poison/` (sweep +
 diag-counter run).
+
+---
+
+# Phase 4.5 Part-A fire-count + Part-C fix attempt — bail-out (2026-06-05)
+
+Goal: per the "locate the actual stale reader" prompt, instrument every
+per-step CPU consumer of `end1AsPt3D()` / `end1Pt` / `getEnd1X/Y/Z` /
+`Thing.soaEnd1[]` on the `-gpu glidingAssay500_val` path with a
+DIAG_*_FIRE_CT counter (Part A), identify the live reader by its
+non-zero count, fix it, and verify with a re-poison test (Part C).
+
+## Part A — fire counters (single `-gpu` probe, seed=1, 10101 steps)
+
+Instrumented sites and their counts (env-gated `if (Env.useGPU) DIAG_*_FIRE_CT++`):
+
+| candidate site | counter | count |
+|---|---|---:|
+| `Mesh.MeshThreads.execute → fillFilSegMesh(end1AsPt3D, end2AsPt3D)` | `Mesh.DIAG_MESH_FILL_FILSEG_CT`            | **111056** |
+| `FilSegment.meshAllSegs → fillFilSegMesh(end1Pt, end2Pt)`           | `FilSegment.DIAG_MESHALLSEGS_FIRE_CT`        |          0 |
+| `MotorBindGrid3D.FillThreads → fillFilSeg(end1AsPt3D, end2AsPt3D)`  | `MotorBindGrid3D.DIAG_MBG3D_FILL_FILSEG_CT`  |          0 |
+| `MyoFilLink.setAttachment → updatePos → end1AsPt3D`                 | `MyoFilLink.DIAG_UPDATEPOS_FROM_BIND_CT`     |        668 |
+| `MyoFilLink.step → updatePos → end1AsPt3D` (gated)                  | `MyoFilLink.DIAG_UPDATEPOS_FROM_STEP_CT`     |          0 |
+| `MyoFilLink.validateSeg → end1AsPt3D` (dead-code null-check)        | `MyoFilLink.DIAG_VALIDATESEG_FIRE_CT`        |      61792 |
+| `MyosinFixed.applyRodFixedPtForce → end1AsPt3D` (DIAG_CPU_ANCHOR=false) | `MyosinFixed.DIAG_ANCHOR_FIRE_CT`        |          0 |
+| `FilSegment.initialize → getEnd1X` (biochem length-change)          | `FilSegment.DIAG_FILSEG_INIT_CT`             |         21 |
+| `MyoMotor.initialize → getEnd2X` (constructor only)                 | `MyoMotor.DIAG_MOTOR_INIT_CT`                |      14000 |
+| `FilSegment.checkBugCollisionFromInside → end1Pt/end2Pt` (gated)    | `FilSegment.DIAG_BUG_INSIDE_FIRE_CT`         |          0 |
+| `FilSegment.addLinkForces → end1Pt/end2Pt` (gpuChainHandled gate)   | `FilSegment.DIAG_ADDLINK_FIRE_CT`            |          0 |
+| `FilSegment.addTorsionSpringForces → end1Pt/end2Pt` (chain gate)    | `FilSegment.DIAG_ADDTORSION_FIRE_CT`         |          0 |
+
+**Live readers (non-zero counters):**
+
+1. `Mesh.fillFilSegMesh` — every FilSegment, every collision-check step
+   (~11 segs × ~10101 steps). Consumer is `filSegMeshCollisions` (gated
+   on `Env.xLinks.isActive()=false` in gliding) and
+   `membraneFilMeshCollisions` (gated on StickyNode presence, none in
+   gliding). **The fill writes mesh bins from end1AsPt3D, but no
+   downstream consumer reads them in gliding.**
+
+2. `MyoFilLink.setAttachment → updatePos` — fires once per fresh bind
+   event (kernel-decided bind triggers `GPUMotorBinding.detectBindings`
+   to call `ontoFilament → setAttachment → updatePos`, line 668 binds in
+   this baseline). `updatePos` writes `attachPt = end1AsPt3D +
+   posOnSeg · uVecAsPt3D`. **`attachPt` is read by
+   `MyoFilLink.addForces` which is gated off via `gpuMotorHandled() =
+   true` on this workload. The GPU motor-force kernel reconstructs
+   attachPt from device-resident `coord/uVec/length + posOnSegArr`,
+   not from `attachPt`.**
+
+3. `MyoFilLink.validateSeg` — fires for every bound motor every step
+   (~6.12 mean × 10101 steps ≈ 61792). The body is a null-check:
+   `(end1AsPt3D() == null) | (uVecAsPt3D() == null) | mySeg.removeMe`.
+   `end1AsPt3D()` returns `new Pt3D(...)` and is never null;
+   `uVecAsPt3D()` likewise. **Dead-code read — no behavioural effect.**
+
+4. `MyoMotor.initialize` — fires `motorCt = 14000` times, all at
+   construction (verified: 14000 = 500/µm² × 14×2 µm²). Init-time
+   only, not per-step. Not a per-step reader.
+
+5. `FilSegment.initialize` — fires 21 times in the run, all at biochem
+   length-change events. Not steady-state per-step.
+
+Counters that came back zero confirm the corresponding paths are
+correctly gated inert in this workload (MotorBindGrid3D.FillThreads,
+MyosinFixed anchor, F1 bug, F3 chain link forces, F4 chain torsion,
+meshAllSegs static path).
+
+## Part B — fix attempts and outcomes
+
+Three attempts. None made the re-poison PASS.
+
+### Attempt 1: refresh in `FilSegment.fillSoaArrays`
+
+Added per-step writes inside the existing `fillSoaArrays` loop:
+
+```java
+thingEnd1Arr[b] = (float) e1x;     // Thing.soaEnd1[FilSegment slot]
+thingEnd1Arr[b + 1] = (float) e1y;
+thingEnd1Arr[b + 2] = (float) e1z;
+// (and end2 + fs.end1Pt/end2Pt likewise)
+```
+
+Refreshes `Thing.soaEnd1[FilSegment slot]` (read by `getEnd1X/Y/Z` →
+`end1AsPt3D()`) and `FilSegment.end1Pt/end2Pt` (read directly) from the
+freshly computed `cx ± half·ux` values that `fillSoaArrays` already
+derives from `Thing.soaCoord/UVec` (demand-synced this step).
+
+**Result (seed=1):** poison=soaEnds bindEvents=212 (vs baseline 778,
+−73%); poison=rangesEndpt bindEvents=1 (catastrophic — paradoxically
+WORSE than no-fix's 125); poison=all bindEvents=282 (vs baseline 778,
+−64%). All three families still HIT; rangesEndpt result indicates an
+unexpected interaction between the per-step `fs.end1Pt` write and the
+rangesEndpt-poison drift accumulation. Reverted.
+
+### Attempt 2: `Thing.recomputeDerivedSoA(0, thingCt)` post-fillSoaArrays
+
+Added a per-step `Thing.recomputeDerivedSoA(0, Thing.thingCt)` call in
+`BoxOfActin.doLoop` immediately after `MyoMotor.fillSoaArrays() +
+FilSegment.fillSoaArrays()`, plus an explicit `fs.end1Pt/end2Pt`
+refresh loop. This re-introduces the half-flip's retired P6 host
+mirror refresh on ALL slots (FilSegments, MyoMotors, MyoRods, MyoLevers
+— every Thing).
+
+**Result (seed=1):**
+
+| run            | bindEvents | meanBoundMotors | glidingVelocity |
+|---             |---:        |---:             |---:             |
+| baseline       | 700        | 6.396           | 7.118           |
+| poison=soaEnds | **151**    | 1.375           | 5.631           |
+| poison=rangesEndpt | **215** | 1.672           | 9.311           |
+| poison=all     | **171**    | 1.576           | 12.757          |
+
+All three poison families STILL HIT at the same magnitude as the
+no-fix selective sweep (soaEnds 151 vs 173 no-fix; rangesEndpt 215 vs
+125 no-fix; all 171 vs 155 no-fix — all in the 125-215 floor band).
+The fix has **no measurable effect on the poison's observable
+impact**. Reverted.
+
+### What the attempts establish
+
+The refresh path covers every per-step CPU reader the Part-A fire
+counters identified as non-zero (Mesh.fillFilSegMesh, updatePos,
+validateSeg, plus all the gated-off candidates for safety). Both
+`Thing.soaEnd1[*]` (every slot) and `FilSegment.end1Pt/end2Pt` are
+forced to fresh values at the very start of every step, before any
+downstream code can read them. **The poison's observable impact
+survives this refresh unchanged.**
+
+The mechanism by which the `soaEnds` / `rangesEndpt` poison drops
+bindEvents from ~750 to ~150 is therefore **NOT** a CPU-side
+`end1AsPt3D()` / `end1Pt` / `getEnd1X` read. The reader is somewhere
+outside the candidate set the Part-A counters cover.
+
+## Part C — re-poison: FAIL (all three families still drop)
+
+Re-poison battery did not pass with either fix attempt. The required
+Part-C bail-out applies.
+
+## Bail-out — what we know and don't know
+
+**Known:**
+
+- The selective-poison sweep (PHASE45_SCOPING.md "selective-poison
+  localization" section) demonstrated that `soaEnds` (`Thing.soaEnd1[]
+  / soaEnd2[]`) and `rangesEndpt` (`FilSegment.end1Pt / end2Pt`)
+  poisoning each independently drop `bindEvents` ~75–80%. The drop is
+  deterministic and sign-aligned, far outside the ±24% run-to-run
+  noise band.
+- The Part-A fire counters identified every per-step CPU reader of
+  `end1AsPt3D / end1Pt / getEnd1X` on the gliding path. Three sites
+  fire (Mesh.fillFilSegMesh: 111056, MyoFilLink.updatePos via bind:
+  668, MyoFilLink.validateSeg: 61792); all others are 0.
+- All three live readers' downstream effects are inert in this
+  workload: Mesh consumer gated on xLinks; updatePos writes attachPt
+  which the GPU motor-force kernel ignores; validateSeg's null-check
+  is dead code.
+- Refreshing every per-step Thing.soaEnd1 + fs.end1Pt for ALL slots at
+  the start of each step (Attempt 2) leaves the poison's observable
+  impact unchanged. **The reader is NOT a CPU consumer of these
+  mirrors.**
+
+**Unknown — where the stale read actually lives.** Candidates the
+Part-A enumeration did not cover and which the bail-out widening should
+chase next session:
+
+- Any per-step path that reads `Thing.soaZVec[] / soaTransXTox[]` —
+  although `zvecTransx` poison alone MISSED in the original sweep,
+  the `soaEnds` HIT could be masking a co-located read at the
+  Thing-slot level (e.g., a `body-frame transform` path that reads
+  `transXTox` and the `end1/end2` of the same Thing in lockstep).
+- Any per-step path that consumes a Pt3D field on a non-FilSegment
+  Thing (MyoMotor, MyoRod, MyoLever, Crucible) whose `getEnd1X /
+  getEnd2X` was unintentionally upstream of a force calculation.
+- The `MyoMotor.fillSoaArrays`-to-`GPUMotorBinding.detectBindings`
+  flow at a deeper level than the host-pack inspection: e.g., is
+  there any path where the bind kernel's PCIe upload buffer
+  (`motPos / filEnd1`) silently consumes stale data because the host
+  FloatArray was filled from a Thing.soa* mirror rather than the
+  per-class `MyoMotor.soaX / FilSegment.soaEnd1X` array I traced?
+  Worth a second pass — the binding's CPU pack at
+  `GPUMotorBinding.java:611–635` should read **only** per-class SoA
+  arrays, but a misattribution there would explain the poison HIT
+  on `soaEnds` exactly. Code-grep on
+  `Thing\.soa(End|ZVec|TransXTox)` reads inside any per-step path.
+- The Phase-3 device-resident grid build's relationship to host-side
+  state on plan rebuild — 11 rebuilds in 10101 steps, each doing
+  FIRST_EXECUTION re-upload. If any FIRST_EXECUTION buffer is filled
+  from a poisoned mirror, the device-resident state inherits the
+  poison for the rest of the run.
+
+## Part D — not run
+
+The Part-D N=8 re-gate is contingent on Part C passing. It did not.
+Documented here only for completeness — no runs executed.
+
+## Files committed (this session) vs reverted
+
+**Committed (kept):** the Part-A fire counters. No-op when
+`Env.useGPU` is false; one increment per call site on the GPU path.
+Total per-step cost is bounded by `~filSegmentCt + motorCt + linkCt`
+counter increments. Negligible relative to surrounding work.
+
+| file | counter(s) added |
+|---|---|
+| `boxOfActin/MyosinFixed.java`     | `DIAG_ANCHOR_FIRE_CT` |
+| `boxOfActin/MyoFilLink.java`      | `DIAG_UPDATEPOS_FROM_BIND_CT`, `DIAG_UPDATEPOS_FROM_STEP_CT`, `DIAG_VALIDATESEG_FIRE_CT` |
+| `boxOfActin/Mesh.java`            | `DIAG_MESH_FILL_FILSEG_CT` |
+| `boxOfActin/FilSegment.java`      | `DIAG_FILSEG_INIT_CT`, `DIAG_MESHALLSEGS_FIRE_CT` |
+| `boxOfActin/MyoMotor.java`        | `DIAG_MOTOR_INIT_CT` |
+| `boxOfActin/MotorBindGrid3D.java` | `DIAG_MBG3D_FILL_FILSEG_CT` |
+| `boxOfActin/BoxOfActin.java`      | `[STATS] *FireCt=` print lines in `printStats` |
+
+**Reverted (not committed):** Attempt-1 (`FilSegment.fillSoaArrays`
+end1Pt + soaEnd1 refresh) and Attempt-2 (`recomputeDerivedSoA(0,
+thingCt)` + `fs.end1Pt/end2Pt` refresh in `BoxOfActin.doLoop`). The
+working tree is clean of both.
+
+## Record correction
+
+The named next target in the prior section — `GPUMotorBinding`'s pose
+pack — is also **NOT** the reader, per the corrected prompt's
+mechanism analysis: `detectBindings` reads `FilSegment.soaEnd1X` (a
+distinct array refreshed every step by `FilSegment.fillSoaArrays`
+from the demand-synced `Thing.soaCoord/soaUVec`). Not `Thing.soaEnd1`.
+That section's hypothesis was wrong.
+
+## Run logs
+
+`RUN_LOGS/2026-06-05_phase45_locate_reader/`:
+- `probe_seed1.log` — Part-A fire-count probe
+- `fix_baseline_seed1.log`, `fix_poison_{soaEnds,rangesEndpt,all}_seed1.log`
+  — Attempt-1 baseline + poison battery
+- `fix2_baseline_seed1.log`, `fix2_poison_{soaEnds,rangesEndpt,all}_seed1.log`
+  — Attempt-2 baseline + poison battery

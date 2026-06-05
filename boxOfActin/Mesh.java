@@ -29,6 +29,13 @@ public class Mesh {
 	public static MeshThreads meshThreads = new MeshThreads();
 	public static CkMeshThreads ckMeshThreads = new CkMeshThreads();
 	public static CkMotsThreads ckMotsThreads = new CkMotsThreads();
+
+	// Phase 4.5 diag (2026-06-05): per-step counters for end1AsPt3D reads from
+	// MeshThreads.execute. fillFilSegMesh is dispatched every
+	// collisionCheckInt steps from meshFilsStart. Its consumers (filSegMeshCollisions,
+	// membraneFilMeshCollisions) are gated inert in gliding, but the FILL itself
+	// reads end1AsPt3D / end2AsPt3D => Thing.soaEnd1[]/soaEnd2[] (frame-stale).
+	public static long DIAG_MESH_FILL_FILSEG_CT = 0;
 	
 	public static float xBinWidth=X_BIN_WIDTH;
 	public static float yBinWidth=Y_BIN_WIDTH;
@@ -130,6 +137,7 @@ public class Mesh {
 				case Env.meshFilsStart:
 					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
 						FilSegment curSeg = FilSegment.theFilSegments[i];
+						if (Env.useGPU) DIAG_MESH_FILL_FILSEG_CT++;
 						Mesh.FILSEG_MESH.fillFilSegMesh(curSeg.filArrayPos, curSeg.end1AsPt3D(), curSeg.end2AsPt3D());
 					}
 					break;

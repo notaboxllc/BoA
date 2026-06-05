@@ -1502,6 +1502,18 @@ public class BoxOfActin {
 		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
 		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
 		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
+		// Phase 4.5 stale-reader probe (2026-06-05): one counter per candidate
+		// per-step end1AsPt3D()/getEnd1*/end1Pt reader. The nonzero counter on a
+		// -gpu glidingAssay500_val run identifies the leaking path.
+		System.out.printf("[STATS] meshFillFilSegFireCt=%d%n",     Mesh.DIAG_MESH_FILL_FILSEG_CT);
+		System.out.printf("[STATS] meshAllSegsFireCt=%d%n",        FilSegment.DIAG_MESHALLSEGS_FIRE_CT);
+		System.out.printf("[STATS] mbg3dFillFilSegFireCt=%d%n",    MotorBindGrid3D.DIAG_MBG3D_FILL_FILSEG_CT);
+		System.out.printf("[STATS] updatePosFromBindFireCt=%d%n",  MyoFilLink.DIAG_UPDATEPOS_FROM_BIND_CT);
+		System.out.printf("[STATS] updatePosFromStepFireCt=%d%n",  MyoFilLink.DIAG_UPDATEPOS_FROM_STEP_CT);
+		System.out.printf("[STATS] validateSegFireCt=%d%n",        MyoFilLink.DIAG_VALIDATESEG_FIRE_CT);
+		System.out.printf("[STATS] anchorFireCt=%d%n",             MyosinFixed.DIAG_ANCHOR_FIRE_CT);
+		System.out.printf("[STATS] filSegInitFireCt=%d%n",         FilSegment.DIAG_FILSEG_INIT_CT);
+		System.out.printf("[STATS] motorInitFireCt=%d%n",          MyoMotor.DIAG_MOTOR_INIT_CT);
 		if (MyoMotor.boundMotorSampleCt > 0) {
 			System.out.printf("[STATS] meanBoundMotors=%.3f%n", (double)MyoMotor.boundMotorSum / MyoMotor.boundMotorSampleCt);
 		}

@@ -33,7 +33,14 @@ public class MyosinFixed extends Myosin {
 		applyRodFixedPtForce();
 	}
 	
+	// Phase 4.5 diag (2026-06-05): count applyRodFixedPtForce fires on the
+	// GPU path. Should be 0 in default config (gated off via DIAG_CPU_ANCHOR=false
+	// in jointConstraints/applyGPUDroppedForces). Nonzero => the anchor gate is
+	// leaking and this is the stale end1AsPt3D() reader.
+	public static long DIAG_ANCHOR_FIRE_CT = 0;
+
 	public void applyRodFixedPtForce () {
+		if (Env.useGPU) DIAG_ANCHOR_FIRE_CT++;
 		double strainDist = Pt3D.ptDist(myoRod.end1AsPt3D(), myFixedPt);
 		linkUVec1.unitVec(myoRod.end1AsPt3D(),myFixedPt);
 		linkUVec2.scale(-1,linkUVec1);

@@ -153,7 +153,14 @@ public class MyoMotor extends Thing {
 		
 	}
 	
+	// Phase 4.5 diag (2026-06-05): count MyoMotor.initialize() calls on -gpu.
+	// On the GPU path the device kernel updates coord/uVec; CPU initialize() should
+	// not run per-step for handled motors. If this counter > 0 in gliding, CPU
+	// moveThing is still firing for some subset.
+	public static long DIAG_MOTOR_INIT_CT = 0;
+
 	public void initialize () {
+		if (Env.useGPU) DIAG_MOTOR_INIT_CT++;
 		pushLengthToSoa(getDim());
 		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
 		// Refresh bindTip Pt3D snapshot — Mesh/MotorBindGrid3D read its x/y/z each

@@ -1,8 +1,125 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-05 (Phase 4.5 selective-poison localization — stale reader is segment endpoints; next target named)
+Last updated: 2026-06-05 (Phase 4.5 Part-A fire-count + Part-C fix-attempt bail-out — stale reader is NOT a CPU end1AsPt3D/end1Pt consumer)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-05 — Phase 4.5 Part-A fire-count + Part-C fix-attempt bail-out
+
+**TL;DR.** Per the "locate the actual stale reader" prompt, instrumented
+every per-step CPU consumer of `end1AsPt3D() / end1Pt / getEnd1X /
+Thing.soaEnd1[]` on the `-gpu glidingAssay500_val` path with a
+DIAG_*_FIRE_CT counter (Part A), identified three live readers
+(Mesh.fillFilSegMesh: 111056, MyoFilLink.updatePos: 668,
+MyoFilLink.validateSeg: 61792), all of whose downstream effects are
+inert in this workload. Two fix attempts — refresh `Thing.soaEnd1 +
+fs.end1Pt` in `FilSegment.fillSoaArrays`, then escalate to
+`Thing.recomputeDerivedSoA(0, thingCt)` + explicit `fs.end1Pt/end2Pt`
+refresh post-`fillSoaArrays` — **neither made the re-poison PASS**.
+The mechanism by which the soaEnds / rangesEndpt poison drops
+bindEvents ~75–80% is NOT a CPU read of these mirrors. Per the
+prompt's Part-C bail-out, fix is reverted; instrumentation is kept.
+See `PHASE45_SCOPING.md` for the fire-count table, the two attempt
+results, and the widened search the next session should chase.
+
+**Record correction.** Both prior "named next target" identifications
+were wrong: (1) earlier today's `Crucible.keepMyosinOnSurface` device
+port was a no-op (`numChamberFixedMyos=0`); (2) the selective-poison
+section's hypothesised `GPUMotorBinding.detectBindings` pose pack is
+also NOT the reader — `detectBindings` reads `FilSegment.soaEnd1X`
+(distinct from `Thing.soaEnd1`, freshly recomputed by
+`FilSegment.fillSoaArrays` from demand-synced `Thing.soaCoord/UVec`).
+
+**Part-A fire-count result (seed=1, baseline -gpu):**
+
+| candidate site                                                | count    |
+|---                                                            |---:      |
+| `Mesh.MeshThreads → fillFilSegMesh(end1AsPt3D, end2AsPt3D)`   | 111056   |
+| `MyoFilLink.setAttachment → updatePos → end1AsPt3D`           |    668   |
+| `MyoFilLink.validateSeg → end1AsPt3D` (dead-code null-check)  |  61792   |
+| `MyoMotor.initialize` (constructor only)                      |  14000   |
+| `FilSegment.initialize` (biochem length-change only)          |     21   |
+| every gated/checkpoint candidate (anchor, MBG3D, meshAllSegs, bug, addLink, addTorsion) | 0 |
+
+All three live per-step readers are inert in observable terms: Mesh
+fill writes to FILSEG_MESH whose only consumers are gated off in
+gliding; updatePos writes `attachPt` which the GPU motor-force kernel
+ignores (reconstructs from device-resident pose); validateSeg's
+condition is dead code (`end1AsPt3D() == null` is impossible because
+the getter always allocates a new Pt3D).
+
+**Two fix attempts, both reverted:**
+
+| attempt | what                                                                 | poison=soaEnds bindEvents | poison=rangesEndpt | poison=all |
+|---:     |---                                                                   |---:                       |---:                |---:        |
+| (none) baseline | -gpu                                                          | 778                       | n/a                | n/a        |
+| 1       | `FilSegment.fillSoaArrays` writes back Thing.soaEnd1 + fs.end1Pt fresh | 212                       | **1**              | 282        |
+| 2       | `Thing.recomputeDerivedSoA(0, thingCt)` + explicit fs.end1Pt refresh   | 151                       | 215                | 171        |
+
+Baseline drops from 778 (no fix) to 700 (V2 fix) — small natural-noise
+variation, well within the previously-established ±24% same-seed
+band. Both attempts leave the poison drop at the same ~75–80%
+magnitude the no-fix selective sweep showed (soaEnds 173, rangesEndpt
+125, all 155). **The fix has no measurable effect.** Attempt 1's
+catastrophic rangesEndpt=1 is an unexpected interaction (writing
+fresh fs.end1Pt every step somehow makes rangesEndpt poison MORE
+effective rather than less) — flagged for next session, not
+investigated further now because the broader Attempt-2 already
+confirms the readers I covered are not the culprit.
+
+**Widening — what the next session should chase.** With CPU
+end1AsPt3D / end1Pt / soaEnd1 readers ruled out, the next-most-likely
+candidates the bail-out flags (in priority order):
+
+1. **The binding pose-pack at `GPUMotorBinding.java:611–635`** —
+   verified to read `MyoMotor.soaX / FilSegment.soaEnd1X` (per-class
+   SoA), not `Thing.soaEnd1`. But the soaEnds HIT exactly demands a
+   path where a Thing-level mirror feeds the kernel input. Second
+   pass with a value-comparison instrumentation
+   (print `Thing.soaEnd1[fs_slot]` vs `FilSegment.soaEnd1X[i]` for
+   a single FilSegment at known steps) would confirm or rule out a
+   misattributed read.
+2. **Plan-rebuild FIRST_EXECUTION uploads** — 11 plan rebuilds in
+   10101 steps; each does FIRST_EXECUTION transferToDevice for
+   `coord, uVec, yVec, soaLengthArr, ...`. Filled from
+   `Thing.soaCoord/UVec/YVec` (not poisoned). But also need to
+   confirm no Phase-3 device-resident grid-build state is filled
+   from a poisoned mirror at rebuild.
+3. **Co-located reads at the Thing-slot level** — `zvecTransx`
+   alone MISSED but `soaEnds` co-located with it; check if any
+   per-step path reads `transXTox + end1` in the same access (a
+   body-frame transform that incidentally reads both).
+4. **Non-FilSegment per-step readers** — `MyoMotor / MyoRod /
+   MyoLever / Crucible / Bug / etc.` — re-grep
+   `getEnd1X / getEnd2X / end1AsPt3D / end2AsPt3D` on these classes
+   for any per-step path the FilSegment-focused enumeration missed.
+
+**Files committed (this session):**
+
+- `boxOfActin/MyosinFixed.java` — `DIAG_ANCHOR_FIRE_CT`.
+- `boxOfActin/MyoFilLink.java` — `DIAG_UPDATEPOS_FROM_BIND_CT`,
+  `DIAG_UPDATEPOS_FROM_STEP_CT`, `DIAG_VALIDATESEG_FIRE_CT`.
+- `boxOfActin/Mesh.java` — `DIAG_MESH_FILL_FILSEG_CT`.
+- `boxOfActin/FilSegment.java` — `DIAG_FILSEG_INIT_CT`,
+  `DIAG_MESHALLSEGS_FIRE_CT`.
+- `boxOfActin/MyoMotor.java` — `DIAG_MOTOR_INIT_CT`.
+- `boxOfActin/MotorBindGrid3D.java` — `DIAG_MBG3D_FILL_FILSEG_CT`.
+- `boxOfActin/BoxOfActin.java` — `[STATS] *FireCt=` print lines in
+  `printStats`.
+- `PHASE45_SCOPING.md` + this entry.
+
+**Files reverted (NOT committed):** Attempt-1
+(`FilSegment.fillSoaArrays` `Thing.soaEnd1` + `fs.end1Pt` writeback)
+and Attempt-2 (`Thing.recomputeDerivedSoA(0, thingCt)` +
+`fs.end1Pt/end2Pt` refresh in `BoxOfActin.doLoop`). Working tree is
+clean of both.
+
+**Part D — NOT run.** N=8 paired resident vs non-resident re-gate is
+contingent on Part C passing; it did not.
+
+**Run logs:** `RUN_LOGS/2026-06-05_phase45_locate_reader/`:
+`probe_seed1.log` (Part-A), `fix_*` (Attempt-1 battery), `fix2_*`
+(Attempt-2 battery).
 
 ## 2026-06-05 — Phase 4.5 selective-poison: stale reader is filament endpoints; GPUMotorBinding pose pack is next target
 
