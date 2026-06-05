@@ -118,7 +118,7 @@ gate; the gliding observables PASS regardless.
   `cp_signed.log` + `smoke_seed1.log`.
 - `PHASE4_FLIP.md` — full writeup.
 
-Commit hash: `<to fill after commit>` on `main`.
+Commit hash: `ec789f2` on `main`.
 
 ---
 

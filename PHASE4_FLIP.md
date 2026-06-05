@@ -6,7 +6,7 @@ calls; eliminate the per-step CPU↔GPU pose upload; retire the per-step CPU
 plan rebuild. **Partial flip — the cross-graph residency for
 GPUMotorBinding (retiring P1.a/P1.b/P4) is scoped out as Phase 4.5 (see
 "Scoped out" below).** Built against `4e23837` on `main`; commit landed
-post-validation as `<hash to fill>`.
+post-validation as `ec789f2`.
 
 ## Verdict
 
