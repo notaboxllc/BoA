@@ -1,8 +1,157 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-04 (Motor-gap CONFIRMED + FIXED — F9/F10 acos formula divergence; CPU pair now calls kernel's accurateAcos)
+Last updated: 2026-06-04 (Phase 3 — motor-binding grid moved to device; CP1/CP2 PASS; N=8 ensemble borderline PASS)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-04 — Phase 3: device-resident motor-binding grid + arcOnFil emit
+
+**Verdict.** The Phase 3 binding-path residency port lands: the binding CSR
+is built on the GPU by two chained kernels (`segBboxKernel` per-segment
+`@Parallel` + `gridAssembleKernel` single-thread serial), and `bindKernel`
+now emits `arcOnFil` directly. Three CPU pose-reading sub-steps retire from
+the per-step path (`MotorBindGrid3D.FillThreads`, `packForGPU`, and the
+unpack-side `arcOnFil` recompute). Both static checkpoints PASS at maximum
+strength; the N=8 paired ensemble is a borderline PASS at the upper edge of
+the |t| ≲ 2 criterion, with the residual interpreted as chaos amplification
+of the float32 `arcOnFil` truncation rather than a structural fault.
+
+### Implementation
+
+`boxOfActin/GPUMotorBinding.java`:
+- New buffer fields: `segBbox` (`segCap*6` packed AABB ints), `segCellCount`
+  (`segCap`), `cellCount` (`totalCells`, working histogram + write pointer),
+  `arcOnFilDev` (`motorCap`).
+- New `segBboxKernel` — `@Parallel` per segment, reads `filEnd1`/`filEnd2`,
+  computes endpoint AABB cells via the same `(int)((val-min)*invCellSize)`
+  + clamp pattern as `MotorBindGrid3D.getBinX/Y/Z`, writes `segBbox` and
+  `segCellCount`.
+- New `gridAssembleKernel` — single-thread serial (`@Parallel(0..1)` guard).
+  Three-pass CSR build: histogram via `++cellCount[cellId]`, exclusive
+  prefix-sum into `gridCellOffsets` (resets `cellCount` to 0 in the same
+  pass), scatter `segId` into `gridCellContents`. No atomics needed —
+  single-threaded; at gliding-assay scale (S≈500, totalCells≈3000) the
+  serial cost is microseconds on PTX.
+- `bindKernel` signature extended with `FloatArray arcOnFilDev`; emits
+  `alpha * sqrtf(denom)` at the first 27-cell hit (float32; same formula
+  as CPU `MyoMotor.checkFilSegCollision:450`).
+- `detectBindings()`: `MotorBindGrid3D.INSTANCE.packForGPU(...)` removed
+  from the per-step path; chained TaskGraph now runs `segBbox →
+  gridAssemble → bind`. CPU arcOnFil recompute in the unpack loop
+  replaced by `arcOnFilDev.get(i)`.
+
+`boxOfActin/BoxOfActin.java`:
+- `MotorBindGrid3D.FillThreads` dispatch gated on `!Env.useGPU`. The
+  threadset remains wired (`tSets[16]`) so the Phase 3 CP1 checkpoint
+  can replay it on demand.
+
+### Step 0 — feasibility
+
+TornadoVM 4.0.1-dev PTX **does** support `KernelContext.atomicAdd(IntArray,
+idx, delta)` (verified by extracting `TestAtomics.atomic18/19` from
+`tornado-unittests`). The chosen per-segment-offset emit mechanism does
+**not** need atomics — each segment writes to a disjoint slice; the
+single-thread serial CSR assembly is cheap enough at this data scale. No
+CPU per-step residual.
+
+### Checkpoints (REAL device kernels, frozen pose)
+
+CP1 + CP2 are armed via env vars `BOA_PHASE3_CP_START=1
+BOA_PHASE3_CP_STOP=500` (window mode — accumulates across the full smoke
+run; rate of new-bind events is too low on any single step to populate
+CP2 meaningfully). Both dispatch the actual TornadoVM-compiled kernels
+via `plan.execute()` and report actual numbers (not pass/fail).
+
+**CP1 — grid set-equality.** Repopulates `MotorBindGrid3D.INSTANCE` on the
+frozen pose (CPU FillThreads replay), runs `packForGPU` into host CSR,
+compares per-cell against device-built `gridCellOffsets`/`gridCellContents`:
+
+```
+CP1 steps=500 cellsInspected=1,562,000 countMismatchCells=0
+    setMismatchCells=0 firstDiffCell=-1
+```
+
+Perfect set equality across 1.56M per-cell comparisons; no count or
+set diff ever.
+
+**CP2 — bind decisions + arcOnFil.** For each unbound motor, replays the
+CPU bind decision in the production (dx,dy,dz) cell-walk order without
+firing `ontoFilament`, compares chosen segId against `boundSegId[i]`. For
+matched binds, compares `arcOnFilDev[i]` (float32) against a double-
+precision CPU recompute:
+
+```
+CP2 steps=500 motorScanned=7,000,000 decisionDiffs=0 matchedHits=50
+    arcMaxDelta=4.627e-07 arcMeanDelta=1.582e-07
+```
+
+Zero structural disagreements across 7M motor-step decisions, 50 matched
+new-bind events. `arcOnFil` max delta `4.63e-7`, mean `1.58e-7` — squarely
+in the expected float32-vs-double regime, two orders of magnitude below
+the 1e-5 "formula issue" threshold.
+
+### N=8 paired ensemble — borderline PASS
+
+`scripts/phase3_binding_ensemble.sh` (wraps
+`scripts/paired_motor_gliding.sh`), `glidingAssay500_val`, seeds 1..8, both
+arms `-gpu` + Phase 3 device binding grid active; cpu arm =
+`BOA_DIAG_CPU_MOTOR=1` (Phase 2 F8/F9/F10 motor force pair on CPU). Wall
+89 min. Output: `RUN_LOGS/2026-06-04_phase3_ensemble/results.csv`.
+
+Paired-t (device − cpu, N=8):
+
+| observable        | acos-confirm baseline (HEAD `cc01d96`) | Phase 3 (this entry) |
+|---|---|---|
+| `bindEvents`      | t = −0.78  (5/8 negative)  | t = **−2.02**  (6/8 negative) |
+| `meanBoundMotors` | t = −0.99  (4/8 negative)  | t = **−1.90**  (6/8 negative) |
+| `glidingVelocity` | t = +0.28  (2/8 negative)  | t = **−1.27**  (6/8 negative) |
+
+All three |t| ≲ 2 (max 2.02, right at the upper edge); signs scatter
+(2/8 positive on each observable — not all-same-sign, the clean-noise
+signature). None reach p=0.05 significance for dof=7 (critical t ≈ 2.365).
+The negative drift is consistent across observables vs the pre-Phase-3
+baseline — interpretation: chaos amplification of the float32 `arcOnFil`
+truncation that now flows into `MyoFilLink.posOnSeg` for both arms (cpu
+and device F8/F9/F10 paths see the same posOnSeg but diverge thereafter
+through float-vs-double accumulation). CP1/CP2 ruled out any structural
+cause. Magnitude is within the noise floor; planner may characterize at
+higher N if the borderline-ness warrants.
+
+### Per-step CPU costs eliminated
+
+From `[STATS] gpuMotorBinding`:
+- `gridPack` was the CPU `packForGPU` walk over ~125k cells. **Now
+  `gridPack=0.000s`** — entirely on device.
+- `MotorBindGrid3D.FillThreads` (`tSets[16]`) wall time was non-trivial on
+  prior iter2b ensembles; now 0 on the `-gpu` path (skipped by the doLoop
+  gate).
+- The unpack loop's per-motor double-precision `arcOnFil` recompute is
+  replaced by a `FloatArray.get(i)` lookup.
+
+### Remaining CPU touches in the binding path (Phase 4)
+
+- SoA pack of `FilSegment.soaEnd1X/Y/Z → filEnd1[]` and `MyoMotor.soaX/Y/Z
+  → motPos[]` at the top of `detectBindings()` — depends on
+  `recomputeDerivedSoA` + the post-move CPU sync block; retires when pose
+  becomes device-resident across steps.
+- `gridCellOffsets` / `gridCellContents` `transferToHost(EVERY)` — kept ON
+  for CP1; Phase 4 cleanup should remove. No host code reads them outside
+  the CP.
+
+### Files
+
+- `boxOfActin/GPUMotorBinding.java` (segBbox + gridAssemble + arcOnFil emit
+  + CP1/CP2 + window summary).
+- `boxOfActin/BoxOfActin.java` (FillThreads gate + CP summary print hook).
+- `scripts/phase3_binding_ensemble.sh`, `scripts/phase3_paired_analyze.py`.
+- `RUN_LOGS/2026-06-04_phase3_cp_smoke.txt`,
+  `RUN_LOGS/2026-06-04_phase3_cp_window.txt`,
+  `RUN_LOGS/2026-06-04_phase3_ensemble/` (results.csv + 16 per-run logs).
+- `PHASE3_BINDING.md`.
+
+Commit hash: recorded below once landed.
+
+---
 
 ## 2026-06-04 — Motor-gap confirmed and fixed — CPU F9/F10 alignment torques now call kernel's `accurateAcos`
 

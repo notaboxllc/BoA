@@ -933,11 +933,18 @@ public class BoxOfActin {
 
 				// Motor domain - filament collisions... check every time-step
 				motorsAndFilsColTimer.start();
-				// Iteration 2a: CPU FillThreads runs in BOTH paths — the GPU kernel
-				// reads the CPU-built grid via the CSR pack inside detectBindings().
-				// CPU 27-neighbour query (motCollStart/Stop) only runs on the CPU path.
-				startAllThreadSets(Env.motorBindGrid3DStart);
-				waitOnAllThreadSets(Env.motorBindGrid3DStop);
+				// Phase 3 (2026-06-04): grid build moved to device. The CPU
+				// FillThreads is now skipped on the GPU path — the device
+				// segBbox + gridAssemble kernels (chained inside GPUMotorBinding's
+				// TaskGraph) build the CSR from already-resident endpoints.
+				// CPU FillThreads is still callable for the Phase 3 CP1
+				// checkpoint, which dispatches it explicitly on a frozen pose.
+				// CPU 27-neighbour query (motCollStart/Stop) only runs on the
+				// CPU path; FillThreads is still wired ahead of it there.
+				if (!Env.useGPU) {
+					startAllThreadSets(Env.motorBindGrid3DStart);
+					waitOnAllThreadSets(Env.motorBindGrid3DStop);
+				}
 				if (Env.useGPU) {
 					GPUMotorBinding.detectBindings();
 				} else {
@@ -1484,6 +1491,7 @@ public class BoxOfActin {
 			double un    = GPUMotorBinding.getUnpackNanos()   / 1.0e9;
 			System.out.printf("[STATS] gpuMotorBinding total=%.3fs calls=%d pack=%.3fs gridPack=%.3fs exec=%.3fs unpack=%.3fs%n",
 				tot, calls, pk, gp, ex, un);
+			GPUMotorBinding.reportCheckpointSummary();
 		}
 		if (Env.useGPU && GPUMoveThing.getCallCount() > 0) {
 			int    calls = GPUMoveThing.getCallCount();
