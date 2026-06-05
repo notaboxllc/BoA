@@ -128,7 +128,7 @@ log gives only |delta|); a future one-line `sumSignedArcDelta` to
 - `RUN_LOGS/2026-06-04_phase4_prep/{cp_smoke.log, partc_*.log,
   partc_gated_seed1_rerun*.log, partc_summary.log}`.
 
-Commit hash: `<HASH>` on `main`.
+Commit hash: `51422bf` on `main`.
 
 ---
 

@@ -15,7 +15,7 @@ checkpoints and a paired smoke; no expensive ensemble run.
   gated-vs-ungated paired observables comparison.
 - **Part D** — directionality fold-in for the Phase-3 `arcOnFil` deltas.
 
-Commit landed as `<HASH>` on `main`.
+Commit landed as `51422bf` on `main`.
 
 ---
 
