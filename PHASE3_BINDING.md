@@ -201,6 +201,4 @@ After Phase 3 lands, the only CPU pose-touching work in the binding path is:
 
 ## Commit + push
 
-Pending the ensemble result.
-
-Hash recorded below once committed.
+Landed as commit `5812c75` on `main` (2026-06-04).

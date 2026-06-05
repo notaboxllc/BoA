@@ -149,7 +149,7 @@ From `[STATS] gpuMotorBinding`:
   `RUN_LOGS/2026-06-04_phase3_ensemble/` (results.csv + 16 per-run logs).
 - `PHASE3_BINDING.md`.
 
-Commit hash: recorded below once landed.
+Commit hash: `5812c75` on `main`.
 
 ---
 
