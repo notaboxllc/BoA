@@ -401,6 +401,20 @@ public class GPUMoveThing {
     private static IntArray   rodSlots;       // myoCap -- move slot of myoRod
     private static IntArray   leverSlots;     // myoCap -- move slot of myoLever
     private static IntArray   motorSlots;     // myoCap -- move slot of myoMotor
+
+    // ----- Phase 4.5 — per-MyoMotor and per-FilSegment move-slot lookups
+    // used by the device-resident pose path inside GPUMotorBinding's bind
+    // kernel. Indexed by MyoMotor.myMotorNumber (motorIdx ∈ [0, motorCt))
+    // and FilSegment.filArrayPos (s ∈ [0, filSegmentCt)). Value -1 means the
+    // motor / fil is CPU-fallback and the bind kernel must skip it. Populated
+    // alongside rodSlots/leverSlots/motorSlots inside classifyThings; sized
+    // to MyoMotor.theMotors.length and FilSegment.theFilSegments.length
+    // respectively (the cap GPUMotorBinding's plan uses).
+    private static IntArray   motMoveSlot;    // bindMotorCap -- move slot of MyoMotor[m]
+    private static IntArray   motRodMoveSlot; // bindMotorCap -- move slot of MyoMotor[m].myMyosin.myoRod
+    private static IntArray   filMoveSlot;    // bindSegCap   -- move slot of FilSegment[s]
+    private static int        bindMotorCap   = 0;
+    private static int        bindSegCap     = 0;
     private static FloatArray myoDrags;       // myoCap * 9 -- packed drag tensors for rod/lever/motor
     private static IntArray   cockedFlags;    // myoCap
     // 2026-06-02 Phase 1 — anchor spring (A7.b). anchorPts carries
@@ -2522,6 +2536,18 @@ public class GPUMoveThing {
         rodSlots       = new IntArray(myoCap);
         leverSlots     = new IntArray(myoCap);
         motorSlots     = new IntArray(myoCap);
+
+        // Phase 4.5: slot maps for the resident-pose bind path. Sized to the
+        // GPUMotorBinding plan's caps (MyoMotor.soaX.length and
+        // FilSegment.soaEnd1X.length — both 1e6 / 5e5 worst case). Allocated
+        // here so they share the plan-rebuild lifecycle and live in the
+        // merged executor's persistedObject set.
+        bindMotorCap   = MyoMotor.soaX.length;
+        bindSegCap     = FilSegment.soaEnd1X.length;
+        motMoveSlot    = new IntArray(bindMotorCap);
+        motRodMoveSlot = new IntArray(bindMotorCap);
+        filMoveSlot    = new IntArray(bindSegCap);
+
         myoDrags       = new FloatArray(myoCap * 9);
         cockedFlags    = new IntArray(myoCap);
         anchorPts      = new FloatArray(myoCap * 3);
@@ -3435,6 +3461,51 @@ public class GPUMoveThing {
             if (cpuFallback[i] instanceof FilSegment) {
                 ((FilSegment) cpuFallback[i]).gpuChainHandled    = false;
                 ((FilSegment) cpuFallback[i]).gpuBoundaryHandled = false;
+            }
+        }
+
+        // Phase 4.5: populate the bind-side slot maps. Indexed by
+        // MyoMotor.myMotorNumber (= motorIdx in the binding kernel) and
+        // FilSegment.filArrayPos (= s in the binding kernel). -1 sentinel
+        // marks CPU-fallback (the bind kernel skips those motors / segs).
+        if (motMoveSlot != null && filMoveSlot != null) {
+            int mcap = motMoveSlot.getSize();
+            for (int i = 0; i < mcap; i++) {
+                motMoveSlot.set(i, -1);
+                motRodMoveSlot.set(i, -1);
+            }
+            int scap = filMoveSlot.getSize();
+            for (int i = 0; i < scap; i++) filMoveSlot.set(i, -1);
+
+            int motorCtLocal = MyoMotor.motorCt;
+            MyoMotor[] motors = MyoMotor.theMotors;
+            for (int m = 0; m < motorCtLocal && m < mcap; m++) {
+                MyoMotor mm = motors[m];
+                if (mm == null || mm.removeMe) continue;
+                int motIdx = mm.myThingNumber;
+                if (motIdx >= 0 && motIdx < thingNumberToMoveSlot.length) {
+                    int ms = thingNumberToMoveSlot[motIdx];
+                    if (ms >= 0) motMoveSlot.set(m, ms);
+                }
+                if (mm.myMyosin != null && mm.myMyosin.myoRod != null) {
+                    int rIdx = mm.myMyosin.myoRod.myThingNumber;
+                    if (rIdx >= 0 && rIdx < thingNumberToMoveSlot.length) {
+                        int rs = thingNumberToMoveSlot[rIdx];
+                        if (rs >= 0) motRodMoveSlot.set(m, rs);
+                    }
+                }
+            }
+
+            int filCtLocal = FilSegment.filSegmentCt;
+            FilSegment[] fils = FilSegment.theFilSegments;
+            for (int s = 0; s < filCtLocal && s < scap; s++) {
+                FilSegment fs = fils[s];
+                if (fs == null || fs.removeMe) continue;
+                int filIdx = fs.myThingNumber;
+                if (filIdx >= 0 && filIdx < thingNumberToMoveSlot.length) {
+                    int fSlot = thingNumberToMoveSlot[filIdx];
+                    if (fSlot >= 0) filMoveSlot.set(s, fSlot);
+                }
             }
         }
     }
