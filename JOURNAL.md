@@ -14,7 +14,7 @@ is at t=1e-5, i.e. *post-step-1*, not the IC). The real cause of the post-step-1
 − actinMonoRadius) × uVec`, which extends the chain end by ~1 × stdFilSegLengthUM (~173 nm)
 beyond the original end2 on the *first* split (step 1, before joint settling). The 0.5×
 pad covers the centroid shift but not the end-of-chain shift (end shift = 2 × centroid shift).
-**Fix: pad raised from 0.5× to 1.5× stdFilSegLengthUM** (commit `<TBD>`). Post-step-1 chain
+**Fix: pad raised from 0.5× to 1.5× stdFilSegLengthUM** (commit `a03a5f6`). Post-step-1 chain
 end now sits ~6.914 µm (where the pre-fix single-segment IC was), comfortably inside.
 
 > Correction to the 2026-06-02 IC-fix entry's "Caveat for future baselines" closing line
