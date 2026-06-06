@@ -272,3 +272,116 @@ Plan: proceed to B2 with the five-step incremental commit cadence above.
 If any step's compile-and-load checkpoint fails or step-4 parity is off by
 more than ~1e-5 max-divergence, bail and commit the survey + a "stopped at
 step N" note.
+
+---
+
+## B2 attempt — runtime bail-out (2026-06-06)
+
+### What landed (committed on branch `phase45-binding-residency`)
+
+- **Step A** (commit `bb87816`): `motMoveSlot` / `motRodMoveSlot` /
+  `filMoveSlot` IntArrays added to `GPUMoveThing`. Allocated alongside the
+  move plan's FloatArrays in `allocateAndBuildPlan` (sized to
+  `MyoMotor.soaX.length` and `FilSegment.soaEnd1X.length`). Populated in
+  `classifyThings` via `thingNumberToMoveSlot[]`. -1 sentinel for
+  CPU-fallback. Compile-and-load smoke (CPU + GPU, `glidingAssay500_val`,
+  seed=1) matched the post-IC-fix baseline within noise (GPU
+  bindEvents=893, mbm=7.40, gv=8.70).
+
+### What was attempted and reverted (step B — kernel rewrite + executor merge)
+
+The full step-B change set was implemented but hit a TornadoVM-side
+device-memory leak on plan rebuilds in the merged-executor
+configuration. Reverted before commit.
+
+Implementation pieces (now removed from working tree):
+
+1. **New kernels** in `GPUMotorBinding.java`:
+   - `segBboxKernel(coord, uVec, soaLengthArr, filMoveSlot, gridParams,
+     gridDims, counts, segCellCount, segBbox)` — 9 args. Slot-indexed
+     pose read, endpoints derived as `coord ± 0.5·length·uVec` (same
+     formula `FilSegment.fillSoaArrays()` uses on CPU).
+   - `bindKernel(coord, uVec, soaLengthArr, motMoveSlot, motRodMoveSlot,
+     filMoveSlot, motOnFil, filNodeAtEnd2, gridCellOffsets,
+     gridCellContents, gridParams, gridDims, counts, boundSegId,
+     arcOnFilDev)` — 15 args (at cap). Motor tip = `coord +
+     0.5·motorLen·uVec`; arc = `alpha·length` (simplifies `alpha·
+     sqrt(denom)` since uVec is unit on device).
+2. **`buildBindITG()`** on GPUMotorBinding builds the bind ITG referencing
+   the shared `coord`/`uVec`/`soaLengthArr` FloatArrays + the three slot
+   maps. Returns the snapshot; allocates EVERY_EXECUTION uploads for
+   `motOnFil`/`filNodeAtEnd2`/`counts` only (no pose pack).
+3. **Merged executor**: `GPUMoveThing.allocateAndBuildPlan` constructs
+   `new TornadoExecutionPlan(itgBind, itgMove)` with
+   `BIND_GRAPH_IDX=0`, `MOVE_GRAPH_IDX=1`. `detectBindings` dispatches
+   `plan.withGraph(BIND_GRAPH_IDX).withGridScheduler(bindScheduler).
+   execute()`; `moveThings` dispatches `withGraph(MOVE_GRAPH_IDX)`.
+4. **`MyoMotor.fillSoaArrays()` + `FilSegment.fillSoaArrays()`** gated on
+   `!Env.useGPU` in `BoxOfActin.doLoop:920–922`.
+
+### The bail-out: TornadoOutOfMemoryException on first long run
+
+Single-seed `glidingAssay500_val` (10101 steps) with the merged executor
+crashed at ~step 1010 with:
+
+```
+TornadoOutOfMemoryException: Unable to allocate 24000016 bytes of memory.
+  at boxOfActin.GPUMotorBinding.detectBindings(GPUMotorBinding.java:725)
+  at TornadoBufferProvider.freeUnusedNativeBufferAndAssignRegion(...)
+```
+
+The 24 MB allocation is `segBbox = segCap*6*4 = 24 MB`. Plan was rebuilt
+11 times before the OOM — consistent with normal gliding-assay biochem
+poly/depoly rebuild rate (~1/1000 steps). Retried with
+`-Dtornado.device.memory=8GB`: same crash at the same step, same buffer
+size. The 4 GB default and 8 GB raised limit both exhaust before the run
+completes.
+
+Logs: `RUN_LOGS/2026-06-06_phase45_b2/stepB_gpu_seed1.log` (4 GB default,
+~step ~1010), `stepB_gpu_seed1_8gb.log` (8 GB, same step).
+
+### Most likely cause (not fully diagnosed in this session)
+
+Multi-graph `TornadoExecutionPlan` does not appear to fully reclaim
+device memory on plan rebuild when buffers are referenced by **both**
+ITGs in the merged executor (the `coord/uVec/soaLengthArr/slot-map`
+buffers shared between bind and move ITGs). `plan.close() →
+freeDeviceMemory()` is called on each `closePlan`, but the rate of
+accumulation (~700 MB per rebuild × 11 rebuilds → ~8 GB) suggests the
+shared buffers are being double-counted across the bind ITG and move
+ITG within the executor's internal allocation tracker, and only one
+copy is freed.
+
+A clean separate-executor architecture (today's HEAD, where each plan
+owns its own buffers) doesn't see this — each plan's
+`freeDeviceMemory` is bounded.
+
+### What still needs to be done by a future session
+
+The merge-via-`consumeFromDevice` lift on a **single
+`TornadoExecutionPlan`** is what TornadoVM documents
+(`TaskGraph.java:701` + `TornadoExecutionPlan.java:112`). The OOM blocker
+appears to be a runtime-side memory-management issue with multi-graph
+plans containing shared buffers. Two viable next-session approaches:
+
+1. **Probe TornadoVM's multi-graph memory accounting**: run the merged
+   plan with `-Dtornado.fullDebug=true` (or whatever the diagnostic
+   property is) and inspect `getCurrentDeviceMemoryUsage()` before/after
+   each rebuild. Confirm whether shared buffers are being
+   over-allocated.
+2. **Pin buffers across rebuilds** rather than re-allocating: keep the
+   merged `TornadoExecutionPlan` static across rebuilds, only re-snapshot
+   the ITGs (the `coord`/`uVec`/`slot-map` Java FloatArrays themselves
+   should survive). Today's `closePlan` is too aggressive — it drops the
+   plan even when only topology changed. A finer-grained rebuild that
+   keeps device buffers warm would side-step the leak.
+
+The step-A slot maps are useful infrastructure for either approach.
+
+### Implementation skeleton (committed B1 survey + step A) is sufficient for a follow-up to pick up
+
+- Slot maps populated correctly in `classifyThings` (commit `bb87816`).
+- B1 survey documents the kernel signatures, parameter counts, and the
+  multi-graph executor API confirmation (commit `3bae689`).
+- The bail-out note above identifies the specific runtime issue to
+  address before re-attempting step B.
