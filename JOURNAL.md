@@ -1,8 +1,44 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (gliding-assay IC pad enlarged to absorb step-1 split extension; staleness gap re-baselined)
+Last updated: 2026-06-06 (dense CPU-vs-GPU benchmark at current HEAD: GPU 0.80× CPU)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Dense CPU-vs-GPU benchmark at current HEAD (b044874)
+
+Single-seed wall-clock point on `ParameterFiles/glidingDense_demo_smoke`
+(M ≈ 98K motors, 14×14×0.5 µm bed, 100 random fils, ~1001 steps) — same
+config used for the iter2b/2c/2d entries. Aorus + Java 21 + TornadoVM
+4.0.1-dev PTX.
+
+```
+                  CPU wall   GPU wall   ratio (GPU/CPU)
+iter2b              ~188 s     330 s     1.76×
+iter2c               188 s     273 s     1.45×
+iter2d               190 s     184 s     0.97× (first crossover)
+HEAD (b044874)       154 s     123 s     0.80× (GPU 20 % faster)
+```
+
+The work since iter2d (motor port to GPU, Phase 3 device-resident grid build,
+Phase 4 half-flip residency, motor-gap acos fix, IC pad fix) pushed both
+arms down: CPU -19 %, GPU -33 %. Both ran with `tornado-api-4.0.1-dev.jar`
+on classpath; a post-iter2d regression now requires `WorkerGrid` to be
+class-loadable from `MyosinFixed.jointConstraints`'s static-init reach
+even on `-r` (no `-gpu`), so the CPU arm picks up the API jar — a few-ms
+JVM-startup delta, immaterial vs the 154 s wall.
+
+Per-phase, GPU arm:
+
+```
+[STATS] gpuMotorBinding total=17.725s (16.1 ms/call exec)
+[STATS] gpuMoveThing    total=34.735s (slotPack=8.0 jointPack=7.3 exec=11.1 unpack=8.3)
+[STATS] demandSyncPose=5.044s  planRebuild=17
+ThingStep (CPU-fallback)  20.99 s    Brownian  2.92 s    Mesh  5.67 s
+MotorBindGrid3D Fill       0.00 s    (Phase 3 — device-resident)
+```
+
+Details and reproduction recipe in `BENCHMARK_dense.md`. Logs:
+`RUN_LOGS/2026-06-06_dense_benchmark/{cpu,gpu}_seed1.log`.
 
 ## 2026-06-06 — Gliding-assay IC pad enlarged; step-1 split extension absorbed; resident/refreshed gap re-baselined
 
