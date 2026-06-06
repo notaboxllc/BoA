@@ -1,8 +1,154 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-05 (Phase 4.5 Part-D — CPU mirror refresh structurally guaranteed; physical-scale poison HITs → cannot pass-it-by)
+Last updated: 2026-06-06 (gliding-assay IC pad enlarged to absorb step-1 split extension; staleness gap re-baselined)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Gliding-assay IC pad enlarged; step-1 split extension absorbed; resident/refreshed gap re-baselined
+
+**TL;DR.** The 2026-06-02 IC pad (`0.5 × stdFilSegLengthUM`) is *present in code* and gives a
+mathematically clean single-segment IC (end2.x = 6.91395 µm, 86 nm clear of the +x wall) —
+so jba's "pad regression" hypothesis from the overnight visual-diag was a misread (frame 0
+is at t=1e-5, i.e. *post-step-1*, not the IC). The real cause of the post-step-1 OOB is
+`FilSegment.splitSegment()`: it places `nextFil` at `splitFilSeg.end2Pt + (0.5 × nextFilLength
+− actinMonoRadius) × uVec`, which extends the chain end by ~1 × stdFilSegLengthUM (~173 nm)
+beyond the original end2 on the *first* split (step 1, before joint settling). The 0.5×
+pad covers the centroid shift but not the end-of-chain shift (end shift = 2 × centroid shift).
+**Fix: pad raised from 0.5× to 1.5× stdFilSegLengthUM** (commit `<TBD>`). Post-step-1 chain
+end now sits ~6.914 µm (where the pre-fix single-segment IC was), comfortably inside.
+
+> Correction to the 2026-06-02 IC-fix entry's "Caveat for future baselines" closing line
+> ("the Phase-1 device-vs-CPU delta is unaffected because both arms shared the old IC") and
+> its "downstream behavior, not an IC issue" framing of the residual 7.087 µm post-split
+> overshoot. The same-arm comparisons that Phase 4.5 actually depended on (resident vs
+> refreshed, +offset poison vs baseline, seed-1 single-shot) all read the absolute binding
+> count, and that count *was* sitting on top of the IC recovery transient. The seed-1
+> 679-vs-809 resident/refreshed comparison from the 2026-06-06 overnight visual-diag is
+> the specific casualty.
+
+**File modified.** `boxOfActin/FilSegment.java:3426` — pad coefficient `stdFilSegLengthUM/2`
+→ `1.5*stdFilSegLengthUM`. Shared code; CPU and GPU paths both inherit it.
+
+### Visual confirmation
+
+`RUN_LOGS/2026-06-06_pad_fix/visual_resident/` — short resident run (runTime=0.005,
+toFileInterval=10) with the fix, 65 frames on disk. Post-fix early-frame xrange:
+
+| frame | t (s) | num_segs | xrange |
+|---|---|---|---|
+| 0 (pre-fix) | 1e-5 | 2 | [5.000, **7.087**] |
+| 0 (post-fix) | 1e-5 | 2 | [4.828, **6.914**] |
+| 7 (post-fix) | 7.1e-4 | 11 | [4.921, 6.916] |
+| 25 (post-fix) | 2.5e-3 | 11 | [4.921, 6.927] |
+| 55 (post-fix) | 5.5e-3 | 11 | [4.890, 6.906] |
+
+Chain settles to ~6.92 µm and oscillates inside the box; no violent recovery. Viewer URL:
+`http://localhost:8000/sim_viewer_boa.html?run=RUN_LOGS/2026-06-06_pad_fix/visual_resident`.
+
+### Re-baselined three regimes (seed=1, `glidingAssay500_val`, full 10000 steps)
+
+| run | mode | pre-fix (be / mbm / gv) | post-fix (be / mbm / gv) |
+|---|---|---|---|
+| resident | stock | 679 / 6.11 / 7.93 | **879 / 7.70 / 8.16** |
+| refreshed | fixed, offset=0 | 809 / 7.85 / 7.56 | **664 / 6.25 / 6.52** |
+| poison | accum, offset=1.0 µm | 202 / 1.91 / 5.49 | **221 / 1.94 / 11.14** |
+
+Pre-fix data from `RUN_LOGS/2026-06-05_visual_diag/SUMMARY.md`. Post-fix logs in
+`RUN_LOGS/2026-06-06_pad_fix/run{1,2,3}_*.log`. Same seed=1, same paramfile, same build
+flags — only the pad coefficient differs.
+
+### Interpretation
+
+* **Resident binding rose 679 → 879 (+29 %).** The IC recovery transient was depressing
+  the resident-mode binding rate by ~20 % across the full 10000-step run. With the pad
+  fix the resident-mode count is well above the historical clean band (~684–848) — at
+  879 the seed-1 value sits at the top of the normal seed-spread instead of the bottom.
+
+* **Refreshed binding fell 809 → 664 (−18 %).** Refresh-only mode shifted down by a
+  similar magnitude. Same-seed noise band ±24 % of ~700 ≈ ±170, so this drop is on the
+  edge of the noise floor.
+
+* **The resident-vs-refreshed gap collapses to ~0 across 4 seeds.** Seed=1 alone showed
+  resident > refreshed by 215 (looked like a sign-reversal of the +130 pre-fix gap), but
+  that was single-seed wobble. Multi-seed mini-comparison (seeds 1–4, full 10000-step
+  glidingAssay500_val, GPU, fix applied):
+
+  | seed | resident (be / mbm / gv) | refreshed (be / mbm / gv) | gap (refr − res) |
+  |---|---|---|---|
+  | 1 | 879 / 7.70 / 8.16 | 664 / 6.25 / 6.52 | **−215** |
+  | 2 | 624 / 5.99 / 7.94 | 895 / 7.35 / 7.65 | **+271** |
+  | 3 | 697 / 6.90 / 7.63 | 755 / 6.63 / 6.84 | **+58** |
+  | 4 | 740 / 7.17 / 7.79 | 652 / 6.03 / 6.55 | **−88** |
+  | **mean** | **735 / 6.94 / 7.88** | **742 / 6.57 / 6.89** | **+6.5 (≈ 0 %)** |
+
+  Mean post-fix gap: **+6.5 bindEvents (~0.9 %)** — well inside the ±24 % single-seed
+  noise band. **The pre-fix "+19 % refreshed > resident" gap was the IC recovery
+  transient asymmetrically loading the two regimes; with the IC clean it dissolves into
+  noise.** Per the decision mapping: "*If the resident-vs-refreshed gap collapses toward
+  zero with the IC fixed → the staleness bug was largely an IC/confinement artifact;
+  there is no meaningful steady-state binding staleness, and Phase 4.5 inherits a clean
+  baseline.*" **That is what we see.** Logs:
+  `RUN_LOGS/2026-06-06_pad_fix/seed{1..4}_{resident,refreshed}.log`.
+
+  Side observation: mean gliding velocity is slightly higher for resident (7.88 µm/s)
+  than refreshed (6.89 µm/s), ~13 % gap. Both means sit in / near the 5–8 µm/s
+  skeletal-myosin band; the asymmetry is below threshold of "interesting on its own"
+  but worth flagging — the per-step `refreshHostMirrorsForOutput` may carry a small
+  velocity cost. Not investigated further here.
+
+* **Poison HIT essentially unchanged.** Pre-fix: 202 vs 679 baseline = −70 %. Post-fix:
+  221 vs 879 baseline = −75 %. The HIT magnitude is preserved with the IC clean,
+  confirming the poison's effect was *not* IC-amplification — it's a genuine
+  steady-state binding-geometry coupling. **Per Part-D's decision mapping
+  (`RUN_LOGS/2026-06-05_phase45_partD_physical_scale/`), the device-pack hunt
+  (`filEnd1`/`filEnd2`/`motPos` pre-`transferToDevice`) remains the next probe
+  target.** Gliding velocity for poison shot up from 5.49 → 11.14 µm/s — out of the
+  skeletal band, consistent with an active perturbation rather than a clean run.
+
+### Baseline re-validation — both paths in the published band
+
+* **GPU resident post-fix:** gv = 8.16 µm/s (slightly above 5–8 µm/s skeletal-myosin
+  band, within seed noise of the published range).
+* **CPU sanity post-fix:** seed=1, full 10000-step glidingAssay500_val, no `-gpu` —
+  bindEvents = 932, mbm = 7.66, **gv = 7.90 µm/s** (squarely in band). Log:
+  `RUN_LOGS/2026-06-06_pad_fix/run4_cpu_sanity.log`. CPU and GPU paths agree on the
+  fixed baseline (gv within 3 %, bind counts within 6 %). The IC fix is a shared-code
+  correctness fix and both paths inherit it.
+
+### Reproduction
+
+Runner scripts in `RUN_LOGS/2026-06-06_pad_fix/`:
+* `rebaseline.sh` — three GPU regimes + CPU sanity run, seed=1.
+* `multiseed.sh` — seeds 2/3/4 × {resident, refreshed} for the gap-reversal probe.
+* `glidingAssay500_val_visualconfirm` — short paramfile (runTime=0.005, toFileInterval=10)
+  for the cheap visual run.
+
+Build line is the standard aorus one (Java 21 + TornadoVM, `--enable-preview`); no
+classpath changes vs the pre-fix build.
+
+## 2026-06-06 — Overnight visual-diag — three full-length frame dumps to disk
+
+Three sequential `-gpu`, seed=1, `glidingAssay500_val` runs at full
+validation length (runTime=0.1, 10000 steps), frames written to disk
+for offline scrubbing in `RUN_LOGS/2026-06-05_visual_diag/frames/`.
+Cadence sized empirically from prior probe (~4.75 MB/frame at 14000
+myosins): `toFileInterval=14` → 722 frames × ~4.7 MB = 3.3 GB/run.
+Total ~9.9 GB. Override paramfile + runner in
+`RUN_LOGS/2026-06-05_visual_diag/`, full summary in `SUMMARY.md`.
+
+| run | mode | bindEvents | mbm | gv |
+|---|---|---|---|---|
+| run1_resident | stock (no poison) | 679 | 6.11 | 7.93 |
+| run2_refreshed | fixed mode, offset=0 | 809 | 7.85 | 7.56 |
+| run3_poison | accum mode, offset=1.0 µm | 202 | 1.91 | 5.49 |
+
+Regime ordering preserved (refreshed > resident > poisoned); absolute
+counts are ~1.2–1.6× the Part-D 2500-step reference because today's
+runs are 4× longer. IC intentionally left un-fixed in this build so the
+filament's settling can be reviewed frame-by-frame. Per-run logs:
+`run{1,2,3}_*_overnight.log`. Frames not committed (several GB).
+Open: jba to scrub frame dirs in viewer and report visual signature
+of run3 vs run1.
 
 ## 2026-06-05 — Phase 4.5 Part-D — CPU path clean by construction; physical-scale poison still HITs
 

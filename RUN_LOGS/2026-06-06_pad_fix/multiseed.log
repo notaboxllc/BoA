@@ -1,0 +1,15 @@
+==============================================================
+[2026-06-06 10:04:44] multiseed runner starting (pid=4130302)
+[2026-06-06 10:04:44] starting seed=2 resident (env=)
+[2026-06-06 10:09:47] seed=2 resident done rc=0 be=624 mbm=5.986 gv=7.9361
+[2026-06-06 10:09:47] starting seed=2 refreshed (env= BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed BOA_PHASE45_POISON_OFFSET=0)
+[2026-06-06 10:15:32] seed=2 refreshed done rc=0 be=895 mbm=7.346 gv=7.6535
+[2026-06-06 10:15:32] starting seed=3 resident (env=)
+[2026-06-06 10:20:31] seed=3 resident done rc=0 be=697 mbm=6.902 gv=7.6344
+[2026-06-06 10:20:31] starting seed=3 refreshed (env= BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed BOA_PHASE45_POISON_OFFSET=0)
+[2026-06-06 10:26:14] seed=3 refreshed done rc=0 be=755 mbm=6.629 gv=6.8401
+[2026-06-06 10:26:14] starting seed=4 resident (env=)
+[2026-06-06 10:31:17] seed=4 resident done rc=0 be=740 mbm=7.168 gv=7.7921
+[2026-06-06 10:31:17] starting seed=4 refreshed (env= BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed BOA_PHASE45_POISON_OFFSET=0)
+[2026-06-06 10:36:59] seed=4 refreshed done rc=0 be=652 mbm=6.033 gv=6.5540
+[2026-06-06 10:36:59] multiseed runner finished

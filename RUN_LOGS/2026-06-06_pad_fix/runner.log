@@ -1,0 +1,9 @@
+==============================================================
+[2026-06-06 09:28:35] rebaseline runner starting (pid=4116856)
+[2026-06-06 09:28:35] starting GPU run1_resident (env=)
+[2026-06-06 09:33:38] run1_resident done rc=0 be=879 mbm=7.698 gv=8.1566
+[2026-06-06 09:33:38] starting GPU run2_refreshed (env= BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed BOA_PHASE45_POISON_OFFSET=0)
+[2026-06-06 09:39:18] run2_refreshed done rc=0 be=664 mbm=6.252 gv=6.5200
+[2026-06-06 09:39:18] starting GPU run3_poison (env= BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=accum BOA_PHASE45_POISON_OFFSET=1.0)
+[2026-06-06 09:44:46] run3_poison done rc=0 be=221 mbm=1.939 gv=11.1393
+[2026-06-06 09:44:46] starting CPU run4_cpu_sanity

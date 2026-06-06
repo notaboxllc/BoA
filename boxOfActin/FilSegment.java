@@ -3423,7 +3423,12 @@ public class FilSegment extends Thing {
 		double filLength = Env.glidingFilamentLength.getValue();
 		int monCt = (int)(filLength/Env.actinMonoRadius);
 		double stdFilSegLengthUM = Env.stdSegLength.getIntValue() * Env.actinMonoRadius;
-		Pt3D loc = new Pt3D(Env.boxXDim.getValue()/2 - filLength/2 - stdFilSegLengthUM/2, 0, 0);
+		// Pad covers the per-split chain extension. splitSegment() places nextFil
+		// at original_end2 + (0.5*nextFilLength - actinMonoRadius) along uVec, so the
+		// post-step-1 chain end extends ~1 * stdFilSegLengthUM beyond the IC end2.
+		// 0.5* was the centroid shift (used historically); 1.5* keeps the post-step-1
+		// chain end comfortably inside the +x wall (~80 nm clear).
+		Pt3D loc = new Pt3D(Env.boxXDim.getValue()/2 - filLength/2 - 1.5*stdFilSegLengthUM, 0, 0);
 		Pt3D ang = new Pt3D(1,0,0);
 		FilSegment newSeg = new FilSegment (loc,ang,-1,monCt,false);
 	}
