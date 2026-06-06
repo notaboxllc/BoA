@@ -985,3 +985,201 @@ the trace finishes early in the run.
   killed after the 12 trace lines were captured; observables not
   rerun because the prior selective-poison sweep already established
   the `soaEnds` family reproduces the ~80% `bindEvents` drop.
+
+---
+
+# Phase 4.5 Part-D — go/no-go (2026-06-05)
+
+Two cheap confirmations to decide whether the stale-mirror finding can
+be passed by and Phase 4.5 attempted on a behavior-preserving
+half-flip. **Diagnostic only — no fix, no ensemble.**
+
+## Part 1 — CPU path verdict: structurally clean
+
+The retirement of per-step `recomputeDerivedSoA` did *not* happen by
+gating a skip inside the CPU branch. It happened by replacing the
+whole `moveThing` dispatch on the GPU path:
+
+```java
+// boxOfActin/BoxOfActin.java:1037-1059
+if (Env.useGPU) {
+    GPUMoveThing.moveThings();              // device kernel; demand-syncs pose only
+    GPUMoveThing.poisonFrameOnlyMirrors();  // optional diag
+    Phase45Trace.snapshot("1_postPoison");
+} else {
+    startAllThreadSets(Env.moveStart);      // CPU path
+    waitOnAllThreadSets(Env.moveStop);
+}
+```
+
+The CPU branch's `Env.moveStart` threadset
+(`boxOfActin/Thing.java:229-232`):
+
+```java
+case Env.moveStart:
+    for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
+        if (!theThings[i].removeMe) { theThings[i].moveThing(); }
+    }
+    break;
+```
+
+Every per-Thing `moveThing()` ends with `initialize()`:
+`FilSegment.java:649`, `MyoMotor.java:335`, `MyoRod.java:134`,
+`MyoLever.java:131`, `MyoMiniFilament.java:226`, `Bug.java:240`,
+`ProteinNode.java:268`. Every `initialize()` calls
+`Thing.recomputeDerivedSoA(myThingNumber, myThingNumber+1)` and
+refreshes the per-Thing Pt3D mirrors:
+
+```java
+// boxOfActin/FilSegment.java:444-458
+public void initialize () {
+    if (Env.useGPU) DIAG_FILSEG_INIT_CT++;
+    length = (monomerCt+1)*Env.actinMonoRadius;
+    pushLengthToSoa(length);
+    Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
+    end1Pt.x = getEnd1X(); end1Pt.y = getEnd1Y(); end1Pt.z = getEnd1Z();
+    end2Pt.x = getEnd2X(); end2Pt.y = getEnd2Y(); end2Pt.z = getEnd2Z();
+    xRange = Math.abs(getCoordX()-getEnd2X());
+    yRange = Math.abs(getCoordY()-getEnd2Y());
+    zRange = Math.abs(getCoordZ()-getEnd2Z());
+}
+```
+
+**On a non-`-gpu` run, the per-step derived-mirror refresh
+(`Thing.soaEnd1/end1Pt/xRange/...`) runs every step, unconditionally,
+because the CPU branch dispatches `moveThing()` → `initialize()` →
+`recomputeDerivedSoA` for every Thing.** It is not gated on
+`Env.useGPU`; it is in the other branch entirely. The staleness
+phenomenon cannot occur off-GPU.
+
+Verdict: **CPU path is structurally clean. Pass-it-by remains viable
+from Part 1's perspective.** No optional CPU sanity run executed —
+the structural argument is dispositive.
+
+## Part 2 — physical-scale (non-accumulating) poison
+
+The existing poison adds `+1.0 µm` to all selected mirror families each
+step (`POISON_OFFSET += per-family loop`), which piles up to ~+200 µm
+by step 200. Real per-step mirror staleness on the `-gpu` path is at
+most ~one monomer (~7e-3 µm/step ≈ 0.007 µm). The +200 µm HIT is
+therefore an over-amplified proxy; we need to ask whether the coupling
+survives at honest physical scale.
+
+### Implementation
+
+Two new env vars, both reuse the existing
+`GPUMoveThing.poisonFrameOnlyMirrors()` hook and the existing family
+selector (`BOA_PHASE45_POISON_FAMILY`):
+
+| env var | effect |
+|---|---|
+| `BOA_PHASE45_POISON_MODE` | `accum` (default; existing behavior) or `fixed` (new — call `refreshHostMirrorsForOutput()` first, then add `POISON_OFFSET` once; net staleness vs truth = exactly `POISON_OFFSET` per step, no accumulation). |
+| `BOA_PHASE45_POISON_OFFSET` | µm offset. Default 1.0 in `accum` mode, 0.01 in `fixed` mode. |
+
+Calling `refreshHostMirrorsForOutput()` every step is the existing
+output-frame refresh; it demand-syncs pose and recomputes all derived
+arrays + Pt3D mirrors from authoritative values. This adds CPU work
+but does not change the device state — the device-resident `coord/
+uVec/yVec` buffers are the source-of-truth and untouched. Calling
+this per step makes the GPU path's host-mirror visibility resemble
+the CPU path's per-`initialize()` cadence.
+
+### Three-point probe + refresh-only control
+
+Single-seed (`-seed 1`), `glidingAssay500_val`, same TornadoVM build.
+The refresh-only control (`mode=fixed offset=0`) was added beyond the
+three required points to disentangle "the offset" from "the per-step
+refresh overhead" — without it, a HIT at `mode=fixed offset=0.01`
+could be attributed to either.
+
+| run | env | bindEvents | mbm | gv |
+|---|---|---|---|---|
+| clean | (no poison) | 482 | 5.14 | 7.15 |
+| **refresh-only control** | `MODE=fixed OFFSET=0` | **677** | **6.69** | **7.97** |
+| **physical-scale probe** | `MODE=fixed` (offset=0.01) | **306** | **2.93** | **5.16** |
+| accumulating positive control | (default mode, offset=1.0) | 127 | 1.04 | 11.51 |
+
+Run logs in `RUN_LOGS/2026-06-05_phase45_partD_physical_scale/`.
+
+### Interpretation
+
+- **Positive control reproduces** (127 ≪ clean ≈ 600–800): the harness
+  still works, the device-side response to a massive accumulated
+  mirror offset is unchanged from prior sweeps.
+- **Refresh-only control = clean band**: `mode=fixed offset=0` lands at
+  677, squarely inside the historical clean baseline range
+  (684–848 from earlier same-seed runs; today's clean=482 is a
+  low-side noise sample). Calling `refreshHostMirrorsForOutput()`
+  every step has no measurable behavior effect on its own. Good —
+  the GPU path's natural between-frame derived-array staleness alone
+  is not a per-step reader.
+- **Physical-scale probe HITs**: against the refresh-only control,
+  adding only a 0.01 µm fixed offset (~one monomer) drops bindEvents
+  from 677 → 306, a **55 % drop** — far outside the documented ±24 %
+  same-seed noise band. mbm drops 6.69 → 2.93 (consistent direction
+  and magnitude). gv shifts down 7.97 → 5.16 (different signature
+  from the accum mode's runaway — accum drove gv *up*).
+
+**The coupling is real at physical scale; the +200 µm HIT was
+magnitude-amplified, not artifactual.**
+
+## Decision
+
+Per the mapping in the Part-D briefing:
+
+| condition | action |
+|---|---|
+| Part 1 gated + Part 2 fixed-mode MISS | pass it by; Phase 4.5 |
+| Part 1 ungated | fix the CPU bug first |
+| **Part 2 fixed-mode HIT** | **real coupling; hunt the device-buffer path before 4.5** |
+
+Part 1: structurally clean (the CPU branch always refreshes).
+Part 2: HIT (55 % bindEvents drop at one-monomer staleness).
+
+**Decision: Phase 4.5 cannot proceed on a pass-it-by basis. The
+device-bound binding input buffers (`filEnd1` / `filEnd2` / `motPos`
+just before `transferToDevice` in `GPUMotorBinding`) are the next
+probe target.** The 9eb494b propagation trace already showed
+`Thing.soaEnd1[]` does not reach the binding kernel's host-side
+geometric inputs — combined with today's confirmed physical-scale
+HIT, that points the search at how stale host-frame mirrors might be
+leaking *into the device pack* rather than via a host reader.
+
+## Files modified
+
+| file | change |
+|---|---|
+| `boxOfActin/GPUMoveThing.java` | Added `POISON_MODE_FIXED` + `POISON_OFFSET` env parsing (`BOA_PHASE45_POISON_MODE`, `BOA_PHASE45_POISON_OFFSET`). In `fixed` mode `poisonFrameOnlyMirrors()` calls `refreshHostMirrorsForOutput()` before applying the offset. Banner now logs mode + offset. No-op when `BOA_PHASE45_POISON` unset. |
+
+## Reproduction
+
+```
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." boxOfActin/*.java *.java
+
+# Clean
+/tmp/p45_run.sh 1 \
+  > RUN_LOGS/2026-06-05_phase45_partD_physical_scale/clean_seed1.log 2>&1
+
+# Positive control (+1 µm accumulating)
+BOA_PHASE45_POISON=1 /tmp/p45_run.sh 1 \
+  > RUN_LOGS/2026-06-05_phase45_partD_physical_scale/accum_1um_seed1.log 2>&1
+
+# Physical-scale probe (+0.01 µm non-accumulating)
+BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed /tmp/p45_run.sh 1 \
+  > RUN_LOGS/2026-06-05_phase45_partD_physical_scale/fixed_0p01um_seed1.log 2>&1
+
+# Refresh-only control (mode=fixed, offset=0)
+BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_MODE=fixed \
+  BOA_PHASE45_POISON_OFFSET=0 /tmp/p45_run.sh 1 \
+  > RUN_LOGS/2026-06-05_phase45_partD_physical_scale/fixed_0um_control_seed1.log 2>&1
+```
+
+## Run logs
+
+`RUN_LOGS/2026-06-05_phase45_partD_physical_scale/`:
+- `clean_seed1.log` — bindEvents=482 mbm=5.14 gv=7.15
+- `accum_1um_seed1.log` — bindEvents=127 mbm=1.04 gv=11.51 (positive control)
+- `fixed_0p01um_seed1.log` — bindEvents=306 mbm=2.93 gv=5.16 (the probe)
+- `fixed_0um_control_seed1.log` — bindEvents=677 mbm=6.69 gv=7.97 (refresh-only control)

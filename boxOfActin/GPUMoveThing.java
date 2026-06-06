@@ -3055,7 +3055,44 @@ public class GPUMoveThing {
     // -------------------------------------------------------------------------
     private static final boolean POISON_FRAME_MIRRORS =
         "1".equals(System.getenv("BOA_PHASE45_POISON"));
-    private static final float POISON_OFFSET = 1.0f;
+
+    // Mode selector (2026-06-05 Part 2 — physical-scale probe).
+    //   "accum" (default) — existing behavior: each step += POISON_OFFSET, so
+    //                       the offset piles up unboundedly between output frames.
+    //                       Useful as a positive control (massive HIT).
+    //   "fixed"           — physical-scale probe: first refresh all mirrors to
+    //                       their true values (calls refreshHostMirrorsForOutput),
+    //                       then add a single POISON_OFFSET. Net effect each step
+    //                       is exactly DELTA staleness vs truth — never grows.
+    //                       Models the worst-case real per-frame mirror lag
+    //                       (~7e-3 µm). HIT here = the coupling is real at
+    //                       physical scale; MISS = the +200 µm HIT was a
+    //                       magnitude artifact.
+    private static final boolean POISON_MODE_FIXED;
+    private static final float   POISON_OFFSET;
+    static {
+        String rawMode = System.getenv("BOA_PHASE45_POISON_MODE");
+        String mode = (rawMode == null || rawMode.isEmpty()) ? "accum" : rawMode.trim().toLowerCase();
+        POISON_MODE_FIXED = "fixed".equals(mode);
+        // Default offset: 1.0 µm for "accum" (existing behavior); 0.01 µm for
+        // "fixed" (conservative upper bound on real per-step staleness).
+        // BOA_PHASE45_POISON_OFFSET overrides either default.
+        String rawOff = System.getenv("BOA_PHASE45_POISON_OFFSET");
+        float off;
+        if (rawOff == null || rawOff.isEmpty()) {
+            off = POISON_MODE_FIXED ? 0.01f : 1.0f;
+        } else {
+            float parsed;
+            try { parsed = Float.parseFloat(rawOff.trim()); }
+            catch (NumberFormatException nfe) {
+                System.err.println("[PHASE45_POISON_OFFSET] parse error '" + rawOff
+                    + "' — using default");
+                parsed = POISON_MODE_FIXED ? 0.01f : 1.0f;
+            }
+            off = parsed;
+        }
+        POISON_OFFSET = off;
+    }
 
     // Selective-poison family selector (2026-06-05). When BOA_PHASE45_POISON=1
     // is set, BOA_PHASE45_POISON_FAMILY narrows the poison to a single family
@@ -3113,12 +3150,21 @@ public class GPUMoveThing {
     public static void poisonFrameOnlyMirrors() {
         if (!POISON_FRAME_MIRRORS) return;
         if (!poisonBannerPrinted) {
-            System.err.printf("[PHASE45_POISON] armed; family=%s (soaEnds=%b bindTip=%b rangesScalar=%b rangesEndpt=%b zvecTransx=%b)%n",
+            System.err.printf("[PHASE45_POISON] armed; mode=%s offset=%.5f family=%s (soaEnds=%b bindTip=%b rangesScalar=%b rangesEndpt=%b zvecTransx=%b)%n",
+                POISON_MODE_FIXED ? "fixed" : "accum", POISON_OFFSET,
                 POISON_FAMILY_LABEL, POISON_SOA_ENDS, POISON_BIND_TIP, POISON_RANGES_SCALAR, POISON_RANGES_ENDPT, POISON_ZVEC_TRANSX);
             poisonBannerPrinted = true;
         }
         int tc = Thing.thingCt;
         if (tc <= 0) return;
+
+        // Fixed (non-accumulating) mode: first restore every mirror family to
+        // its truthful value (the same work refreshHostMirrorsForOutput does at
+        // output-frame boundaries), then apply a single POISON_OFFSET. Net
+        // staleness vs truth = exactly POISON_OFFSET each step, no pile-up.
+        if (POISON_MODE_FIXED) {
+            refreshHostMirrorsForOutput();
+        }
 
         float[] e1 = Thing.soaEnd1;
         float[] e2 = Thing.soaEnd2;
