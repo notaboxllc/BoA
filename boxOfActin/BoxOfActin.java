@@ -916,8 +916,10 @@ public class BoxOfActin {
 				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
 				long _fillSoaT0 = (Env.useGPU && GPUMotorBinding.isBindProfileEnabled())
 				                  ? System.nanoTime() : 0L;
+				Phase45Trace.snapshot("2_preFillSoa");
 				MyoMotor.fillSoaArrays();
 				FilSegment.fillSoaArrays();
+				Phase45Trace.snapshot("3_postFillSoa");
 				if (Env.useGPU && GPUMotorBinding.isBindProfileEnabled()) {
 					fillSoaArraysNanos += System.nanoTime() - _fillSoaT0;
 					fillSoaArraysCalls++;
@@ -959,6 +961,7 @@ public class BoxOfActin {
 					waitOnAllThreadSets(Env.motorBindGrid3DStop);
 				}
 				if (Env.useGPU) {
+					Phase45Trace.snapshot("4_preBindingDispatch");
 					GPUMotorBinding.detectBindings();
 				} else {
 					startAllThreadSets(Env.motCollStart);
@@ -1049,6 +1052,7 @@ public class BoxOfActin {
 					// No-op unless BOA_PHASE45_POISON=1. refresh restores
 					// before any output-frame dispatch.
 					GPUMoveThing.poisonFrameOnlyMirrors();
+					Phase45Trace.snapshot("1_postPoison");
 				} else {
 					startAllThreadSets(Env.moveStart);
 					waitOnAllThreadSets(Env.moveStop);

@@ -735,3 +735,253 @@ That section's hypothesis was wrong.
   — Attempt-1 baseline + poison battery
 - `fix2_baseline_seed1.log`, `fix2_poison_{soaEnds,rangesEndpt,all}_seed1.log`
   — Attempt-2 baseline + poison battery
+
+---
+
+# Phase 4.5 propagation trace — no host-side crossover (2026-06-05)
+
+The two prior fix attempts left the empirical question open. This pass is
+diagnostic only: measure where the +1 µm poison travels at four ordered
+points inside one `doLoop` iteration. No fix. No production behaviour
+change. The trace itself is what's being committed.
+
+## Methodology note (why direct measurement, not refresh-fix outcome)
+
+A "refresh the mirror" fix passes or fails the re-poison test depending on
+where the refresh sits **relative** to the poison injection point and the
+actual reader. The fix-failure of Attempt 1/2 doesn't prove the absence
+of a CPU stale-mirror reader — it proves the refresh wasn't placed where
+the reader sees it. Refresh-fix outcomes are placement-dependent and not
+a clean reader test. **Direct propagation measurement is**: snapshot the
+arrays at ordered points; whichever array first carries the offset, and
+the point at which it appears, localizes the crossover.
+
+## Instrumentation
+
+`boxOfActin/Phase45Trace.java` (new). Env-gated via `BOA_PHASE45_TRACE=1`
+with `BOA_PHASE45_TRACE_START` (default 200) and `BOA_PHASE45_TRACE_STEPS`
+(default 3). At each snapshot point, prints raw values + a `P|.` tag for
+each of four arrays at three representative FilSegment slots:
+
+| array | poisoned-iff test |
+|---|---|
+| `Thing.soaEnd1[b]`        | `\|now − canonE1\| > 0.5 µm` |
+| `Thing.soaCoord[b]`       | `\|now − baselineCoord\| > 0.5 µm` |
+| `Thing.soaUVec[b]`        | `\|now − baselineUVec\| > 0.5 µm` |
+| `FilSegment.soaEnd1X[s]`  | `\|now − canonE1\| > 0.5 µm` |
+
+Baseline = first-snapshot values. `canonE1 = baselineCoord − 0.5·length·
+baselineUVec`. The 0.5 µm threshold sits well above natural per-step
+displacement (~7e-3 µm/step at gliding velocity) and well below the
++1.0 µm poison.
+
+`BoxOfActin.doLoop` carries four `Phase45Trace.snapshot()` calls at the
+ordered points (no other source change).
+
+## Point ordering inside one `doLoop` iteration
+
+Time order: **2 → 3 → 4 → 1**.
+
+| label | location | what should be fresh |
+|---|---|---|
+| `2_preFillSoa`         | before `MyoMotor.fillSoaArrays / FilSegment.fillSoaArrays` | `soaCoord/UVec` just-synced last step's tail; `soaEnd1X` stale from prior step |
+| `3_postFillSoa`        | after `FilSegment.fillSoaArrays`                            | `soaEnd1X` rederived from `soaCoord/UVec` |
+| `4_preBindingDispatch` | before `GPUMotorBinding.detectBindings()`                    | binding pose pack about to read |
+| `1_postPoison`         | after `GPUMoveThing.moveThings() + poisonFrameOnlyMirrors()` | `soaCoord/UVec` just demand-synced; `soaEnd1` just incremented +1 |
+
+## The 4×4 table (seed=1, `soaEnds` poison, slot 0, steps 200/201/202)
+
+Each cell is the maximum-axis deviation in µm from the comparison reference
+(see methodology). `P` = poisoned (`> 0.5 µm`); `.` = clean.
+
+| step | point                | `Thing.soaEnd1` | `Thing.soaCoord` | `Thing.soaUVec` | `FilSegment.soaEnd1X` |
+|---|---|---|---|---|---|
+| 200 | 2 preFillSoa          | P (d=199.75) | . (0.0000) | . (0.0000) | . (0.0029) |
+| 200 | 3 postFillSoa         | P (199.75)   | . (0.0000) | . (0.0000) | . (0.0000) |
+| 200 | 4 preBindingDispatch  | P (199.75)   | . (0.0000) | . (0.0000) | . (0.0000) |
+| 200 | 1 postPoison          | P (200.75)   | . (0.0032) | . (0.0069) | . (0.0000) |
+| 201 | 2 preFillSoa          | P (200.75)   | . (0.0032) | . (0.0069) | . (0.0000) |
+| 201 | 3 postFillSoa         | P (200.75)   | . (0.0032) | . (0.0069) | . (0.0026) |
+| 201 | 4 preBindingDispatch  | P (200.75)   | . (0.0032) | . (0.0069) | . (0.0026) |
+| 201 | 1 postPoison          | P (201.75)   | . (0.0054) | . (0.0008) | . (0.0026) |
+| 202 | 2 preFillSoa          | P (201.75)   | . (0.0054) | . (0.0008) | . (0.0026) |
+| 202 | 3 postFillSoa         | P (201.75)   | . (0.0054) | . (0.0008) | . (0.0055) |
+| 202 | 4 preBindingDispatch  | P (201.75)   | . (0.0054) | . (0.0008) | . (0.0055) |
+| 202 | 1 postPoison          | P (202.75)   | . (0.0043) | . (0.0052) | . (0.0055) |
+
+Reading: `Thing.soaEnd1` carries hundreds of µm of accumulated poison
+(+1 µm/step since step 0; by step 200 it sits at ~+200 µm), and the
+expected +1 µm bump appears between point 4 of step N and point 1 of
+step N (the poison call). Every other array stays in the natural-motion
+noise band (`< 0.014` µm anywhere in the table) at every point.
+
+Slots 1 and 2 in the raw log show the same pattern.
+
+## The crossover site: there isn't one (case (c))
+
+Per the prompt's case decomposition, this falls in case (c): **none of
+`soaCoord`/`soaUVec`/`soaEnd1X` poisoned, yet bindEvents still drops**.
+
+Specifically:
+
+- The poison stays trapped in `Thing.soaEnd1[]` (and the other
+  per-Thing derived arrays `soaEnd2/ZVec/TransXTox` by extension —
+  same code path).
+- No CPU write-back reconstructs `Thing.soaCoord/UVec` from
+  `Thing.soaEnd1` between frames on the GPU gliding path.
+  `FilSegment.fillSoaArrays` recomputes `soaEnd1X` from clean
+  `Thing.soaCoord/UVec` every step (point 3), so the binding kernel's
+  pose pack reads CLEAN endpoints (`FilSegment.soaEnd1X` d ≤ 0.0055 µm
+  across all snapshots).
+- The `setFirstHalf` write-back at `FilSegment.java:843-846`
+  (`setCoord(getEnd1X() + 0.5·length·getUVecX(), …)`) does NOT fire
+  per-step in gliding — it's reachable only via `splitSegment` →
+  biochem length-change events, which were measured at 21 fires total
+  over the entire 10101-step run by Part-A's `DIAG_FILSEG_INIT_CT`
+  (and `splitSegment` is a stricter subset of that).
+- `Thing.recomputeDerivedSoA` is only called per-output-frame via
+  `refreshHostMirrorsForOutput` — and in this `-r` run with no `-3js
+  /-3jsLive`, `ThreeJSWriter.writeFrame()` early-returns at the no-
+  consumer guard (`Env.threeJSOutputDir == null && !LiveFrameServer.
+  isRunning()`), so even the per-100-step refresh doesn't fire. That
+  explains why the table shows `Thing.soaEnd1` accumulating ~+200 µm
+  by step 200 instead of being reset to canonical at step 100.
+
+Therefore the observable shift (`bindEvents -80%`) does NOT propagate
+through `Thing.soaCoord/UVec/length` into the binding kernel's pose
+pack. It must propagate through a **non-geometric** consumer of one of
+the poisoned host mirrors (`Thing.soaEnd1[]`, `Thing.soaEnd2[]`, or a
+derived field).
+
+## What the grep for non-geometric consumers found (and didn't)
+
+Per the prompt's hint ("trace every per-step read of `attachPt`"),
+walked the candidate set:
+
+| candidate per-step reader of poisoned host state | disposition in `-gpu glidingAssay500_val` |
+|---|---|
+| `MyoFilLink.addForces` → reads `attachPt` (which `setAttachment→updatePos` writes from poisoned `mySeg.end1AsPt3D()`) | gated off via `gpuMotorHandled() == true` for every bound motor; `DIAG_UPDATEPOS_FROM_STEP_CT = 0` in the Part-A probe confirms `step()`'s CPU pair never fires. |
+| `MyoFilLink.validateSeg → end1AsPt3D() == null` | result discarded (allocation never null); no behaviour. |
+| `Mesh.fillFilSegMesh` populated bins → `motorFilMeshCollisions` / `filSegMeshCollisions` / `membraneFilMeshCollisions` | `motorFilMeshCollisions` only dispatched on `!Env.useGPU`; `filSegMeshCollisions` gated on `xLinks.isActive()=false`; no membrane in gliding. |
+| `Myosin.applyLeverMotorJointForce` / `applyRodLeverJointForce` (read `end1AsPt3D / end2AsPt3D`) | `myoJoints1` thread only dispatches `jointConstraints()` on the `!gpuPath` branch (`Myosin.java:126-129`); confirmed inert on GPU path. |
+| `MyosinFixed.applyRodFixedPtForce` (reads `myoRod.end1AsPt3D()`) | dispatched via `applyGPUDroppedForces` only when `DIAG_CPU_ANCHOR=true` (default false). |
+| `MyosinDimer.divideAndConquer` joint forces (read `myoRod*.end1AsPt3D/end2AsPt3D`) | no MyosinDimer instances in gliding (`initialMyoMiniFils=false`). |
+| `ProteinNode.applyMyoForce` (reads `curRod.end1AsPt3D()`) | no ProteinNode instances in gliding. |
+| `Crucible.keepMyosinOnSurface / keepMyosinDimerOnSurface` (reads `curRod.end1AsPt3D()`) | `numChamberFixedMyos=0` in gliding (already established 2026-06-05). |
+| `MyoMotor.checkOuterBugCollision` (reads `end1AsPt3D()`) | call site at `MyoMotor.step():183` is commented out. |
+| `GPUMotorBinding.runCP1`'s `grid.fillFilSeg(…end1AsPt3D…)` | Phase 3 CP1 path, only dispatched when `BOA_DIAG_PHASE3_CP1=1` or similar. |
+| `bridgeMotorForceWriteback` | reads device-resident `motorWriteback` FloatArray; no host poisoned input. |
+
+**Every candidate I found by static grep is gated off, inert in this
+workload, or consumes only device-resident state in gliding.** No live
+host-side per-step consumer of `Thing.soaEnd1[]` is identifiable by
+inspection of the source.
+
+This is not a contradiction — `bindEvents` empirically drops ~80% under
+`soaEnds` poison (prior selective-poison runs, `RUN_LOGS/
+2026-06-05_phase45_selective_poison/`). Some path my grep missed reads
+the poisoned host state per step. The miss is in the **survey**, not in
+the trace.
+
+## What this rules out vs leaves open
+
+**Ruled out** (by this trace, with the 4×4 table as the smoking gun):
+
+- A per-step CPU write-back from `Thing.soaEnd1` (or `end1Pt`) into
+  `Thing.soaCoord/UVec/length` (e.g., a `setCoord(getEnd1X()…)` call
+  on the live gliding path). If such a path existed it would show
+  `Thing.soaCoord` poisoned at point 2 or point 3 of subsequent steps;
+  the table shows `Thing.soaCoord` d ≤ 0.0057 µm everywhere.
+- A direct corruption of `FilSegment.soaEnd1X` by anything between
+  `fillSoaArrays` and binding dispatch (points 3 → 4). The table
+  shows zero change in `soaEnd1X` between points 3 and 4 across
+  three steps.
+- The Phase 4.5 device-residency lever as a fix-for-this-bug-only
+  rationale being a guess — **it removes the host pose-pack path
+  entirely**, which makes ANY remaining host-side per-step
+  `Thing.soaEnd1` reader irrelevant to the binding decision. The
+  trace strengthens this: the leak is not via pose data at all, it's
+  via a non-geometric consumer the host pose-pack flow doesn't even
+  touch.
+
+**Still open** (for the planner / jba, not this session's CC):
+
+- Which non-geometric reader fires per step and feeds the +1 µm
+  poison into the binding decision. Candidates the static grep
+  cannot eliminate cheaply: any host-side path that reads a per-
+  Thing `Pt3D` field on a non-FilSegment slot (e.g., a force
+  recipient computed from a poisoned MyoRod / MyoLever / MyoMotor
+  endpoint); or a TornadoVM plan FIRST_EXECUTION buffer fill that
+  consumes a poisoned host array on plan rebuild (11 rebuilds in
+  10101 steps, per Part-2 binding profile) and leaves the device
+  state poisoned until the next rebuild.
+
+The cheapest next probe is dynamic, not static: instrument the
+binding kernel inputs (the `motPos / motDir / filEnd1 / filEnd2`
+host FloatArrays just before `transferToDevice` fires) with a
+poison-vs-baseline diff. If those FloatArrays show >0.5 µm
+deviation under `BOA_PHASE45_POISON=1`, the leak is in the binding
+pack itself (which my static grep claims reads only
+`MyoMotor.soaX/Y/Z` and `FilSegment.soaEnd1X/Y/Z` — both clean per
+this trace). If they don't, the leak is via forces on the move
+plan: check the `forceSum` host FloatArray (or its device
+EVERY_EXECUTION upload) for poison.
+
+## Decision input for the planner
+
+The 4×4 table closes a key question for the **Phase 4.5 fork** in the
+prompt's "after this" section:
+
+> **(A)** interim fix — cut or feed-fresh the write-back / redirect the
+> reader → clean re-gate; or
+> **(B)** go straight to **Phase 4.5** (binding reads the resident
+> device pose, eliminating the host pose-pack path the poison travels).
+
+Option (A) is misnamed — there's no write-back to cut. The leak is via
+a non-geometric consumer of `Thing.soaEnd1` (case (c)). A localized
+"refresh the mirror" fix would have to identify and patch the actual
+reader (which the survey did not produce). The fix attempts to date
+have all been refresh attempts; they've failed because the leak isn't
+a geometric crossover.
+
+Option (B) makes the host `Thing.soaEnd1` mirror irrelevant to the
+binding decision by definition. Whether the still-unidentified non-
+geometric reader survives Phase 4.5 depends on what it does — if it
+applies a host-side force on motors, it'll still leak; if it's just a
+diagnostic write, it'll become inert. The trace doesn't decide that
+question; only finding the reader does.
+
+## Files modified
+
+| file | change |
+|---|---|
+| `boxOfActin/Phase45Trace.java` | New. Env-gated trace helper with one `snapshot(String)` entrypoint. No-op when `BOA_PHASE45_TRACE` unset. |
+| `boxOfActin/BoxOfActin.java`   | Four `Phase45Trace.snapshot()` calls at points 2/3/4/1 in `doLoop`. No-op when trace disabled. |
+
+Both kept committed. Trace adds 4 method calls per step; when disabled,
+each call returns at the first env-var check (one branch + one boolean
+field read).
+
+## Reproduction
+
+```
+TDIR="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado"
+javac -g --release 21 --enable-preview -XDignore.symbol.file \
+      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." boxOfActin/*.java *.java
+
+BOA_PHASE45_POISON=1 BOA_PHASE45_POISON_FAMILY=soaEnds \
+BOA_PHASE45_TRACE=1 BOA_PHASE45_TRACE_START=200 BOA_PHASE45_TRACE_STEPS=3 \
+/tmp/p45_run.sh 1 \
+  > RUN_LOGS/2026-06-05_phase45_trace/trace_soaEnds_seed1.log 2>&1
+```
+
+The run can be `kill`'d once `grep -c PHASE45_TRACE` shows 12 lines —
+the trace finishes early in the run.
+
+## Run logs
+
+`RUN_LOGS/2026-06-05_phase45_trace/`:
+- `trace_soaEnds_seed1.log` — 12-line trace + run preamble. Process
+  killed after the 12 trace lines were captured; observables not
+  rerun because the prior selective-poison sweep already established
+  the `soaEnds` family reproduces the ~80% `bindEvents` drop.

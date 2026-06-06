@@ -1,8 +1,102 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-05 (Phase 4.5 Part-A fire-count + Part-C fix-attempt bail-out — stale reader is NOT a CPU end1AsPt3D/end1Pt consumer)
+Last updated: 2026-06-05 (Phase 4.5 propagation trace — no host-side geometric crossover; leak is non-geometric)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-05 — Phase 4.5 propagation trace (no host-side crossover)
+
+**TL;DR.** Built `boxOfActin/Phase45Trace.java` (env-gated diagnostic) +
+four `Phase45Trace.snapshot()` calls in `BoxOfActin.doLoop` at ordered
+points 2/3/4/1 (preFillSoa / postFillSoa / preBindingDispatch /
+postPoison). One probe run, seed=1, `soaEnds` poison, steps 200–202 →
+12-line 4×4 table. Every cell shows `Thing.soaEnd1` poisoned (cumulative
++200 µm by step 200; +1/step) and `Thing.soaCoord`, `Thing.soaUVec`,
+`FilSegment.soaEnd1X` all CLEAN at every point (max-axis deviation
+≤ 0.0057 µm anywhere in the table — in the natural-motion noise band).
+
+**Conclusion: no host-side geometric crossover exists** between the
+poisoned `Thing.soaEnd1[]` and the binding kernel's pose-pack inputs
+(`MyoMotor.soaX/Y/Z`, `FilSegment.soaEnd1X/Y/Z`). The empirical
+~80% `bindEvents` drop must propagate through a **non-geometric**
+consumer (the prompt's case (c)). Static grep of every per-step
+host-side reader of `Thing.soaEnd1` / `end1AsPt3D` / `getEnd1*` that
+could plausibly feed a force into a motor on the gliding GPU path
+returns ZERO live readers — every candidate is gated off
+(`gpuMotorHandled`, `gpuChainHandled`, `gpuBoundaryHandled`,
+`DIAG_CPU_ANCHOR=false`, `numChamberFixedMyos=0`, `xLinks=off`,
+`!Env.useGPU`-gated, no ProteinNode, no MyosinDimer, commented-out
+call) or consumes only device-resident state. The miss is in the
+**survey**, not in the trace.
+
+**Methodology note (the prompt's main ask):** refresh-fix pass/fail
+under re-poison is **placement-dependent** between the poison
+injection and the actual reader, NOT a clean reader test. The two
+prior attempts ("refresh in `fillSoaArrays`", "`recomputeDerivedSoA`
+post-`fillSoaArrays`") both FAILED re-poison, but those failures
+proved only that the refresh wasn't placed where the reader sees it
+— they did not prove the absence of a CPU stale-mirror reader.
+Direct propagation measurement (this trace) is the unambiguous test.
+
+**4×4 table summary (slot 0, full table in `PHASE45_SCOPING.md`):**
+
+| step | point         | soaEnd1   | soaCoord | soaUVec | soaEnd1X |
+|---:  |---            |---        |---       |---      |---       |
+| 200  | 2 preFillSoa  | P(d=199.75) | . | . | . |
+| 200  | 3 postFillSoa | P(199.75) | . | . | . |
+| 200  | 4 preBinding  | P(199.75) | . | . | . |
+| 200  | 1 postPoison  | P(200.75) | . | . | . |
+| 201  | 2/3/4         | P(200.75) | . | . | . |
+| 201  | 1 postPoison  | P(201.75) | . | . | . |
+| 202  | 2/3/4         | P(201.75) | . | . | . |
+| 202  | 1 postPoison  | P(202.75) | . | . | . |
+
+`P` = `|now − canonE1| > 0.5 µm` (or `> 0.5 µm` vs baseline for
+`soaCoord`/`soaUVec`); `.` = clean.
+
+**Decision input for the planner (re. the "after this" fork in the
+prompt):**
+
+- Option (A) "interim fix — cut the write-back" is misnamed; there
+  is no host write-back from `soaEnd1` to `soaCoord/UVec/length`
+  to cut. The prior two refresh attempts validated this empirically
+  by failing.
+- Option (B) "go straight to Phase 4.5" makes the host
+  `Thing.soaEnd1` mirror IRRELEVANT to the binding decision by
+  definition. Whether the still-unidentified non-geometric reader
+  survives Phase 4.5 depends on what it does (host-side force on
+  motors → still leaks; diagnostic-only write → becomes inert).
+  The trace doesn't decide that; finding the actual reader does.
+- Cheapest next probe is dynamic, not static: instrument the
+  binding kernel input FloatArrays (`motPos / filEnd1 / filEnd2`)
+  with a poison-vs-baseline diff just before `transferToDevice`.
+  >0.5 µm deviation = leak is in the binding pack. No deviation =
+  leak is via forces on the move plan (check the `forceSum`
+  EVERY_EXECUTION upload).
+
+**Files committed (kept):**
+
+- `boxOfActin/Phase45Trace.java` — new (env-gated diagnostic).
+- `boxOfActin/BoxOfActin.java` — four `Phase45Trace.snapshot()`
+  calls (no-op when `BOA_PHASE45_TRACE` unset).
+- `PHASE45_SCOPING.md` — full 4×4 table, methodology note, named
+  rule-outs, candidate ruled-out grep table, decision input.
+- `RUN_LOGS/2026-06-05_phase45_trace/trace_soaEnds_seed1.log` —
+  the trace.
+
+**Open at end of session (for next CC / planner):**
+
+1. Identify which non-geometric per-step path reads `Thing.soaEnd1`
+   (or another poisoned host array) and influences the binding
+   decision. Static grep does not produce a candidate. Dynamic
+   probe of `motPos/filEnd1/filEnd2` host arrays before upload is
+   the proposed next step.
+2. The Attempt-1 catastrophic `rangesEndpt=1` interaction (writing
+   fresh `fs.end1Pt` every step makes `rangesEndpt` poison MORE
+   effective rather than less) remains unexplained. Likely a clue
+   to the actual reader but not pursued this session.
+
+---
 
 ## 2026-06-05 — Phase 4.5 Part-A fire-count + Part-C fix-attempt bail-out
 
