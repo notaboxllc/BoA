@@ -1,8 +1,27 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (Phase 4.5 frozen-pose kernel-parity check — {kernel-math-correct})
+Last updated: 2026-06-06 (Plan-invariant buffers — Step 1 survey — `{small-fix}`)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Plan-invariant buffers Step-1 survey — `{small-fix}` verdict
+
+Survey-only pass for the deferred Part-2 refactor. Findings appended to
+`PLAN_INVARIANT_BUFFERS.md` §"Survey findings (2026-06-06)" with Q1–Q5
+answers. Scope verdict: `{small-fix}` — the move-plan device pose buffers
+do not grow during a normal `glidingAssay500_val` run (0 capGrow events /
+10101 steps in the Part-1 baseline log; 2× initial headroom holds for the
+run). `MyoMotor.soaX` / `FilSegment.soaEnd1X` are statically fixed at 500K
+/ 1M and never grow. The 11 topoDirty rebuilds at startup are same-sized
+reallocations whose sole effect is forcing a fresh FIRST_EXECUTION upload.
+Re-upload path: Option 1 (EVERY_EXECUTION on pose buffers) — Q3 confirms
+`demandSyncPoseToHost` runs unconditionally every step from inside
+`moveThings()`, so host pose is authoritative every step and the upload is
+clobber-safe; Q5 re-confirms Part 2's finding that 4.0.1-dev exposes no
+dirty-slice / runtime `transferToDevice` primitive (Option 2 is unavailable
+without a plan rebuild). No new masking surface needed — kernels already
+short-circuit on `m >= N` / slot < 0 (Q4). Stable `Thing.thingInstanceId`
+is already in place (Q2). No code edits this session.
 
 ## 2026-06-06 — Phase 4.5 frozen-pose kernel-parity check — resident-pose bind kernel verified
 
