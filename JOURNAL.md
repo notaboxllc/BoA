@@ -1,8 +1,19 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (Phase 4.5 small-fix landed — separate-plan resident bind)
+Last updated: 2026-06-06 (float32 binding systematic + binding scheme reference filed)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — float32 binding systematic + binding scheme reference filed
+
+`MYOSIN_VALIDATION.md` gains a "float32 binding systematic" note (CPU-double vs
+GPU-float32 +22% bindEvents observed Phase 4.5, deferred reconciliation) and a
+"Binding scheme reference" subsection documenting the capture test (`myoColTol`,
+no stochastic accept/reject), the tip-computation sites on both paths
+(`MyoMotor.fillSoaArrays` + `checkFilSegCollision` vs `bindKernelResident`), the
+tuning knobs, and the specific CPU sites to drop to float32 (`MyoMotor.java:42-44`
++ `:431-453`) — separable from the double-precision Langevin integrator.
+Docs only, no code changes.
 
 ## 2026-06-06 — Phase 4.5 small-fix landed — separate-plan resident bind (merge bailed)
 

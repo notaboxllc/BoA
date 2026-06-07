@@ -256,3 +256,212 @@ law that `dissociateADP` uses via `forceDotFilTrack.averageVal()` is
 the new release law would also need to apply to the existing tracker (or the
 new law would replace it). Any future principled rewrite of the release-rate
 law should subsume both code paths simultaneously.
+
+## float32 binding systematic (CPU-double vs GPU-float32) — observed, deferred
+
+Observation (Phase 4.5, seeds 1–4): the resident GPU bind path produces ~+22% bindEvents
+vs the retired CPU/double host-pack, uniform-positive across seeds (t≈2.5). Gliding velocity
+preserved within 3%. Mechanism: GPU derives the motor tip (coord + 0.5·motorLen·uVec) from
+float32 pose on-device; the host path computed it in double. At the capture-tolerance
+threshold, float32 tips cross slightly more often, biasing the count upward.
+
+Interpretation: NOT a precision error against ground truth. The binding rule (thermal
+exploration under a coarse timestep + stochastic accept/reject against a capture tolerance)
+is a lumped-parameter scheme calibrated to approximate biology. Double is not "the true
+signal," only one realization. CPU-double and GPU-float32 are two equally-valid
+approximations differing at the threshold.
+
+Resolution (deferred): make both paths float32 so they agree, then calibrate the unified
+binding behavior to experiment via the capture-tolerance / acceptance knob once suitable
+experimental binding/kinetics data exists. Scope: confine the float32 reconciliation to the
+binding DECISION (CPU tip/threshold computed from float32 pose, mirroring the GPU); leave the
+CPU double-precision Langevin integration untouched to protect the persistence-length /
+deflection calibration (BTransCoeff/BRotCoeff, fracMove/fracR/fracMoveTorq).
+
+Status: not blocking gliding-velocity validation (gv holds). Revisit when force-velocity /
+phalloidin biological runs that depend on binding kinetics begin.
+
+### Binding scheme reference
+
+What the code actually does, with file:line citations — so the unify-and-calibrate work
+can start here without re-reading the code from scratch.
+
+#### 1. Capture test (geometry)
+
+**Per-pair criterion**, applied to every (motor, candidate-seg) pair returned by the spatial
+grid (CPU) or the 27-cell device-grid walk (GPU). The pair binds iff ALL of:
+
+1. **Motor-axis vs filament-axis alignment** — `dot(motUVec, filUVec) ≥ myoMotorAlignWithFilTolerance`
+   (default `-0.4` cos(rad), `Env.java:718`).
+2. **Rod-axis vs filament-axis sign gate** — `dot(rodUVec, filUVec) ≥ 0` (motor approaches the
+   barbed end with the right handedness).
+3. **End2 nodal exclusion** — `FilSegment.soaNodeAtEnd2[s]` must be false (a seg whose end2 is
+   tethered to a node is excluded — formin-bound filaments etc.).
+4. **Tip-to-segment perpendicular distance** — compute α = projection of (tip − end1) onto
+   (end2 − end1), require `0 ≤ α ≤ 1` AND `|tip − (end1 + α·r1)|² < myoColTol²`.
+
+**The capture-tolerance parameter is `Env.myoColTol`**, default `0.006 µm` =
+`myoColTol_init` (`Env.java:742-743`). This is THE primary knob that controls bind rate via
+the geometric criterion.
+
+CPU implementation: `MyoMotor.checkFilSegCollision(int motorId, int filId)`
+(`MyoMotor.java:417-459`), all arithmetic in `double`. The narrow-phase math:
+
+- Read `FilSegment.soaUX/Y/Z`, `soaEnd1X/Y/Z`, `soaEnd2X/Y/Z`, `soaNodeAtEnd2`
+  (`MyoMotor.java:419-436`).
+- Read `MyoMotor.soaX/Y/Z` (= **the precomputed motor tip**, set in
+  `MyoMotor.fillSoaArrays`; see §3 below).
+- Compute α = numer/denom, clamp 0 ≤ α ≤ 1, compute closest-point distance squared
+  `conDistSq`, compare against `myoColTol²` (`MyoMotor.java:443-453`).
+- On hit: `arcOnFil = α · sqrt(denom)`, fire `ontoFilament(seg, arcOnFil)`
+  (`MyoMotor.java:457-458`).
+
+GPU resident kernel: `GPUMotorBinding.bindKernelResident` (`GPUMotorBinding.java:607-755`),
+all arithmetic in `float32`. Same algebra, with the algebraic simplification that the on-device
+`uVec` is unit so `denom = length²` and `arcOnFil = α·length` directly (no sqrt)
+(`GPUMotorBinding.java:713-743`).
+
+The CPU pre-filter that broadens to the 27 grid cells lives in
+`MotorBindGrid3D.motorFilCollisions` (`MotorBindGrid3D.java:241-266`); the GPU equivalent is
+the cell-walk inside `bindKernelResident` (`GPUMotorBinding.java:678-693`).
+
+#### 2. Stochastic accept/reject — there isn't one
+
+**The bind decision is purely geometric.** There is NO probabilistic acceptance on top of the
+distance test — no rate·dt, no Boltzmann factor, no RNG draw at bind time. A grep for
+`Random`/`nextDouble`/`mtRNG` across `MyoMotor.checkFilSegCollision` /
+`bindKernelResident` / `MotorBindGrid3D.motorFilCollisions` finds none. The
+KERNEL_ID comment block in `GPUMotorBinding.java:52-54` confirms: "Slot reserved; this kernel
+does not consume RNG."
+
+Two non-RNG gates supplement the geometry inside `MyoMotor.ontoFilament`
+(`MyoMotor.java:488-495`):
+
+- **Already-bound rejection** — `if (onFil) return;` (a motor can only attach to one seg at a
+  time).
+- **Rebind-cooldown timer** — `if (bindTimer < Env.myoRebindTime.getValue()) return;`. `bindTimer`
+  is reset to 0 on release (`MyoFilLink.java:286`), advanced by `Env.deltaT` each call to
+  `MyoMotor.step()` (`MyoMotor.java:179`). The default cooldown is `myoRebindTime_init = 1e-5 s`
+  (= 1 sim step at the validation `deltaT`, `Env.java:745-746`).
+
+Effective on-rate is implicit: each step, every free-and-not-on-cooldown motor that has at
+least one geometrically-eligible candidate within `myoColTol` binds to it (the kernel returns
+the **first** hit in the 27-cell walk; see `found >= 0 && break` in
+`GPUMotorBinding.java:744-745`). So the per-step bind probability is effectively 1 conditional
+on (i) motor free, (ii) motor off cooldown, (iii) `myoColTol`-disk overlap with some valid seg
+in the 27-neighbour cells. The rate is tuned via the capture geometry (myoColTol) and the
+cooldown.
+
+RNG **does** drive the surrounding kinetics — nucleotide cycle and unbinding — but not the
+bind decision itself:
+
+- ATP/ADPPi/ADP transitions: `MyoMotor.checkATPstate` (`MyoMotor.java:204-271`), each
+  transition gated by `myPRNG.nextDouble() < rate·deltaT`.
+- Release: catch/slip law in `MyoFilLink.dissociateADP` (`MyoFilLink.java:318-326` and
+  related), `forceDotFilTrack.averageVal()`-conditioned, `myPRNG.nextDouble()`-fired.
+
+#### 3. Tip computation — both paths, side-by-side
+
+The motor "tip" is the binding-business-end of the motor: `coord + 0.5·motorLength·uVec`.
+
+**CPU (double)** — `MyoMotor.fillSoaArrays` (`MyoMotor.java:22-55`). Every step on the
+non-`-gpu` path (after Phase 4.5 the CPU-path is also gated on `!Env.useGPU` in
+`BoxOfActin.doLoop:951-960`):
+
+```java
+final double halfLen = 0.5 * Env.myoMotorLength.getValue();
+// ...
+final double cx = soaCoordArr[b];   // Thing.soaCoord is float32 mirror
+final double cy = soaCoordArr[b + 1];
+// ...
+soaX[i] = cx + halfLen * ux;   // soaX is double[]; arithmetic in double
+soaY[i] = cy + halfLen * uy;
+soaZ[i] = cz + halfLen * uz;
+```
+
+Note the host already widens the float32 `Thing.soaCoord` mirror to `double` at the read,
+then performs the `+ halfLen·u` operation in `double`, and stores into the `double[]
+soaX/Y/Z` cache. `checkFilSegCollision` (above) reads `soaX/Y/Z` (double) and computes
+α, conDistSq, comparison against `myoColTol²` — all in `double`.
+
+**GPU (float32)** — `GPUMotorBinding.bindKernelResident` (`GPUMotorBinding.java:651-664`).
+On-device, every dispatch:
+
+```java
+float mcx = coord.get(mSlot * 3);          // FloatArray, host-side already float32
+float mcy = coord.get(mSlot * 3 + 1);
+float mcz = coord.get(mSlot * 3 + 2);
+float mux = uVec.get(mSlot * 3);
+// ...
+float mx = mcx + halfMotorLen * mux;       // float arithmetic
+float my = mcy + halfMotorLen * muy;
+float mz = mcz + halfMotorLen * muz;
+```
+
+`halfMotorLen` is `0.5f · gridParams[7]` (`GPUMotorBinding.java:633`), itself uploaded as
+`(float)Env.myoMotorLength.getValue()` at plan-build time (`GPUMotorBinding.java:1099`).
+All subsequent α / conDistSq / `myoColTolSq` math is also `float`.
+
+#### 4. Tuning knobs (what jba would calibrate against experimental data)
+
+| parameter | default | sets | location |
+|---|---|---|---|
+| `myoColTol` | `0.006 µm` | capture tolerance (perpendicular distance threshold) | `Env.java:742-743` |
+| `myoMotorAlignWithFilTolerance` | `-0.4` cos(rad) | motor-axis alignment gate | `Env.java:718` |
+| `myoRebindTime` | `1e-5 s` | post-release rebind cooldown | `Env.java:745-746` |
+| `myoMotorLength` | `0.020 µm` | motor head length (sets the tip offset) | `Env.java:716` |
+
+`myoColTol` is the dominant knob for bind rate — quadratic in the per-pair acceptance disk
+area, and linear in the broad-phase candidate count (since the grid cell width is
+~`CELL_SIZE = 0.2 µm`, several `myoColTol`-disk diameters fit per cell). Calibration of bind
+rate against experimental kinetics would tune this against a reference dataset.
+
+#### 5. Reconciliation point (the specific CPU site to drop to float32)
+
+To remove the +22% CPU-vs-GPU divergence, narrow the float32 conversion to the binding
+decision and ONLY the binding decision. The CPU sites to convert (Langevin integration stays
+double):
+
+- **A. Motor tip computation in `MyoMotor.fillSoaArrays`** (`MyoMotor.java:42-44`):
+
+  ```java
+  soaX[i] = cx + halfLen * ux;   // currently double; mirror the GPU by computing in float
+  soaY[i] = cy + halfLen * uy;
+  soaZ[i] = cz + halfLen * uz;
+  ```
+
+  Either cast inputs to `float`, do the add+multiply in `float`, then store back into the
+  `double[]` arrays (`soaX/Y/Z[i] = (double)((float)cx + (float)halfLen * (float)ux)`), OR
+  introduce a parallel `float[] soaXf/Yf/Zf` that `checkFilSegCollision` reads instead. The
+  second is cleaner if other CPU consumers of `soaX/Y/Z` (audit needed) benefit from the
+  double precision elsewhere.
+
+- **B. The four arithmetic blocks in `MyoMotor.checkFilSegCollision`** that compute the
+  distance test (`MyoMotor.java:431-453`):
+
+  - r1 = end2 − end1, denom = |r1|² (lines 434-444)
+  - r2 = tip − end1, numer = r2·r1, α = numer/denom (lines 440-445)
+  - cp = end1 + α·r1; d = cp − tip; `conDistSq = |d|²` (lines 447-451)
+  - threshold compare: `conDistSq >= myoColTol²` (line 452-453)
+
+  Convert each to `float` arithmetic, mirroring the GPU kernel. Read sites: the seg endpoints
+  `FilSegment.soaEnd1X/Y/Z` and `soaEnd2X/Y/Z` are already `float[]` — the widening to
+  `double` (`MyoMotor.java:431-436`) is the explicit cast site that would simply drop.
+
+- **C. `arcOnFil` simplification** (`MyoMotor.java:457`): change `α · Math.sqrt(denom)` to
+  `α · length` (where `length` = `FilSegment.soaLength[filId]` cast to float), matching the
+  GPU's `alpha · len` formulation (`GPUMotorBinding.java:743`).
+
+Separability from the Langevin integrator: the Langevin step lives in `Thing.moveThing` /
+`FilSegment` chain forces / Brownian — none of these read `MyoMotor.soaX/Y/Z` or call
+`checkFilSegCollision`. The bind path consumes `soaX/Y/Z` exclusively (grep:
+`MotorBindGrid3D.fillMotor` reads `bindTip` Pt3D, `motorFilCollisions` reads `soaX/Y/Z`, and
+the GPU bind path reads them via the bind plan's EVERY_EXECUTION upload of the same caches).
+So a localized float32 conversion of (A) and (B) leaves the persistence-length /
+deflection calibration (`BTransCoeff`/`BRotCoeff`/`fracMove`/`fracR`/`fracMoveTorq`)
+completely untouched — those knobs feed `moveThing`, `chainPairForces`, `boundaryBox`,
+not the bind path.
+
+After the conversion, the CPU-double residual that fed the historical pad-fix calibration
+(`MYOSIN_VALIDATION.md` §earlier entries) disappears at the binding boundary; calibration
+of the unified float32 bind rate becomes the next step.
