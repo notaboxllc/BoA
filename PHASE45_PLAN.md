@@ -530,3 +530,110 @@ references stay valid for the entire run.
 The measurement matches the persistent-buffer hypothesis. Proceeding to
 Part 2: rebuild-invariant lifecycle. This also pays a separate dividend
 at HEAD by removing 11 unnecessary plan-rebuild cycles at startup.
+
+---
+
+## Part 2 — design exploration + bail-out (2026-06-06)
+
+### What was investigated
+
+1. **Reuse Java FloatArray identities across rebuilds** — easy edit
+   (allocate-once + ITG snapshot references the same FloatArrays each
+   rebuild). Self-evidently correct on memory accounting.
+2. **Eliminate the topology-dirty close+rebuild** — the rest of the
+   prompt's Part-2 proposal. Examined the load-bearing role of
+   `closePlan` in the current biochem propagation path.
+
+### Why "keep buffers warm across topology dirty" is not a drop-in
+
+The current plan rebuild is **load-bearing for correctness**, not just a
+memory-management nicety. Specifically:
+
+- `coord`/`uVec`/`yVec`/`soaLengthArr` are `FIRST_EXECUTION` host→device
+  + `UNDER_DEMAND` device→host (the Phase-4 flip).
+- The move kernel writes new pose to `coord/uVec/yVec` **on device**
+  every step; the host only sees a snapshot via `demandSyncPoseToHost()`.
+- On biochem poly/depoly, `FilSegment.biochemStep` mutates host
+  `Thing.soaCoord` and `Thing.soaLength` (via the canonical-pose path),
+  then calls `GPUMoveThing.markTopologyDirty()`.
+- The mutated host data needs to **reach the device** before the next
+  kernel run, or the move + chain kernels read stale pose. The current
+  mechanism is: dirty → `closePlan` + `allocateAndBuildPlan` → new
+  TaskGraph → next execute does a fresh FIRST_EXECUTION upload that
+  picks up the new values.
+
+If we skip the close+rebuild, FIRST_EXECUTION's "upload once" contract
+means subsequent host writes via `coord.set(...)` are not seen by the
+device. Physics silently uses stale pose at biochem cycles.
+
+Three remedies, none drop-in:
+
+1. **Switch pose to EVERY_EXECUTION.** Adds ~3 MB host→device per step
+   (~3.8 s over a 10101-step run; ~3% wall-clock cost). Has to coexist
+   with the existing `UNDER_DEMAND` device→host pull; may force a
+   coherent EVERY_EXECUTION on the device→host side too (which then
+   doubles the PCIe). Also conceptually undoes the Phase-4 flip's "pose
+   is device-resident" claim.
+2. **Multi-graph uploader sub-plan.** Add a second TaskGraph in the
+   same TornadoExecutionPlan whose only job is `transferToDevice(
+   EVERY_EXECUTION, coord, uVec, ...)` + a noop kernel. On dirty, dispatch
+   that graph once before the main chained graph. Requires merged
+   executor — the very pattern that produced the Part-1 OOM. Pre-Part-3,
+   this would smoke-test whether the OOM is from the merge **itself** vs
+   the `consumeFromDevice` handoff specifically.
+3. **Force-upload API on a per-buffer basis.** TornadoVM 4.0.1-dev's
+   public `TornadoExecutionPlan` API (verified via `javap`) exposes
+   `execute / withGraph / withGridScheduler / freeDeviceMemory /
+   resetDevice / withMemoryLimit / mapOnDeviceMemoryRegion /
+   getCurrentDeviceMemoryUsage` and a handful of profiler/device toggles
+   — no `transferToDevice` runtime method. `freeDeviceMemory()` would
+   work (next execute re-uploads everything) but throws out the
+   intermediate device-resident state.
+
+### Decision: bail Part 2 implementation in this session
+
+The three remedies each carry meaningful risk or scope expansion:
+
+- (1) compromises Phase 4's residency claim and needs careful PCIe
+  bookkeeping
+- (2) requires the merged-executor pattern that produced the OOM in the
+  first place — we can't validate the persistent-buffer fix until we
+  also disambiguate "merge breaks" from "consumeFromDevice breaks", and
+  doing both at once is what the prompt's Part-3 is for
+- (3) is barely better than the current close+rebuild
+
+The prompt's framing — "make the plan rebuild-invariant" — under-
+specifies how the biochem propagation gets re-routed. A faithful
+implementation needs an architectural decision (which of the three
+above; or a new approach) and probably a TornadoVM API discussion
+upstream. None of those fit a single-session deliverable.
+
+Bailing per the prompt's "bail-out: leave the branch clean, commit a
+'stopped at step N + why' note." Part 1 (instrumentation + measurement
++ documented mechanism) is landed. Part 2 not started in code; only this
+design analysis. Parts 3-4 are blocked on Part 2.
+
+### What a future session has
+
+- Branch `phase45-binding-residency` at commit `7fccc2e` with:
+  - Step-A slot maps (`bb87816`) — populated by `classifyThings`.
+  - Part-1 instrumentation: `BOA_PHASE45_MEM_TRACE=1` traces
+    rebuild memory at every close + build site + every 500 steps.
+    Helper accessors: `GPUMoveThing.memUsage(plan)`,
+    `GPUMoveThing.memTrace(tag)`,
+    `GPUMotorBinding.peekDeviceMemoryUsage()`.
+  - HEAD baseline log
+    (`RUN_LOGS/2026-06-06_phase45_p1_baseline/head_4gb_seed1.log`)
+    proving HEAD's separate-plan architecture is leak-free.
+- A clear mechanism diagnosis (this document) and three concrete
+  alternative architectures, with named tradeoffs.
+- The existing crash logs in `RUN_LOGS/2026-06-06_phase45_b2/` now
+  correctly re-interpreted — the 11 rebuilds are startup spawns, not
+  biochem cycles; 4 GB OOMs during the burst, 8 GB after.
+
+### Final status
+
+`{bailed-at-Part-2-design}`. Branch `phase45-binding-residency`; last
+commit on branch: `7fccc2e` (Part-1 instrumentation + baseline + plan
+doc). No untracked working-tree changes. Ready for a follow-up session
+to pick one of the three remedies above.

@@ -111,3 +111,69 @@ Sim. time=00.03....~49.13 minutes computation to simulate 1 sec, run finished in
 Sim. time=00.04....~48.96 minutes computation to simulate 1 sec, run finished in ~00.05 hours
 [GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
 [MEM] tag=periodic rebuildIdx=11 step=4500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=5000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.05....~48.93 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=5500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=6000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.06....~49.35 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=6500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=7000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.07....~49.05 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=7500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=8000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.08....~48.97 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=8500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=9000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.09....~48.94 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=9500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=10000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.10....~49.09 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=914
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=111056
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=914
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=78141
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=21
+[STATS] motorInitFireCt=14000
+[STATS] meanBoundMotors=7.739
+[STATS] gpuMotorBinding total=88.815s calls=10101 pack=1.235s gridPack=0.000s exec=86.985s unpack=0.511s
+[STATS] gpuMoveThing total=61.746s calls=10101 slotPack=13.366s jointPack=10.374s exec=22.025s unpack=15.968s
+[STATS] gpuMoveThing demandSyncPose=13.080s(calls=10101) demandSyncDerived=0.000s(calls=0) planRebuild=11
+[STATS] glidingVelocity=8.8318
+ThingStep Threads took 52.490000 seconds.
+ThingBrownian Threads took 9.944000 seconds.
+Myosin Threads took 9.162000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 20.058000 seconds.
+Ck Mesh Threads took 8.410000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!
