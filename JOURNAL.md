@@ -69,8 +69,8 @@ stericHindrance readers to consume device-resident pose, or
 distinguishing the per-step "neighbour-read" path from the output-
 frame path so demand-sync moves to the latter only.
 
-Commits: code+docs `TBD`; journal `TBD`. Branch only; jba reviews
-before merge.
+Commits: code+docs+logs `7a509c4`; hash-record commit `TBD`.
+Branch only; jba reviews before merge.
 
 ## 2026-06-07 — Step 2: resident pose + delta-scatter (branch only)
 

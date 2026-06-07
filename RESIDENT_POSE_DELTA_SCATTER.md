@@ -585,8 +585,8 @@ slotCap 588204, 1101 calls). A/B same seed:
 
 ### Status
 
-**landed-on-branch.** Branch `probe/scatter-resident`, base commit
-`299d7c0`. All 3.1 / 3.2 / 3.3 gates passed:
+**landed-on-branch.** Branch `probe/scatter-resident`, code+docs
+commit `7a509c4` (base `299d7c0`). All 3.1 / 3.2 / 3.3 gates passed:
 - 3.1 feasibility: no OOM, single-graph bind reads device pose,
   bind/gv parity within noise (A/B on same seed).
 - 3.2 inventory: bind plan upload retired, OP_PACK_FULL dependence
