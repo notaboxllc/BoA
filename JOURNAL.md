@@ -1,8 +1,60 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (scatter-into-resident probe — feasible)
+Last updated: 2026-06-07 (Step 2 — resident pose + delta-scatter landed on branch)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — Step 2: resident pose + delta-scatter (branch only)
+
+Branch `probe/scatter-resident` (base `3df21c9`). Restores Phase-4's
+FIRST_EXECUTION coord/uVec/yVec/soaLengthArr in the chained move plan;
+4.5's EVERY_EXECUTION pose flip is undone for the move plan (the
+separate bind plan still uploads its own host-side pose copy — that
+retires in Step 3). Per-step host-side mutations (biochem poly/depoly,
+splits, creation, removeThing-swap) are delivered via a small
+EVERY_EXECUTION delta (idx+coord+uVec+yVec+length, cap=4096) consumed by
+a `scatterPose` task declared FIRST in the chained graph.
+
+Dirty-set audit confirmed every host pose-writer is captured: explicit
+`markPoseDirty(this)` from biochem `lengthChanged` + splitSegment in
+`FilSegment.biochemStep`; everything else (creations from
+`spawnNodeFilaments`/`bespokeNodeFilament`/ActA + removeThing's
+swap-compaction survivor) is auto-detected by a slot-change scan in
+`buildDeltaSet` after `classifyThings`. The benchmark-pin path
+(`applyBenchmarkPins`, `-bm*` only) is flagged as not-on-production —
+would need an explicit mark if benchmark-mode is ever run with `-gpu`.
+
+**Gates** (all PASS):
+- **2.1 probe**: `glidingAssay500_val` seed=1 GPU — bindEvents=792,
+  gv=7.94, `poseDelta sum=20 max=2 overflow=0 fresh=1 planRebuild=1`.
+  Within Phase 4.5 baseline noise; scatter mechanic exercised; no NaN/escape.
+- **2.2 N=4 paired-t** vs Phase 4.5 (pad_fix resident): bindEvents
+  `t=+0.67` (Δ=+34.5±103.6, sign-scatter 1neg/3pos); gv `t=-1.17`
+  (Δ=-0.158±0.269, sign-scatter 3neg/1pos). Both `|t| ≤ 1.17` —
+  well within the prompt's `|t| ≲ 1-2` criterion.
+- **2.2 dense smoke** (`glidingDense_demo_smoke` seed=1): GPU wall
+  126.2 s vs 4.5 baseline 120.2 s (single-seed noise; 4.5 reference
+  was 125 s). `gpuMoveThing total` 46.3 → 44.1 s (-2.2 s); **`exec`
+  15.3 → 12.9 s (-2.4 s)** — that's the move-side EVERY_EXECUTION pose
+  upload retired. `OP_PACK_FULL`'s pose-side work stays (the bind plan
+  still reads host pose); retiring that is Step 3.
+- **High-churn caveat**: no scale-up high-churn config exists in the
+  tree (every gliding/dense config has `noMonomersSimd:true:1.0`). The
+  closest, `boxSpaghetti` (6 fils + biochem), shows Step 2 *slower*
+  than 4.5 at this scale (+2.9 s on move total) — at `slotCap=1024` the
+  delta-buffer overhead (~160 KB EVERY_EXECUTION + 4096-thread scatter
+  launch) exceeds the EVERY_EXECUTION pose buffer it replaces (~12 KB
+  at this slot count). Crossover sits at ~13K things; production
+  gliding sits comfortably above. The churn-independence claim
+  validates analytically; demonstrating it head-to-head requires a
+  scale-up biochem config (proposed but not built this prompt).
+
+`planRebuild=1` across every Step 2 run (only the startup build);
+topology-dirty rebuilds gone from the steady-state path; overflow
+fallback didn't fire. Logs in `RUN_LOGS/2026-06-07_step2_delta_scatter/`.
+Detailed audit + tables + benchmarks in `RESIDENT_POSE_DELTA_SCATTER.md`
+(`## Step 2 — resident pose + delta-scatter (implementation)`). Status:
+**landed-on-branch.** Branch only — jba reviews before merge.
 
 ## 2026-06-07 — scatter-into-resident probe: feasible (4.0.1-dev)
 

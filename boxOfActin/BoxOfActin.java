@@ -1669,6 +1669,19 @@ public class BoxOfActin {
 			int    prc  = GPUMoveThing.getPlanRebuildCount();
 			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d%n",
 				dspN, dspC, dsdN, dsdC, prc);
+			// Step 2 — per-step pose-delta scatter stats. avg=mean entries per
+			// gathered step (excludes the freshPlan steps that snapshot only);
+			// max=largest single delta; overflow=times the cap was exceeded
+			// and a plan rebuild fell back. Resident-only ticks counted
+			// separately (FIRST_EXECUTION carried the pose, no delta packed).
+			long pdSum   = GPUMoveThing.getPoseDeltaCountSum();
+			long pdMax   = GPUMoveThing.getPoseDeltaCountMax();
+			long pdOver  = GPUMoveThing.getPoseDeltaOverflowCount();
+			long pdFresh = GPUMoveThing.getPoseDeltaCallsResident();
+			long pdCalls = Math.max(1, dspC - pdFresh);
+			double pdAvg = (double) pdSum / (double) pdCalls;
+			System.out.printf("[STATS] gpuMoveThing poseDelta avg=%.2f max=%d sum=%d fresh=%d overflow=%d cap=%d%n",
+				pdAvg, pdMax, pdSum, pdFresh, pdOver, GPUMoveThing.POSE_DELTA_CAP);
 			GPUMoveThing.reportDerivedCheckpointSummary();
 		}
 		GPUMoveThing.reportMoveAB();

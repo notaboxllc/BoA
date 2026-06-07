@@ -160,3 +160,193 @@ The bail-out cases listed above (TornadoVM clobbers a kernel-written
 FIRST_EXECUTION buffer; ignores the scatter; or re-initializes the buffer each
 execute) did not occur. No redirect to `persistOnDevice`/`consumeFromDevice`
 or to staying on EVERY_EXECUTION is required.
+
+## Step 2 — resident pose + delta-scatter (implementation)
+
+Run 2026-06-07 on aorus (TornadoVM 4.0.1-dev PTX, Java 21). Branch
+`probe/scatter-resident`, base commit `3df21c9`. Logs in
+`RUN_LOGS/2026-06-07_step2_delta_scatter/`.
+
+### Dirty-set audit — every host pose-writer captured
+
+The Phase 4.5 path uploaded the whole pose EVERY_EXECUTION, so host-side
+writes to a GPU-classified Thing's coord/uVec/yVec/length reached the device
+"for free". Switching pose to FIRST_EXECUTION means anything written on the
+host between executes that we do **not** delta-scatter is silently lost. The
+audit enumerated every such writer and showed all are captured:
+
+| Writer | Capture mechanism |
+|---|---|
+| `FilSegment.biochemStep` poly/depoly (`lengthChanged` branch, FilSegment.java:539-551) — `incCoord` shifts coord ±halfmono/2 on the same Thing in the same slot | explicit `GPUMoveThing.markPoseDirty(this)` added alongside the existing `markTopologyDirty()` |
+| `FilSegment.splitSegment` (FilSegment.java:553-566) — parent's coord changes (`setFirstHalf` calls `setCoord`); new `nextFil` is created | explicit `markPoseDirty(this)` on the parent; new `nextFil` is auto-detected via slot-change scan (its slot's previous occupant differs) |
+| `ProteinNode.spawnNodeFilaments` / `bespokeNodeFilament` / ActA nucleation — creation of a new FilSegment in `kNodeNuc` and similar paths after biochem | auto via slot-change scan — `thingCt` grows, classify assigns a slot, the slot's `prevSlotInstanceId` differs from the new Thing's instance id, pose is packed |
+| `Thing.removeThing` swap-compaction (Thing.java:939-993) — survivor at `lastId` swaps into deceased's slot, soaCoord copies with it; classify on next step may reassign survivor to a different move-slot than before | auto via slot-change scan — the new occupant's instance id at the surviving move-slot is different from last step's |
+| `applyBenchmarkPins` (BoxOfActin.java:1704-1716) — `-bm*` flags only; benchmark runs do not exercise the GPU move plan on the production gliding paths | flagged (would need explicit `markPoseDirty` if exercised under `-gpu` in a future benchmark mode) — **not in the production path**; documented as a Step-2 follow-up if benchmark+gpu is wired |
+
+Verdict: every production-path host pose-writer is captured cleanly. The
+`pendingDirty` set is identity-backed (`IdentityHashMap`) so swap-compaction
+renumbering `myThingNumber` between the mark site and `buildDeltaSet` is fine
+— the slot is resolved via `thingNumberToMoveSlot[t.myThingNumber]` at
+consume time.
+
+### Implementation (GPUMoveThing.java)
+
+- **Buffers** (`POSE_DELTA_CAP=4096`, ~160 KB/step EVERY_EXECUTION):
+  `poseDeltaIdx` (IntArray, slot indices), `poseDeltaCoord/UVec/YVec`
+  (FloatArrays, `cap*3` each), `poseDeltaLength` (FloatArray, `cap`),
+  `poseDeltaCount` (IntArray[1]).
+- **`scatterPoseKernel`**: launches `POSE_DELTA_CAP` threads, each `i<N`
+  writes the i-th delta into `coord/uVec/yVec/soaLengthArr[slot]`. AoS layout
+  (production); SOA_POSE flagged as a follow-up.
+- **Plan wiring**: `transferToDevice(FIRST_EXECUTION, coord, uVec, yVec,
+  soaLengthArr)` + `transferToDevice(EVERY_EXECUTION, poseDeltaIdx,
+  poseDeltaCount, poseDeltaCoord/UVec/YVec/Length, …)`. The `scatterPose`
+  task is declared **first** in the chained graph so its writes are visible
+  to joints/chain/boundary/motorForce/move within the same execute (the
+  declaration-order=execution-order rule the probe pinned).
+- **`buildDeltaSet`**: called in `onStepStart` after `classifyThings`. Two
+  passes per step — (1) slot-change scan against `prevSlotInstanceId[]`;
+  (2) drain `pendingDirty` for in-place biochem mutations. De-duped via
+  `slotAlreadyDeltaed[]`. On `freshPlan` (plan build/rebuild), no delta is
+  packed because the upcoming FIRST_EXECUTION upload covers the full pose;
+  the scan just records prev-slot instance ids.
+- **Overflow fallback**: if `count >= POSE_DELTA_CAP`, log + `closePlan()`
+  + re-enter `onStepStart` → fresh plan → FIRST_EXECUTION re-uploads
+  everything. Counted in `poseDeltaOverflowCount`; 0 occurrences across the
+  validation runs below.
+- **Hook sites** (FilSegment.java): biochem `lengthChanged` branch and
+  `splitSegment` branch both add `GPUMoveThing.markPoseDirty(this)`
+  alongside the existing `markTopologyDirty()` call.
+
+### 2.1 minimal correctness probe — PASS
+
+`glidingAssay500_val` seed=1 GPU (10101 steps):
+- `bindEvents=792`, `glidingVelocity=7.9407` — within the Phase 4.5 baseline
+  noise band (pad_fix run1_resident: 879 / 8.16).
+- `planRebuild=1` (only the initial plan build — topology-dirty no longer
+  rebuilds; delta-scatter handles all mutations).
+- `poseDelta avg=0.00 max=2 sum=20 fresh=1 overflow=0 cap=4096` — the
+  scatter mechanic exercised, no overflow, no NaN, no escape.
+
+A separate biochem-active smoke (`boxSpaghetti`, 20011 steps) exercises the
+mutation path more intensively: `poseDelta avg=0.07 max=12 sum=1466
+overflow=0`, with `filSegInitFireCt=1461` matching the delta count
+(biochem-triggered poly/depoly + splits). The CPU-vs-GPU pose stays in the
+same float32 noise regime as Phase 4 (no NaN/escape; run completes; observables
+stable).
+
+### 2.2 full validation
+
+**N=4 paired ensemble**, `glidingAssay500_val`, seeds 1-4 each, GPU.
+Baseline = Phase 4.5 resident (RUN_LOGS/2026-06-06_pad_fix/{run1,seedN}_resident).
+
+| seed | base bindEvents | step2 bindEvents | Δ | base gv | step2 gv | Δ |
+|---|---|---|---|---|---|---|
+| 1 | 879 | 792 | -87 | 8.157 | 7.941 | -0.216 |
+| 2 | 624 | 646 | +22 | 7.936 | 7.554 | -0.382 |
+| 3 | 697 | 863 | +166 | 7.634 | 7.369 | -0.265 |
+| 4 | 740 | 777 |  +37 | 7.792 | 8.024 | +0.232 |
+
+**Paired-t (N=4, df=3):**
+
+| metric | mean delta | sd delta | **t** |
+|---|---|---|---|
+| bindEvents | +34.5 | 103.6 | **+0.67** |
+| glidingVelocity | -0.158 | 0.269 | **-1.17** |
+
+Both `|t| ≤ 1.17` — well within the `|t| ≲ 1-2` PASS criterion. Sign-scatter
+present: bindEvents 1 neg / 3 pos, gv 3 neg / 1 pos. **Correctness gate
+PASSES.** Across all four seeds: `poseDelta sum ∈ [20, 20]`, `max=2`,
+`overflow=0`, `planRebuild=1` — confirms the scatter mechanic stayed at
+near-zero churn at the validation scale (noMonomersSimd active means no
+biochem mutation), so the validation primarily exercises slot-change
+detection from removeThing-swap events.
+
+**Dense smoke benchmark** (`glidingDense_demo_smoke`, seed=1).
+
+| metric | baseline (4.5) | Step 2 | Δ |
+|---|---|---|---|
+| wall (GPU) | 120.2 s | 126.2 s | +6.0 s (single-seed noise band; Phase 4.5 reference was 125 s) |
+| wall (CPU) | (n/a)¹ | 147.4 s | (4.5 ref 153 s — within noise) |
+| `gpuMoveThing` total | 46.32 s | 44.08 s | **-2.24 s** |
+| └ slotPack | 15.93 s | 16.27 s | +0.34 s |
+| └ jointPack | 7.01 s | 7.03 s | 0.0 s |
+| └ exec | 15.31 s | **12.88 s** | **-2.42 s** (move-side pose upload retired) |
+| └ unpack | 8.07 s | 7.89 s | -0.18 s |
+| bindEvents | 1794 | 1841 | (within noise) |
+| gv | 41.42 | 42.76 | (within noise) |
+| `poseDelta` | (n/a) | avg=2.09 max=202 sum=2300 overflow=0 | — |
+| `planRebuild` | 1 | 1 | (only initial) |
+
+¹ CPU baseline today identical to today's CPU run; both arms unchanged from
+`BENCHMARK_dense.md` post-4.5 reference. The 6-s wall delta on the GPU arm
+is within the run-to-run noise band the BENCHMARK_dense.md HEAD point
+already documented (`+2 s vs b044874's 123 s … single-seed noise band`).
+
+The per-phase signal: **`exec` dropped 2.42 s** — that's the
+EVERY_EXECUTION pose upload retired (the move-side portion of the +13.2 s
+that 4.5 paid; the OP_PACK_FULL+`slotPack` portion stays because the bind
+plan still reads host pose). Move total dropped 2.24 s. `OP_PACK_FULL`
+remains (Step 3 territory: single-graph fold lets the bind kernel read the
+resident pose directly and lets `OP_PACK_FULL`'s pose-side work retire).
+
+**High-churn benchmark — caveat:** no scale-up high-churn config exists in
+the tree (every gliding/dense config has `noMonomersSimd:true:1.0`, which
+suppresses poly/depoly). The closest available is `boxSpaghetti` — 6
+polymerizing filaments in a 0.6×0.6×0.4 µm box with `actinConc=50.0` —
+which exercises biochem at trivial scale. Results (seed=1, 20011 steps):
+
+| metric | baseline (4.5) | Step 2 | Δ |
+|---|---|---|---|
+| wall (GPU) | 40.7 s | 44.7 s | +4.0 s |
+| `gpuMoveThing` total | 17.97 s | 20.87 s | +2.90 s |
+| └ exec | 13.51 s | 15.90 s | +2.39 s |
+| `filSegInitFireCt` | 1388 | 1461 | (biochem variance) |
+| `poseDelta` | (n/a) | avg=0.07 max=12 sum=1466 | — |
+| `planRebuild` | 1 | 1 | — |
+
+**At small scale the delta-scatter is a regression**: the per-step EVERY_
+EXECUTION upload of the ~160 KB delta buffers, plus the 4096-thread scatter
+launch (most threads early-out), costs more than the EVERY_EXECUTION upload
+of the tiny pose buffer at this slot count (`slotCap=1024` → pose ≈ 12 KB).
+The win is **buffer-size-dependent**: delta wins when the pose buffer is
+larger than the delta buffer, i.e. when `slotCap*3*4 > 160 KB`, i.e.
+`slotCap > 13K things`. At dense scale `slotCap=588204` and the saving is
+~7 MB/step (the dense `-2.4 s` exec drop above). At `boxSpaghetti` scale
+`slotCap=1024` and the delta-buffer overhead dominates.
+
+This is consistent with the design's churn-independence claim: the
+delta-scatter cost stays flat at any churn (a few entries vs cap-bound),
+while EVERY_EXECUTION scales with population. The crossover sits at
+~13K things; production gliding (M ≈ 98 K) is comfortably above it. To
+deliberately *demonstrate* the high-churn-at-scale win we would need a
+config that combines `glidingDense_demo_smoke`-scale populations with
+`noMonomersSimd:false:0.0` and non-zero actin kinetics — that config does
+not currently exist. Proposed (not built this prompt): a
+`glidingDense_demo_smoke` derivative with biochem enabled, `kATPOn2=10`,
+`kATPOff2=0.5`, `actinConc=30`, runtime 0.1 s. Step 2 mechanic is correct;
+the dense smoke already shows the move-side pose upload retired; the
+churn-independence claim has to wait on a config that combines both.
+
+### Plan rebuild + topology-dirty discussion
+
+`planRebuild=1` across every Step 2 run (only the startup build) confirms
+that the FIRST_EXECUTION + delta-scatter path replaces 4.5's
+`topologyDirty → no-rebuild + EVERY_EXECUTION re-upload` mechanism without
+re-introducing the Phase 4 rebuild cost. `topologyDirty` still triggers
+`classifyThings` to refresh slot maps (in-place IntArray writes) but no
+plan close/rebuild. Plan rebuild is reserved for capGrow (slotCap exceeded)
+and the overflow fallback (>POSE_DELTA_CAP deltas in a single step) —
+neither fired in the validation suite.
+
+### Status
+
+**landed-on-branch.** Branch `probe/scatter-resident`, commit hash pending
+(this writeup + JOURNAL update follow). All four 2.1 / 2.2 gates passed
+(probe correctness, N=4 paired-t, dense smoke regression, scatter
+mechanic). The high-churn-at-scale benchmark is the one not-yet-built
+piece; the dense smoke proves the per-call move-side pose upload retired,
+and that's the buffer-size term the design targets.
+
+Step 3 (single-graph fold: bind reads resident pose, retires
+`OP_PACK_FULL`'s pose side) follows.

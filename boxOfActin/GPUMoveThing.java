@@ -427,6 +427,45 @@ public class GPUMoveThing {
     private static FloatArray anchorPts;      // myoCap * 3
     private static IntArray   anchoredFlags;  // myoCap
 
+    // ----- Step 2 — resident pose + delta-scatter (2026-06-07) -----
+    // Pose buffers (coord/uVec/yVec/soaLengthArr) ride FIRST_EXECUTION;
+    // device-resident across executes. Per-step mutations from biochem
+    // (poly/depoly, splits) and creation/removal-swap are delivered via a
+    // bounded per-step delta buffer + a scatterPose kernel that runs FIRST in
+    // the chained graph (before joints/chain/boundary/move). Empty-delta
+    // (count=0) steps are common and effectively free.
+    //
+    // Cap is intentionally generous (4096 entries ≈ 160 KB of EVERY_EXECUTION
+    // upload per step) so a full biochem turn cannot overflow at any realistic
+    // churn. Overflow triggers a plan rebuild fall-back (closePlan + a fresh
+    // FIRST_EXECUTION upload picks up everything) — logged so the cap can be
+    // grown if the rebuild rate ever turns up in a profile.
+    public static final int POSE_DELTA_CAP = 4096;
+    private static FloatArray poseDeltaCoord;   // POSE_DELTA_CAP * 3
+    private static FloatArray poseDeltaUVec;    // POSE_DELTA_CAP * 3
+    private static FloatArray poseDeltaYVec;    // POSE_DELTA_CAP * 3
+    private static FloatArray poseDeltaLength;  // POSE_DELTA_CAP
+    private static IntArray   poseDeltaIdx;     // POSE_DELTA_CAP -- destination slot per entry
+    private static IntArray   poseDeltaCount;   // 1 -- active count read by the scatter kernel
+
+    // Per-slot prev-step Thing instance id, for change detection in onStepStart.
+    // -1 sentinel = "no Thing here last step". Reset on plan build/rebuild
+    // (then the FIRST_EXECUTION upload of pose covers the whole population on
+    // the next execute, so no delta entries needed for that step).
+    private static int[]      prevSlotInstanceId;
+    private static boolean[]  slotAlreadyDeltaed;
+    private static boolean    freshPlan = false;
+    // Things explicitly marked dirty by host pose-writers (biochem etc.) —
+    // identity-backed set so swap-compaction renumbering myThingNumber between
+    // marking and consumption is fine. Drained inside buildDeltaSet().
+    private static final java.util.Set<Thing> pendingDirty =
+        java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    // Step-2 stats.
+    private static long poseDeltaCountSum = 0L;
+    private static long poseDeltaCountMax = 0L;
+    private static long poseDeltaOverflowCount = 0L;
+    private static long poseDeltaCallsResident = 0L;
+
     // ----- Phase 2 F8/F9/F10 — motor cross-bridge force port (2026-06-03) -----
     // Per-Myosin binding state uploaded each step:
     //   boundSegSlot[mj]   = move-slot of the FilSegment that motor mj is
@@ -2539,6 +2578,48 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Step 2 — scatterPoseKernel: writes a small delta into the device-resident
+    // pose buffers ahead of joints/chain/move. Launched with POSE_DELTA_CAP
+    // threads; threads past the active count (poseDeltaCount.get(0)) early-out.
+    // Declared FIRST in the chained TaskGraph so its writes are visible to
+    // every subsequent task (scatter-resident probe confirmed declaration
+    // order = execution order in 4.0.1-dev).
+    //
+    // AoS pose layout (production path). SOA_POSE mode is out-of-scope for
+    // Step 2 — it forces DIAG_CPU_JOINTS/F3F4/F1/MOTOR on, runs a single
+    // moveOnlyPlan, and is exercised only by the spike (BOA_SOA_POSE).
+    // -------------------------------------------------------------------------
+    private static void scatterPoseKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray yVec,
+            FloatArray soaLengthArr,
+            IntArray   idx,
+            FloatArray dCoord,
+            FloatArray dUVec,
+            FloatArray dYVec,
+            FloatArray dLength,
+            IntArray   count) {
+        int N = count.get(0);
+        for (@Parallel int i = 0; i < POSE_DELTA_CAP; i++) {
+            if (i >= N) { continue; }
+            int slot = idx.get(i);
+            int s3 = slot * 3;
+            int i3 = i * 3;
+            coord.set(s3,     dCoord.get(i3));
+            coord.set(s3 + 1, dCoord.get(i3 + 1));
+            coord.set(s3 + 2, dCoord.get(i3 + 2));
+            uVec.set(s3,     dUVec.get(i3));
+            uVec.set(s3 + 1, dUVec.get(i3 + 1));
+            uVec.set(s3 + 2, dUVec.get(i3 + 2));
+            yVec.set(s3,     dYVec.get(i3));
+            yVec.set(s3 + 1, dYVec.get(i3 + 1));
+            yVec.set(s3 + 2, dYVec.get(i3 + 2));
+            soaLengthArr.set(slot, dLength.get(i));
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Lazy allocation + chained plan build.
     // -------------------------------------------------------------------------
     private static void allocateAndBuildPlan(int newSlotCap, int newMyoCap) {
@@ -2621,6 +2702,21 @@ public class GPUMoveThing {
         brownianRule          = new int[slotCap];
         cpuFallback           = new Thing[Math.max(64, slotCap)];
 
+        // Step 2 — delta-scatter buffers + slot-change tracker. freshPlan
+        // tells buildDeltaSet() that the upcoming FIRST_EXECUTION upload
+        // covers the whole resident pose; no delta entries needed this step.
+        poseDeltaCoord  = new FloatArray(POSE_DELTA_CAP * 3);
+        poseDeltaUVec   = new FloatArray(POSE_DELTA_CAP * 3);
+        poseDeltaYVec   = new FloatArray(POSE_DELTA_CAP * 3);
+        poseDeltaLength = new FloatArray(POSE_DELTA_CAP);
+        poseDeltaIdx    = new IntArray(POSE_DELTA_CAP);
+        poseDeltaCount  = new IntArray(1);
+        prevSlotInstanceId = new int[slotCap];
+        slotAlreadyDeltaed = new boolean[slotCap];
+        java.util.Arrays.fill(prevSlotInstanceId, -1);
+        pendingDirty.clear();
+        freshPlan = true;
+
         // Phase 2 F1 — plan-build-time shape dispatch (Survey Option A).
         // Today only Chamber (box) is wired; the Bug-shaped pill kernel
         // (F1b) becomes a sibling task here after the pill CPU revival
@@ -2683,15 +2779,27 @@ public class GPUMoveThing {
         //     motorWriteback              — output buffer for force writeback.
         //     motorForceParams, jointParams, chainParams, params, counts —
         //                                   per-step uniforms.
+        // Step 2 (2026-06-07) — resident pose + per-step delta-scatter.
+        //   FIRST_EXECUTION: coord, uVec, yVec, soaLengthArr ride device-
+        //     resident; the move kernel + derived kernel write them in-place,
+        //     and the scatter kernel applies host-side mutations from biochem
+        //     / creation / removal-swap via a small EVERY_EXECUTION delta.
+        //   EVERY_EXECUTION (delta): poseDeltaIdx + poseDeltaCoord/UVec/YVec
+        //     + poseDeltaLength + poseDeltaCount carry only the changed slots
+        //     for this step (count=0 on most steps). Cap POSE_DELTA_CAP.
+        //   EVERY_EXECUTION (residual): everything else stays per-step (drags,
+        //     slot/topology maps, force/torque buffers, uniforms).
         TaskGraph tg = new TaskGraph("chained")
+            .transferToDevice(DataTransferMode.FIRST_EXECUTION,
+                              coord, uVec, yVec, soaLengthArr)
             .transferToDevice(DataTransferMode.EVERY_EXECUTION,
-                              coord, uVec, yVec,
+                              poseDeltaIdx, poseDeltaCount,
+                              poseDeltaCoord, poseDeltaUVec, poseDeltaYVec, poseDeltaLength,
                               bTransGam, bRotGam,
                               velMask,
                               rodSlots, leverSlots, motorSlots,
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
-                              soaLengthArr,
                               cpuForceSum, cpuTorqueSum,
                               jointForceSum, jointTorqueSum,
                               brownianScales,
@@ -2704,6 +2812,17 @@ public class GPUMoveThing {
                               derivedEnd1, derivedEnd2, derivedZVec,
                               derivedYVecOrtho, derivedTransXTox,
                               jointParams, chainParams, params, counts)
+            // scatterPose declared FIRST so its writes into the resident
+            // coord/uVec/yVec/soaLengthArr buffers are visible to joints/chain/
+            // boundary/motorForce/move within the same execute. The
+            // scatter-resident probe pinned the declaration-order==execution-
+            // order rule; do not reorder this task.
+            .task("scatterPose",
+                  GPUMoveThing::scatterPoseKernel,
+                  coord, uVec, yVec, soaLengthArr,
+                  poseDeltaIdx,
+                  poseDeltaCoord, poseDeltaUVec, poseDeltaYVec, poseDeltaLength,
+                  poseDeltaCount)
             .task("joints",
                   GPUMoveThing::jointsKernel,
                   coord, uVec,
@@ -2862,6 +2981,12 @@ public class GPUMoveThing {
         gridScheduler = new GridScheduler("chained.move", moveWorker);
         gridScheduler.addWorkerGrid("chained.joints", jointWorker);
         gridScheduler.addWorkerGrid("chained.chain",  chainWorker);
+
+        // Step 2 — scatterPose: POSE_DELTA_CAP threads, one per delta slot.
+        // Threads past poseDeltaCount.get(0) early-out inside the kernel.
+        WorkerGrid scatterWorker = new WorkerGrid1D(POSE_DELTA_CAP);
+        scatterWorker.setLocalWork(Math.min(POSE_DELTA_CAP, MOVE_KERNEL_BLOCK_SIZE), 1, 1);
+        gridScheduler.addWorkerGrid("chained.scatterPose", scatterWorker);
 
         // Phase 2 F1: boundary kernel, one thread per move slot.
         if (boundaryShape == BOUNDARY_SHAPE_BOX) {
@@ -3079,6 +3204,26 @@ public class GPUMoveThing {
     public static void markTopologyDirty() {
         topologyDirty = true;
         coordsDirty   = true;
+    }
+
+    /**
+     * Step 2 (2026-06-07) — flag a single Thing's host pose as having changed
+     * between executes; the next onStepStart packs its current coord/uVec/yVec/
+     * length into the per-step delta and the scatterPose task lands it in the
+     * device-resident pose buffer ahead of joints/chain/move.
+     *
+     * Required at every host-side write to a GPU-classified Thing's pose, OR
+     * the next move integration runs on a stale device pose. Today's writers:
+     *   - FilSegment.biochemStep poly/depoly (lengthChanged branch)
+     *   - FilSegment.biochemStep split (parent; new FilSegment auto-detected
+     *     via the post-classifyThings slot-change scan)
+     * Created/swapped Things are caught automatically (slot occupant differs
+     * from prevSlotInstanceId), so no explicit mark needed for the creation
+     * paths or for removeThing's swap-compaction survivor.
+     */
+    public static void markPoseDirty(Thing t) {
+        if (t == null) return;
+        pendingDirty.add(t);
     }
 
     /**
@@ -3668,6 +3813,155 @@ public class GPUMoveThing {
                 Thing.thingCt, lastThingCt, topologyDirty);
             classifyThings();
         }
+
+        // Step 2 — build the per-step pose delta. After classifyThings so
+        // newly-created Things already have slots; before plan.execute() so
+        // the EVERY_EXECUTION upload + scatter kernel run on this step's data.
+        buildDeltaSet();
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 2 — assemble the per-step pose delta for the scatterPose kernel.
+    //
+    // Two sources of dirtiness:
+    //   1. Slot-change detection. For each active slot, compare the current
+    //      occupant's thingInstanceId to last step's. If different, the slot
+    //      either gained a new occupant (creation: spawnNodeFilaments,
+    //      bespokeNodeFilament, ActA nucleation, splitSegment's nextFil, ...)
+    //      or had a different Thing swapped in by removeThing's compaction.
+    //      Either way the device-resident pose at that slot is wrong; push
+    //      this step's pose.
+    //   2. Explicit pendingDirty marks. Biochem poly/depoly mutates pose
+    //      in-place on the same Thing in the same slot — no slot change, no
+    //      auto-detection. FilSegment.biochemStep calls markPoseDirty(this)
+    //      so the mutated coord is packed here.
+    //
+    // The two sets are de-duped via slotAlreadyDeltaed so a slot is never
+    // packed twice.
+    //
+    // freshPlan==true branch: the plan was just built or rebuilt. Its
+    // FIRST_EXECUTION upload of coord/uVec/yVec/soaLengthArr will fire on
+    // the upcoming plan.execute() and carry the entire current pose to the
+    // device — no delta needed this step. Just snapshot prevSlotInstanceId
+    // so next step's change detection has a baseline.
+    //
+    // Overflow handling: if pendingDirty + slot-change exceeds POSE_DELTA_CAP,
+    // we trigger a closePlan + onStepStart re-entry on the next call. The
+    // FIRST_EXECUTION upload then re-syncs everything. Overflow is logged
+    // and counted; sustained overflow means POSE_DELTA_CAP needs growing.
+    // -------------------------------------------------------------------------
+    private static void buildDeltaSet() {
+        if (slotCap == 0) {
+            poseDeltaCount.set(0, 0);
+            return;
+        }
+
+        if (freshPlan) {
+            // FIRST_EXECUTION will cover the entire resident pose this step.
+            // Just record the current slot occupants for next step's diff.
+            for (int s = 0; s < slotCount; s++) {
+                Thing t = Thing.theThings[gpuThingIndices[s]];
+                prevSlotInstanceId[s] = (t == null) ? -1 : t.thingInstanceId;
+            }
+            for (int s = slotCount; s < slotCap; s++) {
+                prevSlotInstanceId[s] = -1;
+            }
+            pendingDirty.clear();
+            freshPlan = false;
+            poseDeltaCount.set(0, 0);
+            poseDeltaCallsResident++;
+            return;
+        }
+
+        java.util.Arrays.fill(slotAlreadyDeltaed, 0, slotCap, false);
+
+        int count = 0;
+        // 1. Slot-change detection — catches creation + removeThing-swap.
+        for (int s = 0; s < slotCount; s++) {
+            Thing t = Thing.theThings[gpuThingIndices[s]];
+            int curId = (t == null) ? -1 : t.thingInstanceId;
+            if (prevSlotInstanceId[s] != curId) {
+                if (count >= POSE_DELTA_CAP) { count = -1; break; }
+                if (t != null) packDelta(count, s, t);
+                else clearDeltaSlot(count, s);
+                count++;
+                slotAlreadyDeltaed[s] = true;
+            }
+            prevSlotInstanceId[s] = curId;
+        }
+        if (count >= 0) {
+            for (int s = slotCount; s < slotCap; s++) {
+                prevSlotInstanceId[s] = -1;
+            }
+            // 2. Explicit biochem marks — catches same-slot in-place mutations.
+            if (!pendingDirty.isEmpty()) {
+                for (Thing t : pendingDirty) {
+                    if (t == null || t.removeMe) continue;
+                    int idx = t.myThingNumber;
+                    if (idx < 0 || idx >= thingNumberToMoveSlot.length) continue;
+                    int slot = thingNumberToMoveSlot[idx];
+                    if (slot < 0 || slot >= slotCount) continue;
+                    if (slotAlreadyDeltaed[slot]) continue;
+                    if (count >= POSE_DELTA_CAP) { count = -1; break; }
+                    packDelta(count, slot, t);
+                    count++;
+                    slotAlreadyDeltaed[slot] = true;
+                }
+            }
+        }
+        pendingDirty.clear();
+
+        if (count < 0) {
+            // Overflow: fall back to a fresh plan, which FIRST_EXECUTION-
+            // uploads the whole resident pose next step.
+            poseDeltaOverflowCount++;
+            System.err.printf("[Step2] poseDelta overflow (>%d entries) — rebuilding plan%n", POSE_DELTA_CAP);
+            closePlan();
+            // Re-enter onStepStart immediately to rebuild + reset prev/freshPlan.
+            onStepStart();
+            return;
+        }
+
+        poseDeltaCount.set(0, count);
+        poseDeltaCountSum += count;
+        if (count > poseDeltaCountMax) poseDeltaCountMax = count;
+    }
+
+    private static void packDelta(int i, int slot, Thing t) {
+        int s3 = t.myThingNumber * 3;
+        int i3 = i * 3;
+        poseDeltaIdx.set(i, slot);
+        poseDeltaCoord.set(i3,     Thing.soaCoord[s3]);
+        poseDeltaCoord.set(i3 + 1, Thing.soaCoord[s3 + 1]);
+        poseDeltaCoord.set(i3 + 2, Thing.soaCoord[s3 + 2]);
+        poseDeltaUVec .set(i3,     Thing.soaUVec[s3]);
+        poseDeltaUVec .set(i3 + 1, Thing.soaUVec[s3 + 1]);
+        poseDeltaUVec .set(i3 + 2, Thing.soaUVec[s3 + 2]);
+        poseDeltaYVec .set(i3,     Thing.soaYVec[s3]);
+        poseDeltaYVec .set(i3 + 1, Thing.soaYVec[s3 + 1]);
+        poseDeltaYVec .set(i3 + 2, Thing.soaYVec[s3 + 2]);
+        poseDeltaLength.set(i, Thing.soaLength[t.myThingNumber]);
+    }
+
+    /** Slot vacated this step (its thing died and was not replaced). The
+     *  device-resident pose still holds the dead Thing's last pose, but no
+     *  kernel reads inactive slots — record the change anyway so the next
+     *  step's diff is consistent. The actual pose written here is harmless;
+     *  use zeros. (idx points at the inactive slot, which subsequent kernels
+     *  early-out on via slotCount / velMask.) */
+    private static void clearDeltaSlot(int i, int slot) {
+        int i3 = i * 3;
+        poseDeltaIdx.set(i, slot);
+        poseDeltaCoord.set(i3,     0f);
+        poseDeltaCoord.set(i3 + 1, 0f);
+        poseDeltaCoord.set(i3 + 2, 0f);
+        poseDeltaUVec .set(i3,     1f);
+        poseDeltaUVec .set(i3 + 1, 0f);
+        poseDeltaUVec .set(i3 + 2, 0f);
+        poseDeltaYVec .set(i3,     0f);
+        poseDeltaYVec .set(i3 + 1, 1f);
+        poseDeltaYVec .set(i3 + 2, 0f);
+        poseDeltaLength.set(i, 0f);
     }
 
     // -------------------------------------------------------------------------
@@ -4688,6 +4982,12 @@ public class GPUMoveThing {
     public static long getDemandSyncDerivedNanos() { return demandSyncDerivedNanos; }
     public static int  getDemandSyncDerivedCalls() { return demandSyncDerivedCalls; }
     public static int  getPlanRebuildCount()       { return planRebuildCount;       }
+
+    // Step 2 — pose-delta-scatter stats.
+    public static long getPoseDeltaCountSum()       { return poseDeltaCountSum;       }
+    public static long getPoseDeltaCountMax()       { return poseDeltaCountMax;       }
+    public static long getPoseDeltaOverflowCount()  { return poseDeltaOverflowCount;  }
+    public static long getPoseDeltaCallsResident()  { return poseDeltaCallsResident;  }
 
     public static int getSlotCount()     { return slotCount;     }
     public static int getCpuFallbackCt() { return cpuFallbackCt; }

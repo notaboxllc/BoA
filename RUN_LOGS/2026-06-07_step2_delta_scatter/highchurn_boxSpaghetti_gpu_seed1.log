@@ -1,0 +1,162 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/boxSpaghetti...
+     Parameter assigned: deltaT set to 1.0E-4
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 2.0
+     Parameter assigned: fracMove set to 0.4
+     Parameter assigned: fracR set to 0.134
+     Parameter assigned: fracMoveTorq set to 0.013685
+     Parameter assigned: drawInterval set to 100
+     Parameter assigned: toFileInterval set to 200
+     Parameter assigned: remoteWriteInterval set to 100000
+     Parameter assigned: frameWidth set to 800
+     Parameter assigned: frameHeight set to 800
+     Parameter assigned: bugShapedCrucible set to false
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: boxXDim set to 0.6
+     Parameter assigned: boxYDim set to 0.6
+     Parameter assigned: boxZDim set to 0.4
+     Parameter assigned: initialFilaments set to 6
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: minFilLength set to 0.05
+     Parameter assigned: maxFilLength set to 0.15
+     Parameter assigned: stdDevActinDist set to 0.3
+     Parameter assigned: actinConc set to 50.0
+     Parameter assigned: actinConcNonHydro set to 0.0
+     Parameter assigned: aeta set to 1.0
+     Parameter assigned: capConc set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: nodeZone set to 0.9
+     Parameter assigned: nodeRadius set to 0.025
+     Parameter assigned: forminsPerNode set to 0
+     No match found for parameter label myosPerNode ... you best check that out!
+     Parameter assigned: actinSeed set to 3
+     Parameter assigned: actinOnCortex set to true
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.5
+     Parameter assigned: nodeTorqSpring set to 1.0E-20
+     Parameter assigned: forminRelease set to 1.0
+     No match found for parameter label noMonomers ... you best check that out!
+     Parameter assigned: filamentsAnneal set to false
+     Parameter assigned: annealDist set to 0.054
+     Parameter assigned: annealAngleCosine set to 0.9
+     Parameter assigned: maxLinksOnSeg set to 10.0
+     Parameter assigned: sideBonds set to 0
+     Parameter assigned: filLinkSpring set to 1.0E-9
+     Parameter assigned: filLinkTorqSpring set to 1.0E-19
+     Parameter assigned: xLinkTransAttn set to 1.0
+     Parameter assigned: xLinkRotAttn set to 1.0
+     No match found for parameter label maxFilLinkDist ... you best check that out!
+     No match found for parameter label linkDissolveRate ... you best check that out!
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: cofilinRatio set to 1.1
+     No match found for parameter label myosSteppingSwitch ... you best check that out!
+     Parameter assigned: polyCompressionCutoff set to 0.0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kHydrolysis set to 1.0
+     Parameter assigned: kDissociation set to 1.0
+     Parameter assigned: showTime set to true
+     Parameter assigned: showConc set to true
+     Parameter assigned: showFilCt set to true
+     Parameter assigned: showFilLinkCt set to true
+     Parameter assigned: showMonCt set to true
+     Parameter assigned: showHistBox set to true
+     Parameter assigned: showYHistTics set to true
+     Parameter assigned: flatTops set to true
+Done... there were 5 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 4; xBinWidth = 0.2 µm
+nYBins = 4; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 4 x 4 x 3 cells (0.2 µm each)
+GPUMotorBinding (resident): motorCap=500000 segCap=1000000 totalCells=48 contentsCap=48000 bindBlk=64 segBboxBlk=128
+GPUMoveThing: slotCap=1024 myoCap=1024 moveBlock=64 jointBlock=64 runSeed=-1312541327 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=2
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=277164
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=1461
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+[STATS] gpuMoveThing total=20.872s calls=20011 slotPack=1.970s jointPack=0.001s exec=15.897s unpack=3.000s
+[STATS] gpuMoveThing demandSyncPose=2.982s(calls=20011) demandSyncDerived=0.000s(calls=0) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=0.07 max=12 sum=1466 fresh=1 overflow=0 cap=4096
+ThingStep Threads took 8.335000 seconds.
+ThingBrownian Threads took 1.991000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 2.053000 seconds.
+Ck Mesh Threads took 2.116000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.735000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!
+
+real	0m44.682s
+user	0m38.800s
+sys	0m12.806s
