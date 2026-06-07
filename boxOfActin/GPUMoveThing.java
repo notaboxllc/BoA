@@ -574,6 +574,16 @@ public class GPUMoveThing {
     private static final int MOVE_KERNEL_BLOCK_SIZE = 64;
     private static final int JOINTS_KERNEL_BLOCK_SIZE = 64;
 
+    // Phase 4.5 small-fix Step 2 (attempted merged plan, bailed): the
+    // intended approach was `new TornadoExecutionPlan(itgBind, itgMove)` with
+    // consumeFromDevice across the bind/move graphs. Bailed on a TornadoVM
+    // 4.0.1-dev multi-graph runtime issue (segBbox=24 MB OOM at first
+    // detectBindings, see RUN_LOGS/2026-06-06_phase45_smallfix/
+    // step2_merged_bailout.log). Constants retained for clarity / a possible
+    // future revival once the runtime issue is understood; currently unused.
+    public static final int BIND_GRAPH_IDX = 0;
+    public static final int MOVE_GRAPH_IDX = 1;
+
     // Timing accumulators
     private static long packNanos       = 0;
     private static long execNanos       = 0;
@@ -2810,14 +2820,36 @@ public class GPUMoveThing {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        motorWriteback);
             }
+            // Phase 4.5 small-fix Step 2 — soaLengthArr also persists on device
+            // so the bind ITG can consumeFromDevice it.
             tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
                                    coord, uVec, yVec,
+                                   soaLengthArr,
                                    derivedEnd1, derivedEnd2, derivedZVec,
                                    derivedYVecOrtho, derivedTransXTox);
         }
 
-        itg  = tg.snapshot();
+        itg = tg.snapshot();
         plan = new TornadoExecutionPlan(itg);
+
+        // Phase 4.5 small-fix Step 2 (separate-plan variant) — the bind ITG
+        // lives in its OWN TornadoExecutionPlan (not merged), because the
+        // merged-multi-graph executor leaks per-execute even with persistent
+        // Java identities + persisted scratch (verified by the OOM on the
+        // first segBbox=24 MB alloc, RUN_LOGS/2026-06-06_phase45_smallfix/
+        // step2_merged_bailout.log). The merge approach is blocked on a
+        // TornadoVM 4.0.1-dev runtime issue with multi-graph allocations.
+        // The interim fix: keep two separate plans, but have the bind plan
+        // run the resident kernels (segBboxKernelResident / bindKernelResident)
+        // reading coord/uVec/soaLengthArr/slot maps via EVERY_EXECUTION upload
+        // of the SHARED Java FloatArray identities. The host-pack of
+        // motPos/motUVec/motRodUVec/filEnd1/filEnd2 (~30 MB/step) retires;
+        // the new bind-side upload of coord/uVec/soaLengthArr is ~2 MB/step.
+        // Net PCIe savings: ~28 MB/step.
+        GPUMotorBinding.allocateBuffersIfNeeded();
+        GPUMotorBinding.installSeparateResidentPlan(
+            coord, uVec, soaLengthArr,
+            motMoveSlot, motRodMoveSlot, filMoveSlot);
 
         WorkerGrid moveWorker = new WorkerGrid1D(slotCap);
         moveWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
@@ -2995,6 +3027,9 @@ public class GPUMoveThing {
 
     private static void closePlan() {
         if (MEM_TRACE) memTrace("closePlan-before");
+        // Phase 4.5 small-fix Step 2 — clear GPUMotorBinding's shared plan ref
+        // so its next detectBindings() doesn't dispatch through a closed plan.
+        GPUMotorBinding.clearSharedPlan();
         if (plan != null) {
             try { plan.close(); } catch (Exception e) { /* best effort */ }
             plan = null;

@@ -1056,6 +1056,143 @@ public class GPUMotorBinding {
     // Public entry point: pack → execute → unpack
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Phase 4.5 small-fix Step 2 — buffer allocation + grid-param init split
+    // out from the plan-build, so GPUMoveThing can drive the merged executor
+    // construction. allocateBuffersIfNeeded() handles the (rare) reallocation
+    // path on capacity growth; it is idempotent on subsequent calls with the
+    // same caps.
+    // -------------------------------------------------------------------------
+    public static int motorCap() { return motorCap; }
+    public static int segCap()   { return segCap;   }
+    public static int bindKernelBlockSize()   { return BIND_KERNEL_BLOCK_SIZE;   }
+    public static int segBboxKernelBlockSize() { return SEGBBOX_KERNEL_BLOCK_SIZE; }
+
+    public static void allocateBuffersIfNeeded() {
+        if (gridParams != null) return;   // already done
+        MotorBindGrid3D grid = MotorBindGrid3D.INSTANCE;
+        motorCap    = MyoMotor.soaX.length;
+        segCap      = FilSegment.soaEnd1X.length;
+        totalCells  = grid.totalCellCount();
+        contentsCap = Math.min(totalCells * MotorBindGrid3D.BIN_DEPTH, segCap * 8);
+
+        motOnFil      = new IntArray(motorCap);
+        filNodeAtEnd2 = new IntArray(segCap);
+
+        gridCellOffsets  = new IntArray(totalCells + 1);
+        gridCellContents = new IntArray(contentsCap);
+
+        segBbox      = new IntArray(segCap * 6);
+        segCellCount = new IntArray(segCap);
+        cellCount    = new IntArray(totalCells);
+
+        arcOnFilDev  = new FloatArray(motorCap);
+
+        // slot 7 = motorLen (resident-pose bind kernel derives motor tip on-device).
+        gridParams = new FloatArray(8);
+        gridParams.set(0, grid.xMin);
+        gridParams.set(1, grid.yMin);
+        gridParams.set(2, grid.zMin);
+        gridParams.set(3, MotorBindGrid3D.CELL_SIZE);
+        gridParams.set(4, 1.0f / MotorBindGrid3D.CELL_SIZE);
+        gridParams.set(5, (float) Env.myoMotorAlignWithFilTolerance.getValue());
+        float myoColTol = (float) Env.myoColTol.getValue();
+        gridParams.set(6, myoColTol * myoColTol);
+        gridParams.set(7, (float) Env.myoMotorLength.getValue());
+
+        gridDims = new IntArray(4);
+        gridDims.set(0, grid.nXBins);
+        gridDims.set(1, grid.nYBins);
+        gridDims.set(2, grid.nZBins);
+        gridDims.set(3, totalCells);
+
+        counts     = new IntArray(3);
+        boundSegId = new IntArray(motorCap);
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4.5 small-fix Step 2 — build the resident-pose bind ITG that lives
+    // alongside GPUMoveThing's chained ITG inside the merged TornadoExecution-
+    // Plan. coord/uVec/soaLengthArr are consumed from the chained graph's
+    // device-resident buffers (consumeFromDevice). Slot maps are uploaded
+    // EVERY_EXECUTION because classifyThings rewrites them in place when
+    // topology changes (their per-step upload is ~3 MB, dwarfed by the
+    // ~30 MB host-pack pose upload this retires).
+    // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Phase 4.5 small-fix Step 2 — separate-plan resident-pose bind. We share
+    // the move plan's Java FloatArray / IntArray identities (coord, uVec,
+    // soaLengthArr, motMoveSlot, motRodMoveSlot, filMoveSlot) so the bind
+    // kernels read the same data the move plan sees this step. But each
+    // plan owns its OWN device-side buffer (no consumeFromDevice — the
+    // merged-executor multi-graph plan leaks per-execute in TornadoVM
+    // 4.0.1-dev, see RUN_LOGS/2026-06-06_phase45_smallfix/
+    // step2_merged_bailout.log). The bind plan EVERY_EXECUTION-uploads the
+    // shared pose each step (~2 MB host→device), retiring the host-pack
+    // path's ~30 MB upload of motPos/motUVec/motRodUVec/filEnd1/filEnd2.
+    //
+    // Net: ~28 MB/step PCIe savings vs HEAD, plus the entire CPU pack loop
+    // gone. The same `plan` field the host-pack version used carries the
+    // new resident plan, so peekDeviceMemoryUsage() and reset() keep
+    // working unchanged.
+    // -------------------------------------------------------------------------
+    public static void installSeparateResidentPlan(
+            FloatArray coord, FloatArray uVecArr, FloatArray soaLength,
+            IntArray   motMoveSlot, IntArray motRodMoveSlot, IntArray filMoveSlot) {
+        TaskGraph tg = new TaskGraph("motorBinding")
+            .transferToDevice(DataTransferMode.FIRST_EXECUTION, gridParams, gridDims)
+            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                              coord, uVecArr, soaLength,
+                              motMoveSlot, motRodMoveSlot, filMoveSlot,
+                              motOnFil, filNodeAtEnd2,
+                              counts)
+            .task("segBbox",
+                  GPUMotorBinding::segBboxKernelResident,
+                  coord, uVecArr, soaLength, filMoveSlot,
+                  gridParams, gridDims, counts,
+                  segCellCount, segBbox)
+            .task("gridAssemble",
+                  GPUMotorBinding::gridAssembleKernel,
+                  segCellCount, segBbox,
+                  gridDims, counts,
+                  gridCellOffsets, gridCellContents, cellCount)
+            .task("bind",
+                  GPUMotorBinding::bindKernelResident,
+                  coord, uVecArr, soaLength,
+                  motMoveSlot, motRodMoveSlot, filMoveSlot,
+                  motOnFil, filNodeAtEnd2,
+                  gridCellOffsets, gridCellContents,
+                  gridParams, gridDims, counts,
+                  boundSegId, arcOnFilDev)
+            .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                            boundSegId, arcOnFilDev);
+        itg  = tg.snapshot();
+        plan = new TornadoExecutionPlan(itg);
+        if (BIND_PROFILE) {
+            plan = plan.withProfiler(
+                uk.ac.manchester.tornado.api.enums.ProfilerMode.SILENT);
+        }
+
+        WorkerGrid bindWorker = new WorkerGrid1D(motorCap);
+        bindWorker.setLocalWork(BIND_KERNEL_BLOCK_SIZE, 1, 1);
+        WorkerGrid segBboxWorker = new WorkerGrid1D(segCap);
+        segBboxWorker.setLocalWork(SEGBBOX_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler = new GridScheduler("motorBinding.bind",    bindWorker);
+        gridScheduler.addWorkerGrid("motorBinding.segBbox", segBboxWorker);
+
+        System.out.printf("GPUMotorBinding (resident): motorCap=%d segCap=%d totalCells=%d contentsCap=%d bindBlk=%d segBboxBlk=%d%n",
+                          motorCap, segCap, totalCells, contentsCap,
+                          BIND_KERNEL_BLOCK_SIZE, SEGBBOX_KERNEL_BLOCK_SIZE);
+    }
+
+    public static void clearSharedPlan() {
+        if (plan != null) {
+            try { plan.close(); } catch (Exception e) { /* best effort */ }
+        }
+        plan = null;
+        itg  = null;
+    }
+
     public static void detectBindings() {
         int M = MyoMotor.motorCt;
         int S = FilSegment.filSegmentCt;
@@ -1063,147 +1200,21 @@ public class GPUMotorBinding {
 
         long t0 = System.nanoTime();
 
-        // First call: size arrays to the CPU SoA caps + grid dims, build the plan.
         if (plan == null) {
-            MotorBindGrid3D grid = MotorBindGrid3D.INSTANCE;
-            motorCap    = MyoMotor.soaX.length;
-            segCap      = FilSegment.soaEnd1X.length;
-            totalCells  = grid.totalCellCount();
-            // Worst-case contents capacity: every segment painted into every cell
-            // it overlaps, capped by BIN_DEPTH per cell. The totalCells * BIN_DEPTH
-            // worst case is far larger than reality; cap at a sane multiplier of
-            // segCap*8 (each segment lives in ~8 cells at this geometry).
-            contentsCap = Math.min(totalCells * MotorBindGrid3D.BIN_DEPTH, segCap * 8);
-
-            motPos     = new FloatArray(motorCap * 3);
-            motUVec    = new FloatArray(motorCap * 3);
-            motRodUVec = new FloatArray(motorCap * 3);
-            motOnFil   = new IntArray(motorCap);
-
-            filEnd1       = new FloatArray(segCap * 3);
-            filEnd2       = new FloatArray(segCap * 3);
-            filNodeAtEnd2 = new IntArray(segCap);
-
-            gridCellOffsets  = new IntArray(totalCells + 1);
-            gridCellContents = new IntArray(contentsCap);
-
-            // Phase 3 — device-resident grid build scratch (allocated once;
-            // refilled each step inside the chained TaskGraph; never touched
-            // by the host on the per-step path).
-            segBbox      = new IntArray(segCap * 6);
-            segCellCount = new IntArray(segCap);
-            cellCount    = new IntArray(totalCells);
-
-            arcOnFilDev  = new FloatArray(motorCap);
-
-            // Phase 4.5 — slot 7 added for motorLen so the resident-pose bind
-            // kernel can derive the motor tip on-device as
-            //   coord + 0.5·motorLen·uVec
-            // (the host-pack path packs the tip directly in
-            // MyoMotor.fillSoaArrays). The host-pack kernel ignores slot 7.
-            gridParams = new FloatArray(8);
-            gridParams.set(0, grid.xMin);
-            gridParams.set(1, grid.yMin);
-            gridParams.set(2, grid.zMin);
-            gridParams.set(3, MotorBindGrid3D.CELL_SIZE);
-            gridParams.set(4, 1.0f / MotorBindGrid3D.CELL_SIZE);
-            gridParams.set(5, (float) Env.myoMotorAlignWithFilTolerance.getValue());
-            float myoColTol = (float) Env.myoColTol.getValue();
-            gridParams.set(6, myoColTol * myoColTol);
-            gridParams.set(7, (float) Env.myoMotorLength.getValue());
-
-            gridDims = new IntArray(4);
-            gridDims.set(0, grid.nXBins);
-            gridDims.set(1, grid.nYBins);
-            gridDims.set(2, grid.nZBins);
-            gridDims.set(3, totalCells);
-
-            counts     = new IntArray(3);
-            boundSegId = new IntArray(motorCap);
-
-            // Phase 3 TaskGraph: device-resident grid build chained ahead of
-            // bindKernel. gridCellOffsets / gridCellContents / segBbox /
-            // segCellCount / cellCount / arcOnFilDev are NOT in transferToDevice
-            // (they are populated entirely on device by segBbox + gridAssemble
-            // kernels; arcOnFilDev is written by bindKernel). gridCellOffsets and
-            // gridCellContents ARE in transferToHost so that the Phase-3 CP1
-            // checkpoint can read them back for set-equality comparison against
-            // the CPU CSR; the per-step download cost is ~500 KB (mostly empty
-            // cells) and will be removed at the Phase 4 flip.
-            TaskGraph tg = new TaskGraph("motorBinding")
-                .transferToDevice(DataTransferMode.FIRST_EXECUTION, gridParams, gridDims)
-                .transferToDevice(DataTransferMode.EVERY_EXECUTION,
-                                  motPos, motUVec, motRodUVec, motOnFil,
-                                  filEnd1, filEnd2, filNodeAtEnd2,
-                                  counts)
-                .task("segBbox",
-                      GPUMotorBinding::segBboxKernel,
-                      filEnd1, filEnd2,
-                      gridParams, gridDims, counts,
-                      segCellCount, segBbox)
-                .task("gridAssemble",
-                      GPUMotorBinding::gridAssembleKernel,
-                      segCellCount, segBbox,
-                      gridDims, counts,
-                      gridCellOffsets, gridCellContents, cellCount)
-                .task("bind",
-                      GPUMotorBinding::bindKernel,
-                      motPos, motUVec, motRodUVec, motOnFil,
-                      filEnd1, filEnd2, filNodeAtEnd2,
-                      gridCellOffsets, gridCellContents,
-                      gridParams, gridDims,
-                      counts, boundSegId, arcOnFilDev)
-                .transferToHost(DataTransferMode.EVERY_EXECUTION,
-                                boundSegId, arcOnFilDev,
-                                gridCellOffsets, gridCellContents);
-
-            itg  = tg.snapshot();
-            plan = new TornadoExecutionPlan(itg);
-            if (BIND_PROFILE) {
-                plan = plan.withProfiler(
-                    uk.ac.manchester.tornado.api.enums.ProfilerMode.SILENT);
-            }
-
-            // Per-task WorkerGrids — bind keeps its small block to fit register
-            // pressure; segBbox uses a larger block (register-light). The
-            // gridAssemble task is single-threaded (forced via @Parallel(0..1));
-            // omitting it from the scheduler lets TornadoVM apply default
-            // 1-thread launch from the @Parallel range.
-            WorkerGrid bindWorker = new WorkerGrid1D(motorCap);
-            bindWorker.setLocalWork(BIND_KERNEL_BLOCK_SIZE, 1, 1);
-            WorkerGrid segBboxWorker = new WorkerGrid1D(segCap);
-            segBboxWorker.setLocalWork(SEGBBOX_KERNEL_BLOCK_SIZE, 1, 1);
-            gridScheduler = new GridScheduler("motorBinding.bind",    bindWorker);
-            gridScheduler.addWorkerGrid("motorBinding.segBbox", segBboxWorker);
-
-            System.out.printf("GPUMotorBinding: motorCap=%d segCap=%d totalCells=%d contentsCap=%d bindBlk=%d segBboxBlk=%d%n",
-                              motorCap, segCap, totalCells, contentsCap,
-                              BIND_KERNEL_BLOCK_SIZE, SEGBBOX_KERNEL_BLOCK_SIZE);
+            System.err.println("[GPUMotorBinding] plan is null — was GPUMoveThing.onStepStart called?");
+            return;
         }
 
-        // ---------- Pack motor + segment SoA (CPU double → FloatArray float) ----------
+        // ---------- Pack bind-only host inputs (motOnFil, filNodeAtEnd2, counts) ----------
+        // Pose pack + filament endpoint pack retired with the merge:
+        // coord/uVec/soaLengthArr ride device-resident from GPUMoveThing's
+        // chained graph; the resident bind kernel derives motor tip and seg
+        // endpoints on-device. ~30 MB of per-step PCIe write retired.
         long packStart = System.nanoTime();
         for (int i = 0; i < M; i++) {
-            int j = i * 3;
-            motPos.set(j,     (float) MyoMotor.soaX[i]);
-            motPos.set(j + 1, (float) MyoMotor.soaY[i]);
-            motPos.set(j + 2, (float) MyoMotor.soaZ[i]);
-            motUVec.set(j,     (float) MyoMotor.soaUX[i]);
-            motUVec.set(j + 1, (float) MyoMotor.soaUY[i]);
-            motUVec.set(j + 2, (float) MyoMotor.soaUZ[i]);
-            motRodUVec.set(j,     (float) MyoMotor.soaRodUX[i]);
-            motRodUVec.set(j + 1, (float) MyoMotor.soaRodUY[i]);
-            motRodUVec.set(j + 2, (float) MyoMotor.soaRodUZ[i]);
             motOnFil.set(i, MyoMotor.soaOnFil[i] ? 1 : 0);
         }
         for (int s = 0; s < S; s++) {
-            int j = s * 3;
-            filEnd1.set(j,     (float) FilSegment.soaEnd1X[s]);
-            filEnd1.set(j + 1, (float) FilSegment.soaEnd1Y[s]);
-            filEnd1.set(j + 2, (float) FilSegment.soaEnd1Z[s]);
-            filEnd2.set(j,     (float) FilSegment.soaEnd2X[s]);
-            filEnd2.set(j + 1, (float) FilSegment.soaEnd2Y[s]);
-            filEnd2.set(j + 2, (float) FilSegment.soaEnd2Z[s]);
             filNodeAtEnd2.set(s, FilSegment.soaNodeAtEnd2[s] ? 1 : 0);
         }
         counts.set(0, M);
@@ -1211,20 +1222,10 @@ public class GPUMotorBinding {
         counts.set(2, Env.counter);
         long packEnd = System.nanoTime();
 
-        // ---------- Grid build now runs on device ----------
-        // Phase 3: the segBbox + gridAssemble kernels (chained ahead of bind
-        // inside the same TaskGraph) populate gridCellOffsets / gridCellContents
-        // directly on the device, reading the same filEnd1/filEnd2 buffers the
-        // bind kernel uses. The CPU MotorBindGrid3D.FillThreads + packForGPU
-        // pair are no longer on the per-step path (FillThreads is still wired
-        // in BoxOfActin's tSets but should be skipped by the caller on the
-        // GPU device-grid path — see BoxOfActin.doLoop gate). For Phase 3 the
-        // CSR is still transferred back to the host for the CP1 checkpoint
-        // path; Phase 4 will drop that.
         long gridStart = System.nanoTime();
         long gridEnd   = gridStart;
 
-        // ---------- Execute ----------
+        // ---------- Execute the (separate) bind plan ----------
         uk.ac.manchester.tornado.api.TornadoExecutionResult execRes =
             plan.withGridScheduler(gridScheduler).execute();
         long execEnd = System.nanoTime();
@@ -1235,7 +1236,6 @@ public class GPUMotorBinding {
                 bindWriteNanos += pr.getDeviceWriteTime();
                 bindReadNanos  += pr.getDeviceReadTime();
                 bindDeviceKernelTotalNanos += pr.getDeviceKernelTime();
-                // Per-task kernel time — extract from the profile-log JSON.
                 String json = pr.getProfileLog();
                 bindSegBboxKernelNanos       += extractTaskKernelTime(json, "motorBinding.segBbox");
                 bindGridAssembleKernelNanos  += extractTaskKernelTime(json, "motorBinding.gridAssemble");

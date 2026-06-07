@@ -943,12 +943,18 @@ public class BoxOfActin {
 				// This replaces the per-Thing forceSum.zero()/torqueSum.zero() that
 				// used to live in resetCounters — one memset over thingCt*3 floats.
 				Thing.clearSoaForcesTorques(Thing.thingCt);
-				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
+				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a).
+				// Phase 4.5 small-fix Step 2 — on the GPU path the resident bind
+				// kernel reads coord/uVec/soaLengthArr directly via slot maps; no
+				// MyoMotor.soaX / FilSegment.soaEnd1X consumer remains on the per-
+				// step path. CPU path (no -gpu) still needs them for MotorBindGrid3D.
 				long _fillSoaT0 = (Env.useGPU && GPUMotorBinding.isBindProfileEnabled())
 				                  ? System.nanoTime() : 0L;
 				Phase45Trace.snapshot("2_preFillSoa");
-				MyoMotor.fillSoaArrays();
-				FilSegment.fillSoaArrays();
+				if (!Env.useGPU) {
+					MyoMotor.fillSoaArrays();
+					FilSegment.fillSoaArrays();
+				}
 				Phase45Trace.snapshot("3_postFillSoa");
 				if (Env.useGPU && GPUMotorBinding.isBindProfileEnabled()) {
 					fillSoaArraysNanos += System.nanoTime() - _fillSoaT0;
