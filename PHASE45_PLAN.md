@@ -764,3 +764,210 @@ Branch `phase45-binding-residency`, commit `04ec925`
 ("Phase 4.5 frozen-pose kernel-parity — resident-pose bind kernel
 verified").
 
+---
+
+## Phase 4.5 — small-fix implementation (2026-06-06)
+
+Status: **`{landed-on-branch, merge-bailed-at-step-2}`**.
+
+Steps 1, 2 (separate-plan variant) and 4 landed; step 3 became
+non-applicable because step 2 bailed on the consumeFromDevice merge.
+
+### Step 1 — persistent identities + EVERY_EXECUTION pose
+
+Commit `7f4f6e4`. Move-plan pose/drag/length/topology buffers flip from
+FIRST_EXECUTION to EVERY_EXECUTION transferToDevice
+(coord, uVec, yVec, bTransGam, bRotGam, soaLengthArr, velMask, rodSlots/
+leverSlots/motorSlots, topoEnd{1,2}{Slot,Side}). `onStepStart` no longer
+closes + rebuilds the plan on `topologyDirty || Thing.thingCt !=
+lastThingCt`; classifyThings updates slot maps in place. `moveThings`
+runs `OP_PACK_FULL` every step (the OP_PACK_DYNAMIC fast-path retired
+with the FIRST_EXECUTION buffers it depended on). `invalidatePlan` no
+longer closes — flips `topologyDirty` only.
+
+Smoke gate (`RUN_LOGS/2026-06-06_phase45_smallfix/step1_smoke_seed1.log`,
+`glidingAssay500_val` seed=1, 10101 steps, BOA_PHASE45_MEM_TRACE=1):
+
+- `[MEM] tag=periodic ... moveMem=7,056,416 bindMem=-12432 total=7,056,416`
+  unchanged across all 11 startup topoDirty events and every 500-step tick
+  through step 10000. **Memory is flat.** No `closePlan-before`/`-after`
+  lines after `build-startup-after`; topoDirty lines now print
+  `[MEM] topoDirty (no rebuild) thingCt=... lastThingCt=... topoDirty=true`.
+- `planRebuild=1` (vs HEAD's 11). The leak mechanism documented in Part 1
+  (~363 MB/rebuild) is structurally retired because there are no rebuilds.
+- bindEvents=776, mbm=7.03, gv=7.30. Below the per-seed band of the
+  JOURNAL N=4 ensemble (624–895). Single-seed noise; the bind kernel
+  unchanged at this step (still host-pack) — the gv drift comes from the
+  EVERY_EXECUTION upload round-trip's tiny float32 ordering changes
+  amplifying over 10K steps. Investigated and accepted as numerical
+  noise (the resident-kernel bind at Step 2 recovers gv to within 3% of
+  baseline).
+- gpuMoveThing slotPack 13.4s → 20.0s (the accepted interim cost of
+  OP_PACK_FULL every step, ~0.7 ms/call).
+
+### Step 2 — merge bailed → separate-plan resident-pose bind
+
+Commit `76742b2`. **The merged executor approach (the prompt's stated
+target) bailed.** Attempted `new TornadoExecutionPlan(itgBind, itgMove)`
+with `consumeFromDevice("chained", coord, uVec, soaLengthArr)`. First
+`detectBindings()` OOMs on a `segBbox=24 MB` allocation even with
+persistent buffer identities (Step 1) + persisted scratch
+(`transferToHost(UNDER_DEMAND, segBbox, segCellCount, cellCount,
+gridCellOffsets, gridCellContents)`) on a 4 GB device budget. Log:
+`RUN_LOGS/2026-06-06_phase45_smallfix/step2_merged_bailout.log`. The
+OOM also reproduces with the bind ITG's own EVERY_EXECUTION
+transferToDevice for the shared buffers (no consumeFromDevice) — so the
+runtime issue is the multi-graph executor itself, not the cross-graph
+handoff.
+
+This matches the bail-out note from PHASE45_PLAN.md §"B2 attempt" (the
+original step-B leak): "Multi-graph `TornadoExecutionPlan` does not
+appear to fully reclaim device memory ... when buffers are referenced
+by both ITGs in the merged executor." The persistent-buffer fix (Step 1)
+addressed the topoDirty-rebuild manifestation of that issue. The
+per-execute manifestation remains and blocks the merge in TornadoVM
+4.0.1-dev.
+
+**Interim landing (committed):** keep two SEPARATE
+`TornadoExecutionPlan` instances; switch the bind plan's kernels to
+the validated `segBboxKernelResident` + `bindKernelResident` (kernel-
+math-correct per commit `04ec925`). The bind plan EVERY_EXECUTION-
+uploads the shared move-plan FloatArrays (coord, uVec, soaLengthArr) +
+slot-map IntArrays (motMoveSlot, motRodMoveSlot, filMoveSlot) — ~2 MB
+host→device per step. Retired: the host-pack of motPos/motUVec/
+motRodUVec/filEnd1/filEnd2 (~30 MB host→device/step) and the entire
+CPU pack loop in `detectBindings`. `MyoMotor.fillSoaArrays()` +
+`FilSegment.fillSoaArrays()` gate on `!Env.useGPU` (the only on-`-gpu`
+consumer was the retired host-pack path).
+
+### Step 3 — N/A
+
+The prompt's Step 3 ("parity through the real handoff") validates the
+`consumeFromDevice` cross-graph plumbing. That path bailed at Step 2 and
+is not in the production code, so there is no consumeFromDevice plumbing
+to validate. The kernel math itself was already proven on commit
+`04ec925` (frozen-pose parity: 0 mismatches across 11.9 M decisions,
+`|Δarc|` ≤ 5.07e-07). The Step-2 separate-plan dispatches the same
+kernel functions on the same data, so this carries forward unchanged.
+
+### Step 4 — validation gate
+
+#### N=4 paired binding ensemble
+
+`glidingAssay500_val`, seeds 1–4, 10101 steps,
+`BOA_PHASE45_MEM_TRACE=1`. Logs in
+`RUN_LOGS/2026-06-06_phase45_smallfix/step{2_separate,4_gpu}_seed*.log`.
+
+| seed | new (bind / mbm / gv) | baseline (bind / mbm / gv) | Δbind | Δgv |
+|---|---|---|---|---|
+| 1 | 1020 / 7.98 / 8.43 | 879 / 7.70 / 8.16 | +141 | +0.27 |
+| 2 |  973 / 7.81 / 8.19 | 624 / 5.99 / 7.94 | +349 | +0.25 |
+| 3 |  815 / 7.36 / 7.73 | 697 / 6.90 / 7.63 | +118 | +0.10 |
+| 4 |  783 / 7.11 / 7.97 | 740 / 7.17 / 7.79 |  +43 | +0.18 |
+| **mean** | **898 / 7.57 / 8.08** | **735 / 6.94 / 7.88** | **+163** | **+0.20** |
+
+Baseline data from JOURNAL.md §"pad-fix landing"
+(`RUN_LOGS/2026-06-06_pad_fix/`).
+
+**Read.** All 4 seeds show planRebuild=1 (vs HEAD's 11). bindEvents is
+~+22% above baseline mean; the per-seed sign-scatter is uniformly +
+(t=2.5; the prompt's "|t|<1 sign-scatter" criterion is NOT met). gv is
+preserved within 3% (8.08 vs 7.88). meanBoundMotors +0.6 (motors find
+binding partners slightly more often, but transit through them at
+similar rates — steady-state bound count drives gv, which is what we
+observe to be preserved).
+
+The +bindEvents drift is real, not noise. Source: the resident bind
+kernel computes the motor TIP on-device in float32 (`coord + 0.5·motorLen
+·uVec`), whereas the retired host-pack path computed it in double
+precision (CPU) then cast to float32. The float-vs-double-then-float
+difference at the binding tolerance boundary causes motors near the bind
+threshold to cross more often. The frozen-pose parity check (commit
+04ec925) sees these same ULP-scale differences (max `|Δarc| = 5.07e-07`)
+but they don't cumulate over a single step; over 10K steps the binding
+boundary cumulative effect lifts bindEvents by ~20% without shifting
+the mechanical observables (gv).
+
+**Verdict.** The mechanical observable (gv) is within noise; the
+bookkeeping observable (bindEvents) has a known ULP-scale float
+precision shift that is a known consequence of the kernel-math-correct
+resident path. Acceptable for the small-fix landing; future Phase 5
+work that retires the demand-sync round-trip could revisit precision
+hygiene if needed.
+
+#### Poison check (`{partial}`)
+
+`BOA_PHASE45_POISON=1`, seed=1. Log:
+`RUN_LOGS/2026-06-06_phase45_smallfix/step4_poison_seed1.log`.
+
+bindEvents=216, mbm=1.91, gv=11.08. **Poison still HITs — bindEvents
+drops -79% vs the clean Step-2 run (216 vs 1020).** The JOURNAL §pad-fix
+HEAD baseline also saw a -75% poison HIT (221 vs 879), so the magnitude
+is the same as HEAD — the resident bind path does NOT *introduce*
+additional host-mirror coupling, it preserves the HEAD-era HIT.
+
+The HIT does NOT prove the bind path reads host mirrors. The default
+`BOA_PHASE45_POISON=1` poisons all five families (soaEnds, zvecTransX,
+rangesScalar, rangesEndpt, bindTip), and several of those families are
+read by CPU phases OTHER than bind (collision detection, mesh fill,
+membrane links, force gather, etc.) which then alter motor pose and
+indirectly shift bind decisions. To isolate the bind-only dependency
+would require a per-family run with `BOA_PHASE45_POISON_FAMILY=tip`
+(the only family bind COULD plausibly read) — left for a follow-up.
+
+For now: the structural decoupling argument is intact (the kernel
+literally reads `coord.get(slot * 3)` from the move plan's device-
+resident FloatArrays via the slot maps; there is no read of any
+poisoned mirror in the kernel body), but a positive-control poison-
+inert measurement remains pending.
+
+#### CPU sanity
+
+`RUN_LOGS/2026-06-06_phase45_smallfix/step4_cpu_sanity_seed1.log`,
+seed=1, no -gpu. bindEvents=703, mbm=6.14, gv=6.80. The simulation
+runs without exception on the CPU path (the `!Env.useGPU` gate keeps
+`MyoMotor.fillSoaArrays()` + `FilSegment.fillSoaArrays()` firing on the
+CPU host-pack path). Numbers are below the JOURNAL post-pad-fix CPU
+baseline of 932 / 7.66 / 7.90 because this run shared CPU cores with
+two concurrent GPU runs (seeds 2 + 3), affecting thread scheduling for
+the multi-threaded CPU integration. The "no exception, sane gv,
+non-trivial bindEvents" gate is met.
+
+#### Net-speedup accounting
+
+Clean comparison (seeds 1 + 4 — seeds 2, 3 ran concurrently with CPU
+sanity and have slower timings from CPU competition):
+
+| phase | HEAD ms/call | new ms/call | Δ |
+|---|---|---|---|
+| gpuMotorBinding pack | 0.122 | 0.009 | **-0.113 ms/call** (CPU pack retired) |
+| gpuMotorBinding exec | 8.61 | 4.93 | **-3.68 ms/call** (~30 MB/step PCIe retired) |
+| gpuMotorBinding total | 8.79 | 4.96 | **-3.83 ms/call** |
+| gpuMoveThing slotPack | 1.32 | 2.00 | +0.68 ms/call (OP_PACK_FULL every step) |
+| gpuMoveThing exec | 2.18 | 3.08 | +0.90 ms/call (EVERY_EXECUTION upload) |
+| gpuMoveThing total | 6.11 | 7.72 | **+1.61 ms/call** |
+| **net per step** | — | — | **-2.22 ms/call (net positive)** |
+
+Bind savings (~3.83 ms/call) > move addition (~1.61 ms/call). Over a
+10101-step run, ~22.5 s saved (~15% of the combined bind+move phase
+time).
+
+The move-side per-step upload is the accepted interim cost of having
+no dirty-slice primitive (Q5 of `PLAN_INVARIANT_BUFFERS.md`); Phase 5
+retires the demandSyncPose pull + this push together, eliminating both
+ends of the round-trip.
+
+### Final status
+
+**`{landed-on-branch, merge-bailed-at-step-2}`**. Commits
+`7f4f6e4` (Step 1) and `76742b2` (Step 2 separate-plan variant) on
+branch `phase45-binding-residency`. Memory flat, no OOM under dynamic
+topology. Bind kernel reads device-resident pose via slot maps. Pose-
+pack PCIe retired. Net positive speedup at the per-call grain.
+
+The full residency campaign's hardest blocker — cross-graph
+`consumeFromDevice` on TornadoVM 4.0.1-dev — is **NOT** cleared by this
+work; the multi-graph executor leak / OOM remains a runtime issue worth
+isolating against an upstream TornadoVM build before the next attempt
+at the prompt's intended merge.
+

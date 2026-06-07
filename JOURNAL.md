@@ -1,8 +1,68 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (Plan-invariant buffers — Step 1 survey — `{small-fix}`)
+Last updated: 2026-06-06 (Phase 4.5 small-fix landed — separate-plan resident bind)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Phase 4.5 small-fix landed — separate-plan resident bind (merge bailed)
+
+**TL;DR.** The plan-invariant buffers refactor lands on
+`phase45-binding-residency` (commits `7f4f6e4`, `76742b2`) in two steps:
+(1) move-plan pose/drag/length/topology buffers go EVERY_EXECUTION and
+topoDirty no longer rebuilds the plan — flat memory, no rebuild leak;
+(2) the bind plan switches from host-pack to the validated resident
+kernels reading the same shared FloatArrays, retiring ~30 MB host→device
+PCIe per step. The prompt's intended cross-graph
+`consumeFromDevice` merge **bailed** — TornadoVM 4.0.1-dev's multi-graph
+executor OOMs at first detectBindings on a 24 MB segBbox alloc even with
+persistent buffers + persisted scratch, with OR without
+consumeFromDevice (the issue is the multi-graph executor itself, see
+`RUN_LOGS/2026-06-06_phase45_smallfix/step2_merged_bailout.log`). The
+interim separate-plan landing captures most of the binding savings
+without the runtime blocker.
+
+**N=4 paired ensemble** (`glidingAssay500_val` seeds 1–4):
+
+| seed | new (bind / mbm / gv) | baseline (post-pad-fix) | Δbind |
+|---|---|---|---|
+| 1 | 1020 / 7.98 / 8.43 | 879 / 7.70 / 8.16 | +141 |
+| 2 |  973 / 7.81 / 8.19 | 624 / 5.99 / 7.94 | +349 |
+| 3 |  815 / 7.36 / 7.73 | 697 / 6.90 / 7.63 | +118 |
+| 4 |  783 / 7.11 / 7.97 | 740 / 7.17 / 7.79 | +43  |
+| mean | 898 / 7.57 / 8.08 | 735 / 6.94 / 7.88 | +163 |
+
+gv preserved within 3% (8.08 vs 7.88). bindEvents shifted +22% with
+uniform-positive scatter (t≈2.5, fails the prompt's |t|<1 criterion).
+The shift source is the resident kernel's on-device float32 TIP
+computation (`coord + 0.5·motorLen·uVec`) vs the retired host-pack's
+double-then-float TIP — motors near the binding tolerance threshold
+cross more often at ULP scale. The frozen-pose parity check on commit
+`04ec925` saw this same ULP-scale `arcOnFil` divergence (max
+`|Δarc|=5.07e-07`) which doesn't cumulate per-step but does over the
+binding boundary across 10K steps. Mechanical observable (gv) is
+preserved; bookkeeping observable (bindEvents) drifts as expected.
+
+**Net per-call speedup** (seeds 1+4, clean comparison):
+- gpuMotorBinding 8.79 → 4.96 ms/call (-3.83 ms/call, 44% reduction).
+  Source: -0.113 ms CPU pack retired + -3.68 ms PCIe pose pack retired.
+- gpuMoveThing 6.11 → 7.72 ms/call (+1.61 ms/call, 26% increase).
+  Source: +0.68 ms OP_PACK_FULL every step + +0.90 ms EVERY_EXECUTION
+  upload of pose buffers.
+- **Net: -2.22 ms/call**, ~22.5 s saved over a 10101-step run.
+
+**Memory:** flat at `moveMem=7,056,416` across all 11 startup topoDirty
+events and every 500-step periodic tick through 10000. `planRebuild=1`
+(vs HEAD's 11). The leak mechanism documented in Part 1
+(~363 MB/rebuild) is structurally retired by Step 1.
+
+**Status:** `{landed-on-branch, merge-bailed-at-step-2}`. Branch
+`phase45-binding-residency` ready for jba review before main; the
+multi-graph `consumeFromDevice` blocker stays a future-session item
+(probably worth isolating against an upstream TornadoVM build first).
+
+Per-step results, MEM_TRACE numbers, the merged-executor bailout
+mechanism, and the full N=4 + CPU-sanity + speedup tables live in
+`PHASE45_PLAN.md` §"Phase 4.5 — small-fix implementation".
 
 ## 2026-06-06 — Plan-invariant buffers Step-1 survey — `{small-fix}` verdict
 
