@@ -1,8 +1,25 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (Phase 4.5 merged to main; dense crossover point landed)
+Last updated: 2026-06-07 (scatter-into-resident probe — feasible)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — scatter-into-resident probe: feasible (4.0.1-dev)
+
+Standalone TornadoVM 4.0.1-dev probe on branch `probe/scatter-resident`
+(base `7759be7`, aorus). Settles the gating mechanic for the resident-pose +
+delta-scatter design: a `FIRST_EXECUTION` + `UNDER_DEMAND` `FloatArray` can be
+(a) uploaded once, (b) kernel-written each execute, (c) also written by a
+scatter kernel from `EVERY_EXECUTION` host deltas, and (d) persist across
+executes — all in one TaskGraph, with no `persistOnDevice`/
+`consumeFromDevice` and no extra plan flags. Task declaration order is
+honored (verified both directions via a swap-order variant). Empty deltas are
+below noise floor in per-execute timing. Verdict + numbers + required
+incantations appended to `RESIDENT_POSE_DELTA_SCATTER.md` (`## Scatter-into-
+resident probe`). Probes at `probes/ScatterResidentProbe.java` and
+`probes/ScatterResidentProbeSwap.java`; logs in
+`RUN_LOGS/2026-06-07_scatter_resident/`. Green-lights Step 2: wire the delta-
+scatter into the real move plan and return coord/uVec/yVec to FIRST_EXECUTION.
 
 ## 2026-06-06 — Phase 4.5 merged to main; dense crossover point landed
 
