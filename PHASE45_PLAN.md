@@ -760,6 +760,7 @@ non-leaking buffer lifecycle.
 
 ### Commit
 
-Branch `phase45-binding-residency`. Last commit: see git log for the
-"Phase 4.5 frozen-pose kernel-parity check" commit.
+Branch `phase45-binding-residency`, commit `04ec925`
+("Phase 4.5 frozen-pose kernel-parity — resident-pose bind kernel
+verified").
 
