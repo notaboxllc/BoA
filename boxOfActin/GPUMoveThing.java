@@ -401,6 +401,20 @@ public class GPUMoveThing {
     private static IntArray   rodSlots;       // myoCap -- move slot of myoRod
     private static IntArray   leverSlots;     // myoCap -- move slot of myoLever
     private static IntArray   motorSlots;     // myoCap -- move slot of myoMotor
+
+    // ----- Phase 4.5 — per-MyoMotor and per-FilSegment move-slot lookups
+    // used by the device-resident pose path inside GPUMotorBinding's bind
+    // kernel. Indexed by MyoMotor.myMotorNumber (motorIdx ∈ [0, motorCt))
+    // and FilSegment.filArrayPos (s ∈ [0, filSegmentCt)). Value -1 means the
+    // motor / fil is CPU-fallback and the bind kernel must skip it. Populated
+    // alongside rodSlots/leverSlots/motorSlots inside classifyThings; sized
+    // to MyoMotor.theMotors.length and FilSegment.theFilSegments.length
+    // respectively (the cap GPUMotorBinding's plan uses).
+    private static IntArray   motMoveSlot;    // bindMotorCap -- move slot of MyoMotor[m]
+    private static IntArray   motRodMoveSlot; // bindMotorCap -- move slot of MyoMotor[m].myMyosin.myoRod
+    private static IntArray   filMoveSlot;    // bindSegCap   -- move slot of FilSegment[s]
+    private static int        bindMotorCap   = 0;
+    private static int        bindSegCap     = 0;
     private static FloatArray myoDrags;       // myoCap * 9 -- packed drag tensors for rod/lever/motor
     private static IntArray   cockedFlags;    // myoCap
     // 2026-06-02 Phase 1 — anchor spring (A7.b). anchorPts carries
@@ -560,6 +574,16 @@ public class GPUMoveThing {
     private static final int MOVE_KERNEL_BLOCK_SIZE = 64;
     private static final int JOINTS_KERNEL_BLOCK_SIZE = 64;
 
+    // Phase 4.5 small-fix Step 2 (attempted merged plan, bailed): the
+    // intended approach was `new TornadoExecutionPlan(itgBind, itgMove)` with
+    // consumeFromDevice across the bind/move graphs. Bailed on a TornadoVM
+    // 4.0.1-dev multi-graph runtime issue (segBbox=24 MB OOM at first
+    // detectBindings, see RUN_LOGS/2026-06-06_phase45_smallfix/
+    // step2_merged_bailout.log). Constants retained for clarity / a possible
+    // future revival once the runtime issue is understood; currently unused.
+    public static final int BIND_GRAPH_IDX = 0;
+    public static final int MOVE_GRAPH_IDX = 1;
+
     // Timing accumulators
     private static long packNanos       = 0;
     private static long execNanos       = 0;
@@ -578,6 +602,20 @@ public class GPUMoveThing {
     // FIRST_EXECUTION re-upload of coord/uVec/yVec/bTransGam/bRotGam/length so
     // any biochem poly/depoly mutation of soaCoord (B1) is pushed to device.
     private static int  planRebuildCount       = 0;
+
+    // Phase 4.5 Part-1 — TornadoVM device-memory instrumentation.
+    // Armed via BOA_PHASE45_MEM_TRACE=1. When on, every plan close + plan
+    // build site queries plan.getCurrentDeviceMemoryUsage() and prints a line
+    // tagged [MEM] with the rebuild index, step counter, phase, and bytes.
+    // Also drains a periodic snapshot from BoxOfActin.doLoop tail (every
+    // MEM_TRACE_STEP_INTERVAL steps) so we can see steady-state drift between
+    // rebuilds without flooding the log. Used to answer the "monotonic vs
+    // flat-then-spike" + "4 GB vs 8 GB trajectory" questions for the merged-
+    // executor OOM bail-out.
+    public static final boolean MEM_TRACE =
+        "1".equals(System.getenv("BOA_PHASE45_MEM_TRACE"));
+    public static final int MEM_TRACE_STEP_INTERVAL = 500;
+    private static int memTraceTickCount = 0;
 
     // -------------------------------------------------------------------------
     // Phase-0 A/B profiler accumulators — populated only when MOVE_AB_PROFILE
@@ -2522,6 +2560,18 @@ public class GPUMoveThing {
         rodSlots       = new IntArray(myoCap);
         leverSlots     = new IntArray(myoCap);
         motorSlots     = new IntArray(myoCap);
+
+        // Phase 4.5: slot maps for the resident-pose bind path. Sized to the
+        // GPUMotorBinding plan's caps (MyoMotor.soaX.length and
+        // FilSegment.soaEnd1X.length — both 1e6 / 5e5 worst case). Allocated
+        // here so they share the plan-rebuild lifecycle and live in the
+        // merged executor's persistedObject set.
+        bindMotorCap   = MyoMotor.soaX.length;
+        bindSegCap     = FilSegment.soaEnd1X.length;
+        motMoveSlot    = new IntArray(bindMotorCap);
+        motRodMoveSlot = new IntArray(bindMotorCap);
+        filMoveSlot    = new IntArray(bindSegCap);
+
         myoDrags       = new FloatArray(myoCap * 9);
         cockedFlags    = new IntArray(myoCap);
         anchorPts      = new FloatArray(myoCap * 3);
@@ -2600,45 +2650,48 @@ public class GPUMoveThing {
         // contribution, move reads the combined sum). Inter-task RMW within
         // a single .execute() is safe because both tasks share device-resident
         // buffers and no host re-upload happens between tasks.
-        // Phase 4 flip — buffers split by transfer cadence:
+        // Phase 4.5 small-fix — all per-step-mutable buffers now ride
+        // EVERY_EXECUTION so topology changes (biochem poly/depoly, splits,
+        // swap-compaction) reach the device by re-upload, NOT by plan
+        // rebuild. The host-pose-authoritative invariant holds: every step
+        // demandSyncPoseToHost pulls device pose → host before the next
+        // execute, so the EVERY_EXECUTION upload round-trips rather than
+        // clobbers. classifyThings updates slot maps / topology IntArrays in
+        // place on topology-dirty steps; OP_PACK_FULL refreshes the pose,
+        // drag and length FloatArrays before each execute.
         //
-        //   FIRST_EXECUTION (resident across .execute() calls; re-uploaded on
-        //   plan rebuild only):
-        //     coord, uVec, yVec          — written by move kernel, re-orthog by
-        //                                  derived kernel; CPU only updates them
-        //                                  on biochem poly/depoly (B1 sets
-        //                                  topologyDirty → plan rebuild → re-upload).
-        //     bTransGam, bRotGam         — Thing drag tensors; only change on aeta
-        //                                  mutation (calls invalidatePlan).
-        //     soaLengthArr               — FilSegment length; only changes on
-        //                                  poly/depoly (also B1 → plan rebuild).
-        //     topo*Slot/Side, *Slots     — slot mappings populated by
-        //                                  classifyThings on plan rebuild.
-        //     velMask                    — boundary pin mask, set in classifyThings.
-        //
-        //   EVERY_EXECUTION (uploaded per step; CPU recomputes contents):
-        //     cpuForceSum, cpuTorqueSum  — CPU accumulator output.
+        //   EVERY_EXECUTION inputs:
+        //     coord, uVec, yVec           — host-authoritative; OP_PACK_FULL
+        //                                   refreshes from Thing.soa*.
+        //     bTransGam, bRotGam          — drag tensors (aeta mutation safe).
+        //     soaLengthArr                — FilSegment length (poly/depoly safe).
+        //     velMask                     — boundary pin mask; classifyThings
+        //                                   may rewrite on topology-dirty steps.
+        //     rodSlots/leverSlots/motorSlots — Myosin joint slot mapping;
+        //                                   classifyThings may rewrite.
+        //     topo*Slot/Side              — chain neighbour mapping; classifyThings
+        //                                   may rewrite on topology-dirty steps.
+        //     cpuForceSum, cpuTorqueSum   — CPU accumulator output.
         //     jointForceSum, jointTorqueSum — zeroed each step (delta buffer).
-        //     brownianScales             — depends on per-step linkedToCt + mutable
-        //                                  Env.BTransCoeff/BRotCoeff.
-        //     myoDrags, cockedFlags      — re-packed in packJointsRange each step.
-        //     anchorPts, anchoredFlags   — same.
-        //     boundaryActive, boundaryParams, boundaryTipC  — per-step CPU side.
+        //     brownianScales              — depends on per-step linkedToCt + mutable
+        //                                   Env.BTransCoeff/BRotCoeff.
+        //     myoDrags, cockedFlags       — re-packed in packJointsRange each step.
+        //     anchorPts, anchoredFlags    — same.
+        //     boundaryActive, boundaryParams, boundaryTipC — per-step CPU side.
         //     boundSegSlot, posOnSegArr, segMotorOffsets, segMotorMyo —
-        //                                  motor binding CSR (CPU pack).
-        //     motorWriteback             — output buffer for force writeback.
+        //                                   motor binding CSR (CPU pack).
+        //     motorWriteback              — output buffer for force writeback.
         //     motorForceParams, jointParams, chainParams, params, counts —
-        //                                  per-step uniforms.
+        //                                   per-step uniforms.
         TaskGraph tg = new TaskGraph("chained")
-            .transferToDevice(DataTransferMode.FIRST_EXECUTION,
+            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               coord, uVec, yVec,
                               bTransGam, bRotGam,
                               velMask,
                               rodSlots, leverSlots, motorSlots,
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
-                              soaLengthArr)
-            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                              soaLengthArr,
                               cpuForceSum, cpuTorqueSum,
                               jointForceSum, jointTorqueSum,
                               brownianScales,
@@ -2767,14 +2820,36 @@ public class GPUMoveThing {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        motorWriteback);
             }
+            // Phase 4.5 small-fix Step 2 — soaLengthArr also persists on device
+            // so the bind ITG can consumeFromDevice it.
             tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
                                    coord, uVec, yVec,
+                                   soaLengthArr,
                                    derivedEnd1, derivedEnd2, derivedZVec,
                                    derivedYVecOrtho, derivedTransXTox);
         }
 
-        itg  = tg.snapshot();
+        itg = tg.snapshot();
         plan = new TornadoExecutionPlan(itg);
+
+        // Phase 4.5 small-fix Step 2 (separate-plan variant) — the bind ITG
+        // lives in its OWN TornadoExecutionPlan (not merged), because the
+        // merged-multi-graph executor leaks per-execute even with persistent
+        // Java identities + persisted scratch (verified by the OOM on the
+        // first segBbox=24 MB alloc, RUN_LOGS/2026-06-06_phase45_smallfix/
+        // step2_merged_bailout.log). The merge approach is blocked on a
+        // TornadoVM 4.0.1-dev runtime issue with multi-graph allocations.
+        // The interim fix: keep two separate plans, but have the bind plan
+        // run the resident kernels (segBboxKernelResident / bindKernelResident)
+        // reading coord/uVec/soaLengthArr/slot maps via EVERY_EXECUTION upload
+        // of the SHARED Java FloatArray identities. The host-pack of
+        // motPos/motUVec/motRodUVec/filEnd1/filEnd2 (~30 MB/step) retires;
+        // the new bind-side upload of coord/uVec/soaLengthArr is ~2 MB/step.
+        // Net PCIe savings: ~28 MB/step.
+        GPUMotorBinding.allocateBuffersIfNeeded();
+        GPUMotorBinding.installSeparateResidentPlan(
+            coord, uVec, soaLengthArr,
+            motMoveSlot, motRodMoveSlot, filMoveSlot);
 
         WorkerGrid moveWorker = new WorkerGrid1D(slotCap);
         moveWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
@@ -2887,7 +2962,74 @@ public class GPUMoveThing {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Phase 4.5 — accessors for the resident-pose bind path. GPUMotorBinding
+    // reads the move plan's pose buffers + slot maps to dispatch the
+    // resident-pose bind kernels (parity harness, and eventually the production
+    // resident dispatch when the merged-executor lifecycle is solved).
+    // -------------------------------------------------------------------------
+    public static FloatArray getCoordArray()          { return coord; }
+    public static FloatArray getUVecArray()           { return uVec; }
+    public static FloatArray getSoaLengthArray()      { return soaLengthArr; }
+    public static IntArray   getMotMoveSlotArray()    { return motMoveSlot; }
+    public static IntArray   getMotRodMoveSlotArray() { return motRodMoveSlot; }
+    public static IntArray   getFilMoveSlotArray()    { return filMoveSlot; }
+    public static int        getBindMotorCap()        { return bindMotorCap; }
+    public static int        getBindSegCap()          { return bindSegCap; }
+
+    /** Phase 4.5 parity — demand-sync coord/uVec back to host so the parity
+     *  plan's EVERY_EXECUTION upload of the move plan's resident pose sees the
+     *  current device state (not a stale host snapshot from an earlier step's
+     *  demand-sync). Wraps the same TornadoVM transferToHost(UNDER_DEMAND)
+     *  mechanism the doLoop already uses at the top of each step. */
+    public static void demandSyncPoseToHostForParity() {
+        if (lastExecResult == null) return;
+        try {
+            lastExecResult.transferToHost(coord, uVec, yVec);
+        } catch (Throwable t) {
+            // best effort; the host snapshot may be one step stale but parity
+            // still operates on the same data the bind path consumed.
+        }
+    }
+
+    /** Phase 4.5 Part-1 — query plan.getCurrentDeviceMemoryUsage() defensively
+     *  (returns -1 on any exception, e.g., closed plan / null plan). The
+     *  TornadoVM API exposes a single getCurrentDeviceMemoryUsage() per
+     *  TornadoExecutionPlan. With separate move + bind plans at HEAD, we sum
+     *  both; under the merged executor we read the single plan. */
+    public static long memUsage(TornadoExecutionPlan p) {
+        if (p == null) return -1;
+        try { return p.getCurrentDeviceMemoryUsage(); }
+        catch (Throwable t) { return -1; }
+    }
+
+    /** Phase 4.5 Part-1 — emit one [MEM] line. Tag describes the phase
+     *  (startup, rebuild-before, rebuild-after, periodic, etc.). */
+    public static void memTrace(String tag) {
+        if (!MEM_TRACE) return;
+        long moveMem = memUsage(plan);
+        long bindMem = GPUMotorBinding.peekDeviceMemoryUsage();
+        long total = (moveMem < 0 ? 0 : moveMem) + (bindMem < 0 ? 0 : bindMem);
+        System.out.printf(
+            "[MEM] tag=%s rebuildIdx=%d step=%d moveMem=%d bindMem=%d total=%d%n",
+            tag, planRebuildCount, stepCounter, moveMem, bindMem, total);
+    }
+
+    /** Periodic tick called from BoxOfActin.doLoop tail; logs every
+     *  MEM_TRACE_STEP_INTERVAL invocations. */
+    public static void memTraceTick() {
+        if (!MEM_TRACE) return;
+        memTraceTickCount++;
+        if (memTraceTickCount % MEM_TRACE_STEP_INTERVAL == 0) {
+            memTrace("periodic");
+        }
+    }
+
     private static void closePlan() {
+        if (MEM_TRACE) memTrace("closePlan-before");
+        // Phase 4.5 small-fix Step 2 — clear GPUMotorBinding's shared plan ref
+        // so its next detectBindings() doesn't dispatch through a closed plan.
+        GPUMotorBinding.clearSharedPlan();
         if (plan != null) {
             try { plan.close(); } catch (Exception e) { /* best effort */ }
             plan = null;
@@ -2907,10 +3049,16 @@ public class GPUMoveThing {
         // demandSyncPoseToHost call between closePlan and the next execute is
         // a no-op (correct: no device data to sync).
         lastExecResult = null;
+        if (MEM_TRACE) memTrace("closePlan-after");
     }
 
     public static void invalidatePlan() {
-        closePlan();
+        // Phase 4.5 small-fix — closing the plan is no longer required to
+        // propagate CPU-side parameter changes (aeta → bTransGam/bRotGam).
+        // Those buffers ride EVERY_EXECUTION, so the next OP_PACK_FULL +
+        // plan.execute() picks up the freshly-recomputed values. We still
+        // mark topology dirty so classifyThings re-runs defensively in case
+        // the parameter change altered gpuHandled status anywhere.
         topologyDirty = true;
         coordsDirty   = true;
     }
@@ -3437,6 +3585,51 @@ public class GPUMoveThing {
                 ((FilSegment) cpuFallback[i]).gpuBoundaryHandled = false;
             }
         }
+
+        // Phase 4.5: populate the bind-side slot maps. Indexed by
+        // MyoMotor.myMotorNumber (= motorIdx in the binding kernel) and
+        // FilSegment.filArrayPos (= s in the binding kernel). -1 sentinel
+        // marks CPU-fallback (the bind kernel skips those motors / segs).
+        if (motMoveSlot != null && filMoveSlot != null) {
+            int mcap = motMoveSlot.getSize();
+            for (int i = 0; i < mcap; i++) {
+                motMoveSlot.set(i, -1);
+                motRodMoveSlot.set(i, -1);
+            }
+            int scap = filMoveSlot.getSize();
+            for (int i = 0; i < scap; i++) filMoveSlot.set(i, -1);
+
+            int motorCtLocal = MyoMotor.motorCt;
+            MyoMotor[] motors = MyoMotor.theMotors;
+            for (int m = 0; m < motorCtLocal && m < mcap; m++) {
+                MyoMotor mm = motors[m];
+                if (mm == null || mm.removeMe) continue;
+                int motIdx = mm.myThingNumber;
+                if (motIdx >= 0 && motIdx < thingNumberToMoveSlot.length) {
+                    int ms = thingNumberToMoveSlot[motIdx];
+                    if (ms >= 0) motMoveSlot.set(m, ms);
+                }
+                if (mm.myMyosin != null && mm.myMyosin.myoRod != null) {
+                    int rIdx = mm.myMyosin.myoRod.myThingNumber;
+                    if (rIdx >= 0 && rIdx < thingNumberToMoveSlot.length) {
+                        int rs = thingNumberToMoveSlot[rIdx];
+                        if (rs >= 0) motRodMoveSlot.set(m, rs);
+                    }
+                }
+            }
+
+            int filCtLocal = FilSegment.filSegmentCt;
+            FilSegment[] fils = FilSegment.theFilSegments;
+            for (int s = 0; s < filCtLocal && s < scap; s++) {
+                FilSegment fs = fils[s];
+                if (fs == null || fs.removeMe) continue;
+                int filIdx = fs.myThingNumber;
+                if (filIdx >= 0 && filIdx < thingNumberToMoveSlot.length) {
+                    int fSlot = thingNumberToMoveSlot[filIdx];
+                    if (fSlot >= 0) filMoveSlot.set(s, fSlot);
+                }
+            }
+        }
     }
 
     public static void onStepStart() {
@@ -3444,37 +3637,35 @@ public class GPUMoveThing {
         int desiredSlotCap = Math.max(1024, Thing.thingCt * 2);
         int desiredMyoCap  = Math.max(1024, Myosin.myoCt   * 2);
         if (plan == null) {
+            if (MEM_TRACE) memTrace("build-startup-before");
             allocateAndBuildPlan(desiredSlotCap, desiredMyoCap);
             planRebuildCount++;
+            if (MEM_TRACE) memTrace("build-startup-after");
         } else if (Thing.thingCt > slotCap || Myosin.myoCt > myoCap) {
+            // Rare-event fallback: device buffers are over-allocated to
+            // ~2x at first build, and 0 capGrow events were observed across
+            // 10101 steps of glidingAssay500_val. If we ever exceed capacity,
+            // close + reallocate + rebuild (the buffer Java identities have
+            // to change because the FloatArrays themselves must grow). This
+            // is the only path that still drops plan + buffer identities.
+            if (MEM_TRACE) System.out.printf("[MEM] rebuild reason=capGrow thingCt=%d slotCap=%d myoCt=%d myoCap=%d%n",
+                Thing.thingCt, slotCap, Myosin.myoCt, myoCap);
             closePlan();
             int ns = (Thing.thingCt > slotCap) ? Math.max(slotCap * 2, Thing.thingCt * 2) : slotCap;
             int nm = (Myosin.myoCt  > myoCap)  ? Math.max(myoCap  * 2, Myosin.myoCt  * 2) : myoCap;
             allocateAndBuildPlan(ns, nm);
             planRebuildCount++;
-        } else if (topologyDirty || Thing.thingCt != lastThingCt) {
-            // Phase 4 flip — pose is now FIRST_EXECUTION on the device side, so
-            // any CPU-side pose mutation (B1: biochem poly/depoly's
-            // pushCoordToSoa, or thingCt change from cleanup/spawning) must
-            // force a plan rebuild to trigger a fresh FIRST_EXECUTION upload.
-            // We reuse the existing FloatArray buffers — the rebuild only
-            // reconstructs the TaskGraph + ImmutableTaskGraph + ExecutionPlan
-            // (lightweight Java objects); the on-device memory for the
-            // buffers themselves is dropped and re-created on the upcoming
-            // first execute via the plan's transferToDevice list.
-            //
-            // Plan rebuild is amortized over many steady-state steps; in
-            // gliding rotation with biochemDeltaT=0.01s and dt=1e-5,
-            // topologyDirty fires at most every ~1000 steps from biochem
-            // poly/depoly (it does not fire in steady state in the absence of
-            // nucleation / random spawn). The cost (Java object construction
-            // + capacity-sized FIRST_EXECUTION re-upload at next execute) is
-            // a fraction of a millisecond, dwarfed by the per-step savings.
-            closePlan();
-            allocateAndBuildPlan(slotCap, myoCap);
-            planRebuildCount++;
+            if (MEM_TRACE) memTrace("build-capGrow-after");
         }
+        // Phase 4.5 small-fix: topology-dirty no longer rebuilds the plan.
+        // All buffers ride EVERY_EXECUTION, so biochem-mutated host pose
+        // reaches the device on the next plan.execute() via OP_PACK_FULL +
+        // EVERY_EXECUTION upload. classifyThings still runs on topology
+        // change to refresh the slot maps in place (no buffer reallocation
+        // — same Java IntArray identities, just rewritten contents).
         if (topologyDirty || Thing.thingCt != lastThingCt) {
+            if (MEM_TRACE) System.out.printf("[MEM] topoDirty (no rebuild) thingCt=%d lastThingCt=%d topoDirty=%b%n",
+                Thing.thingCt, lastThingCt, topologyDirty);
             classifyThings();
         }
     }
@@ -4189,19 +4380,16 @@ public class GPUMoveThing {
         long packStart = System.nanoTime();
         int sc = slotCount;
         if (sc > 0) {
-            // Phase 4 flip — when plan was just rebuilt (coordsDirty=true),
-            // perform OP_PACK_FULL so the host FloatArrays for the FIRST_EXECUTION
-            // buffers (coord/uVec/yVec/bTransGam/bRotGam/soaLengthArr) hold the
-            // correct values; the runtime then uploads them on the upcoming
-            // plan.execute(). On steady-state steps the pose stays
-            // device-resident, so we only pack the EVERY_EXECUTION dynamic
-            // buffers (force/torque/joint-zero/brownianScales).
-            if (coordsDirty) {
-                dispatchAndWait(OP_PACK_FULL, sc);
-                coordsDirty = false;
-            } else {
-                dispatchAndWait(OP_PACK_DYNAMIC, sc);
-            }
+            // Phase 4.5 small-fix — all pose/drag/length/topology buffers
+            // are now EVERY_EXECUTION (rather than FIRST_EXECUTION + rebuild
+            // on biochem change), so OP_PACK_FULL runs every step to refresh
+            // the host FloatArrays from Thing.soa* before the next upload.
+            // Host pose stays authoritative every step via demandSyncPoseToHost,
+            // so this round-trips the device-integrated pose plus any CPU-side
+            // biochem mutation. The OP_PACK_DYNAMIC fast-path retired with the
+            // FIRST_EXECUTION buffers it depended on.
+            dispatchAndWait(OP_PACK_FULL, sc);
+            coordsDirty = false;
         }
 
         // Per-Myosin joint pack — drags + cocked flags only; slot maps were

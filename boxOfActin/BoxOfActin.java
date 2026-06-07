@@ -126,6 +126,36 @@ public class BoxOfActin {
 	static long fillSoaArraysNanos = 0;
 	static int  fillSoaArraysCalls = 0;
 
+	// Phase 4.5 — frozen-pose kernel-parity check. Triggered by
+	// BOA_PHASE45_PARITY=<start>[:<stop>]; at every step in [start, stop],
+	// immediately after the host-pack detectBindings() dispatch has fired and
+	// ontoFilament has applied bindings, the resident-pose bind plan is
+	// dispatched on the same frozen pose and boundSegId/arcOnFilDev are
+	// compared element-wise. The pose is "frozen" between the two dispatches
+	// because nothing between detectBindings and parityCheck mutates
+	// Thing.soaCoord/soaUVec or the slot maps. After the last step in the
+	// window, BoxOfActin.doLoop prints the aggregate summary and
+	// System.exit(0)s to keep the trajectory from drifting past the window.
+	// A single step is allowed via BOA_PHASE45_PARITY=<step> (start==stop).
+	static final int PHASE45_PARITY_START = parsePhase45ParityRange()[0];
+	static final int PHASE45_PARITY_STOP  = parsePhase45ParityRange()[1];
+	private static int[] parsePhase45ParityRange() {
+		String s = System.getenv("BOA_PHASE45_PARITY");
+		if (s == null || s.isEmpty()) return new int[]{-1, -1};
+		try {
+			int colon = s.indexOf(':');
+			if (colon < 0) {
+				int v = Integer.parseInt(s.trim());
+				return new int[]{v, v};
+			}
+			int a = Integer.parseInt(s.substring(0, colon).trim());
+			int b = Integer.parseInt(s.substring(colon + 1).trim());
+			return new int[]{a, b};
+		} catch (NumberFormatException e) {
+			return new int[]{-1, -1};
+		}
+	}
+
 	public BoxOfActin (String[] args) {
 		
 	}
@@ -913,12 +943,18 @@ public class BoxOfActin {
 				// This replaces the per-Thing forceSum.zero()/torqueSum.zero() that
 				// used to live in resetCounters — one memset over thingCt*3 floats.
 				Thing.clearSoaForcesTorques(Thing.thingCt);
-				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a)
+				// SoA sync: snapshot motor and filament positions for 3D grid (step 1a).
+				// Phase 4.5 small-fix Step 2 — on the GPU path the resident bind
+				// kernel reads coord/uVec/soaLengthArr directly via slot maps; no
+				// MyoMotor.soaX / FilSegment.soaEnd1X consumer remains on the per-
+				// step path. CPU path (no -gpu) still needs them for MotorBindGrid3D.
 				long _fillSoaT0 = (Env.useGPU && GPUMotorBinding.isBindProfileEnabled())
 				                  ? System.nanoTime() : 0L;
 				Phase45Trace.snapshot("2_preFillSoa");
-				MyoMotor.fillSoaArrays();
-				FilSegment.fillSoaArrays();
+				if (!Env.useGPU) {
+					MyoMotor.fillSoaArrays();
+					FilSegment.fillSoaArrays();
+				}
 				Phase45Trace.snapshot("3_postFillSoa");
 				if (Env.useGPU && GPUMotorBinding.isBindProfileEnabled()) {
 					fillSoaArraysNanos += System.nanoTime() - _fillSoaT0;
@@ -963,6 +999,27 @@ public class BoxOfActin {
 				if (Env.useGPU) {
 					Phase45Trace.snapshot("4_preBindingDispatch");
 					GPUMotorBinding.detectBindings();
+					// Phase 4.5 — frozen-pose kernel-parity check. Fires
+					// once at BOA_PHASE45_PARITY=<step>; resident dispatch
+					// reads the move plan's coord/uVec/soaLengthArr via the
+					// slot maps populated by GPUMoveThing.classifyThings().
+					// The demand-sync below ensures the host-side pose
+					// FloatArrays carry the same values fillSoaArrays just
+					// read (otherwise the resident plan's EVERY_EXECUTION
+					// upload would carry stale host data while the host-pack
+					// plan saw fresh CPU pose).
+					if (PHASE45_PARITY_START >= 0
+					    && Env.counter >= PHASE45_PARITY_START
+					    && Env.counter <= PHASE45_PARITY_STOP) {
+						GPUMoveThing.demandSyncPoseToHostForParity();
+						GPUMotorBinding.parityCheck();
+						if (Env.counter == PHASE45_PARITY_STOP) {
+							GPUMotorBinding.reportParitySummary();
+							System.out.printf("[PARITY] freezing run at step %d%n",
+							                  Env.counter);
+							System.exit(0);
+						}
+					}
 				} else {
 					startAllThreadSets(Env.motCollStart);
 					waitOnAllThreadSets(Env.motCollStop);
@@ -1097,6 +1154,12 @@ public class BoxOfActin {
 				}
 
 				updateCounters();
+
+				// Phase 4.5 Part-1 — periodic device-memory tick. No-op unless
+				// BOA_PHASE45_MEM_TRACE=1. Logs at MEM_TRACE_STEP_INTERVAL cadence.
+				if (Env.useGPU && GPUMoveThing.MEM_TRACE) {
+					GPUMoveThing.memTraceTick();
+				}
 
 				// 2026-05-31 conformation diagnostic — no-op when JointDiag.ENABLED=false.
 				JointDiag.sample();

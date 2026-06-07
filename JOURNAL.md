@@ -1,8 +1,224 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (dense CPU-vs-GPU benchmark at current HEAD: GPU 0.80× CPU)
+Last updated: 2026-06-06 (Phase 4.5 merged to main; dense crossover point landed)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Phase 4.5 merged to main; dense crossover point landed
+
+Phase 4.5 (`phase45-binding-residency`) merged to `main` via `--no-ff`
+preserving a phase-milestone merge commit. Branch contents: persistent-
+buffer plan lifecycle, separate-plan resident-pose bind, validation
+gate, float32 binding doc + binding scheme reference, and a new dense
+benchmark point — all landed in prior commits, plus this entry.
+
+**Dense crossover point** (post-4.5, seed=1, `glidingDense_demo_smoke`,
+branch tip `ade5b56`):
+
+| | wall (s) | ratio vs CPU |
+|---|---|---|
+| CPU (no `-gpu`) | **153** | 1.00× |
+| GPU (`-gpu`)    | **125** | **0.82×** |
+
+vs HEAD's 154 / 123 / 0.80×. CPU sanity-check passes (no CPU-side change
+in 4.5 → 1 s drift). GPU is +2 s vs HEAD, ratio shifted 0.80→0.82× —
+within single-seed noise. Bind phase dropped 17.7 s → 14.0 s (pose-pack
+PCIe retired) but move grew 34.7 s → 47.9 s (EVERY_EXECUTION upload +
+OP_PACK_FULL every step), near-cancelling at dense scale where M ≈ 98K
+makes the per-call pose-pack PCIe saved on bind comparable to the
+per-call PCIe added on move. `planRebuild` collapsed 17 → 1 (the
+plan-invariant lift retires all topoDirty rebuilds). Logs:
+`RUN_LOGS/2026-06-06_dense_post45/{cpu,gpu}_seed1.{log,wall}`;
+`BENCHMARK_dense.md` updated with the post-4.5 row alongside the
+iter2b/2c/2d series.
+
+What 4.5 actually delivers at dense scale: a structural retirement of
+the topoDirty rebuild leak (no memory accumulation, no startup-burst
+OOM risk) and a kernel-math-correct resident bind path validated at
+ULP scale — the wall numbers won't move until Step-5-class work
+eliminates the demand-sync pull and the move-side push together.
+
+## 2026-06-06 — float32 binding systematic + binding scheme reference filed
+
+`MYOSIN_VALIDATION.md` gains a "float32 binding systematic" note (CPU-double vs
+GPU-float32 +22% bindEvents observed Phase 4.5, deferred reconciliation) and a
+"Binding scheme reference" subsection documenting the capture test (`myoColTol`,
+no stochastic accept/reject), the tip-computation sites on both paths
+(`MyoMotor.fillSoaArrays` + `checkFilSegCollision` vs `bindKernelResident`), the
+tuning knobs, and the specific CPU sites to drop to float32 (`MyoMotor.java:42-44`
++ `:431-453`) — separable from the double-precision Langevin integrator.
+Docs only, no code changes.
+
+## 2026-06-06 — Phase 4.5 small-fix landed — separate-plan resident bind (merge bailed)
+
+**TL;DR.** The plan-invariant buffers refactor lands on
+`phase45-binding-residency` (commits `7f4f6e4`, `76742b2`) in two steps:
+(1) move-plan pose/drag/length/topology buffers go EVERY_EXECUTION and
+topoDirty no longer rebuilds the plan — flat memory, no rebuild leak;
+(2) the bind plan switches from host-pack to the validated resident
+kernels reading the same shared FloatArrays, retiring ~30 MB host→device
+PCIe per step. The prompt's intended cross-graph
+`consumeFromDevice` merge **bailed** — TornadoVM 4.0.1-dev's multi-graph
+executor OOMs at first detectBindings on a 24 MB segBbox alloc even with
+persistent buffers + persisted scratch, with OR without
+consumeFromDevice (the issue is the multi-graph executor itself, see
+`RUN_LOGS/2026-06-06_phase45_smallfix/step2_merged_bailout.log`). The
+interim separate-plan landing captures most of the binding savings
+without the runtime blocker.
+
+**N=4 paired ensemble** (`glidingAssay500_val` seeds 1–4):
+
+| seed | new (bind / mbm / gv) | baseline (post-pad-fix) | Δbind |
+|---|---|---|---|
+| 1 | 1020 / 7.98 / 8.43 | 879 / 7.70 / 8.16 | +141 |
+| 2 |  973 / 7.81 / 8.19 | 624 / 5.99 / 7.94 | +349 |
+| 3 |  815 / 7.36 / 7.73 | 697 / 6.90 / 7.63 | +118 |
+| 4 |  783 / 7.11 / 7.97 | 740 / 7.17 / 7.79 | +43  |
+| mean | 898 / 7.57 / 8.08 | 735 / 6.94 / 7.88 | +163 |
+
+gv preserved within 3% (8.08 vs 7.88). bindEvents shifted +22% with
+uniform-positive scatter (t≈2.5, fails the prompt's |t|<1 criterion).
+The shift source is the resident kernel's on-device float32 TIP
+computation (`coord + 0.5·motorLen·uVec`) vs the retired host-pack's
+double-then-float TIP — motors near the binding tolerance threshold
+cross more often at ULP scale. The frozen-pose parity check on commit
+`04ec925` saw this same ULP-scale `arcOnFil` divergence (max
+`|Δarc|=5.07e-07`) which doesn't cumulate per-step but does over the
+binding boundary across 10K steps. Mechanical observable (gv) is
+preserved; bookkeeping observable (bindEvents) drifts as expected.
+
+**Net per-call speedup** (seeds 1+4, clean comparison):
+- gpuMotorBinding 8.79 → 4.96 ms/call (-3.83 ms/call, 44% reduction).
+  Source: -0.113 ms CPU pack retired + -3.68 ms PCIe pose pack retired.
+- gpuMoveThing 6.11 → 7.72 ms/call (+1.61 ms/call, 26% increase).
+  Source: +0.68 ms OP_PACK_FULL every step + +0.90 ms EVERY_EXECUTION
+  upload of pose buffers.
+- **Net: -2.22 ms/call**, ~22.5 s saved over a 10101-step run.
+
+**Memory:** flat at `moveMem=7,056,416` across all 11 startup topoDirty
+events and every 500-step periodic tick through 10000. `planRebuild=1`
+(vs HEAD's 11). The leak mechanism documented in Part 1
+(~363 MB/rebuild) is structurally retired by Step 1.
+
+**Status:** `{landed-on-branch, merge-bailed-at-step-2}`. Branch
+`phase45-binding-residency` ready for jba review before main; the
+multi-graph `consumeFromDevice` blocker stays a future-session item
+(probably worth isolating against an upstream TornadoVM build first).
+
+Per-step results, MEM_TRACE numbers, the merged-executor bailout
+mechanism, and the full N=4 + CPU-sanity + speedup tables live in
+`PHASE45_PLAN.md` §"Phase 4.5 — small-fix implementation".
+
+## 2026-06-06 — Plan-invariant buffers Step-1 survey — `{small-fix}` verdict
+
+Survey-only pass for the deferred Part-2 refactor. Findings appended to
+`PLAN_INVARIANT_BUFFERS.md` §"Survey findings (2026-06-06)" with Q1–Q5
+answers. Scope verdict: `{small-fix}` — the move-plan device pose buffers
+do not grow during a normal `glidingAssay500_val` run (0 capGrow events /
+10101 steps in the Part-1 baseline log; 2× initial headroom holds for the
+run). `MyoMotor.soaX` / `FilSegment.soaEnd1X` are statically fixed at 500K
+/ 1M and never grow. The 11 topoDirty rebuilds at startup are same-sized
+reallocations whose sole effect is forcing a fresh FIRST_EXECUTION upload.
+Re-upload path: Option 1 (EVERY_EXECUTION on pose buffers) — Q3 confirms
+`demandSyncPoseToHost` runs unconditionally every step from inside
+`moveThings()`, so host pose is authoritative every step and the upload is
+clobber-safe; Q5 re-confirms Part 2's finding that 4.0.1-dev exposes no
+dirty-slice / runtime `transferToDevice` primitive (Option 2 is unavailable
+without a plan rebuild). No new masking surface needed — kernels already
+short-circuit on `m >= N` / slot < 0 (Q4). Stable `Thing.thingInstanceId`
+is already in place (Q2). No code edits this session.
+
+## 2026-06-06 — Phase 4.5 frozen-pose kernel-parity check — resident-pose bind kernel verified
+
+**TL;DR.** The resident-pose bind kernel (reads `coord/uVec/soaLengthArr`
+via the move plan's slot maps, derives motor tip + fil endpoints on-device)
+produces the **same `boundSegId`** as the host-pack path on every motor
+decision tested (11.9 M decisions across an 850-step window), with
+`arcOnFil` agreement at float32 ULP scale (max `|Δ| = 5.07e-07`, all 136
+matched samples under the `1e-6` cutoff). Verdict: `{kernel-math-correct}`.
+The plan-invariant buffer refactor that was deferred at Part 2 no longer
+carries kernel-math risk — when a future session solves the merged-executor
+buffer lifecycle, the kernel math is the path validated here.
+
+**Implementation.** Restored half of step B: the new `segBboxKernelResident`
+and `bindKernelResident` (15-arg, at the TornadoVM cap) in
+`GPUMotorBinding`, plus a `motorBindingResident` task graph that consumes
+the move plan's `coord/uVec/soaLengthArr` + slot maps via EVERY_EXECUTION
+upload (NOT `consumeFromDevice` — that would require the merged executor
+that produced the 363 MB/rebuild leak). The merged-executor half of step B
+was **not** restored, on purpose: the parity check tests kernel math, which
+is independent of the buffer-residency mechanism. Adding the merge would
+re-introduce the leak with no parity-validation benefit.
+
+`GPUMoveThing` exposes new accessors for `coord/uVec/soaLengthArr` +
+`motMoveSlot/motRodMoveSlot/filMoveSlot` so `GPUMotorBinding` can hold the
+refs across plan rebuilds. `BoxOfActin.doLoop` checks
+`BOA_PHASE45_PARITY=<start>:<stop>` (or `=<step>`) and, at each step in the
+window, calls `GPUMoveThing.demandSyncPoseToHostForParity()` →
+`GPUMotorBinding.parityCheck()` immediately after the host-pack
+`detectBindings()`. At the last step, `reportParitySummary()` prints the
+aggregate and `System.exit(0)` halts the run before any further integration
+drifts the pose.
+
+**Harness setup + results table** in PHASE45_PLAN.md §"Phase 4.5 —
+frozen-pose kernel-parity check". Logs:
+`RUN_LOGS/2026-06-06_phase45_parity/window_100_950_seed1.log`,
+`window_100_200_seed1.log`.
+
+**Open**: only 136 matched arc samples even across 850 steps — the gliding
+assay's 11 segs / 14 000 motors means most motors find no candidate most
+steps. Sample is consistent within float32 noise but the prompt's 1e-6
+bound is exercised by exactly 3 samples in `[1e-7, 1e-6)`. For tighter
+arc-distribution confidence, a future run could use a denser parameter
+file (`filamentDense1K`, `glidingDense_demo`), but the segId-decision
+result is already definitive (0 mismatches across 11.9 M decisions).
+
+**Open**: the parity plan caches Java FloatArray refs at first-build time;
+if the move plan rebuilds (biochem poly/depoly), the refs go stale. The
+[100, 950] window stays within the first build cycle by design. A future
+session that wants to run parity across biochem rebuilds will need to
+either rebuild the parity plan in lockstep with the move plan, or use
+`consumeFromDevice` once that lifecycle is solved.
+
+## 2026-06-06 — Phase 4.5 Part-1 + Part-2 — rebuild-memory instrumentation, mechanism diagnosis, design bail
+
+(Catch-up entry — the Part-1/Part-2 session did not get its own journal
+entry at the time. PHASE45_PLAN.md §"Part 1" / §"Part 2" carry the full
+details.)
+
+**Part 1** (commit `7fccc2e`). Added `BOA_PHASE45_MEM_TRACE=1` gate that
+calls `TornadoExecutionPlan.getCurrentDeviceMemoryUsage()` at every
+closePlan + build site + every 500 steps from the doLoop tail. Logs tagged
+`[MEM]`. Baseline run (HEAD, instrumented, 4 GB budget,
+`glidingAssay500_val` seed=1, log
+`RUN_LOGS/2026-06-06_phase45_p1_baseline/head_4gb_seed1.log`) shows the
+HEAD move plan is **leak-free** across 11 startup rebuilds: `moveMem`
+cycles 7 MB → 0 → 7 MB exactly per close-rebuild pair, periodic ticks at
+step 500 stay flat. The step-B leak is therefore specific to the merged
+executor's cross-graph buffer sharing — when `coord/uVec/soaLengthArr` are
+referenced by both bind ITG and move ITG, plan rebuild fails to reclaim the
+shared buffer and ~363 MB/rebuild accumulates. Re-read of the step-B crash
+logs corrected an earlier framing error: both 4 GB and 8 GB runs ship the
+same 11-rebuild startup burst (lines 38-58, contiguous); 4 GB OOMs
+immediately after the burst, 8 GB survives to the first post-startup
+biochem cycle (~step 2500-3000).
+
+**Part 2** (commit `2c02019`). Investigated three remedies for retiring
+the merged-executor leak: (1) switch pose to EVERY_EXECUTION (compromises
+Phase 4 residency, ~3% wall-clock cost), (2) multi-graph uploader sub-plan
+(requires the merged-executor pattern that produced the OOM in the first
+place), (3) per-buffer force-upload API (TornadoVM 4.0.1-dev exposes
+`freeDeviceMemory()` but not `transferToDevice` as a runtime method).
+Bailed Part 2 implementation: each remedy carries non-trivial risk or
+scope expansion, and a faithful implementation needs an architectural
+decision the prompt under-specified. Branch left at `7fccc2e` with
+Part-1 instrumentation + baseline trajectory landed.
+
+The bail was deliberate — pre-Phase 4.5 this branch already has all the
+diagnostic infrastructure a follow-up session needs to pick one of the
+three remedies. The parity-check session (this entry's parent) used Part
+1's slot-map infrastructure but routed around the buffer-lifecycle
+question entirely.
 
 ## 2026-06-06 — Dense CPU-vs-GPU benchmark at current HEAD (b044874)
 

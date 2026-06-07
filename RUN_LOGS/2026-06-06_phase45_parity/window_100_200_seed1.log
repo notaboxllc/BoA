@@ -1,0 +1,459 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay500_val...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMotorBinding: motorCap=500000 segCap=1000000 totalCells=3124 contentsCap=3124000 bindBlk=64 segBboxBlk=128
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=-285867265 nWorkers=16
+[PARITY] resident plan built: motorCap=500000 segCap=1000000 totalCells=3124 contentsCap=3124000
+[PARITY step=100] M=14000 S=11 resident dispatch 361.053 ms
+[PARITY step=100] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=100] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=100] verdict: {kernel-math-correct}
+[PARITY step=101] M=14000 S=11 resident dispatch 5.569 ms
+[PARITY step=101] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=101] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=101] verdict: {kernel-math-correct}
+[PARITY step=102] M=14000 S=11 resident dispatch 8.975 ms
+[PARITY step=102] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=102] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=102] verdict: {kernel-math-correct}
+[PARITY step=103] M=14000 S=11 resident dispatch 4.720 ms
+[PARITY step=103] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=103] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=103] verdict: {kernel-math-correct}
+[PARITY step=104] M=14000 S=11 resident dispatch 4.725 ms
+[PARITY step=104] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=104] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=104] verdict: {kernel-math-correct}
+[PARITY step=105] M=14000 S=11 resident dispatch 4.880 ms
+[PARITY step=105] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=105] arcOnFilDev (matched-seg only): matched=1  maxAbs=3.725e-09  meanAbs=3.725e-09  rms=3.725e-09
+[PARITY step=105] verdict: {kernel-math-correct}
+[PARITY step=106] M=14000 S=11 resident dispatch 4.686 ms
+[PARITY step=106] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=106] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=106] verdict: {kernel-math-correct}
+[PARITY step=107] M=14000 S=11 resident dispatch 4.846 ms
+[PARITY step=107] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=107] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=107] verdict: {kernel-math-correct}
+[PARITY step=108] M=14000 S=11 resident dispatch 5.286 ms
+[PARITY step=108] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=108] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=108] verdict: {kernel-math-correct}
+[PARITY step=109] M=14000 S=11 resident dispatch 4.792 ms
+[PARITY step=109] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=109] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=109] verdict: {kernel-math-correct}
+[PARITY step=110] M=14000 S=11 resident dispatch 5.127 ms
+[PARITY step=110] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=110] arcOnFilDev (matched-seg only): matched=1  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=110] verdict: {kernel-math-correct}
+[PARITY step=111] M=14000 S=11 resident dispatch 4.813 ms
+[PARITY step=111] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=111] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=111] verdict: {kernel-math-correct}
+[PARITY step=112] M=14000 S=11 resident dispatch 4.625 ms
+[PARITY step=112] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=112] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=112] verdict: {kernel-math-correct}
+[PARITY step=113] M=14000 S=11 resident dispatch 5.071 ms
+[PARITY step=113] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=113] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=113] verdict: {kernel-math-correct}
+[PARITY step=114] M=14000 S=11 resident dispatch 4.837 ms
+[PARITY step=114] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=114] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=114] verdict: {kernel-math-correct}
+[PARITY step=115] M=14000 S=11 resident dispatch 4.619 ms
+[PARITY step=115] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=115] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=115] verdict: {kernel-math-correct}
+[PARITY step=116] M=14000 S=11 resident dispatch 4.709 ms
+[PARITY step=116] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=116] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=116] verdict: {kernel-math-correct}
+[PARITY step=117] M=14000 S=11 resident dispatch 4.690 ms
+[PARITY step=117] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=117] arcOnFilDev (matched-seg only): matched=1  maxAbs=9.313e-10  meanAbs=9.313e-10  rms=9.313e-10
+[PARITY step=117] verdict: {kernel-math-correct}
+[PARITY step=118] M=14000 S=11 resident dispatch 4.820 ms
+[PARITY step=118] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=118] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=118] verdict: {kernel-math-correct}
+[PARITY step=119] M=14000 S=11 resident dispatch 4.609 ms
+[PARITY step=119] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=119] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=119] verdict: {kernel-math-correct}
+[PARITY step=120] M=14000 S=11 resident dispatch 4.633 ms
+[PARITY step=120] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=120] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=120] verdict: {kernel-math-correct}
+[PARITY step=121] M=14000 S=11 resident dispatch 4.726 ms
+[PARITY step=121] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=121] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=121] verdict: {kernel-math-correct}
+[PARITY step=122] M=14000 S=11 resident dispatch 5.420 ms
+[PARITY step=122] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=122] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=122] verdict: {kernel-math-correct}
+[PARITY step=123] M=14000 S=11 resident dispatch 4.587 ms
+[PARITY step=123] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=123] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=123] verdict: {kernel-math-correct}
+[PARITY step=124] M=14000 S=11 resident dispatch 4.604 ms
+[PARITY step=124] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=124] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=124] verdict: {kernel-math-correct}
+[PARITY step=125] M=14000 S=11 resident dispatch 4.606 ms
+[PARITY step=125] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=125] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=125] verdict: {kernel-math-correct}
+[PARITY step=126] M=14000 S=11 resident dispatch 4.762 ms
+[PARITY step=126] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=126] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=126] verdict: {kernel-math-correct}
+[PARITY step=127] M=14000 S=11 resident dispatch 5.006 ms
+[PARITY step=127] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=127] arcOnFilDev (matched-seg only): matched=1  maxAbs=2.328e-10  meanAbs=2.328e-10  rms=2.328e-10
+[PARITY step=127] verdict: {kernel-math-correct}
+[PARITY step=128] M=14000 S=11 resident dispatch 5.188 ms
+[PARITY step=128] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=128] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=128] verdict: {kernel-math-correct}
+[PARITY step=129] M=14000 S=11 resident dispatch 4.644 ms
+[PARITY step=129] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=129] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=129] verdict: {kernel-math-correct}
+[PARITY step=130] M=14000 S=11 resident dispatch 4.638 ms
+[PARITY step=130] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=130] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=130] verdict: {kernel-math-correct}
+[PARITY step=131] M=14000 S=11 resident dispatch 4.605 ms
+[PARITY step=131] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=131] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=131] verdict: {kernel-math-correct}
+[PARITY step=132] M=14000 S=11 resident dispatch 4.598 ms
+[PARITY step=132] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=132] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=132] verdict: {kernel-math-correct}
+[PARITY step=133] M=14000 S=11 resident dispatch 4.586 ms
+[PARITY step=133] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=133] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=133] verdict: {kernel-math-correct}
+[PARITY step=134] M=14000 S=11 resident dispatch 4.599 ms
+[PARITY step=134] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=134] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=134] verdict: {kernel-math-correct}
+[PARITY step=135] M=14000 S=11 resident dispatch 4.732 ms
+[PARITY step=135] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=135] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=135] verdict: {kernel-math-correct}
+[PARITY step=136] M=14000 S=11 resident dispatch 4.623 ms
+[PARITY step=136] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=136] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=136] verdict: {kernel-math-correct}
+[PARITY step=137] M=14000 S=11 resident dispatch 11.752 ms
+[PARITY step=137] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=137] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=137] verdict: {kernel-math-correct}
+[PARITY step=138] M=14000 S=11 resident dispatch 4.586 ms
+[PARITY step=138] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=138] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=138] verdict: {kernel-math-correct}
+[PARITY step=139] M=14000 S=11 resident dispatch 4.570 ms
+[PARITY step=139] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=139] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=139] verdict: {kernel-math-correct}
+[PARITY step=140] M=14000 S=11 resident dispatch 4.606 ms
+[PARITY step=140] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=140] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=140] verdict: {kernel-math-correct}
+[PARITY step=141] M=14000 S=11 resident dispatch 4.904 ms
+[PARITY step=141] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=141] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=141] verdict: {kernel-math-correct}
+[PARITY step=142] M=14000 S=11 resident dispatch 4.687 ms
+[PARITY step=142] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=142] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=142] verdict: {kernel-math-correct}
+[PARITY step=143] M=14000 S=11 resident dispatch 4.591 ms
+[PARITY step=143] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=143] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=143] verdict: {kernel-math-correct}
+[PARITY step=144] M=14000 S=11 resident dispatch 4.595 ms
+[PARITY step=144] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=144] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=144] verdict: {kernel-math-correct}
+[PARITY step=145] M=14000 S=11 resident dispatch 5.002 ms
+[PARITY step=145] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=145] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=145] verdict: {kernel-math-correct}
+[PARITY step=146] M=14000 S=11 resident dispatch 5.110 ms
+[PARITY step=146] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=146] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=146] verdict: {kernel-math-correct}
+[PARITY step=147] M=14000 S=11 resident dispatch 5.218 ms
+[PARITY step=147] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=147] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=147] verdict: {kernel-math-correct}
+[PARITY step=148] M=14000 S=11 resident dispatch 4.581 ms
+[PARITY step=148] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=148] arcOnFilDev (matched-seg only): matched=1  maxAbs=2.910e-11  meanAbs=2.910e-11  rms=2.910e-11
+[PARITY step=148] verdict: {kernel-math-correct}
+[PARITY step=149] M=14000 S=11 resident dispatch 4.606 ms
+[PARITY step=149] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=149] arcOnFilDev (matched-seg only): matched=1  maxAbs=1.490e-08  meanAbs=1.490e-08  rms=1.490e-08
+[PARITY step=149] verdict: {kernel-math-correct}
+[PARITY step=150] M=14000 S=11 resident dispatch 4.660 ms
+[PARITY step=150] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=150] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=150] verdict: {kernel-math-correct}
+[PARITY step=151] M=14000 S=11 resident dispatch 5.116 ms
+[PARITY step=151] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=151] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=151] verdict: {kernel-math-correct}
+[PARITY step=152] M=14000 S=11 resident dispatch 5.118 ms
+[PARITY step=152] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=152] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=152] verdict: {kernel-math-correct}
+[PARITY step=153] M=14000 S=11 resident dispatch 5.012 ms
+[PARITY step=153] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=153] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=153] verdict: {kernel-math-correct}
+[PARITY step=154] M=14000 S=11 resident dispatch 4.587 ms
+[PARITY step=154] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=154] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=154] verdict: {kernel-math-correct}
+[PARITY step=155] M=14000 S=11 resident dispatch 4.717 ms
+[PARITY step=155] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=155] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=155] verdict: {kernel-math-correct}
+[PARITY step=156] M=14000 S=11 resident dispatch 8.426 ms
+[PARITY step=156] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=156] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=156] verdict: {kernel-math-correct}
+[PARITY step=157] M=14000 S=11 resident dispatch 4.614 ms
+[PARITY step=157] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=157] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=157] verdict: {kernel-math-correct}
+[PARITY step=158] M=14000 S=11 resident dispatch 4.628 ms
+[PARITY step=158] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=158] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=158] verdict: {kernel-math-correct}
+[PARITY step=159] M=14000 S=11 resident dispatch 4.589 ms
+[PARITY step=159] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=159] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=159] verdict: {kernel-math-correct}
+[PARITY step=160] M=14000 S=11 resident dispatch 4.593 ms
+[PARITY step=160] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=160] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=160] verdict: {kernel-math-correct}
+[PARITY step=161] M=14000 S=11 resident dispatch 4.813 ms
+[PARITY step=161] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=161] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=161] verdict: {kernel-math-correct}
+[PARITY step=162] M=14000 S=11 resident dispatch 4.841 ms
+[PARITY step=162] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=162] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=162] verdict: {kernel-math-correct}
+[PARITY step=163] M=14000 S=11 resident dispatch 4.552 ms
+[PARITY step=163] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=163] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=163] verdict: {kernel-math-correct}
+[PARITY step=164] M=14000 S=11 resident dispatch 4.571 ms
+[PARITY step=164] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=164] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=164] verdict: {kernel-math-correct}
+[PARITY step=165] M=14000 S=11 resident dispatch 4.663 ms
+[PARITY step=165] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=165] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=165] verdict: {kernel-math-correct}
+[PARITY step=166] M=14000 S=11 resident dispatch 4.583 ms
+[PARITY step=166] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=166] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=166] verdict: {kernel-math-correct}
+[PARITY step=167] M=14000 S=11 resident dispatch 4.636 ms
+[PARITY step=167] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=167] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=167] verdict: {kernel-math-correct}
+[PARITY step=168] M=14000 S=11 resident dispatch 4.594 ms
+[PARITY step=168] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=168] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=168] verdict: {kernel-math-correct}
+[PARITY step=169] M=14000 S=11 resident dispatch 4.783 ms
+[PARITY step=169] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=169] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=169] verdict: {kernel-math-correct}
+[PARITY step=170] M=14000 S=11 resident dispatch 4.854 ms
+[PARITY step=170] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=170] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=170] verdict: {kernel-math-correct}
+[PARITY step=171] M=14000 S=11 resident dispatch 4.582 ms
+[PARITY step=171] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=171] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=171] verdict: {kernel-math-correct}
+[PARITY step=172] M=14000 S=11 resident dispatch 4.612 ms
+[PARITY step=172] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=172] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=172] verdict: {kernel-math-correct}
+[PARITY step=173] M=14000 S=11 resident dispatch 4.570 ms
+[PARITY step=173] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=173] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=173] verdict: {kernel-math-correct}
+[PARITY step=174] M=14000 S=11 resident dispatch 4.584 ms
+[PARITY step=174] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=174] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=174] verdict: {kernel-math-correct}
+[PARITY step=175] M=14000 S=11 resident dispatch 4.593 ms
+[PARITY step=175] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=175] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=175] verdict: {kernel-math-correct}
+[PARITY step=176] M=14000 S=11 resident dispatch 4.555 ms
+[PARITY step=176] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=176] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=176] verdict: {kernel-math-correct}
+[PARITY step=177] M=14000 S=11 resident dispatch 5.094 ms
+[PARITY step=177] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=177] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=177] verdict: {kernel-math-correct}
+[PARITY step=178] M=14000 S=11 resident dispatch 4.614 ms
+[PARITY step=178] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=178] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=178] verdict: {kernel-math-correct}
+[PARITY step=179] M=14000 S=11 resident dispatch 4.588 ms
+[PARITY step=179] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=179] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=179] verdict: {kernel-math-correct}
+[PARITY step=180] M=14000 S=11 resident dispatch 4.596 ms
+[PARITY step=180] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=180] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=180] verdict: {kernel-math-correct}
+[PARITY step=181] M=14000 S=11 resident dispatch 4.756 ms
+[PARITY step=181] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=181] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=181] verdict: {kernel-math-correct}
+[PARITY step=182] M=14000 S=11 resident dispatch 5.158 ms
+[PARITY step=182] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=182] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=182] verdict: {kernel-math-correct}
+[PARITY step=183] M=14000 S=11 resident dispatch 4.556 ms
+[PARITY step=183] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=183] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=183] verdict: {kernel-math-correct}
+[PARITY step=184] M=14000 S=11 resident dispatch 4.605 ms
+[PARITY step=184] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=184] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=184] verdict: {kernel-math-correct}
+[PARITY step=185] M=14000 S=11 resident dispatch 5.158 ms
+[PARITY step=185] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=185] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=185] verdict: {kernel-math-correct}
+[PARITY step=186] M=14000 S=11 resident dispatch 4.556 ms
+[PARITY step=186] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=186] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=186] verdict: {kernel-math-correct}
+[PARITY step=187] M=14000 S=11 resident dispatch 4.677 ms
+[PARITY step=187] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=187] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=187] verdict: {kernel-math-correct}
+[PARITY step=188] M=14000 S=11 resident dispatch 4.934 ms
+[PARITY step=188] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=188] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=188] verdict: {kernel-math-correct}
+[PARITY step=189] M=14000 S=11 resident dispatch 4.619 ms
+[PARITY step=189] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=189] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=189] verdict: {kernel-math-correct}
+[PARITY step=190] M=14000 S=11 resident dispatch 5.197 ms
+[PARITY step=190] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=190] arcOnFilDev (matched-seg only): matched=1  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=190] verdict: {kernel-math-correct}
+[PARITY step=191] M=14000 S=11 resident dispatch 4.580 ms
+[PARITY step=191] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=191] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=191] verdict: {kernel-math-correct}
+[PARITY step=192] M=14000 S=11 resident dispatch 4.574 ms
+[PARITY step=192] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=192] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=192] verdict: {kernel-math-correct}
+[PARITY step=193] M=14000 S=11 resident dispatch 4.576 ms
+[PARITY step=193] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=193] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=193] verdict: {kernel-math-correct}
+[PARITY step=194] M=14000 S=11 resident dispatch 4.553 ms
+[PARITY step=194] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=194] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=194] verdict: {kernel-math-correct}
+[PARITY step=195] M=14000 S=11 resident dispatch 4.895 ms
+[PARITY step=195] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=195] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=195] verdict: {kernel-math-correct}
+[PARITY step=196] M=14000 S=11 resident dispatch 4.585 ms
+[PARITY step=196] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=196] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=196] verdict: {kernel-math-correct}
+[PARITY step=197] M=14000 S=11 resident dispatch 4.686 ms
+[PARITY step=197] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=197] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=197] verdict: {kernel-math-correct}
+[PARITY step=198] M=14000 S=11 resident dispatch 4.565 ms
+[PARITY step=198] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=198] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=198] verdict: {kernel-math-correct}
+[PARITY step=199] M=14000 S=11 resident dispatch 4.575 ms
+[PARITY step=199] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=199] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=199] verdict: {kernel-math-correct}
+[PARITY step=200] M=14000 S=11 resident dispatch 5.202 ms
+[PARITY step=200] boundSegId: mismatches=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0  firstMotor=-1)
+[PARITY step=200] arcOnFilDev (matched-seg only): matched=0  maxAbs=0.000e+00  meanAbs=0.000e+00  rms=0.000e+00
+[PARITY step=200] verdict: {kernel-math-correct}
+[PARITY_SUMMARY] runs=101 motorCalls=1414000 filSegCalls=1111 segMismatchCt=0 (hostHit+devMiss=0  hostMiss+devHit=0  bothDifferent=0)
+[PARITY_SUMMARY] matchedHits=7  maxAbsArc=1.490e-08 (hostArc=0.0959616 devArc=0.0959616)  meanAbsArc=2.831e-09  rmsArc=5.817e-09
+[PARITY_SUMMARY] |Δarc| histogram: =0:2  (0,1e-8):5  [1e-8,1e-7):0  [1e-7,1e-6):0  [1e-6,1e-5):0  [1e-5,1e-4):0  >=1e-4:0
+[PARITY_SUMMARY] verdict: {kernel-math-correct}
+[PARITY] freezing run at step 200
