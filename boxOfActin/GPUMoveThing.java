@@ -2640,45 +2640,48 @@ public class GPUMoveThing {
         // contribution, move reads the combined sum). Inter-task RMW within
         // a single .execute() is safe because both tasks share device-resident
         // buffers and no host re-upload happens between tasks.
-        // Phase 4 flip — buffers split by transfer cadence:
+        // Phase 4.5 small-fix — all per-step-mutable buffers now ride
+        // EVERY_EXECUTION so topology changes (biochem poly/depoly, splits,
+        // swap-compaction) reach the device by re-upload, NOT by plan
+        // rebuild. The host-pose-authoritative invariant holds: every step
+        // demandSyncPoseToHost pulls device pose → host before the next
+        // execute, so the EVERY_EXECUTION upload round-trips rather than
+        // clobbers. classifyThings updates slot maps / topology IntArrays in
+        // place on topology-dirty steps; OP_PACK_FULL refreshes the pose,
+        // drag and length FloatArrays before each execute.
         //
-        //   FIRST_EXECUTION (resident across .execute() calls; re-uploaded on
-        //   plan rebuild only):
-        //     coord, uVec, yVec          — written by move kernel, re-orthog by
-        //                                  derived kernel; CPU only updates them
-        //                                  on biochem poly/depoly (B1 sets
-        //                                  topologyDirty → plan rebuild → re-upload).
-        //     bTransGam, bRotGam         — Thing drag tensors; only change on aeta
-        //                                  mutation (calls invalidatePlan).
-        //     soaLengthArr               — FilSegment length; only changes on
-        //                                  poly/depoly (also B1 → plan rebuild).
-        //     topo*Slot/Side, *Slots     — slot mappings populated by
-        //                                  classifyThings on plan rebuild.
-        //     velMask                    — boundary pin mask, set in classifyThings.
-        //
-        //   EVERY_EXECUTION (uploaded per step; CPU recomputes contents):
-        //     cpuForceSum, cpuTorqueSum  — CPU accumulator output.
+        //   EVERY_EXECUTION inputs:
+        //     coord, uVec, yVec           — host-authoritative; OP_PACK_FULL
+        //                                   refreshes from Thing.soa*.
+        //     bTransGam, bRotGam          — drag tensors (aeta mutation safe).
+        //     soaLengthArr                — FilSegment length (poly/depoly safe).
+        //     velMask                     — boundary pin mask; classifyThings
+        //                                   may rewrite on topology-dirty steps.
+        //     rodSlots/leverSlots/motorSlots — Myosin joint slot mapping;
+        //                                   classifyThings may rewrite.
+        //     topo*Slot/Side              — chain neighbour mapping; classifyThings
+        //                                   may rewrite on topology-dirty steps.
+        //     cpuForceSum, cpuTorqueSum   — CPU accumulator output.
         //     jointForceSum, jointTorqueSum — zeroed each step (delta buffer).
-        //     brownianScales             — depends on per-step linkedToCt + mutable
-        //                                  Env.BTransCoeff/BRotCoeff.
-        //     myoDrags, cockedFlags      — re-packed in packJointsRange each step.
-        //     anchorPts, anchoredFlags   — same.
-        //     boundaryActive, boundaryParams, boundaryTipC  — per-step CPU side.
+        //     brownianScales              — depends on per-step linkedToCt + mutable
+        //                                   Env.BTransCoeff/BRotCoeff.
+        //     myoDrags, cockedFlags       — re-packed in packJointsRange each step.
+        //     anchorPts, anchoredFlags    — same.
+        //     boundaryActive, boundaryParams, boundaryTipC — per-step CPU side.
         //     boundSegSlot, posOnSegArr, segMotorOffsets, segMotorMyo —
-        //                                  motor binding CSR (CPU pack).
-        //     motorWriteback             — output buffer for force writeback.
+        //                                   motor binding CSR (CPU pack).
+        //     motorWriteback              — output buffer for force writeback.
         //     motorForceParams, jointParams, chainParams, params, counts —
-        //                                  per-step uniforms.
+        //                                   per-step uniforms.
         TaskGraph tg = new TaskGraph("chained")
-            .transferToDevice(DataTransferMode.FIRST_EXECUTION,
+            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               coord, uVec, yVec,
                               bTransGam, bRotGam,
                               velMask,
                               rodSlots, leverSlots, motorSlots,
                               topoEnd2Slot, topoEnd2Side,
                               topoEnd1Slot, topoEnd1Side,
-                              soaLengthArr)
-            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                              soaLengthArr,
                               cpuForceSum, cpuTorqueSum,
                               jointForceSum, jointTorqueSum,
                               brownianScales,
@@ -3015,7 +3018,12 @@ public class GPUMoveThing {
     }
 
     public static void invalidatePlan() {
-        closePlan();
+        // Phase 4.5 small-fix — closing the plan is no longer required to
+        // propagate CPU-side parameter changes (aeta → bTransGam/bRotGam).
+        // Those buffers ride EVERY_EXECUTION, so the next OP_PACK_FULL +
+        // plan.execute() picks up the freshly-recomputed values. We still
+        // mark topology dirty so classifyThings re-runs defensively in case
+        // the parameter change altered gpuHandled status anywhere.
         topologyDirty = true;
         coordsDirty   = true;
     }
@@ -3599,6 +3607,12 @@ public class GPUMoveThing {
             planRebuildCount++;
             if (MEM_TRACE) memTrace("build-startup-after");
         } else if (Thing.thingCt > slotCap || Myosin.myoCt > myoCap) {
+            // Rare-event fallback: device buffers are over-allocated to
+            // ~2x at first build, and 0 capGrow events were observed across
+            // 10101 steps of glidingAssay500_val. If we ever exceed capacity,
+            // close + reallocate + rebuild (the buffer Java identities have
+            // to change because the FloatArrays themselves must grow). This
+            // is the only path that still drops plan + buffer identities.
             if (MEM_TRACE) System.out.printf("[MEM] rebuild reason=capGrow thingCt=%d slotCap=%d myoCt=%d myoCap=%d%n",
                 Thing.thingCt, slotCap, Myosin.myoCt, myoCap);
             closePlan();
@@ -3607,32 +3621,16 @@ public class GPUMoveThing {
             allocateAndBuildPlan(ns, nm);
             planRebuildCount++;
             if (MEM_TRACE) memTrace("build-capGrow-after");
-        } else if (topologyDirty || Thing.thingCt != lastThingCt) {
-            // Phase 4 flip — pose is now FIRST_EXECUTION on the device side, so
-            // any CPU-side pose mutation (B1: biochem poly/depoly's
-            // pushCoordToSoa, or thingCt change from cleanup/spawning) must
-            // force a plan rebuild to trigger a fresh FIRST_EXECUTION upload.
-            // We reuse the existing FloatArray buffers — the rebuild only
-            // reconstructs the TaskGraph + ImmutableTaskGraph + ExecutionPlan
-            // (lightweight Java objects); the on-device memory for the
-            // buffers themselves is dropped and re-created on the upcoming
-            // first execute via the plan's transferToDevice list.
-            //
-            // Plan rebuild is amortized over many steady-state steps; in
-            // gliding rotation with biochemDeltaT=0.01s and dt=1e-5,
-            // topologyDirty fires at most every ~1000 steps from biochem
-            // poly/depoly (it does not fire in steady state in the absence of
-            // nucleation / random spawn). The cost (Java object construction
-            // + capacity-sized FIRST_EXECUTION re-upload at next execute) is
-            // a fraction of a millisecond, dwarfed by the per-step savings.
-            if (MEM_TRACE) System.out.printf("[MEM] rebuild reason=topoDirty thingCt=%d lastThingCt=%d topoDirty=%b%n",
-                Thing.thingCt, lastThingCt, topologyDirty);
-            closePlan();
-            allocateAndBuildPlan(slotCap, myoCap);
-            planRebuildCount++;
-            if (MEM_TRACE) memTrace("build-topoDirty-after");
         }
+        // Phase 4.5 small-fix: topology-dirty no longer rebuilds the plan.
+        // All buffers ride EVERY_EXECUTION, so biochem-mutated host pose
+        // reaches the device on the next plan.execute() via OP_PACK_FULL +
+        // EVERY_EXECUTION upload. classifyThings still runs on topology
+        // change to refresh the slot maps in place (no buffer reallocation
+        // — same Java IntArray identities, just rewritten contents).
         if (topologyDirty || Thing.thingCt != lastThingCt) {
+            if (MEM_TRACE) System.out.printf("[MEM] topoDirty (no rebuild) thingCt=%d lastThingCt=%d topoDirty=%b%n",
+                Thing.thingCt, lastThingCt, topologyDirty);
             classifyThings();
         }
     }
@@ -4347,19 +4345,16 @@ public class GPUMoveThing {
         long packStart = System.nanoTime();
         int sc = slotCount;
         if (sc > 0) {
-            // Phase 4 flip — when plan was just rebuilt (coordsDirty=true),
-            // perform OP_PACK_FULL so the host FloatArrays for the FIRST_EXECUTION
-            // buffers (coord/uVec/yVec/bTransGam/bRotGam/soaLengthArr) hold the
-            // correct values; the runtime then uploads them on the upcoming
-            // plan.execute(). On steady-state steps the pose stays
-            // device-resident, so we only pack the EVERY_EXECUTION dynamic
-            // buffers (force/torque/joint-zero/brownianScales).
-            if (coordsDirty) {
-                dispatchAndWait(OP_PACK_FULL, sc);
-                coordsDirty = false;
-            } else {
-                dispatchAndWait(OP_PACK_DYNAMIC, sc);
-            }
+            // Phase 4.5 small-fix — all pose/drag/length/topology buffers
+            // are now EVERY_EXECUTION (rather than FIRST_EXECUTION + rebuild
+            // on biochem change), so OP_PACK_FULL runs every step to refresh
+            // the host FloatArrays from Thing.soa* before the next upload.
+            // Host pose stays authoritative every step via demandSyncPoseToHost,
+            // so this round-trips the device-integrated pose plus any CPU-side
+            // biochem mutation. The OP_PACK_DYNAMIC fast-path retired with the
+            // FIRST_EXECUTION buffers it depended on.
+            dispatchAndWait(OP_PACK_FULL, sc);
+            coordsDirty = false;
         }
 
         // Per-Myosin joint pack — drags + cocked flags only; slot maps were
