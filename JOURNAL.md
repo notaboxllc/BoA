@@ -1,8 +1,42 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (float32 binding systematic + binding scheme reference filed)
+Last updated: 2026-06-06 (Phase 4.5 merged to main; dense crossover point landed)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Phase 4.5 merged to main; dense crossover point landed
+
+Phase 4.5 (`phase45-binding-residency`) merged to `main` via `--no-ff`
+preserving a phase-milestone merge commit. Branch contents: persistent-
+buffer plan lifecycle, separate-plan resident-pose bind, validation
+gate, float32 binding doc + binding scheme reference, and a new dense
+benchmark point — all landed in prior commits, plus this entry.
+
+**Dense crossover point** (post-4.5, seed=1, `glidingDense_demo_smoke`,
+branch tip `ade5b56`):
+
+| | wall (s) | ratio vs CPU |
+|---|---|---|
+| CPU (no `-gpu`) | **153** | 1.00× |
+| GPU (`-gpu`)    | **125** | **0.82×** |
+
+vs HEAD's 154 / 123 / 0.80×. CPU sanity-check passes (no CPU-side change
+in 4.5 → 1 s drift). GPU is +2 s vs HEAD, ratio shifted 0.80→0.82× —
+within single-seed noise. Bind phase dropped 17.7 s → 14.0 s (pose-pack
+PCIe retired) but move grew 34.7 s → 47.9 s (EVERY_EXECUTION upload +
+OP_PACK_FULL every step), near-cancelling at dense scale where M ≈ 98K
+makes the per-call pose-pack PCIe saved on bind comparable to the
+per-call PCIe added on move. `planRebuild` collapsed 17 → 1 (the
+plan-invariant lift retires all topoDirty rebuilds). Logs:
+`RUN_LOGS/2026-06-06_dense_post45/{cpu,gpu}_seed1.{log,wall}`;
+`BENCHMARK_dense.md` updated with the post-4.5 row alongside the
+iter2b/2c/2d series.
+
+What 4.5 actually delivers at dense scale: a structural retirement of
+the topoDirty rebuild leak (no memory accumulation, no startup-burst
+OOM risk) and a kernel-math-correct resident bind path validated at
+ULP scale — the wall numbers won't move until Step-5-class work
+eliminates the demand-sync pull and the move-side push together.
 
 ## 2026-06-06 — float32 binding systematic + binding scheme reference filed
 
