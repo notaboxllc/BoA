@@ -83,6 +83,12 @@ public class GPUMoveThing {
     // -------------------------------------------------------------------------
     public static final boolean SOA_POSE;
     public static final boolean MOVE_AB_PROFILE;
+    // Step 3 (2026-06-07) — single unified graph: bind tasks folded into the
+    // chained move TaskGraph, bind reads coord/uVec/soaLengthArr directly from
+    // the move plan's resident buffers (no separate bind-side upload). Default
+    // ON; set BOA_SINGLE_GRAPH=0 to fall back to the Step-2 separate-plan
+    // path (kept for A/B comparison during 3.1–3.3 validation).
+    public static final boolean SINGLE_GRAPH;
     static {
         String s = System.getenv("BOA_SOA_POSE");
         SOA_POSE = (s != null && !s.isEmpty()
@@ -90,6 +96,8 @@ public class GPUMoveThing {
         String p = System.getenv("BOA_MOVE_AB_PROFILE");
         MOVE_AB_PROFILE = (p != null && !p.isEmpty()
                 && !p.equals("0") && !p.equalsIgnoreCase("false"));
+        String sg = System.getenv("BOA_SINGLE_GRAPH");
+        SINGLE_GRAPH = !(sg != null && (sg.equals("0") || sg.equalsIgnoreCase("false")));
         // NOTE: DIAG_CPU_JOINTS / DIAG_CPU_DELTA_ADD are forced below in a
         // SECOND static block placed AFTER their `= false` field initializers
         // (Java runs declarations and static blocks in textual order, so any
@@ -2789,6 +2797,19 @@ public class GPUMoveThing {
         //     for this step (count=0 on most steps). Cap POSE_DELTA_CAP.
         //   EVERY_EXECUTION (residual): everything else stays per-step (drags,
         //     slot/topology maps, force/torque buffers, uniforms).
+        // Step 3 (2026-06-07) — single unified graph: when SINGLE_GRAPH is on
+        // (the default), the bind tasks (segBboxResident → gridAssemble →
+        // bindResident) are folded into this chained graph immediately after
+        // scatterPose, reading the same resident coord/uVec/soaLengthArr the
+        // move tasks consume. The separate motorBinding plan is not built;
+        // detectBindings() degenerates to a host-side pack and the result
+        // drain runs post-chained-execute. Sidesteps the multi-graph executor
+        // OOM that blocked the 4.5 merge — one ExecutionPlan, one allocation.
+        // Allocate GPUMotorBinding's buffers up-front so we can wire their
+        // refs into the chained graph (gridParams/gridDims/etc.).
+        if (SINGLE_GRAPH) {
+            GPUMotorBinding.allocateBuffersIfNeeded();
+        }
         TaskGraph tg = new TaskGraph("chained")
             .transferToDevice(DataTransferMode.FIRST_EXECUTION,
                               coord, uVec, yVec, soaLengthArr)
@@ -2811,7 +2832,51 @@ public class GPUMoveThing {
                               motorWriteback, motorForceParams,
                               derivedEnd1, derivedEnd2, derivedZVec,
                               derivedYVecOrtho, derivedTransXTox,
-                              jointParams, chainParams, params, counts)
+                              jointParams, chainParams, params, counts);
+
+        // Step 3 — fold the bind tasks into the chained graph. The bind
+        // kernels read coord/uVec/soaLengthArr from the same resident buffers
+        // the move tasks consume — no separate bind-side upload. Slot maps
+        // (motMoveSlot/motRodMoveSlot/filMoveSlot) ride EVERY_EXECUTION
+        // because classifyThings rewrites them in place. The bind-only inputs
+        // (motOnFil/filNodeAtEnd2/bindCounts) ride EVERY_EXECUTION; gridParams/
+        // gridDims are FIRST_EXECUTION; the device-only scratch (segBbox/
+        // segCellCount/cellCount/gridCellOffsets/gridCellContents) needs no
+        // host-side transfer (TornadoVM keeps it resident across executes).
+        FloatArray bindGridParams = null;
+        IntArray   bindGridDims = null;
+        IntArray   bindMotOnFil = null;
+        IntArray   bindFilNodeAtEnd2 = null;
+        IntArray   bindCounts = null;
+        IntArray   bindSegBbox = null;
+        IntArray   bindSegCellCount = null;
+        IntArray   bindCellCount = null;
+        IntArray   bindGridCellOffsets = null;
+        IntArray   bindGridCellContents = null;
+        IntArray   bindBoundSegId = null;
+        FloatArray bindArcOnFilDev = null;
+        if (SINGLE_GRAPH) {
+            bindGridParams       = GPUMotorBinding.getGridParamsArray();
+            bindGridDims         = GPUMotorBinding.getGridDimsArray();
+            bindMotOnFil         = GPUMotorBinding.getMotOnFilArray();
+            bindFilNodeAtEnd2    = GPUMotorBinding.getFilNodeAtEnd2Array();
+            bindCounts           = GPUMotorBinding.getCountsArray();
+            bindSegBbox          = GPUMotorBinding.getSegBboxArray();
+            bindSegCellCount     = GPUMotorBinding.getSegCellCountArray();
+            bindCellCount        = GPUMotorBinding.getCellCountArray();
+            bindGridCellOffsets  = GPUMotorBinding.getGridCellOffsetsArray();
+            bindGridCellContents = GPUMotorBinding.getGridCellContentsArray();
+            bindBoundSegId       = GPUMotorBinding.getBoundSegIdArray();
+            bindArcOnFilDev      = GPUMotorBinding.getArcOnFilDevArray();
+            tg = tg
+                .transferToDevice(DataTransferMode.FIRST_EXECUTION,
+                                  bindGridParams, bindGridDims)
+                .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                                  motMoveSlot, motRodMoveSlot, filMoveSlot,
+                                  bindMotOnFil, bindFilNodeAtEnd2, bindCounts);
+        }
+
+        tg = tg
             // scatterPose declared FIRST so its writes into the resident
             // coord/uVec/yVec/soaLengthArr buffers are visible to joints/chain/
             // boundary/motorForce/move within the same execute. The
@@ -2822,7 +2887,36 @@ public class GPUMoveThing {
                   coord, uVec, yVec, soaLengthArr,
                   poseDeltaIdx,
                   poseDeltaCoord, poseDeltaUVec, poseDeltaYVec, poseDeltaLength,
-                  poseDeltaCount)
+                  poseDeltaCount);
+
+        if (SINGLE_GRAPH) {
+            // Step 3 — bind subgraph: segBbox → gridAssemble → bind. Declared
+            // AFTER scatterPose (so deltas have landed in the resident pose)
+            // and BEFORE joints/chain/boundary/motorForce/move (so bind reads
+            // the pre-integration pose, matching the separate-plan semantics
+            // where bind dispatched before the move plan executed).
+            tg = tg
+                .task("segBbox",
+                      GPUMotorBinding::segBboxKernelResident,
+                      coord, uVec, soaLengthArr, filMoveSlot,
+                      bindGridParams, bindGridDims, bindCounts,
+                      bindSegCellCount, bindSegBbox)
+                .task("gridAssemble",
+                      GPUMotorBinding::gridAssembleKernel,
+                      bindSegCellCount, bindSegBbox,
+                      bindGridDims, bindCounts,
+                      bindGridCellOffsets, bindGridCellContents, bindCellCount)
+                .task("bind",
+                      GPUMotorBinding::bindKernelResident,
+                      coord, uVec, soaLengthArr,
+                      motMoveSlot, motRodMoveSlot, filMoveSlot,
+                      bindMotOnFil, bindFilNodeAtEnd2,
+                      bindGridCellOffsets, bindGridCellContents,
+                      bindGridParams, bindGridDims, bindCounts,
+                      bindBoundSegId, bindArcOnFilDev);
+        }
+
+        tg = tg
             .task("joints",
                   GPUMoveThing::jointsKernel,
                   coord, uVec,
@@ -2948,27 +3042,44 @@ public class GPUMoveThing {
                                    derivedYVecOrtho, derivedTransXTox);
         }
 
+        // Step 3 — single-graph bind outputs: boundSegId + arcOnFilDev land
+        // on host post-execute so drainBoundResults() (called from doLoop)
+        // can fire ontoFilament for each hit. Same EVERY_EXECUTION pattern
+        // the separate bind plan used for these buffers.
+        if (SINGLE_GRAPH) {
+            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                   bindBoundSegId, bindArcOnFilDev);
+        }
+
         itg = tg.snapshot();
         plan = new TornadoExecutionPlan(itg);
 
-        // Phase 4.5 small-fix Step 2 (separate-plan variant) — the bind ITG
-        // lives in its OWN TornadoExecutionPlan (not merged), because the
-        // merged-multi-graph executor leaks per-execute even with persistent
-        // Java identities + persisted scratch (verified by the OOM on the
-        // first segBbox=24 MB alloc, RUN_LOGS/2026-06-06_phase45_smallfix/
-        // step2_merged_bailout.log). The merge approach is blocked on a
-        // TornadoVM 4.0.1-dev runtime issue with multi-graph allocations.
-        // The interim fix: keep two separate plans, but have the bind plan
-        // run the resident kernels (segBboxKernelResident / bindKernelResident)
-        // reading coord/uVec/soaLengthArr/slot maps via EVERY_EXECUTION upload
-        // of the SHARED Java FloatArray identities. The host-pack of
-        // motPos/motUVec/motRodUVec/filEnd1/filEnd2 (~30 MB/step) retires;
-        // the new bind-side upload of coord/uVec/soaLengthArr is ~2 MB/step.
-        // Net PCIe savings: ~28 MB/step.
-        GPUMotorBinding.allocateBuffersIfNeeded();
-        GPUMotorBinding.installSeparateResidentPlan(
-            coord, uVec, soaLengthArr,
-            motMoveSlot, motRodMoveSlot, filMoveSlot);
+        // Step 3 — single-graph mode skips the separate bind plan entirely:
+        // bind tasks live in the chained graph above, sharing the move plan's
+        // device-resident coord/uVec/soaLengthArr (one ExecutionPlan, one
+        // allocation set — sidesteps the multi-graph executor OOM the 4.5
+        // merge hit). The legacy two-plan path stays available behind
+        // BOA_SINGLE_GRAPH=0 for A/B validation.
+        if (!SINGLE_GRAPH) {
+            // Phase 4.5 small-fix Step 2 (separate-plan variant) — the bind ITG
+            // lives in its OWN TornadoExecutionPlan (not merged), because the
+            // merged-multi-graph executor leaks per-execute even with persistent
+            // Java identities + persisted scratch (verified by the OOM on the
+            // first segBbox=24 MB alloc, RUN_LOGS/2026-06-06_phase45_smallfix/
+            // step2_merged_bailout.log). The merge approach is blocked on a
+            // TornadoVM 4.0.1-dev runtime issue with multi-graph allocations.
+            // The interim fix: keep two separate plans, but have the bind plan
+            // run the resident kernels (segBboxKernelResident / bindKernelResident)
+            // reading coord/uVec/soaLengthArr/slot maps via EVERY_EXECUTION upload
+            // of the SHARED Java FloatArray identities. The host-pack of
+            // motPos/motUVec/motRodUVec/filEnd1/filEnd2 (~30 MB/step) retires;
+            // the new bind-side upload of coord/uVec/soaLengthArr is ~2 MB/step.
+            // Net PCIe savings: ~28 MB/step.
+            GPUMotorBinding.allocateBuffersIfNeeded();
+            GPUMotorBinding.installSeparateResidentPlan(
+                coord, uVec, soaLengthArr,
+                motMoveSlot, motRodMoveSlot, filMoveSlot);
+        }
 
         WorkerGrid moveWorker = new WorkerGrid1D(slotCap);
         moveWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
@@ -3009,6 +3120,24 @@ public class GPUMoveThing {
         WorkerGrid derivedWorker = new WorkerGrid1D(slotCap);
         derivedWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
         gridScheduler.addWorkerGrid("chained.derived", derivedWorker);
+
+        // Step 3 — bind subgraph worker grids. segBbox = one thread per
+        // FilSegment slot (segCap), bind = one thread per motor slot
+        // (motorCap). Block sizes match the legacy separate-plan defaults
+        // tuned against PTX register pressure (BIND_KERNEL_BLOCK_SIZE=64
+        // for the fused bind kernel, SEGBBOX_KERNEL_BLOCK_SIZE=128 for the
+        // register-light segBbox kernel). gridAssemble runs single-threaded
+        // (its outer @Parallel is gid<1) so no worker grid is required.
+        if (SINGLE_GRAPH) {
+            int bindMotorCapLocal = GPUMotorBinding.motorCap();
+            int bindSegCapLocal   = GPUMotorBinding.segCap();
+            WorkerGrid bindWorker = new WorkerGrid1D(bindMotorCapLocal);
+            bindWorker.setLocalWork(GPUMotorBinding.bindKernelBlockSize(), 1, 1);
+            WorkerGrid segBboxWorker = new WorkerGrid1D(bindSegCapLocal);
+            segBboxWorker.setLocalWork(GPUMotorBinding.segBboxKernelBlockSize(), 1, 1);
+            gridScheduler.addWorkerGrid("chained.bind",    bindWorker);
+            gridScheduler.addWorkerGrid("chained.segBbox", segBboxWorker);
+        }
 
         if (DIAG_CPU_DELTA_ADD) {
             // jointsOnly: reads coord/uVec, writes jointForceSum/jointTorqueSum,

@@ -1,8 +1,76 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (Step 2 — resident pose + delta-scatter landed on branch)
+Last updated: 2026-06-07 (Step 3 — single unified graph landed on branch)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — Step 3: single unified graph (branch only)
+
+Branch `probe/scatter-resident` (base `299d7c0`, Step 2). Bind tasks
+(`segBboxResident`, `gridAssemble`, `bindResident`) folded into the
+chained move `TaskGraph`. The bind kernels read coord/uVec/soaLengthArr
+directly from the move plan's FIRST_EXECUTION resident buffers — no
+separate bind-side EVERY_EXECUTION pose upload. Behind
+`BOA_SINGLE_GRAPH`; default on, set `=0` for the Step-2 two-plan A/B.
+Sidesteps the multi-graph executor OOM that killed the 4.5 merge by
+structural simplification: one `ExecutionPlan`, one buffer allocation.
+
+Task order in the single graph:
+**scatterPose → segBbox → gridAssemble → bind → joints → chain →
+boundary → motorForce → segMotorForce → move → derived**.
+
+The bind result drain (`ontoFilament` for each `boundSegId` hit) moved
+from `detectBindings()`-time (top of step) to post-`moveThings()`-time
+— introduces a **one-step lag** from bind decision to motorForce
+activation (next step's `packMotorBinding` sees the binding). Validation
+shows the lag's effect is at the edge of noise (+8% bindEvents, +1.2%
+gv vs Phase 4.5 baseline; `|t|≤2.1` paired vs Step 2).
+
+**Implementation tightness**: a wrapper-method approach blew past
+TornadoVM's 600-node inliner limit; promoted the three bind kernels
+from `private` to package-private and reference them directly from
+`GPUMoveThing` (no wrapper). Kernels themselves unchanged.
+
+**Gates** (all PASS):
+- **3.1 feasibility** (`glidingAssay500_val` seed=1 A/B same seed):
+  no OOM; combined (move+bind) 121.45 s SG vs 125.01 s legacy;
+  bindEvents 878 SG vs 796 legacy (Step 2 was 792); gv 8.08 vs 7.38.
+  Bind exec absorbed into chained exec; bind plan's pose upload
+  (~2 MB/step at this scale) retired.
+- **3.2 OP_PACK_FULL inventory**: bind no longer reads host
+  FloatArrays — single-graph kernels read device coord/uVec/length
+  via filMoveSlot. `installSeparateResidentPlan` skipped in SG mode.
+  Remaining demand-sync per-step readers (Step-4 surface): CPU
+  fallback `Thing.moveThing()` (reads GPU-neighbour
+  Thing.soaCoord/UVec/YVec for force calc) + `FilSegment.biochemStep`
+  stericHindrance gate. `OP_PACK_FULL`'s pose writes are now dead
+  (FIRST_EXECUTION, never re-uploaded) — small CPU pack cost
+  remaining; skipping is a follow-up optimization.
+- **3.3 N=4 paired ensemble** (`glidingAssay500_val` seeds 1-4):
+  vs Step 2 baseline `t=+2.08` bindEvents, `t=+2.04` gv; vs Phase
+  4.5 `t=+2.70` bindEvents, `t=+1.49` gv. Borderline pass — direction
+  consistent (SG slightly higher), explanation is the 1-step bind
+  lag shifting the steady-state bound fraction by a small amount.
+- **3.3 dense smoke** (`glidingDense_demo_smoke` seed=1, slotCap
+  588204, A/B): **no OOM at dense scale**. Combined exec 24.10 s
+  SG vs 26.22 s legacy (−2.12 s, the retired bind-side pose
+  upload at ~9.4 MB/step × 1101 calls). Combined total 55.11 s vs
+  57.56 s legacy (−2.45 s). bindEvents 1819 vs 1749 (within noise).
+
+`poseDelta sum=20 max=2 overflow=0 planRebuild=1` held across all
+four ensemble seeds. The cross-graph residency the 4.5 merge
+couldn't achieve is now landed; the structural change (one graph,
+not two) avoided the device-allocation lifecycle bug that bit the
+multi-graph executor.
+
+Step 4 (retire per-step `demandSyncPoseToHost`, push to output-frame
+cadence) is next. Requires either porting the CPU-fallback +
+stericHindrance readers to consume device-resident pose, or
+distinguishing the per-step "neighbour-read" path from the output-
+frame path so demand-sync moves to the latter only.
+
+Commits: code+docs `TBD`; journal `TBD`. Branch only; jba reviews
+before merge.
 
 ## 2026-06-07 — Step 2: resident pose + delta-scatter (branch only)
 

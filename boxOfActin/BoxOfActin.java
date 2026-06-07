@@ -1102,6 +1102,17 @@ public class BoxOfActin {
 					// AnchorNode have empty moveThing overrides and the fallback
 					// dispatch is a no-op for them.
 					GPUMoveThing.moveThings();
+					// Step 3 (2026-06-07) — single-graph mode: the chained
+					// graph just ran its bind subgraph (segBbox/gridAssemble/
+					// bind) and transferred boundSegId+arcOnFilDev back to
+					// host. Drain those into ontoFilament() so the next step's
+					// packMotorBinding sees the new bindings (a 1-step lag vs
+					// the separate-plan path, where bind dispatched at
+					// detectBindings()-time). No-op in the legacy two-plan
+					// path (detectBindings already drained).
+					if (GPUMoveThing.SINGLE_GRAPH) {
+						GPUMotorBinding.drainBoundResults();
+					}
 					// Phase 4.5 scoping — poison the frame-only host mirrors
 					// (Thing.soaEnd1/End2/ZVec/TransXTox + per-FilSegment
 					// xRange/end1Pt/end2Pt + per-MyoMotor bindTip) so any

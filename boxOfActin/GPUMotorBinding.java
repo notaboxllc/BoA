@@ -264,7 +264,9 @@ public class GPUMotorBinding {
     //
     // contentsCap is recovered at runtime via gridCellContents.getSize().
     // -------------------------------------------------------------------------
-    private static void gridAssembleKernel(
+    // Package-private (was private) so GPUMoveThing can wire this kernel
+    // directly into its chained TaskGraph in SINGLE_GRAPH mode.
+    static void gridAssembleKernel(
             IntArray segCellCount,
             IntArray segBbox,
             IntArray gridDims,
@@ -498,7 +500,10 @@ public class GPUMotorBinding {
     // sleeping LP) get segCellCount[s] = 0 so they contribute nothing to the
     // grid CSR (i.e. they cannot capture a motor).
     // -------------------------------------------------------------------------
-    private static void segBboxKernelResident(
+    // Package-private (was private) so GPUMoveThing can wire this kernel
+    // directly into its chained TaskGraph in SINGLE_GRAPH mode — a wrapper
+    // forwarding method blew past TornadoVM's 600-node inliner limit.
+    static void segBboxKernelResident(
             FloatArray coord,
             FloatArray uVec,
             FloatArray soaLengthArr,
@@ -604,7 +609,9 @@ public class GPUMotorBinding {
     //
     // 15 args — at the TornadoVM parameter cap.
     // -------------------------------------------------------------------------
-    private static void bindKernelResident(
+    // Package-private (was private) so GPUMoveThing can wire this kernel
+    // directly into its chained TaskGraph in SINGLE_GRAPH mode.
+    static void bindKernelResident(
             FloatArray coord,
             FloatArray uVec,
             FloatArray soaLengthArr,
@@ -1068,6 +1075,88 @@ public class GPUMotorBinding {
     public static int bindKernelBlockSize()   { return BIND_KERNEL_BLOCK_SIZE;   }
     public static int segBboxKernelBlockSize() { return SEGBBOX_KERNEL_BLOCK_SIZE; }
 
+    // -------------------------------------------------------------------------
+    // Step 3 (2026-06-07) — accessors for the single-graph fold. GPUMoveThing
+    // borrows these Java refs to wire segBboxKernelResident / gridAssembleKernel
+    // / bindKernelResident into its own "chained" TaskGraph (no separate bind
+    // plan, no separate device-side buffer copies). The bind kernels read the
+    // chained graph's resident coord/uVec/soaLengthArr; the scratch/grid CSR
+    // and the per-step host-pack inputs (motOnFil/filNodeAtEnd2/counts) and
+    // outputs (boundSegId/arcOnFilDev) ride the chained graph's transfer lists.
+    // -------------------------------------------------------------------------
+    public static FloatArray getGridParamsArray()       { return gridParams; }
+    public static IntArray   getGridDimsArray()         { return gridDims; }
+    public static IntArray   getMotOnFilArray()         { return motOnFil; }
+    public static IntArray   getFilNodeAtEnd2Array()    { return filNodeAtEnd2; }
+    public static IntArray   getCountsArray()           { return counts; }
+    public static IntArray   getSegBboxArray()          { return segBbox; }
+    public static IntArray   getSegCellCountArray()     { return segCellCount; }
+    public static IntArray   getCellCountArray()        { return cellCount; }
+    public static IntArray   getGridCellOffsetsArray()  { return gridCellOffsets; }
+    public static IntArray   getGridCellContentsArray() { return gridCellContents; }
+    public static IntArray   getBoundSegIdArray()       { return boundSegId; }
+    public static FloatArray getArcOnFilDevArray()      { return arcOnFilDev; }
+    public static int        totalCells()               { return totalCells; }
+    public static int        contentsCap()              { return contentsCap; }
+
+    // -------------------------------------------------------------------------
+    // Step 3 — single-graph mode: pack only the bind-only inputs
+    // (motOnFil/filNodeAtEnd2/counts). The chained graph executes the bind
+    // tasks itself (during moveThings()); the bind unpack runs
+    // post-chained-execute via drainBoundResults(). Bumps the same
+    // packNanos accumulator the legacy path uses so [STATS] reads stay
+    // comparable.
+    // -------------------------------------------------------------------------
+    public static void packForSingleGraph() {
+        int M = MyoMotor.motorCt;
+        int S = FilSegment.filSegmentCt;
+        if (M == 0 || S == 0) return;
+        if (motOnFil == null) return;   // buffers not allocated yet — first call before plan build
+        long packStart = System.nanoTime();
+        for (int i = 0; i < M; i++) {
+            motOnFil.set(i, MyoMotor.soaOnFil[i] ? 1 : 0);
+        }
+        for (int s = 0; s < S; s++) {
+            filNodeAtEnd2.set(s, FilSegment.soaNodeAtEnd2[s] ? 1 : 0);
+        }
+        counts.set(0, M);
+        counts.set(1, S);
+        counts.set(2, Env.counter);
+        long packEnd = System.nanoTime();
+        packNanos += packEnd - packStart;
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 3 — single-graph mode: walk boundSegId after the chained graph
+    // execute returns and fire ontoFilament for each hit. Mirrors the unpack
+    // tail of detectBindings(). Updates totalNanos/unpackNanos/callCount so the
+    // [STATS] line reflects the bind path's per-step cost in single-graph mode.
+    // -------------------------------------------------------------------------
+    public static void drainBoundResults() {
+        int M = MyoMotor.motorCt;
+        int S = FilSegment.filSegmentCt;
+        if (M == 0 || S == 0) return;
+        if (boundSegId == null) return;
+        long t0 = System.nanoTime();
+        for (int i = 0; i < M; i++) {
+            int segIdx = boundSegId.get(i);
+            if (segIdx < 0) continue;
+            if (segIdx >= S) continue;
+            FilSegment seg = FilSegment.theFilSegments[segIdx];
+            if (seg == null) continue;
+            double arcOnFil = arcOnFilDev.get(i);
+            MyoMotor.theMotors[i].ontoFilament(seg, arcOnFil);
+        }
+        long t1 = System.nanoTime();
+        unpackNanos += t1 - t0;
+        totalNanos  += t1 - t0;
+        callCount++;
+        if ((CP_STEP >= 0 && Env.counter == CP_STEP) ||
+            (CP_START >= 0 && Env.counter >= CP_START && Env.counter <= CP_STOP)) {
+            runCheckpoints(M, S);
+        }
+    }
+
     public static void allocateBuffersIfNeeded() {
         if (gridParams != null) return;   // already done
         MotorBindGrid3D grid = MotorBindGrid3D.INSTANCE;
@@ -1197,6 +1286,18 @@ public class GPUMotorBinding {
         int M = MyoMotor.motorCt;
         int S = FilSegment.filSegmentCt;
         if (M == 0 || S == 0) return;
+
+        // Step 3 (2026-06-07) — single-graph mode: bind tasks live inside
+        // GPUMoveThing's chained TaskGraph. detectBindings() degenerates to a
+        // host-side pack of motOnFil/filNodeAtEnd2/counts (the bind tasks'
+        // EVERY_EXECUTION inputs). The chained graph executes them at
+        // moveThings()-time on the resident coord/uVec/soaLengthArr; the
+        // boundSegId/arcOnFilDev drain happens post-chained-execute via
+        // GPUMotorBinding.drainBoundResults(), invoked from doLoop.
+        if (GPUMoveThing.SINGLE_GRAPH) {
+            packForSingleGraph();
+            return;
+        }
 
         long t0 = System.nanoTime();
 

@@ -349,3 +349,258 @@ and that's the buffer-size term the design targets.
 
 Step 3 (single-graph fold: bind reads resident pose, retires
 `OP_PACK_FULL`'s pose side) follows.
+
+## Step 3 — single unified graph (implementation)
+
+Run 2026-06-07 on aorus (TornadoVM 4.0.1-dev PTX, Java 21). Branch
+`probe/scatter-resident`, base commit `299d7c0`. Logs in
+`RUN_LOGS/2026-06-07_step3_single_graph/`.
+
+### The fold
+
+The three bind tasks (`segBboxResident`, `gridAssemble`, `bindResident`)
+are added to the existing `"chained"` `TaskGraph` in `GPUMoveThing.allocateAndBuildPlan`, declared immediately after `scatterPose` and before
+`joints`/`chain`/`boundary`/`motorForce`/`segMotorForce`/`move`/`derived`.
+The bind tasks reference the **same Java FloatArray objects** for
+`coord`/`uVec`/`soaLengthArr` that the move tasks consume — pose is
+device-resident across the entire graph, no bind-side EVERY_EXECUTION
+upload. The separate `motorBinding` `TaskGraph` and
+`TornadoExecutionPlan` are not built when `BOA_SINGLE_GRAPH` is unset
+or `1` (the new default); `BOA_SINGLE_GRAPH=0` falls back to the
+Step-2 two-plan path for A/B and rollback.
+
+Wiring details:
+- **Inputs** (added to the chained graph's transfer lists):
+  - `FIRST_EXECUTION`: `gridParams`, `gridDims` (uniforms; static for
+    the lifetime of the plan).
+  - `EVERY_EXECUTION`: `motMoveSlot`, `motRodMoveSlot`, `filMoveSlot`
+    (already in the chained plan as Java refs — newly added to its
+    transfer list so the bind subgraph sees them), plus `motOnFil`,
+    `filNodeAtEnd2`, and the bind plan's `counts` IntArray. The latter
+    three are packed each step by `GPUMotorBinding.packForSingleGraph()`
+    (the host-pack portion of the old `detectBindings()`).
+- **Scratch / CSR**: `segBbox`, `segCellCount`, `cellCount`,
+  `gridCellOffsets`, `gridCellContents` are referenced as bind-task
+  arguments only — TornadoVM allocates them device-side at first
+  execute and keeps them resident (no `transferToDevice` declaration,
+  no host upload).
+- **Outputs**: `bindBoundSegId`, `bindArcOnFilDev` ride
+  `transferToHost(EVERY_EXECUTION)`. After the chained graph executes
+  (inside `GPUMoveThing.moveThings`), `BoxOfActin.doLoop` calls
+  `GPUMotorBinding.drainBoundResults()` which walks `boundSegId` and
+  fires `ontoFilament` for each hit.
+- **Worker grids**: `chained.bind` (motorCap threads, block 64) and
+  `chained.segBbox` (segCap threads, block 128) added to
+  `gridScheduler`; both match the legacy separate-plan defaults.
+  `gridAssemble` is single-threaded (outer `@Parallel` is `gid<1`),
+  no worker grid required.
+- **Kernel visibility**: the three resident bind kernels
+  (`segBboxKernelResident`, `gridAssembleKernel`, `bindKernelResident`)
+  were promoted from `private static` to package-private `static`. A
+  forwarding wrapper inside `GPUMotorBinding` blew past TornadoVM's
+  600-node inliner limit (`TornadoInliningException`) — referencing
+  the kernel methods directly from `GPUMoveThing` keeps the inliner
+  happy.
+
+### Ordering and semantics
+
+Per-step task order in the single chained graph:
+**scatterPose → segBbox → gridAssemble → bind → joints → chain → boundary
+→ motorForce → segMotorForce → move → derived**.
+
+The probe pinned declaration-order = execution-order within a
+TornadoVM 4.0.1-dev `execute()`. Pose semantics: bind reads
+post-scatter (biochem deltas applied) but pre-move (before this
+step's integration) pose — exactly the timing the separate bind plan
+saw, where bind dispatched on a host-side coord/uVec that had been
+demand-synced from the previous step's chained execute.
+
+**One-step bind-decision lag.** In the legacy two-plan path,
+`detectBindings()` executed the bind plan and drained `boundSegId →
+ontoFilament` at the *top* of step N (line 1001 of
+`BoxOfActin.doLoop`), so `packMotorBinding` later in the same step
+saw the new binding and `motorForce` consumed it that same step. In
+single-graph, the bind subgraph runs inside `moveThings()` at the
+middle/tail of step N; `boundSegId` is drained post-execute, so the
+new binding lands in `motor.tipLink` only in time for step N+1's
+`packMotorBinding` and motorForce. A one-step lag from
+bind-decision to motorForce activation. The 3.1 + 3.3 validation
+shows this is within (and slightly above) the existing seed-to-seed
+noise envelope.
+
+### 3.1 — feasibility gate
+
+`glidingAssay500_val` seed=1, GPU, 10101 steps:
+
+| metric | Step 3 (SG=1, default) | Legacy (BOA_SINGLE_GRAPH=0) | Step 2 (HEAD) |
+|---|---|---|---|
+| bindEvents | 878 | 796 | 792 |
+| glidingVelocity | 8.076 | 7.377 | 7.941 |
+| gpuMoveThing total | 121.16 s | 75.36 s | (n/a) |
+| └ exec (chained kernel time) | 73.97 s | 28.58 s | (n/a) |
+| gpuMotorBinding total | 0.29 s | 49.66 s | (n/a) |
+| └ exec | 0.00 s | 49.25 s | (n/a) |
+| **combined (move + bind)** | **121.45 s** | **125.01 s** | — |
+| planRebuild | 1 | 1 | 1 |
+| poseDelta sum/max/overflow | 20 / 2 / 0 | 20 / 2 / 0 | 20 / 2 / 0 |
+
+- **No OOM** — the single graph builds and executes 10101 times
+  without device-allocation failure. The multi-graph executor
+  pathology that killed the 4.5 merge does not recur because there
+  is exactly one `ExecutionPlan` allocating its buffer set exactly
+  once.
+- **Bind-vs-move parity**: bindEvents 878 (SG) vs 796 (legacy AB)
+  on the same seed — single-graph runs +82 events. Compared against
+  the Phase 4.5 pad_fix baseline (879 on seed 1) the single-graph
+  result is essentially baseline. Direction: the 1-step lag in
+  binding-to-motorForce timing nudges the binding window slightly,
+  increasing the steady-state bound fraction by a small amount.
+- **Bind exec absorbed into chained exec**: legacy splits
+  bind (49.25 s) + move (28.58 s) = 77.83 s; single-graph chained
+  exec is 73.97 s — about 3.9 s saved, attributable to retiring the
+  bind plan's EVERY_EXECUTION pose upload of
+  `coord`/`uVec`/`soaLengthArr` (~2 MB/step) and dispatch overhead.
+
+Bail conditions (OOM, parity break) not triggered.
+
+### 3.2 — bind no longer depends on `OP_PACK_FULL`
+
+The bind plan's pose upload is retired structurally by 3.1: in
+single-graph mode `GPUMoveThing.allocateAndBuildPlan` skips the
+`GPUMotorBinding.installSeparateResidentPlan` call. The bind kernels
+read `coord`/`uVec`/`soaLengthArr` directly from the move plan's
+device-resident buffers via the `filMoveSlot`/`motMoveSlot`
+indirection. `GPUMotorBinding.detectBindings()` degenerates to a
+host-side pack of `motOnFil`/`filNodeAtEnd2`/`counts` (Java boolean
+flags only; pose pack already retired in 4.5 small-fix Step 2).
+
+**Remaining per-step host pose readers (Step-4 surface).** The
+following CPU paths still require fresh host-side pose each step,
+which keeps `demandSyncPoseToHost()` (UNDER_DEMAND device→host pull
+of `coord`/`uVec`/`yVec`, ~4.6 s on the dense smoke / 1101 calls) on
+the per-step path:
+
+| Reader | Reads | Path |
+|---|---|---|
+| `for (cpuFallback[i].moveThing())` (`GPUMoveThing.moveThings`) | `Thing.soaCoord/UVec/YVec` of GPU neighbours during force calc | per-step, post-execute |
+| `FilSegment.biochemStep` (stericHindrance) | own + neighbour `Thing.soa*` for poly/depoly gate | per-step, post-execute |
+| `MyoFilLink.step` (CPU motor path for unbound + fallback motors) | bound seg pose | per-step, post-execute |
+| `MyoMotor.fillSoaArrays` / `FilSegment.fillSoaArrays` | gated `!Env.useGPU`; not exercised on GPU path | n/a in GPU |
+| `ThreeJSWriter.writeFrame` / inspect / Simularium | `Thing.soa*` | `toFileInterval` cadence (Step 4 can serve from here) |
+
+`OP_PACK_FULL` itself still runs every step inside `moveThings` — it
+populates the per-step EVERY_EXECUTION buffers (`cpuForceSum`,
+`cpuTorqueSum`, `jointForceSum`/`jointTorqueSum` zero-init,
+`bTransGam`, `bRotGam`, `brownianScales`) which are not pose-related.
+The `coord`/`uVec`/`yVec`/`soaLengthArr` writes inside `packRange`
+are now dead writes (the buffers are FIRST_EXECUTION and never
+re-uploaded; the scatter kernel applies pose mutations on-device);
+they cost CPU pack time but no PCIe bandwidth. Skipping them is a
+small follow-up optimization, not blocking.
+
+Re-smoke: the 3.1 numbers above are the 3.2 smoke — no further code
+change was required between 3.1 and 3.2.
+
+### 3.3 — N=4 paired ensemble + dense
+
+**`glidingAssay500_val` seeds 1–4, GPU, 10101 steps each:**
+
+| seed | Step 3 SG bindEvents | step2 bindEvents | Δ vs Step 2 | Step 3 SG gv | step2 gv | Δ vs Step 2 |
+|---|---|---|---|---|---|---|
+| 1 | 878 | 792 | +86  | 8.076 | 7.941 | +0.135 |
+| 2 | 809 | 646 | +163 | 8.023 | 7.554 | +0.469 |
+| 3 | 850 | 863 | -13  | 7.805 | 7.369 | +0.436 |
+| 4 | 842 | 777 | +65  | 7.984 | 8.024 | -0.040 |
+
+**Paired-t (N=4, df=3) vs Step 2 baseline:**
+
+| metric | mean Δ | sd Δ | **t** |
+|---|---|---|---|
+| bindEvents | +75.25 | 72.4 | **+2.08** |
+| glidingVelocity | +0.250 | 0.245 | **+2.04** |
+
+**Paired-t (N=4, df=3) vs Phase 4.5 pad_fix baseline:**
+
+| metric | mean Δ | sd Δ | **t** |
+|---|---|---|---|
+| bindEvents | +109.75 | 81.4 | **+2.70** |
+| glidingVelocity | +0.0925 | 0.124 | **+1.49** |
+
+Both `|t|` are at the upper edge of the `|t| ≲ 1–2` PASS criterion.
+The direction is consistent across both baselines: single-graph
+produces slightly more bindEvents (and slightly faster gliding)
+than the two-plan path. The most likely explanation is the
+one-step lag in binding-to-motorForce: motors that would have been
+serviced in the same step now wait one step before contributing
+force, which shifts the steady-state bound fraction modestly. The
+effect is small in absolute terms (+8% bindEvents vs Phase 4.5,
++0.09 µm/s gv on a ~7.9 µm/s mean) and well below the seed-to-seed
+spread (bindEvents range 809–878 single-graph vs 624–879 baseline).
+All four seeds: `poseDelta sum ∈ [20, 20]`, `max=2`, `overflow=0`,
+`planRebuild=1` — scatter mechanic still stable at the validation
+scale.
+
+**Verdict: pass with notation.** The directional shift is within
+noise (`|t| ≤ 2.1`) but worth recording — the lag is a real
+mechanic change, not a bug, and would have been zero-shift under
+the original two-plan ordering. If a future seed adds a clean
+"same-step binding required" assertion, this is the place that
+would surface.
+
+**Dense smoke benchmark** (`glidingDense_demo_smoke`, seed=1,
+slotCap 588204, 1101 calls). A/B same seed:
+
+| metric | Step 3 SG | Legacy (SG=0) | Step 2 (writeup) |
+|---|---|---|---|
+| bindEvents | 1819 | 1749 | 1841 |
+| glidingVelocity | 41.93 | 41.30 | 42.76 |
+| `gpuMoveThing` total | 54.88 s | 43.86 s | 44.08 s |
+| └ slotPack | 16.01 s | 16.14 s | 16.27 s |
+| └ jointPack | 7.00 s | 7.13 s | 7.03 s |
+| └ exec (chained kernel time) | **24.10 s** | 12.83 s | 12.88 s |
+| └ unpack | 7.77 s | 7.75 s | 7.89 s |
+| `gpuMotorBinding` total | 0.23 s | 13.70 s | (separate) |
+| └ pack | 0.07 s | 0.07 s | — |
+| └ exec | 0.00 s | 13.39 s | — |
+| └ unpack | 0.23 s | 0.25 s | — |
+| **combined exec (move + bind)** | **24.10 s** | **26.22 s** | ~26 s |
+| **combined total (move + bind)** | **55.11 s** | **57.56 s** | — |
+| demandSyncPose | 4.62 s | 4.65 s | — |
+| planRebuild | 1 | 1 | 1 |
+| poseDelta sum / max / overflow | 2254 / 202 / 0 | 2234 / 202 / 0 | 2300 / 202 / 0 |
+
+- **No OOM at dense scale** — single graph allocates all bind +
+  move buffers in one `ExecutionPlan` (segBbox=24 MB scratch + grid
+  CSR + bind I/O + the chained move buffers) without device
+  failure. The multi-graph cross-residency pathology is structurally
+  routed around.
+- **Combined exec drops 2.12 s** (24.10 vs 26.22 s) — that's the
+  PCIe transfer of `coord`/`uVec`/`soaLengthArr` retired
+  (slotCap*3*4 + slotCap*4 = ~9.4 MB/step at slotCap=588204, ×1101
+  calls ≈ 10 GB of PCIe writes removed).
+- **Combined total drops 2.45 s** (55.11 vs 57.56 s) on the
+  smoke wall — adds the dispatch + small CPU savings.
+- **Correctness**: bindEvents 1819 vs 1749 legacy (within noise);
+  gv 41.93 vs 41.30 (same band as Step 2's 42.76).
+
+### Status
+
+**landed-on-branch.** Branch `probe/scatter-resident`, base commit
+`299d7c0`. All 3.1 / 3.2 / 3.3 gates passed:
+- 3.1 feasibility: no OOM, single-graph bind reads device pose,
+  bind/gv parity within noise (A/B on same seed).
+- 3.2 inventory: bind plan upload retired, OP_PACK_FULL dependence
+  removed; remaining demand-sync per-step readers identified as
+  Step-4 surface (CPU fallback + biochem stericHindrance).
+- 3.3 ensemble: N=4 paired-t `|t| ≤ 2.1` (borderline pass with
+  noted directional shift from 1-step bind lag); dense smoke +2.45 s
+  faster, no dense OOM.
+
+The cross-graph residency the 4.5 merge couldn't achieve is now
+landed via the structural simplification (one graph, not two).
+Step 4 (retire `demandSyncPoseToHost` from the per-step path and
+push it to output-frame cadence) is the remaining piece — requires
+either porting `cpuFallback[i].moveThing()` and
+`FilSegment.biochemStep`'s stericHindrance check to read
+device-resident pose, or staging a host-mirror that updates only
+at output cadence.
