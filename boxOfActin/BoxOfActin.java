@@ -1098,6 +1098,12 @@ public class BoxOfActin {
 
 				updateCounters();
 
+				// Phase 4.5 Part-1 — periodic device-memory tick. No-op unless
+				// BOA_PHASE45_MEM_TRACE=1. Logs at MEM_TRACE_STEP_INTERVAL cadence.
+				if (Env.useGPU && GPUMoveThing.MEM_TRACE) {
+					GPUMoveThing.memTraceTick();
+				}
+
 				// 2026-05-31 conformation diagnostic — no-op when JointDiag.ENABLED=false.
 				JointDiag.sample();
 				// 2026-05-31 joint param + signed-torque diagnostic — Part 3 late-step dump

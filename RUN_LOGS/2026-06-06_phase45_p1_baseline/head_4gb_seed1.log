@@ -1,0 +1,113 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay500_val...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+[MEM] tag=build-startup-before rebuildIdx=0 step=0 moveMem=-1 bindMem=-1 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-startup-after rebuildIdx=1 step=0 moveMem=0 bindMem=-1 total=0
+GPUMotorBinding: motorCap=500000 segCap=1000000 totalCells=3124 contentsCap=3124000 bindBlk=64 segBboxBlk=128
+[MEM] rebuild reason=topoDirty thingCt=42003 lastThingCt=42002 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=1 step=1 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=1 step=1 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=2 step=1 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42004 lastThingCt=42003 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=2 step=2 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=2 step=2 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=3 step=2 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42005 lastThingCt=42004 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=3 step=3 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=3 step=3 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=4 step=3 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42006 lastThingCt=42005 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=4 step=4 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=4 step=4 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=5 step=4 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42007 lastThingCt=42006 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=5 step=5 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=5 step=5 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=6 step=5 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42008 lastThingCt=42007 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=6 step=6 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=6 step=6 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=7 step=6 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42009 lastThingCt=42008 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=7 step=7 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=7 step=7 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=8 step=7 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42010 lastThingCt=42009 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=8 step=8 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=8 step=8 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=9 step=8 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42011 lastThingCt=42010 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=9 step=9 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=9 step=9 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=10 step=9 moveMem=0 bindMem=-12432 total=0
+[MEM] rebuild reason=topoDirty thingCt=42012 lastThingCt=42011 topoDirty=true
+[MEM] tag=closePlan-before rebuildIdx=10 step=10 moveMem=7056416 bindMem=-12432 total=7056416
+[MEM] tag=closePlan-after rebuildIdx=10 step=10 moveMem=-1 bindMem=-12432 total=0
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=218910027 nWorkers=16
+[MEM] tag=build-topoDirty-after rebuildIdx=11 step=10 moveMem=0 bindMem=-12432 total=0
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=1000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.01....~58.17 minutes computation to simulate 1 sec, run finished in ~00.09 hours
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=1500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=2000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.02....~49.43 minutes computation to simulate 1 sec, run finished in ~00.07 hours
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=2500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=3000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.03....~49.13 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=3500 moveMem=7056416 bindMem=-12432 total=7056416
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=4000 moveMem=7056416 bindMem=-12432 total=7056416
+Sim. time=00.04....~48.96 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[MEM] tag=periodic rebuildIdx=11 step=4500 moveMem=7056416 bindMem=-12432 total=7056416

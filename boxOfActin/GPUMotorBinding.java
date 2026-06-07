@@ -1021,6 +1021,15 @@ public class GPUMotorBinding {
         bindProfileSamples = 0;
     }
 
+    /** Phase 4.5 Part-1 — TornadoVM device-memory probe for the bind plan.
+     *  Returns plan.getCurrentDeviceMemoryUsage() when available; -1 when
+     *  the plan has not been built (or has been closed) or any API error. */
+    public static long peekDeviceMemoryUsage() {
+        if (plan == null) return -1;
+        try { return plan.getCurrentDeviceMemoryUsage(); }
+        catch (Throwable t) { return -1; }
+    }
+
     /** Diagnostic timing accessors — read by BoxOfActin at run end. */
     public static long getTotalNanos()    { return totalNanos;    }
     public static long getPackNanos()     { return packNanos;     }

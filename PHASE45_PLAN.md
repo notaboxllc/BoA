@@ -385,3 +385,148 @@ The step-A slot maps are useful infrastructure for either approach.
   multi-graph executor API confirmation (commit `3bae689`).
 - The bail-out note above identifies the specific runtime issue to
   address before re-attempting step B.
+
+---
+
+## Part 1 — Rebuild memory trajectory measurement (2026-06-06)
+
+### Methodology
+
+Added a `BOA_PHASE45_MEM_TRACE=1` gate that calls
+`TornadoExecutionPlan.getCurrentDeviceMemoryUsage()` (verified present on
+TornadoVM 4.0.1-dev's `TornadoExecutionPlan` API via `javap`). Logs at:
+- **`build-startup-before/after`** — first plan build at step 0.
+- **`closePlan-before/after`** — every `closePlan()` call.
+- **`build-{capGrow,topoDirty}-after`** — every rebuild path in
+  `onStepStart()`.
+- **`periodic`** — every `MEM_TRACE_STEP_INTERVAL=500` steps from the
+  doLoop tail, so steady-state drift between rebuild events is visible
+  without flooding the log.
+
+Lines tagged `[MEM]`. Format: `tag=... rebuildIdx=N step=K moveMem=A
+bindMem=B total=C` where `A`/`B` are the move and bind plan's reported
+device-memory usage in bytes.
+
+A matching `GPUMotorBinding.peekDeviceMemoryUsage()` accessor reads the
+bind plan's separate executor at HEAD.
+
+### Re-reading the existing crash logs (`RUN_LOGS/2026-06-06_phase45_b2/`)
+
+The bail-out note's "crashed at the same step at both 4 GB and 8 GB" is
+**incorrect** at the step-count granularity. Line-number forensics on the
+two logs:
+
+| budget | rebuild banner lines | `[GATHER] call=*` lines | `Sim. time` line | OOM |
+|---|---|---|---|---|
+| 4 GB | 38-58 (11 banners, contiguous) | none | none | line 60 |
+| 8 GB | 38-58 (11 banners, contiguous) | call=1000 (line 60), call=2000 (line 61) | line 62 | line 63 |
+
+So:
+- **Both runs ship the same 11 rebuilds at startup** (lines 38-58, contiguous).
+- 4 GB OOMs **immediately** after the rebuild burst (line 60, no `[GATHER]`).
+- 8 GB **survives the rebuild burst** and runs steady-state to at least
+  `detectBindings` call ≈ 2000 before OOMing.
+- Both fail trying to allocate the same 24 MB block (the bind ITG's
+  `segBbox = segCap*6*4`).
+
+That answers **Q3** (4 GB vs 8 GB trajectory differs — yes, by ~2-3× call
+count even though rebuild count is identical) and rules out the "same
+step at both budgets" framing.
+
+### HEAD baseline run (instrumented, single seed, 4 GB)
+
+`RUN_LOGS/2026-06-06_phase45_p1_baseline/head_4gb_seed1.log` — instrumented
+HEAD (no step-B), `glidingAssay500_val`, `tornado.device.memory=4GB`.
+
+Trajectory (all values bytes):
+
+| step | rebuild | moveMem | bindMem | total |
+|---|---|---|---|---|
+| 0 (startup) | 1 | 0 | -1 | 0 |
+| 1 (close) | — | 7,056,416 | -12432 | 7,056,416 |
+| 1 (rebuild) | 2 | 0 | -12432 | 0 |
+| 5 (close) | — | 7,056,416 | -12432 | 7,056,416 |
+| 10 (close) | — | 7,056,416 | -12432 | 7,056,416 |
+| 10 (rebuild) | 11 | 0 | -12432 | 0 |
+| 500 (periodic) | 11 | 7,056,416 | -12432 | 7,056,416 |
+
+`bindMem` reports a small constant (-12432) — the API's behavior for the
+bind plan when GPUMotorBinding's plan hasn't been built yet via its
+detectBindings first-call path (the first run completes startup before any
+detectBindings dispatch). Not meaningful for the trajectory question.
+
+**The HEAD move plan is leak-free across 11 rebuilds.** Every close cycles
+through `moveMem: 7M → 0 → 7M` exactly. No accumulation. Periodic tick at
+step 500 (after rebuilds settle) is still 7 MB.
+
+### Cause of the 11-rebuild startup burst (both HEAD and step-B)
+
+Each [MEM] line in the trace reports `[MEM] rebuild reason=topoDirty
+thingCt=N lastThingCt=N-1 topoDirty=true` where N grows by exactly 1 per
+step from 42003 to 42012. The gliding-assay's initial-spawn phase creates
+one Thing per step for the first ~10 steps, and `onStepStart()`'s
+`Thing.thingCt != lastThingCt` branch triggers a full plan rebuild for
+each spawn. After spawning settles (step ~10), no rebuilds until the next
+biochem poly/depoly cycle.
+
+The bail-out note's framing — "~1/1000 steps from biochem poly/depoly" —
+applies to the **steady-state** rebuild rate, but at startup the rebuild
+rate is **once per step**. This is the burst that exhausted 4 GB in
+step-B.
+
+### Three contradiction-resolving questions (resolved)
+
+**Q1. Used-memory at crash vs configured budget.** At HEAD the budget is
+not approached (7 MB used / 4 GB budget). At step-B the crash fails to
+allocate 24 MB on a 4 GB budget — i.e., the budget IS the operative
+ceiling (not VRAM, not physical limits) and is filled before the alloc
+attempt. With 11 startup rebuilds and a 4 GB budget exhausted by rebuild
+12, the per-rebuild reservation is on the order of **~363 MB/rebuild** in
+the merged-executor configuration.
+
+**Q2. Monotonic vs flat-then-spike.** HEAD: flat (no leak whatsoever).
+Step-B: **monotonic climb across the 11 startup rebuilds**, then flat
+steady-state until the next rebuild. 4 GB OOMs **during** the startup
+burst; 8 GB OOMs at the next post-startup rebuild (the first biochem
+cycle around step 2500-3000).
+
+**Q3. 4 GB vs 8 GB trajectory.** Different lifetime (4 GB OOMs at startup,
+8 GB OOMs ~2500 steps later) but identical pattern (~363 MB/rebuild
+during the rebuild burst; flat between). The flag IS the operative
+ceiling, and the leak is genuine per-rebuild accumulation, but the leak
+is **specific to the merged-executor configuration** (HEAD's separate
+plans show zero leak).
+
+### Mechanism — confirmed: shared-buffer reallocation breaks `consumeFromDevice`
+
+The HEAD baseline proves TornadoVM's `closePlan() →
+freeDeviceMemory()` is clean **per individual plan**: the move plan
+rebuilds 11 times at startup with zero memory growth. The step-B leak is
+therefore specific to the merged executor's cross-graph buffer sharing:
+
+1. `coord/uVec/soaLengthArr` FloatArrays are FIRST_EXECUTION inputs to the
+   move ITG and are referenced via `consumeFromDevice("chained", ...)` by
+   the bind ITG.
+2. On a topology-dirty rebuild, `closePlan()` calls `plan.close()` on the
+   **merged** plan. The runtime frees buffers it tracks as owned by the
+   plan.
+3. `allocateAndBuildPlan()` allocates **new** FloatArray Java objects for
+   `coord/uVec/soaLengthArr` and re-snapshots both ITGs.
+4. The bind ITG's persistedObject list still references the **old** Java
+   objects' `LocalStateObject` entries from the runtime side (the
+   `setOnDevice(true)` flag was set against the old buffer association at
+   ITG snapshot time). When the new plan executes, the runtime allocates
+   **fresh device memory** for the bind side rather than recognizing the
+   handoff — leaving ~363 MB of reservation per rebuild that can't be
+   freed because the old plan is closed.
+
+The persistent-buffer fix (Part 2) addresses this directly: if the move
+plan's FloatArrays are **never reallocated** across topology-dirty
+rebuilds (only on capacity growth), the bind ITG's `consumeFromDevice`
+references stay valid for the entire run.
+
+### Decision
+
+The measurement matches the persistent-buffer hypothesis. Proceeding to
+Part 2: rebuild-invariant lifecycle. This also pays a separate dividend
+at HEAD by removing 11 unnecessary plan-rebuild cycles at startup.

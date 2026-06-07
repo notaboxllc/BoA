@@ -593,6 +593,20 @@ public class GPUMoveThing {
     // any biochem poly/depoly mutation of soaCoord (B1) is pushed to device.
     private static int  planRebuildCount       = 0;
 
+    // Phase 4.5 Part-1 — TornadoVM device-memory instrumentation.
+    // Armed via BOA_PHASE45_MEM_TRACE=1. When on, every plan close + plan
+    // build site queries plan.getCurrentDeviceMemoryUsage() and prints a line
+    // tagged [MEM] with the rebuild index, step counter, phase, and bytes.
+    // Also drains a periodic snapshot from BoxOfActin.doLoop tail (every
+    // MEM_TRACE_STEP_INTERVAL steps) so we can see steady-state drift between
+    // rebuilds without flooding the log. Used to answer the "monotonic vs
+    // flat-then-spike" + "4 GB vs 8 GB trajectory" questions for the merged-
+    // executor OOM bail-out.
+    public static final boolean MEM_TRACE =
+        "1".equals(System.getenv("BOA_PHASE45_MEM_TRACE"));
+    public static final int MEM_TRACE_STEP_INTERVAL = 500;
+    private static int memTraceTickCount = 0;
+
     // -------------------------------------------------------------------------
     // Phase-0 A/B profiler accumulators — populated only when MOVE_AB_PROFILE
     // is on. moveAB* tally the moveOnly plan's TornadoVM profiler readouts
@@ -2913,7 +2927,41 @@ public class GPUMoveThing {
         }
     }
 
+    /** Phase 4.5 Part-1 — query plan.getCurrentDeviceMemoryUsage() defensively
+     *  (returns -1 on any exception, e.g., closed plan / null plan). The
+     *  TornadoVM API exposes a single getCurrentDeviceMemoryUsage() per
+     *  TornadoExecutionPlan. With separate move + bind plans at HEAD, we sum
+     *  both; under the merged executor we read the single plan. */
+    public static long memUsage(TornadoExecutionPlan p) {
+        if (p == null) return -1;
+        try { return p.getCurrentDeviceMemoryUsage(); }
+        catch (Throwable t) { return -1; }
+    }
+
+    /** Phase 4.5 Part-1 — emit one [MEM] line. Tag describes the phase
+     *  (startup, rebuild-before, rebuild-after, periodic, etc.). */
+    public static void memTrace(String tag) {
+        if (!MEM_TRACE) return;
+        long moveMem = memUsage(plan);
+        long bindMem = GPUMotorBinding.peekDeviceMemoryUsage();
+        long total = (moveMem < 0 ? 0 : moveMem) + (bindMem < 0 ? 0 : bindMem);
+        System.out.printf(
+            "[MEM] tag=%s rebuildIdx=%d step=%d moveMem=%d bindMem=%d total=%d%n",
+            tag, planRebuildCount, stepCounter, moveMem, bindMem, total);
+    }
+
+    /** Periodic tick called from BoxOfActin.doLoop tail; logs every
+     *  MEM_TRACE_STEP_INTERVAL invocations. */
+    public static void memTraceTick() {
+        if (!MEM_TRACE) return;
+        memTraceTickCount++;
+        if (memTraceTickCount % MEM_TRACE_STEP_INTERVAL == 0) {
+            memTrace("periodic");
+        }
+    }
+
     private static void closePlan() {
+        if (MEM_TRACE) memTrace("closePlan-before");
         if (plan != null) {
             try { plan.close(); } catch (Exception e) { /* best effort */ }
             plan = null;
@@ -2933,6 +2981,7 @@ public class GPUMoveThing {
         // demandSyncPoseToHost call between closePlan and the next execute is
         // a no-op (correct: no device data to sync).
         lastExecResult = null;
+        if (MEM_TRACE) memTrace("closePlan-after");
     }
 
     public static void invalidatePlan() {
@@ -3515,14 +3564,19 @@ public class GPUMoveThing {
         int desiredSlotCap = Math.max(1024, Thing.thingCt * 2);
         int desiredMyoCap  = Math.max(1024, Myosin.myoCt   * 2);
         if (plan == null) {
+            if (MEM_TRACE) memTrace("build-startup-before");
             allocateAndBuildPlan(desiredSlotCap, desiredMyoCap);
             planRebuildCount++;
+            if (MEM_TRACE) memTrace("build-startup-after");
         } else if (Thing.thingCt > slotCap || Myosin.myoCt > myoCap) {
+            if (MEM_TRACE) System.out.printf("[MEM] rebuild reason=capGrow thingCt=%d slotCap=%d myoCt=%d myoCap=%d%n",
+                Thing.thingCt, slotCap, Myosin.myoCt, myoCap);
             closePlan();
             int ns = (Thing.thingCt > slotCap) ? Math.max(slotCap * 2, Thing.thingCt * 2) : slotCap;
             int nm = (Myosin.myoCt  > myoCap)  ? Math.max(myoCap  * 2, Myosin.myoCt  * 2) : myoCap;
             allocateAndBuildPlan(ns, nm);
             planRebuildCount++;
+            if (MEM_TRACE) memTrace("build-capGrow-after");
         } else if (topologyDirty || Thing.thingCt != lastThingCt) {
             // Phase 4 flip — pose is now FIRST_EXECUTION on the device side, so
             // any CPU-side pose mutation (B1: biochem poly/depoly's
@@ -3541,9 +3595,12 @@ public class GPUMoveThing {
             // nucleation / random spawn). The cost (Java object construction
             // + capacity-sized FIRST_EXECUTION re-upload at next execute) is
             // a fraction of a millisecond, dwarfed by the per-step savings.
+            if (MEM_TRACE) System.out.printf("[MEM] rebuild reason=topoDirty thingCt=%d lastThingCt=%d topoDirty=%b%n",
+                Thing.thingCt, lastThingCt, topologyDirty);
             closePlan();
             allocateAndBuildPlan(slotCap, myoCap);
             planRebuildCount++;
+            if (MEM_TRACE) memTrace("build-topoDirty-after");
         }
         if (topologyDirty || Thing.thingCt != lastThingCt) {
             classifyThings();
