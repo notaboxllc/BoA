@@ -2927,6 +2927,36 @@ public class GPUMoveThing {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Phase 4.5 — accessors for the resident-pose bind path. GPUMotorBinding
+    // reads the move plan's pose buffers + slot maps to dispatch the
+    // resident-pose bind kernels (parity harness, and eventually the production
+    // resident dispatch when the merged-executor lifecycle is solved).
+    // -------------------------------------------------------------------------
+    public static FloatArray getCoordArray()          { return coord; }
+    public static FloatArray getUVecArray()           { return uVec; }
+    public static FloatArray getSoaLengthArray()      { return soaLengthArr; }
+    public static IntArray   getMotMoveSlotArray()    { return motMoveSlot; }
+    public static IntArray   getMotRodMoveSlotArray() { return motRodMoveSlot; }
+    public static IntArray   getFilMoveSlotArray()    { return filMoveSlot; }
+    public static int        getBindMotorCap()        { return bindMotorCap; }
+    public static int        getBindSegCap()          { return bindSegCap; }
+
+    /** Phase 4.5 parity — demand-sync coord/uVec back to host so the parity
+     *  plan's EVERY_EXECUTION upload of the move plan's resident pose sees the
+     *  current device state (not a stale host snapshot from an earlier step's
+     *  demand-sync). Wraps the same TornadoVM transferToHost(UNDER_DEMAND)
+     *  mechanism the doLoop already uses at the top of each step. */
+    public static void demandSyncPoseToHostForParity() {
+        if (lastExecResult == null) return;
+        try {
+            lastExecResult.transferToHost(coord, uVec, yVec);
+        } catch (Throwable t) {
+            // best effort; the host snapshot may be one step stale but parity
+            // still operates on the same data the bind path consumed.
+        }
+    }
+
     /** Phase 4.5 Part-1 — query plan.getCurrentDeviceMemoryUsage() defensively
      *  (returns -1 on any exception, e.g., closed plan / null plan). The
      *  TornadoVM API exposes a single getCurrentDeviceMemoryUsage() per

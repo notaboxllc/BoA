@@ -1,8 +1,100 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (dense CPU-vs-GPU benchmark at current HEAD: GPU 0.80× CPU)
+Last updated: 2026-06-06 (Phase 4.5 frozen-pose kernel-parity check — {kernel-math-correct})
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-06 — Phase 4.5 frozen-pose kernel-parity check — resident-pose bind kernel verified
+
+**TL;DR.** The resident-pose bind kernel (reads `coord/uVec/soaLengthArr`
+via the move plan's slot maps, derives motor tip + fil endpoints on-device)
+produces the **same `boundSegId`** as the host-pack path on every motor
+decision tested (11.9 M decisions across an 850-step window), with
+`arcOnFil` agreement at float32 ULP scale (max `|Δ| = 5.07e-07`, all 136
+matched samples under the `1e-6` cutoff). Verdict: `{kernel-math-correct}`.
+The plan-invariant buffer refactor that was deferred at Part 2 no longer
+carries kernel-math risk — when a future session solves the merged-executor
+buffer lifecycle, the kernel math is the path validated here.
+
+**Implementation.** Restored half of step B: the new `segBboxKernelResident`
+and `bindKernelResident` (15-arg, at the TornadoVM cap) in
+`GPUMotorBinding`, plus a `motorBindingResident` task graph that consumes
+the move plan's `coord/uVec/soaLengthArr` + slot maps via EVERY_EXECUTION
+upload (NOT `consumeFromDevice` — that would require the merged executor
+that produced the 363 MB/rebuild leak). The merged-executor half of step B
+was **not** restored, on purpose: the parity check tests kernel math, which
+is independent of the buffer-residency mechanism. Adding the merge would
+re-introduce the leak with no parity-validation benefit.
+
+`GPUMoveThing` exposes new accessors for `coord/uVec/soaLengthArr` +
+`motMoveSlot/motRodMoveSlot/filMoveSlot` so `GPUMotorBinding` can hold the
+refs across plan rebuilds. `BoxOfActin.doLoop` checks
+`BOA_PHASE45_PARITY=<start>:<stop>` (or `=<step>`) and, at each step in the
+window, calls `GPUMoveThing.demandSyncPoseToHostForParity()` →
+`GPUMotorBinding.parityCheck()` immediately after the host-pack
+`detectBindings()`. At the last step, `reportParitySummary()` prints the
+aggregate and `System.exit(0)` halts the run before any further integration
+drifts the pose.
+
+**Harness setup + results table** in PHASE45_PLAN.md §"Phase 4.5 —
+frozen-pose kernel-parity check". Logs:
+`RUN_LOGS/2026-06-06_phase45_parity/window_100_950_seed1.log`,
+`window_100_200_seed1.log`.
+
+**Open**: only 136 matched arc samples even across 850 steps — the gliding
+assay's 11 segs / 14 000 motors means most motors find no candidate most
+steps. Sample is consistent within float32 noise but the prompt's 1e-6
+bound is exercised by exactly 3 samples in `[1e-7, 1e-6)`. For tighter
+arc-distribution confidence, a future run could use a denser parameter
+file (`filamentDense1K`, `glidingDense_demo`), but the segId-decision
+result is already definitive (0 mismatches across 11.9 M decisions).
+
+**Open**: the parity plan caches Java FloatArray refs at first-build time;
+if the move plan rebuilds (biochem poly/depoly), the refs go stale. The
+[100, 950] window stays within the first build cycle by design. A future
+session that wants to run parity across biochem rebuilds will need to
+either rebuild the parity plan in lockstep with the move plan, or use
+`consumeFromDevice` once that lifecycle is solved.
+
+## 2026-06-06 — Phase 4.5 Part-1 + Part-2 — rebuild-memory instrumentation, mechanism diagnosis, design bail
+
+(Catch-up entry — the Part-1/Part-2 session did not get its own journal
+entry at the time. PHASE45_PLAN.md §"Part 1" / §"Part 2" carry the full
+details.)
+
+**Part 1** (commit `7fccc2e`). Added `BOA_PHASE45_MEM_TRACE=1` gate that
+calls `TornadoExecutionPlan.getCurrentDeviceMemoryUsage()` at every
+closePlan + build site + every 500 steps from the doLoop tail. Logs tagged
+`[MEM]`. Baseline run (HEAD, instrumented, 4 GB budget,
+`glidingAssay500_val` seed=1, log
+`RUN_LOGS/2026-06-06_phase45_p1_baseline/head_4gb_seed1.log`) shows the
+HEAD move plan is **leak-free** across 11 startup rebuilds: `moveMem`
+cycles 7 MB → 0 → 7 MB exactly per close-rebuild pair, periodic ticks at
+step 500 stay flat. The step-B leak is therefore specific to the merged
+executor's cross-graph buffer sharing — when `coord/uVec/soaLengthArr` are
+referenced by both bind ITG and move ITG, plan rebuild fails to reclaim the
+shared buffer and ~363 MB/rebuild accumulates. Re-read of the step-B crash
+logs corrected an earlier framing error: both 4 GB and 8 GB runs ship the
+same 11-rebuild startup burst (lines 38-58, contiguous); 4 GB OOMs
+immediately after the burst, 8 GB survives to the first post-startup
+biochem cycle (~step 2500-3000).
+
+**Part 2** (commit `2c02019`). Investigated three remedies for retiring
+the merged-executor leak: (1) switch pose to EVERY_EXECUTION (compromises
+Phase 4 residency, ~3% wall-clock cost), (2) multi-graph uploader sub-plan
+(requires the merged-executor pattern that produced the OOM in the first
+place), (3) per-buffer force-upload API (TornadoVM 4.0.1-dev exposes
+`freeDeviceMemory()` but not `transferToDevice` as a runtime method).
+Bailed Part 2 implementation: each remedy carries non-trivial risk or
+scope expansion, and a faithful implementation needs an architectural
+decision the prompt under-specified. Branch left at `7fccc2e` with
+Part-1 instrumentation + baseline trajectory landed.
+
+The bail was deliberate — pre-Phase 4.5 this branch already has all the
+diagnostic infrastructure a follow-up session needs to pick one of the
+three remedies. The parity-check session (this entry's parent) used Part
+1's slot-map infrastructure but routed around the buffer-lifecycle
+question entirely.
 
 ## 2026-06-06 — Dense CPU-vs-GPU benchmark at current HEAD (b044874)
 

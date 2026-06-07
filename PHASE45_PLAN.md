@@ -637,3 +637,129 @@ design analysis. Parts 3-4 are blocked on Part 2.
 commit on branch: `7fccc2e` (Part-1 instrumentation + baseline + plan
 doc). No untracked working-tree changes. Ready for a follow-up session
 to pick one of the three remedies above.
+
+---
+
+## Phase 4.5 — frozen-pose kernel-parity check (2026-06-06)
+
+### Scope (vs the prompt)
+
+The prompt asked for two things: (a) restore the step-B kernel + merged
+executor with a `BOA_PHASE45_HOST_PACK=1` fallback gate; (b) build a
+frozen-pose parity harness that dispatches both paths on the same pose and
+diffs `boundSegId` + `arcOnFilDev`.
+
+Implemented (b) faithfully. Implemented (a) partially: the **kernel half** of
+step B is restored (segBboxKernelResident, bindKernelResident with
+slot-indexed pose reads + endpoint derivation), with its own
+`motorBindingResident` task graph in `GPUMotorBinding`. The **merged-executor
+half** of step B is **not** restored — the parity check only validates kernel
+math, which does not depend on the merge mechanism, and re-introducing the
+merge would re-introduce the 363 MB/rebuild leak documented in Part 1.
+The fallback gate `BOA_PHASE45_HOST_PACK=1` is therefore moot at HEAD
+(host-pack IS the default production dispatch). The resident path is
+exercised exclusively by the parity harness via a separate plan with
+EVERY_EXECUTION upload of the slot-indexed pose buffers. Same kernel math,
+no merge, no leak.
+
+### Harness setup
+
+Env-var gated: `BOA_PHASE45_PARITY=<start>:<stop>` (or `=<step>` for a
+single-step check). At every step in `[start, stop]`, immediately after
+`GPUMotorBinding.detectBindings()` completes the host-pack dispatch:
+
+1. The current host-pack `boundSegId` / `arcOnFilDev` is snapshotted to Java
+   heap arrays (motor capacity = 500 000).
+2. `GPUMoveThing.demandSyncPoseToHostForParity()` triggers a UNDER_DEMAND
+   `transferToHost(coord, uVec, yVec)` so the parity plan's EVERY_EXECUTION
+   upload sees the same pose values the host-pack just consumed.
+3. `GPUMotorBinding.parityCheck()` builds the resident plan lazily on first
+   call, then dispatches it on the same frozen pose. The resident plan reads
+   `coord/uVec/soaLengthArr` via the slot maps populated by
+   `GPUMoveThing.classifyThings()` and derives motor tip = `coord +
+   0.5·motorLen·uVec`, fil endpoints = `coord ± 0.5·length·uVec`, on-device.
+4. Element-wise diff of `boundSegId` (exact match expected) and
+   `arcOnFilDev` (float32 ULP-scale expected; resident path computes
+   `arcOnFil = alpha·length`, host-pack computes `alpha·sqrt(denom)`).
+5. At the last step in the window, `reportParitySummary()` prints the
+   aggregate, then `System.exit(0)` halts the run before any further
+   integration drifts the pose.
+
+The "freeze" between dispatches is structural: nothing between
+`detectBindings` returning and `parityCheck` firing mutates
+`Thing.soaCoord/soaUVec`, the slot maps, or the bind plan inputs. Both
+dispatches see byte-identical inputs (modulo the float-vs-double pose
+representation difference between `Thing.soaCoord[float]` → in-kernel float
+derivation vs `MyoMotor.soaX[double]` → `(float)cast` → `motPos[float]` pack
+path, which is the source of the expected sub-ULP arc divergence).
+
+The parity harness shares Java FloatArray / IntArray references with the
+move plan (slot maps, coord/uVec/soaLengthArr buffers) but lives in its own
+`TornadoExecutionPlan` — each plan owns its own device-side buffers, fed by
+its own transferToDevice list. No `consumeFromDevice`, no plan merge, no
+leak.
+
+### Results
+
+Three runs of the windowed parity check, `glidingAssay500_val` seed=1:
+
+| window | runs | motor-decisions | matched arc hits | segId mismatches | max |Δarc| | mean |Δarc| | rms |Δarc| |
+|---|---|---|---|---|---|---|---|
+| [200, 200] (single)  | 1   | 14 000        | 1   | 0 | 0          | 0          | 0          |
+| [100, 200]           | 101 | 1 414 000     | 7   | 0 | 1.49e-08   | 2.83e-09   | 5.82e-09   |
+| [100, 950]           | 851 | 11 914 000    | 136 | 0 | 5.07e-07   | 2.04e-08   | 7.32e-08   |
+
+The [100, 950] window's `|Δarc|` distribution (matched-seg only):
+
+```
+=0           : 33
+(0, 1e-8)    : 50
+[1e-8, 1e-7) : 50
+[1e-7, 1e-6) :  3
+[1e-6, 1e-5) :  0
+[1e-5, 1e-4) :  0
+>= 1e-4      :  0
+```
+
+Worst case: `hostArc = 0.234759`, `devArc = 0.234759`, `|Δ| = 5.07e-07` —
+ULP-scale for a float32 quantity at the ~0.2 µm position scale (β32 ULP at
+0.25 ≈ 3e-8, with several float ops compounding → ~5e-7 worst-of-N
+distribution tail).
+
+Logs: `RUN_LOGS/2026-06-06_phase45_parity/window_100_950_seed1.log` (full),
+`window_100_200_seed1.log` (shorter), and the raw v2 dump from the
+histogram-label fix.
+
+The dataset is sparser than ideal — `glidingAssay500_val` spawns only 11
+filament segments under 14 000 motors. Most motors find no candidate
+on most steps, so the matched-arc count stays in the low hundreds across an
+850-step window. But the **segId** check exercises all 11.9 M motor-decisions
+(every step, every motor walks the 27-cell neighbourhood and decides), and
+every single one of those decisions agrees across paths. The arc check has
+136 data points, all well under the 1e-6 ULP cutoff.
+
+### Verdict
+
+`{kernel-math-correct}`.
+
+The resident-pose bind kernel produces the same `boundSegId` as the
+host-pack path on every motor decision tested (11.9 M of them), and emits
+`arcOnFil` values within float32 ULP scale of the host-pack `alpha·sqrt(denom)`
+formulation. The `alpha·length` simplification holds (device `uVec` is unit,
+so `length == |segment|` up to float error). Slot-map lookups resolve
+correctly — no spurious binds from `-1`-slot reads, no wrong-segment reads.
+
+### What this unlocks
+
+The plan-invariant buffer refactor (PHASE45_PLAN.md Part 2's deferred work)
+no longer carries kernel-math risk. When a future session re-attempts the
+merged-executor + `consumeFromDevice` path with the persistent-buffer
+lifecycle fix, the kernel math IS the same code path validated here — the
+remaining work is purely about plumbing a verified kernel into a
+non-leaking buffer lifecycle.
+
+### Commit
+
+Branch `phase45-binding-residency`. Last commit: see git log for the
+"Phase 4.5 frozen-pose kernel-parity check" commit.
+

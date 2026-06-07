@@ -486,6 +486,573 @@ public class GPUMotorBinding {
     }
 
     // -------------------------------------------------------------------------
+    // Phase 4.5 — resident-pose segBbox kernel.
+    //
+    // Reads the move plan's resident slot-indexed pose (coord, uVec,
+    // soaLengthArr) via filMoveSlot[s], derives segment endpoints on-device as
+    //   end1 = coord − 0.5·length·uVec
+    //   end2 = coord + 0.5·length·uVec
+    // (the same formula FilSegment.fillSoaArrays uses on CPU) and runs the
+    // same bbox-cell logic as the host-pack segBboxKernel above. Segments
+    // whose move slot is -1 (CPU-fallback FilSegments — actAOn, branched,
+    // sleeping LP) get segCellCount[s] = 0 so they contribute nothing to the
+    // grid CSR (i.e. they cannot capture a motor).
+    // -------------------------------------------------------------------------
+    private static void segBboxKernelResident(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray soaLengthArr,
+            IntArray   filMoveSlot,
+            FloatArray gridParams,
+            IntArray   gridDims,
+            IntArray   counts,
+            IntArray   segCellCount,
+            IntArray   segBbox) {
+
+        int S = counts.get(1);
+
+        float xMin        = gridParams.get(0);
+        float yMin        = gridParams.get(1);
+        float zMin        = gridParams.get(2);
+        float invCellSize = gridParams.get(4);
+
+        int nXBins = gridDims.get(0);
+        int nYBins = gridDims.get(1);
+        int nZBins = gridDims.get(2);
+
+        for (@Parallel int s = 0; s < filMoveSlot.getSize(); s++) {
+            if (s >= S) {
+                segCellCount.set(s, 0);
+                continue;
+            }
+            int slot = filMoveSlot.get(s);
+            if (slot < 0) {
+                segCellCount.set(s, 0);
+                continue;
+            }
+            float cx = coord.get(slot * 3);
+            float cy = coord.get(slot * 3 + 1);
+            float cz = coord.get(slot * 3 + 2);
+            float ux = uVec.get(slot * 3);
+            float uy = uVec.get(slot * 3 + 1);
+            float uz = uVec.get(slot * 3 + 2);
+            float half = 0.5f * soaLengthArr.get(slot);
+
+            float e1x = cx - half * ux;
+            float e1y = cy - half * uy;
+            float e1z = cz - half * uz;
+            float e2x = cx + half * ux;
+            float e2y = cy + half * uy;
+            float e2z = cz + half * uz;
+
+            float xLo = e1x < e2x ? e1x : e2x;
+            float xHi = e1x > e2x ? e1x : e2x;
+            float yLo = e1y < e2y ? e1y : e2y;
+            float yHi = e1y > e2y ? e1y : e2y;
+            float zLo = e1z < e2z ? e1z : e2z;
+            float zHi = e1z > e2z ? e1z : e2z;
+
+            int ix0 = (int) ((xLo - xMin) * invCellSize);
+            int ix1 = (int) ((xHi - xMin) * invCellSize);
+            int iy0 = (int) ((yLo - yMin) * invCellSize);
+            int iy1 = (int) ((yHi - yMin) * invCellSize);
+            int iz0 = (int) ((zLo - zMin) * invCellSize);
+            int iz1 = (int) ((zHi - zMin) * invCellSize);
+
+            if (ix0 < 0)        ix0 = 0;
+            if (ix0 >= nXBins)  ix0 = nXBins - 1;
+            if (ix1 < 0)        ix1 = 0;
+            if (ix1 >= nXBins)  ix1 = nXBins - 1;
+            if (iy0 < 0)        iy0 = 0;
+            if (iy0 >= nYBins)  iy0 = nYBins - 1;
+            if (iy1 < 0)        iy1 = 0;
+            if (iy1 >= nYBins)  iy1 = nYBins - 1;
+            if (iz0 < 0)        iz0 = 0;
+            if (iz0 >= nZBins)  iz0 = nZBins - 1;
+            if (iz1 < 0)        iz1 = 0;
+            if (iz1 >= nZBins)  iz1 = nZBins - 1;
+
+            segBbox.set(s * 6,     ix0);
+            segBbox.set(s * 6 + 1, ix1);
+            segBbox.set(s * 6 + 2, iy0);
+            segBbox.set(s * 6 + 3, iy1);
+            segBbox.set(s * 6 + 4, iz0);
+            segBbox.set(s * 6 + 5, iz1);
+
+            int cc = (ix1 - ix0 + 1) * (iy1 - iy0 + 1) * (iz1 - iz0 + 1);
+            segCellCount.set(s, cc);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4.5 — resident-pose bind kernel.
+    //
+    // Like bindKernel, but reads motor + filament pose from the move plan's
+    // resident slot-indexed buffers via motMoveSlot[m] / motRodMoveSlot[m] /
+    // filMoveSlot[s]. Motor tip is derived as
+    //   tip = coord + 0.5·motorLen·uVec  (matches MyoMotor.fillSoaArrays)
+    // Filament endpoints are derived as
+    //   end1 = coord − 0.5·length·uVec
+    //   end2 = coord + 0.5·length·uVec
+    // and arcOnFil is emitted as alpha·length (since the on-device uVec is
+    // unit, length == |end2-end1| up to float error, so this is equivalent to
+    // the host-pack path's alpha·sqrt(denom) modulo a single ULP-scale float
+    // operation difference). Motors / segments with slot == -1 short-circuit:
+    // motor short-circuits write boundSegId[m] = -1 and continue; seg
+    // short-circuits skip the candidate (filNodeAtEnd2 check happens after the
+    // slot guard so a -1 slot never reads filNodeAtEnd2[s] from a stale seg).
+    //
+    // 15 args — at the TornadoVM parameter cap.
+    // -------------------------------------------------------------------------
+    private static void bindKernelResident(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray soaLengthArr,
+            IntArray   motMoveSlot,
+            IntArray   motRodMoveSlot,
+            IntArray   filMoveSlot,
+            IntArray   motOnFil,
+            IntArray   filNodeAtEnd2,
+            IntArray   gridCellOffsets,
+            IntArray   gridCellContents,
+            FloatArray gridParams,
+            IntArray   gridDims,
+            IntArray   counts,
+            IntArray   boundSegId,
+            FloatArray arcOnFilDev) {
+
+        int M = counts.get(0);
+
+        float xMin        = gridParams.get(0);
+        float yMin        = gridParams.get(1);
+        float zMin        = gridParams.get(2);
+        float invCellSize = gridParams.get(4);
+        float alignTol    = gridParams.get(5);
+        float myoColTolSq = gridParams.get(6);
+        float motorLen    = gridParams.get(7);
+        float halfMotorLen = 0.5f * motorLen;
+
+        int nXBins = gridDims.get(0);
+        int nYBins = gridDims.get(1);
+        int nZBins = gridDims.get(2);
+        int nXY    = nXBins * nYBins;
+
+        for (@Parallel int m = 0; m < motMoveSlot.getSize(); m++) {
+            if (m >= M) { return; }
+            boundSegId.set(m, -1);
+            arcOnFilDev.set(m, 0.0f);
+            if (motOnFil.get(m) != 0) { continue; }
+
+            int mSlot = motMoveSlot.get(m);
+            if (mSlot < 0) { continue; }
+            int rSlot = motRodMoveSlot.get(m);
+            if (rSlot < 0) { continue; }
+
+            float mcx = coord.get(mSlot * 3);
+            float mcy = coord.get(mSlot * 3 + 1);
+            float mcz = coord.get(mSlot * 3 + 2);
+            float mux = uVec.get(mSlot * 3);
+            float muy = uVec.get(mSlot * 3 + 1);
+            float muz = uVec.get(mSlot * 3 + 2);
+            float rux = uVec.get(rSlot * 3);
+            float ruy = uVec.get(rSlot * 3 + 1);
+            float ruz = uVec.get(rSlot * 3 + 2);
+
+            // Motor tip = coord + 0.5·motorLen·uVec (matches MyoMotor.fillSoaArrays).
+            float mx = mcx + halfMotorLen * mux;
+            float my = mcy + halfMotorLen * muy;
+            float mz = mcz + halfMotorLen * muz;
+
+            int ix = (int) ((mx - xMin) * invCellSize);
+            int iy = (int) ((my - yMin) * invCellSize);
+            int iz = (int) ((mz - zMin) * invCellSize);
+            if (ix < 0)        ix = 0;
+            if (ix >= nXBins)  ix = nXBins - 1;
+            if (iy < 0)        iy = 0;
+            if (iy >= nYBins)  iy = nYBins - 1;
+            if (iz < 0)        iz = 0;
+            if (iz >= nZBins)  iz = nZBins - 1;
+
+            int found = -1;
+            float foundArc = 0.0f;
+            for (int dz = -1; dz <= 1 && found < 0; dz++) {
+                int ciz = iz + dz;
+                if (ciz < 0 || ciz >= nZBins) continue;
+                int izOff = ciz * nXY;
+                for (int dy = -1; dy <= 1 && found < 0; dy++) {
+                    int ciy = iy + dy;
+                    if (ciy < 0 || ciy >= nYBins) continue;
+                    int iyOff = ciy * nXBins;
+                    for (int dx = -1; dx <= 1 && found < 0; dx++) {
+                        int cix = ix + dx;
+                        if (cix < 0 || cix >= nXBins) continue;
+
+                        int cellId = cix + iyOff + izOff;
+                        int start  = gridCellOffsets.get(cellId);
+                        int end    = gridCellOffsets.get(cellId + 1);
+
+                        for (int idx = start; idx < end; idx++) {
+                            int s = gridCellContents.get(idx);
+                            int fSlot = filMoveSlot.get(s);
+                            if (fSlot < 0) { continue; }
+                            if (filNodeAtEnd2.get(s) != 0) { continue; }
+
+                            float fcx = coord.get(fSlot * 3);
+                            float fcy = coord.get(fSlot * 3 + 1);
+                            float fcz = coord.get(fSlot * 3 + 2);
+                            float fux = uVec.get(fSlot * 3);
+                            float fuy = uVec.get(fSlot * 3 + 1);
+                            float fuz = uVec.get(fSlot * 3 + 2);
+                            float len = soaLengthArr.get(fSlot);
+                            float halfLen = 0.5f * len;
+
+                            float e1x = fcx - halfLen * fux;
+                            float e1y = fcy - halfLen * fuy;
+                            float e1z = fcz - halfLen * fuz;
+
+                            // The on-device uVec is unit, so
+                            //   r1 = end2 - end1 = length · uVec
+                            //   denom = length²
+                            // and the canonical filament axis fU == uVec.
+                            float r1x = len * fux;
+                            float r1y = len * fuy;
+                            float r1z = len * fuz;
+
+                            float motDotFil = mux * fux + muy * fuy + muz * fuz;
+                            if (motDotFil < alignTol) { continue; }
+                            float rodDotFil = rux * fux + ruy * fuy + ruz * fuz;
+                            if (rodDotFil < 0f) { continue; }
+
+                            float r2x = mx - e1x;
+                            float r2y = my - e1y;
+                            float r2z = mz - e1z;
+                            float numer = r2x * r1x + r2y * r1y + r2z * r1z;
+                            float denom = r1x * r1x + r1y * r1y + r1z * r1z;
+                            float alpha = numer / denom;
+                            if (alpha < 0f || alpha > 1f) { continue; }
+
+                            float cpx = e1x + alpha * r1x;
+                            float cpy = e1y + alpha * r1y;
+                            float cpz = e1z + alpha * r1z;
+                            float ddx = cpx - mx, ddy = cpy - my, ddz = cpz - mz;
+                            float conDistSq = ddx * ddx + ddy * ddy + ddz * ddz;
+                            if (conDistSq < myoColTolSq) {
+                                found = s;
+                                // alpha·length simplifies the CPU's alpha·sqrt(denom);
+                                // mathematically equivalent up to one float op.
+                                foundArc = alpha * len;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (found >= 0) {
+                boundSegId.set(m, found);
+                arcOnFilDev.set(m, foundArc);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4.5 — resident-pose parity plan. Built lazily on first
+    // parityCheck() call. Shares device-only scratch (segBbox, segCellCount,
+    // cellCount, gridCellOffsets, gridCellContents) with its own device
+    // allocation (separate plan → separate device buffers from the host-pack
+    // plan). Inputs: coord/uVec/soaLengthArr + slot maps + motOnFil/
+    // filNodeAtEnd2 (shared Java FloatArray refs — each plan uploads its own
+    // copy EVERY_EXECUTION). Outputs: boundSegId, arcOnFilDev — shared with
+    // the host-pack plan's output buffers, so the parity dispatch overwrites
+    // them and we compare against the host-pack snapshot taken before.
+    //
+    // Not in production wiring; only the parity harness builds and dispatches
+    // this plan. The merged-executor consumeFromDevice variant (true
+    // residency, no PCIe re-upload of coord/uVec) is a separate concern from
+    // kernel-math correctness — see the PHASE45_PLAN.md note for the
+    // lifecycle problem that blocks that path.
+    // -------------------------------------------------------------------------
+    private static ImmutableTaskGraph   residentItg;
+    private static TornadoExecutionPlan residentPlan;
+    private static GridScheduler        residentGridScheduler;
+    private static IntArray             residentSegBbox;
+    private static IntArray             residentSegCellCount;
+    private static IntArray             residentCellCount;
+    private static IntArray             residentGridCellOffsets;
+    private static IntArray             residentGridCellContents;
+
+    private static void buildResidentPlanIfNeeded() {
+        if (residentPlan != null) return;
+
+        FloatArray coord        = GPUMoveThing.getCoordArray();
+        FloatArray uVecArr      = GPUMoveThing.getUVecArray();
+        FloatArray soaLength    = GPUMoveThing.getSoaLengthArray();
+        IntArray   motSlot      = GPUMoveThing.getMotMoveSlotArray();
+        IntArray   motRodSlot   = GPUMoveThing.getMotRodMoveSlotArray();
+        IntArray   filSlot      = GPUMoveThing.getFilMoveSlotArray();
+        if (coord == null || motSlot == null || filSlot == null) {
+            throw new IllegalStateException(
+                "GPUMotorBinding.buildResidentPlanIfNeeded: move plan has not been built yet");
+        }
+
+        // Separate device-only scratch — same dims as the host-pack plan's
+        // scratch but owned by this plan. TornadoVM allocates per-plan buffers
+        // from the Java IntArray refs at execute time.
+        residentSegBbox          = new IntArray(segCap * 6);
+        residentSegCellCount     = new IntArray(segCap);
+        residentCellCount        = new IntArray(totalCells);
+        residentGridCellOffsets  = new IntArray(totalCells + 1);
+        residentGridCellContents = new IntArray(contentsCap);
+
+        TaskGraph tg = new TaskGraph("motorBindingResident")
+            .transferToDevice(DataTransferMode.FIRST_EXECUTION, gridParams, gridDims)
+            .transferToDevice(DataTransferMode.EVERY_EXECUTION,
+                              coord, uVecArr, soaLength,
+                              motSlot, motRodSlot, filSlot,
+                              motOnFil, filNodeAtEnd2,
+                              counts)
+            .task("segBbox",
+                  GPUMotorBinding::segBboxKernelResident,
+                  coord, uVecArr, soaLength, filSlot,
+                  gridParams, gridDims, counts,
+                  residentSegCellCount, residentSegBbox)
+            .task("gridAssemble",
+                  GPUMotorBinding::gridAssembleKernel,
+                  residentSegCellCount, residentSegBbox,
+                  gridDims, counts,
+                  residentGridCellOffsets, residentGridCellContents, residentCellCount)
+            .task("bind",
+                  GPUMotorBinding::bindKernelResident,
+                  coord, uVecArr, soaLength,
+                  motSlot, motRodSlot, filSlot,
+                  motOnFil, filNodeAtEnd2,
+                  residentGridCellOffsets, residentGridCellContents,
+                  gridParams, gridDims, counts,
+                  boundSegId, arcOnFilDev)
+            .transferToHost(DataTransferMode.EVERY_EXECUTION,
+                            boundSegId, arcOnFilDev);
+
+        residentItg  = tg.snapshot();
+        residentPlan = new TornadoExecutionPlan(residentItg);
+
+        WorkerGrid bindWorker = new WorkerGrid1D(motorCap);
+        bindWorker.setLocalWork(BIND_KERNEL_BLOCK_SIZE, 1, 1);
+        WorkerGrid segBboxWorker = new WorkerGrid1D(segCap);
+        segBboxWorker.setLocalWork(SEGBBOX_KERNEL_BLOCK_SIZE, 1, 1);
+        residentGridScheduler = new GridScheduler("motorBindingResident.bind",    bindWorker);
+        residentGridScheduler.addWorkerGrid("motorBindingResident.segBbox", segBboxWorker);
+
+        System.out.printf("[PARITY] resident plan built: motorCap=%d segCap=%d totalCells=%d contentsCap=%d%n",
+                          motorCap, segCap, totalCells, contentsCap);
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4.5 — frozen-pose kernel-parity check.
+    //
+    // Pre-conditions (must be set up by caller in BoxOfActin.doLoop):
+    //   - The normal GPUMotorBinding.detectBindings() has just fired this
+    //     step, so motPos/motUVec/motRodUVec/filEnd1/filEnd2 have the
+    //     current pose and boundSegId/arcOnFilDev hold the host-pack output.
+    //   - MyoMotor.fillSoaArrays() and FilSegment.fillSoaArrays() also ran
+    //     this step (canonical CPU pose snapshot).
+    //   - The move plan's resident coord/uVec/soaLengthArr have been
+    //     demand-synced to host (so the parity plan's EVERY_EXECUTION upload
+    //     sees the same pose CPU saw).
+    //   - The slot maps motMoveSlot/motRodMoveSlot/filMoveSlot were
+    //     populated by classifyThings this step.
+    //   - The CPU MotorBindGrid3D was already replayed for the run-N call
+    //     (we don't need it here; the resident plan rebuilds the grid on
+    //     device from the slot-indexed pose).
+    //
+    // Action:
+    //   1. Snapshot the host-pack output (boundSegId, arcOnFilDev) into
+    //      Java int[] / float[] heap arrays.
+    //   2. Dispatch the resident plan on the SAME frozen pose. The plan's
+    //      transferToDevice EVERY_EXECUTION upload reads the current host-
+    //      side values of coord/uVec/soaLengthArr/slot maps. Result lands in
+    //      boundSegId / arcOnFilDev (overwriting the host-pack output).
+    //   3. Element-wise diff: boundSegId (exact match expected) and
+    //      arcOnFilDev (float32 ULP-scale divergence expected — see kernel
+    //      comments).
+    //   4. Print pass/fail and the distribution.
+    //
+    // Caller is responsible for halting the run after this check (no
+    // integration past the parity step — otherwise the boundSegId
+    // re-application would step the run off-trajectory).
+    // -------------------------------------------------------------------------
+    // Aggregated parity statistics — accumulates across repeated calls. Lets
+    // a caller window the parity check over many consecutive steps to gather
+    // a meaningful matched-arc distribution even when at any single step only
+    // a handful of motors are mid-bind.
+    private static int    parityRuns            = 0;
+    private static long   parityMotorCt         = 0;
+    private static long   parityFilSegCt        = 0;
+    private static long   paritySegMismatchCt   = 0;
+    private static long   parityHostHitDevMiss  = 0;
+    private static long   parityHostMissDevHit  = 0;
+    private static long   parityBothHitDiff     = 0;
+    private static long   parityMatchedHits     = 0;
+    private static double parityMaxAbsDArc      = 0.0;
+    private static double parityWorstHostArc    = 0.0;
+    private static double parityWorstDevArc     = 0.0;
+    private static double paritySumAbsDArc      = 0.0;
+    private static double paritySumSqDArc       = 0.0;
+    private static int    parityHistBuckets[]   = new int[7]; // ULP-scale buckets
+
+    public static int parityCheck() {
+        int M = MyoMotor.motorCt;
+        int S = FilSegment.filSegmentCt;
+        if (plan == null) {
+            System.err.println("[PARITY] host-pack plan has not been built — detectBindings must run first; aborting parity");
+            return 1;
+        }
+
+        // 1. Snapshot host-pack output (segId int, arc float32).
+        int[]   hostSegId = new int[motorCap];
+        float[] hostArc   = new float[motorCap];
+        for (int i = 0; i < motorCap; i++) {
+            hostSegId[i] = boundSegId.get(i);
+            hostArc[i]   = arcOnFilDev.get(i);
+        }
+
+        // 2. Build & dispatch resident plan on the same frozen pose.
+        try {
+            buildResidentPlanIfNeeded();
+        } catch (IllegalStateException ise) {
+            System.err.println("[PARITY] " + ise.getMessage());
+            return 1;
+        }
+        long tDispatch = System.nanoTime();
+        residentPlan.withGridScheduler(residentGridScheduler).execute();
+        long dispatchNanos = System.nanoTime() - tDispatch;
+
+        // 3. Diff element-wise.
+        int   segMismatchCt   = 0;
+        int   segHostHitDevMiss = 0;
+        int   segHostMissDevHit = 0;
+        int   segBothHitDiff    = 0;
+        int   matchedHits = 0;
+        double maxAbsDArc = 0.0;
+        double worstHostArcLocal = 0.0;
+        double worstDevArcLocal  = 0.0;
+        double sumAbsDArc = 0.0;
+        double sumSqDArc  = 0.0;
+        int firstMismatchMotor = -1;
+
+        StringBuilder firstFew = new StringBuilder();
+        int firstFewReported = 0;
+
+        for (int m = 0; m < M; m++) {
+            int   hSeg = hostSegId[m];
+            float hArc = hostArc[m];
+            int   dSeg = boundSegId.get(m);
+            float dArc = arcOnFilDev.get(m);
+            if (hSeg != dSeg) {
+                segMismatchCt++;
+                if (firstMismatchMotor < 0) firstMismatchMotor = m;
+                if (hSeg >= 0 && dSeg <  0) segHostHitDevMiss++;
+                if (hSeg <  0 && dSeg >= 0) segHostMissDevHit++;
+                if (hSeg >= 0 && dSeg >= 0) segBothHitDiff++;
+                if (firstFewReported < 12) {
+                    firstFew.append(String.format(
+                        "  m=%d hostSeg=%d hostArc=%.6g  devSeg=%d devArc=%.6g%n",
+                        m, hSeg, hArc, dSeg, dArc));
+                    firstFewReported++;
+                }
+            } else if (hSeg >= 0) {
+                matchedHits++;
+                double d = (double) hArc - (double) dArc;
+                double ad = Math.abs(d);
+                if (ad > maxAbsDArc) {
+                    maxAbsDArc = ad;
+                    worstHostArcLocal = hArc;
+                    worstDevArcLocal  = dArc;
+                }
+                sumAbsDArc += ad;
+                sumSqDArc  += d * d;
+                // Histogram |Δ|: =0, (0,1e-8), [1e-8,1e-7), [1e-7,1e-6),
+                // [1e-6,1e-5), [1e-5,1e-4), >=1e-4 (matches printf labels
+                // below). Float32 ULP at the position scales used here is
+                // ~1e-7..1e-8, so most values should fall in buckets 0..2.
+                int b;
+                if      (ad >= 1.0e-4) b = 6;
+                else if (ad >= 1.0e-5) b = 5;
+                else if (ad >= 1.0e-6) b = 4;
+                else if (ad >= 1.0e-7) b = 3;
+                else if (ad >= 1.0e-8) b = 2;
+                else if (ad >  0.0)    b = 1;
+                else                   b = 0;
+                parityHistBuckets[b]++;
+            }
+        }
+        double meanAbsDArc = matchedHits > 0 ? sumAbsDArc / matchedHits : 0.0;
+        double rmsDArc     = matchedHits > 0 ? Math.sqrt(sumSqDArc / matchedHits) : 0.0;
+
+        // Update aggregate accumulators across windowed parity calls.
+        parityRuns++;
+        parityMotorCt        += M;
+        parityFilSegCt       += S;
+        paritySegMismatchCt  += segMismatchCt;
+        parityHostHitDevMiss += segHostHitDevMiss;
+        parityHostMissDevHit += segHostMissDevHit;
+        parityBothHitDiff    += segBothHitDiff;
+        parityMatchedHits    += matchedHits;
+        if (maxAbsDArc > parityMaxAbsDArc) {
+            parityMaxAbsDArc   = maxAbsDArc;
+            parityWorstHostArc = worstHostArcLocal;
+            parityWorstDevArc  = worstDevArcLocal;
+        }
+        paritySumAbsDArc += sumAbsDArc;
+        paritySumSqDArc  += sumSqDArc;
+
+        System.out.printf(
+            "[PARITY step=%d] M=%d S=%d resident dispatch %.3f ms%n",
+            Env.counter, M, S, dispatchNanos / 1.0e6);
+        System.out.printf(
+            "[PARITY step=%d] boundSegId: mismatches=%d (hostHit+devMiss=%d  hostMiss+devHit=%d  bothDifferent=%d  firstMotor=%d)%n",
+            Env.counter, segMismatchCt, segHostHitDevMiss, segHostMissDevHit, segBothHitDiff, firstMismatchMotor);
+        System.out.printf(
+            "[PARITY step=%d] arcOnFilDev (matched-seg only): matched=%d  maxAbs=%.3e  meanAbs=%.3e  rms=%.3e%n",
+            Env.counter, matchedHits, maxAbsDArc, meanAbsDArc, rmsDArc);
+        if (segMismatchCt > 0) {
+            System.out.print("[PARITY] first mismatches:\n");
+            System.out.print(firstFew);
+        }
+        boolean kernelMathCorrect = segMismatchCt == 0 && maxAbsDArc <= 1.0e-6;
+        System.out.printf(
+            "[PARITY step=%d] verdict: %s%n",
+            Env.counter, kernelMathCorrect ? "{kernel-math-correct}" : "{mismatch-found}");
+
+        return kernelMathCorrect ? 0 : 2;
+    }
+
+    /** Print accumulated parity statistics across all parityCheck() calls in
+     *  the current run. Called from BoxOfActin.doLoop right before
+     *  System.exit at the end of the parity window. */
+    public static void reportParitySummary() {
+        if (parityRuns == 0) return;
+        double meanAbsDArc = parityMatchedHits > 0
+            ? paritySumAbsDArc / parityMatchedHits : 0.0;
+        double rmsDArc = parityMatchedHits > 0
+            ? Math.sqrt(paritySumSqDArc / parityMatchedHits) : 0.0;
+        System.out.printf(
+            "[PARITY_SUMMARY] runs=%d motorCalls=%d filSegCalls=%d segMismatchCt=%d (hostHit+devMiss=%d  hostMiss+devHit=%d  bothDifferent=%d)%n",
+            parityRuns, parityMotorCt, parityFilSegCt, paritySegMismatchCt,
+            parityHostHitDevMiss, parityHostMissDevHit, parityBothHitDiff);
+        System.out.printf(
+            "[PARITY_SUMMARY] matchedHits=%d  maxAbsArc=%.3e (hostArc=%.6g devArc=%.6g)  meanAbsArc=%.3e  rmsArc=%.3e%n",
+            parityMatchedHits, parityMaxAbsDArc, parityWorstHostArc, parityWorstDevArc,
+            meanAbsDArc, rmsDArc);
+        System.out.printf(
+            "[PARITY_SUMMARY] |Δarc| histogram: =0:%d  (0,1e-8):%d  [1e-8,1e-7):%d  [1e-7,1e-6):%d  [1e-6,1e-5):%d  [1e-5,1e-4):%d  >=1e-4:%d%n",
+            parityHistBuckets[0], parityHistBuckets[1], parityHistBuckets[2],
+            parityHistBuckets[3], parityHistBuckets[4], parityHistBuckets[5],
+            parityHistBuckets[6]);
+        boolean verdict = paritySegMismatchCt == 0 && parityMaxAbsDArc <= 1.0e-6;
+        System.out.printf("[PARITY_SUMMARY] verdict: %s%n",
+            verdict ? "{kernel-math-correct}" : "{mismatch-found}");
+    }
+
+    // -------------------------------------------------------------------------
     // Public entry point: pack → execute → unpack
     // -------------------------------------------------------------------------
 
@@ -529,7 +1096,12 @@ public class GPUMotorBinding {
 
             arcOnFilDev  = new FloatArray(motorCap);
 
-            gridParams = new FloatArray(7);
+            // Phase 4.5 — slot 7 added for motorLen so the resident-pose bind
+            // kernel can derive the motor tip on-device as
+            //   coord + 0.5·motorLen·uVec
+            // (the host-pack path packs the tip directly in
+            // MyoMotor.fillSoaArrays). The host-pack kernel ignores slot 7.
+            gridParams = new FloatArray(8);
             gridParams.set(0, grid.xMin);
             gridParams.set(1, grid.yMin);
             gridParams.set(2, grid.zMin);
@@ -538,6 +1110,7 @@ public class GPUMotorBinding {
             gridParams.set(5, (float) Env.myoMotorAlignWithFilTolerance.getValue());
             float myoColTol = (float) Env.myoColTol.getValue();
             gridParams.set(6, myoColTol * myoColTol);
+            gridParams.set(7, (float) Env.myoMotorLength.getValue());
 
             gridDims = new IntArray(4);
             gridDims.set(0, grid.nXBins);
