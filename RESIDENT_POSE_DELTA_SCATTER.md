@@ -341,8 +341,7 @@ neither fired in the validation suite.
 
 ### Status
 
-**landed-on-branch.** Branch `probe/scatter-resident`, commit hash pending
-(this writeup + JOURNAL update follow). All four 2.1 / 2.2 gates passed
+**landed-on-branch.** Branch `probe/scatter-resident`, commit `63f079e`. All four 2.1 / 2.2 gates passed
 (probe correctness, N=4 paired-t, dense smoke regression, scatter
 mechanic). The high-churn-at-scale benchmark is the one not-yet-built
 piece; the dense smoke proves the per-call move-side pose upload retired,
