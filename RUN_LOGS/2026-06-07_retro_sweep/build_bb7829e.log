@@ -1,0 +1,12 @@
+./ec/util/MersenneTwister.java:177: warning: [strictfp] as of release 17, all floating-point expressions are evaluated strictly and 'strictfp' is not required
+public strictfp class MersenneTwister extends java.util.Random implements Serializable, Cloneable
+                ^
+./ec/util/MersenneTwisterFast.java:189: warning: [strictfp] as of release 17, all floating-point expressions are evaluated strictly and 'strictfp' is not required
+public strictfp class MersenneTwisterFast implements Serializable, Cloneable
+                ^
+./edu/cornell/lassp/houle/RngPack/RandomElement.java:150: warning: [removal] Double(double) in Double has been deprecated and marked for removal
+	BMoutput=new Double(x*z);
+	         ^
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+3 warnings

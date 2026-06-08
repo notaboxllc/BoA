@@ -1,0 +1,37 @@
+<BOA> Retrospective sweep dense config — 14x14x0.5 µm bed @ 500/µm² (~98K motors), 400 random filaments (4x the current dense-demo's 100), runTime scaled by harness
+// FIXED across the sweep — only stable knobs present at the oldest commit (6b5599f).
+// Box / density preserved from glidingDense_demo so motor count stays below the 100000 cap
+// in 6b5599f's MyoMotor.theMotors[]. 14*14*500 = 98000 < 100000.
+// Filament population is the scale-up axis: 100 -> 400 (4x). Each filament has length 1-3 µm
+// (Random midpoint placement); with filSegLength=64 -> ~12-35 segs per filament -> ~6-8K
+// FilSegments total (well under FilSegment cap 1000000 at every commit).
+// runTime is set to a comfortable upper bound; the harness terminates the JVM by step-count
+// via two paired runs that compare wall times at K1 vs K2 (steady-state s/step = diff/diff).
+deltaT:true:1.0E-5;
+biochemDeltaT:true:0.01;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:0.020;
+toFileInterval:true:5000.0;
+remoteWriteInterval:true:1000.0;
+fracMove:true:0.5;
+fracR:true:0.1;
+fracMoveTorq:true:0.2;
+boxXDim:true:14.0;
+boxYDim:true:14.0;
+boxZDim:true:0.5;
+aeta:true:0.1;
+noMonomersSimd:true:1.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+initialFilaments:true:400;
+minFilLength:true:1.0;
+maxFilLength:true:3.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+glidingAssay:true:1.0;
+externalDensitySweep:true:1.0;
+fixedMyosinDensity:true:500;
+fixedMyosinZValue:true:-0.05;
+glidingFilamentLength:true:2.0;
+filSegLength:true:64.0;

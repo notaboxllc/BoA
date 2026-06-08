@@ -136,3 +136,98 @@ java @"$TORNADOVM_HOME/tornado-argfile" --enable-preview -Xmx4G \
 Logs:
 - HEAD point: `RUN_LOGS/2026-06-06_dense_benchmark/{cpu,gpu}_seed1.{log,wall}`.
 - post-4.5 point: `RUN_LOGS/2026-06-06_dense_post45/{cpu,gpu}_seed1.{log,wall}`.
+
+## Retrospective campaign sweep
+
+Constant-config CPU + GPU steady-state per-step sweep across the seven
+campaign milestones, run in one overnight session on **2026-06-07**.
+Distinct from (and supersedes for the CPU-evolution question) the
+single-seed iter2b/2c/2d wall-clock series above — that series varied
+the config alongside the code over the campaign, so its CPU drop
+(190 → 154 s) was confounded by config drift. This sweep holds the
+config byte-identical at every commit.
+
+Config: 400 random filaments (4× the dense-demo's 100), 14×14×0.5 µm bed
+@ 500/µm² ≈ 98K motors, `noMonomersSimd:true`, biochem rates zeroed —
+saved as `RUN_LOGS/2026-06-07_retro_sweep/retro_sweep_config`. Box +
+density preserved so motor count stays under the pre-campaign
+`MyoMotor.theMotors[100000]` static cap. Method: two-step-count
+difference — wall_K2 − wall_K1 divided by (K2 − K1), with K1 = 500 and
+K2 = 2000 timesteps at dt = 1e-5 s, cancelling startup (JVM warmup, JIT,
+TornadoVM plan-build) cleanly and identically at every commit. Heap
+`-Xmx20G -XX:-UseGCOverheadLimit` (pre-campaign `-gpu` startup needs
+>4G for class init at this scale).
+
+| commit | hash | CPU ms/step | GPU ms/step | GPU÷CPU |
+|---|---|---:|---:|---:|
+| pre-campaign (iter2a + dense intro) | `6b5599f` | 170.89 | 176.26 | 1.03× |
+| iter2b polish                       | `bb7dc99` | 172.91 | 286.41 | 1.66× |
+| iter2c                              | `bb7829e` | 174.87 | 249.80 | 1.43× |
+| iter2d                              | `8027662` | 172.29 | 160.97 | 0.93× |
+| pre-4.5 (HEAD at the time)          | `b044874` | 130.20 |  94.01 | 0.72× |
+| post-4.5                            | `7759be7` | 132.49 |  96.42 | 0.73× |
+| post-residency (current `main`)     | `498bb7c` | 129.84 |  88.87 | 0.68× |
+
+**Verdict — CPU did genuinely improve, and the change is localized.**
+Across the iter2a → iter2d span (5 commits worth of GPU work) CPU
+steady-state is **flat at 170–175 ms/step**. Between iter2d (`8027662`,
+172.3) and pre-4.5 (`b044874`, 130.2) CPU drops **24 % in one campaign
+step**. The structural change in that window is `cpuopt batch 1`
+(`61c2391` — `pow`/`acos`/`sqrt`/`Env-cache`/`transXTox` flatten); the
+other commits in the window are restoration/IC fixes that don't touch
+per-step hot paths. From pre-4.5 onward CPU is flat again
+(130 → 132 → 130). So the **iter2d → HEAD CPU drop in the old crossover
+series (190 → 154 s) was real, not config drift** — the difference is
+that the *whole* drop is attributable to one cpuopt commit, not
+distributed across the whole iter2d → post-4.5 arc.
+
+**GPU evolution.** GPU per-step starts at 176 (pre-campaign, motor-bind-
+only kernel + everything else CPU), spikes upward to **286 at iter2b**
+(unified moveThing GPU kernel added — transfer-bound at this M),
+recovers to 250 (iter2c, Wang-hash Brownian + pack opt) and 161 (iter2d,
+parallel pack/unpack + myosin coord residency — first crossover at this
+scale, ratio 0.93×), then drops sharply to **94 at pre-4.5** (motor-port
+F8–F10 + Phase 3 grid-on-device + Phase 4 half-flip residency +
+motor-gap `acos` fix all stacked between iter2d and `b044874`). Phase
+4.5 binding-residency lands almost flat (96 vs 94 — the 4.5 small-fix
+trade widened the move-side cost by ~the same as bind shrank, as
+documented above). Steps 2–4 residency knocks GPU another ~8 % to
+**89 ms/step** by retiring the per-step demand-sync in
+`noMonomersSimd` configs and folding bind into the chained graph.
+
+**Overall — GPU is 1.92× faster than CPU at this scale today**
+(88.87 vs 170.89 / pre-campaign, or 88.87 vs 129.84 / today's CPU =
+1.46× speedup over today's CPU). Over the campaign the CPU dropped 24 %
+(170.89 → 129.84) and the GPU dropped 50 % (176.26 → 88.87).
+
+### Notes on comparability
+
+- This sweep is not directly comparable to the iter2b/2c/2d wall-clock
+  numbers above — this is per-step at **4× the filament population** at
+  the same motor density; that series is total wall on the 100-fil
+  `glidingDense_demo_smoke` config. Internal comparability across
+  commits is the point.
+- The pre-campaign GPU path (`6b5599f`) only had the motor-binding
+  GPU kernel; everything else was CPU. At this M and filament scale
+  GPU offload overhead exceeds the marginal motor-binding kernel gain
+  (1.03×) — the GPU advantage starts from the move-port at iter2b.
+- A run is two paired commands per (commit × path): one with
+  `runTime=0.005` for K1 = 500 steps, one with `runTime=0.020` for
+  K2 = 2000 steps. The per-row K1/K2 wall numbers + run logs +
+  per-commit param-file variants are committed under
+  `RUN_LOGS/2026-06-07_retro_sweep/`. The harness
+  (`run_sweep.sh`) is also included for reproducibility — read-only,
+  no source edits at any commit.
+
+### Reproduction
+
+```
+bash RUN_LOGS/2026-06-07_retro_sweep/run_sweep.sh
+```
+
+The harness checks out each campaign commit in turn (force-checkout to
+absorb the pre-campaign/iter2b tracked-`.class` legacy), rebuilds,
+runs K1 + K2 on both paths, appends results immediately to
+`results.md`, and returns the repo to `main` at the end (or on any
+failure path via `trap`). Logs:
+`RUN_LOGS/2026-06-07_retro_sweep/{hash}_{cpu,gpu}_K{1,2}.{log,wall}`.

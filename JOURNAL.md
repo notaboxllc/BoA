@@ -1,8 +1,84 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (residency arc Steps 2–4 merged to main)
+Last updated: 2026-06-07 (retrospective speed sweep across the campaign)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — Retrospective CPU+GPU sweep across the campaign
+
+Overnight constant-config speed sweep across the seven campaign milestone
+commits (pre-campaign `6b5599f`, iter2b `bb7dc99`, iter2c `bb7829e`,
+iter2d `8027662`, pre-4.5 `b044874`, post-4.5 `7759be7`, post-residency
+`498bb7c`). Read-only — no source edits at any commit. Fixed scaled-up
+gliding config (400 filaments + ~98K motors, 4× the dense-demo
+filament population at the same motor density, fits under the
+pre-campaign `MyoMotor.theMotors[100000]` static cap). Method:
+two-step-count difference (K1 = 500, K2 = 2000 timesteps,
+ss = (wall_K2 − wall_K1) / (K2 − K1)), which cancels start-up
+(JVM/JIT/Tornado plan-build) identically at every commit.
+
+Headline numbers (ms/step, single seed, RTX 5070):
+
+```
+                              CPU       GPU      GPU÷CPU
+pre-campaign (6b5599f)      170.89    176.26     1.03×
+iter2b      (bb7dc99)       172.91    286.41     1.66×
+iter2c      (bb7829e)       174.87    249.80     1.43×
+iter2d      (8027662)       172.29    160.97     0.93×   ← first crossover
+pre-4.5     (b044874)       130.20     94.01     0.72×
+post-4.5    (7759be7)       132.49     96.42     0.73×
+post-residency (498bb7c)    129.84     88.87     0.68×
+```
+
+**Verdict on the CPU question.** CPU is flat at 170–175 ms/step across
+the pre-campaign → iter2d span (5 commits, all GPU-side work, CPU
+untouched), then drops 24 % in *one* commit window between iter2d and
+pre-4.5, and stays flat at 130 ms/step from there to today. The
+structural change in that window is `cpuopt batch 1` (`61c2391` —
+`pow`/`acos`/`sqrt`/`Env-cache`/`transXTox` flatten); the other commits
+in the window are anchor-restore / IC-pad fixes that don't touch
+per-step hot paths. So the iter2d → HEAD CPU drop in the old
+single-seed wall-clock series (190 → 154 s) **was real, not config
+drift** — but the *whole* drop is attributable to that one cpuopt
+commit, not distributed across the campaign. The old series' use of a
+single dense-demo config at every commit was honest after all;
+configuration didn't shift under it.
+
+**GPU evolution.** Starts at 176 (pre-campaign, motor-bind-only kernel
++ everything else CPU), spikes to 286 at iter2b (unified moveThing
+kernel added — transfer-bound at this M), recovers to 250 (iter2c
+Wang-hash Brownian + pack opt) and 161 (iter2d parallel pack/unpack +
+myosin coord residency), then drops sharply to 94 at pre-4.5
+(motor-port F8–F10 + Phase 3 grid-on-device + Phase 4 half-flip
+residency + motor-gap `acos` fix all stacked there). 4.5 binding-
+residency lands flat (94 → 96 — the small-fix move-side trade), and
+Steps 2–4 residency takes another ~8 % to 89 ms/step by retiring the
+per-step demand-sync in `noMonomersSimd` configs and folding bind into
+the chained graph. Total GPU drop 176 → 89 = 50 %. Today the GPU is
+1.46× faster than today's CPU; against pre-campaign CPU, 1.92×.
+
+Notes:
+- This sweep is internally comparable across commits but **not**
+  directly comparable to the iter2b/2c/2d wall-clock series in
+  `BENCHMARK_dense.md` — that series is total wall on the
+  `glidingDense_demo_smoke` 100-fil config, this is per-step at 4×
+  filaments. The two are complementary, kept separately in the doc.
+- Pre-campaign `-gpu` startup at this scale OOMs at `-Xmx4G` — the
+  iter2a kernel + JIT load + `fillPlane`(98K motors) needs >12G heap
+  during init. The harness uses `-Xmx20G -XX:-UseGCOverheadLimit`
+  uniformly. Modern HEAD is fine at 4G; the OOM is a feature of the
+  oldest commits.
+
+Artifacts (committed to main):
+- `RUN_LOGS/2026-06-07_retro_sweep/results.md` — full table with K1/K2
+  walls per commit.
+- `RUN_LOGS/2026-06-07_retro_sweep/retro_sweep_config` — the byte-
+  identical fixed config used at every commit.
+- `RUN_LOGS/2026-06-07_retro_sweep/run_sweep.sh` — the harness.
+- `RUN_LOGS/2026-06-07_retro_sweep/{hash}_{cpu,gpu}_K{1,2}.{log,wall}`
+  + `build_{hash}.log` — per-run logs.
+- `BENCHMARK_dense.md` — appended **Retrospective campaign sweep**
+  section.
 
 ## 2026-06-07 — MILESTONE: pose residency achieved (production gliding) — merged to main
 

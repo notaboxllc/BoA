@@ -1,0 +1,63 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-07_retro_sweep/bb7829e_K2.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.02
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 14.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 400
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 Âµm
+nYBins = 71; yBinWidth = 0.2 Âµm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 71 x 4 cells (0.2 Âµm each)
+Sim. time=00.01....~303.44 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+Sim. time=00.02....~293.06 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=28526
+[STATS] meanBoundMotors=1051.329
+[STATS] glidingVelocity=0.0000
+ThingStep Threads took 115.758000 seconds.
+ThingBrownian Threads took 59.240000 seconds.
+Myosin Threads took 42.162000 seconds.
+MyoDimer Threads took 17.808000 seconds.
+Protein Node Threads took 1.658000 seconds.
+MyoMiniFil Threads took 1.631000 seconds.
+Chamber Myo Threads took 1.631000 seconds.
+Chamber MyoDimer Threads took 1.604000 seconds.
+Mesh Threads took 12.643000 seconds.
+Ck Mesh Threads took 2.524000 seconds.
+Ck Mots Threads took 22.024000 seconds.
+XLink Threads took 1.145000 seconds.
+Arp23 Threads took 1.123000 seconds.
+NodeLink Threads took 3.082000 seconds.
+Membrane Node Threads took 1.451000 seconds.
+ActA Threads took 1.849000 seconds.
+MotorBindGrid3D Fill took 59.041000 seconds.
+Finished closing JSON plots!
