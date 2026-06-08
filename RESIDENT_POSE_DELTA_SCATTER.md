@@ -776,8 +776,8 @@ all configs. Not scoped this session.
 
 ### Status
 
-**landed-on-branch.** Branch `probe/scatter-resident`, base commit
-`e24e2e1`. All B1–B4 gates passed:
+**landed-on-branch.** Branch `probe/scatter-resident`, code+docs+logs
+commit `9b82264` (base `e24e2e1`). All B1–B4 gates passed:
 - B1 audit: every per-step host pose reader inventoried and
   classified; gate identified as `Env.noMonomersSimd.isActive()`.
 - B2/B3 implementation: one-line gate in `GPUMoveThing.moveThings`;

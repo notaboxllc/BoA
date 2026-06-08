@@ -65,7 +65,7 @@ Step 3's borderline bind-lag shift (filed as deferred above) is
 unaffected by Step 4 — the single-graph bind kernel still reads
 device-resident pose at the same point in the chained graph.
 
-Commits: code+docs+logs `TBD`; hash-record commit `TBD`. Branch
+Commits: code+docs+logs `9b82264`; hash-record commit `TBD`. Branch
 only; jba reviews before merge.
 
 ## 2026-06-07 — 1-step bind-lag (Step-3 fold) filed as deferred
