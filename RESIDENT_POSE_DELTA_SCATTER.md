@@ -752,27 +752,87 @@ single-seed dense-smoke noise band (Step 2 dense gv was 42.76,
 Step 3 SG 41.93 — already 0.8-unit run-to-run spread, and Step 4
 is at the same scale).
 
-### Remaining per-step pull
+### Remaining per-step pull (deferred follow-ons)
 
 For biochem-active configs (`!noMonomersSimd`) the per-step pull
 still fires. The mechanic that prevents the retire is biochem's
 RELATIVE `incCoord(±halfmono/2, uVecAsPt3D())` reading host-side
-absolute coord baseline. Two follow-on options for a future
-session:
-1. **Device-side biochem deltas.** Pack biochem mutations as
-   relative deltas (`incCoord(scale, uVec)` → `delta[s] +=
-   scale·uVec`) and apply them in the existing `scatterPose`
-   kernel instead of mutating host coord. Removes the dependency
-   on fresh host baseline. Cost: small biochem refactor; the
-   delta-pack path already exists from Step 2.
-2. **Per-Thing on-demand pull.** When biochem is about to mutate
-   a specific FilSegment, demand-sync ONLY that slot's coord
-   first. Cost: a per-Thing transferToHost API — TornadoVM 4.0.1-
-   dev does not expose this granularity, so this option likely
-   requires a TornadoVM API extension.
+absolute coord baseline. Three follow-on options, ordered from
+cheapest interim to fullest fix:
 
-Option 1 is the natural extension and would close the retire for
-all configs. Not scoped this session.
+1. **Biochem-cadence pull gating (cheap interim).** Biochem
+   events (poly/depoly/split/cofilin-dissolve) fire far less
+   often than the rigid-body physics step — likely every ~10–50
+   steps (the ~ratio of `biochemDeltaT` to `deltaT`, modulated
+   by per-Thing dice-roll cooldowns). The per-step host pose
+   pull biochem's relative writes require need not be per-rigid-
+   body-step — gate the pull to biochem-event cadence and most
+   of the pull is reclaimed for biochem-active configs without a
+   device port. Pends a planned survey of biochemical rates and
+   dice-roll intervals (jba + planner) to confirm the
+   cadence ratio and the gate point (`biochemCheckCt` increment
+   vs `biochemCheckInt`, per `FilSegment.biochemStep` line 529).
+   Cost: very small — same one-line gate as Step 4, condition
+   on the per-Thing biochem readiness flag rather than the
+   global `noMonomersSimd`. Saves most of the demand-sync wall
+   in any biochem-active run.
+2. **Device-side biochem deltas (fuller fix).** Apply biochem's
+   relative mutations to the resident pose on-device via the
+   existing `scatterPose` pipeline (`incCoord(scale, uVec)` →
+   pack `(slot, scale·uVec)` into the per-step delta; the
+   scatter kernel performs the addition). Removes the dependency
+   on fresh host baseline entirely; closes the retire for all
+   configs regardless of biochem rate. Cost: a small biochem
+   refactor — split `incCoord` into a host-only path (CPU
+   fallback) and a device-delta-pack path (GPU-handled);
+   `FilSegment.splitSegment.setCoord` similarly. The delta-pack
+   infrastructure already exists from Step 2; this extends its
+   semantics from "absolute write" to "absolute or relative
+   write per delta entry".
+3. **Per-Thing on-demand pull.** When biochem is about to mutate
+   a specific FilSegment, demand-sync ONLY that slot's coord
+   first. Cost: a per-Thing transferToHost API — TornadoVM
+   4.0.1-dev does not expose this granularity, so this option
+   likely requires a TornadoVM API extension. Strictly inferior
+   to option 2 unless TornadoVM lands the granularity
+   independently.
+
+Recommendation: take option 1 next (cheap interim, unblocks
+high-churn biochem benchmarking immediately), then option 2 if
+the residual per-step pull at biochem cadence still dominates
+the wall. The planned biochem-rates survey informs how much of
+the pull option 1 actually reclaims (high biochem rate → option
+2 is needed sooner; low rate → option 1 is enough indefinitely).
+
+### Delta-buffer cap tuning (also deferred)
+
+`POSE_DELTA_CAP=4096` was chosen as a safe upper bound for
+biochem-event count per step at production scale. At low slot
+counts (`boxSpaghetti slotCap=1024`) the ~160 KB delta-buffer
+EVERY_EXECUTION upload dominates the ~12 KB pose buffer it
+replaces — Step 2 measured this as a regression at small scale.
+Crossover point is `slotCap*3*4 > 160 KB` ≈ `slotCap > 13K
+things`. Production gliding (`glidingDense_demo_smoke slotCap=
+588204`) is comfortably above. A per-config tuning sweep
+(`POSE_DELTA_CAP` vs measured biochem-event volume) would lower
+the crossover for biochem-active mid-scale configs. Not
+scoped; cross-referenced from the milestone JOURNAL entry.
+
+### Cross-references
+
+- **1-step bind-decision lag (Step 3 single-graph fold)** —
+  `MYOSIN_VALIDATION.md` §"1-step bind lag (single-graph
+  fold)". Borderline systematic shift (paired-t `|t|≈2.1`,
+  uniform-positive); attributed to bind reading pose one
+  integration step more advanced than the legacy two-plan
+  path. Revisit alongside the float32 binding systematic.
+- **float32 binding systematic (CPU-double vs GPU-float32)** —
+  `MYOSIN_VALIDATION.md` §"float32 binding systematic". +22%
+  bindEvents shift on the resident GPU bind path, attributable
+  to the float32 motor-tip computation crossing the capture
+  tolerance at a slightly different rate than CPU double.
+  Resolution path: unify both arms at float32, then recalibrate
+  via the capture-tolerance knob.
 
 ### Status
 

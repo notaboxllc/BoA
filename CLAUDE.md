@@ -94,7 +94,11 @@ java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
      BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
 ```
 
-`@tornado-argfile` injects `--add-modules`, `--add-exports`, JVMCI, and native library paths in one shot. The `-gpu` flag replaces the CPU motor-binding ThreadSet dispatch with `GPUMotorBinding.detectBindings()`; CPU and GPU paths are mutually exclusive per run. All other phases (mesh, brownian, xlink, joints, step, move, biochem, membrane) remain on CPU.
+`@tornado-argfile` injects `--add-modules`, `--add-exports`, JVMCI, and native library paths in one shot. The `-gpu` flag enables the chained move+bind TaskGraph (`GPUMoveThing.moveThings()` + folded `GPUMotorBinding` bind kernels — see "GPU Acceleration" below). The motor-binding decision, per-segment chain forces, per-Myosin joint constraints, box-boundary, motor cross-bridge forces, and the unified `Thing.moveThing()` integration all run on device with pose resident across executes. xLink/membrane/mesh phases remain CPU. CPU and GPU paths are mutually exclusive per run.
+
+Two TornadoVM-related env vars:
+- `BOA_SINGLE_GRAPH=0` falls back to the Step-2 two-plan path (separate bind plan); default is single graph.
+- `BOA_PHASE45_PARITY=<step>` arms a frozen-pose bind kernel parity check at the named step (diagnostic).
 
 The full command-line option list, as of Session 12:
 
@@ -109,7 +113,7 @@ The full command-line option list, as of Session 12:
 | `-3js <dir>` | write Three.js per-frame JSON files; directory auto-increments `.001` suffix if it exists |
 | `-3jsLive <port>` | start WebSocket server on the given port; viewer connects via `?live=<port>` |
 | `-oc` | ordered filaments (in a biochem-only run) are centered |
-| `-gpu` | route motor-binding decision through `GPUMotorBinding` (TornadoVM); CPU motor-binding ThreadSets skipped. Requires Java 21 + TornadoVM on the classpath. |
+| `-gpu` | route the move + bind + joints + chain + boundary + motor-force pipeline through the chained TornadoVM TaskGraph (`GPUMoveThing.moveThings()`); pose lives resident on device, host syncs at output-frame cadence in `noMonomersSimd` configs. CPU and GPU paths are mutually exclusive per run. Requires Java 21 + TornadoVM on the classpath. See "GPU Acceleration" below. |
 
 Both `-3js` and `-3jsLive` can be given together. Frame JSON is generated once and dispatched to both consumers.
 
@@ -293,9 +297,37 @@ Two-field model:
 | MBP | Primary development machine | — |
 | Aorus | High-memory / GPU build target | `10.0.0.187` (local network) |
 
-## GPU Acceleration Strategy
+## GPU Acceleration (current architecture)
 
-GPU acceleration via TornadoVM is planned. The only remaining prerequisite is `brew install openjdk@21` on the MBP (Phase 5), followed by a clean compile under Java 21 with `--enable-preview`. Full implementation strategy, phase priorities, write-write hazard analysis, and TornadoVM specifics are in `~/Dropbox/CodeSync/Sim3D/GPU_STRATEGY.md` and the JOURNAL.md GPU sections.
+GPU acceleration via TornadoVM is **live on aorus** (Java 21 + TornadoVM 4.0.1-dev PTX backend). Run with `-gpu`. On MBP Phase 5 (`brew install openjdk@21`) is the only remaining prerequisite for local GPU runs.
+
+### Residency model (post Steps 2–4, merged `24a05c7` on 2026-06-07)
+
+Pose lives on the device. Host syncs at output cadence only for production gliding.
+
+- **Canonical pose** (`coord`, `uVec`, `yVec`, `soaLengthArr`) are **FIRST_EXECUTION + UNDER_DEMAND** on the chained move plan: uploaded once at plan build, kernel-written each execute, persist across executes, and only pulled back on explicit `lastExecResult.transferToHost(...)`.
+- **Per-step host pose mutations** (biochem `incCoord` poly/depoly, `splitSegment.setCoord`, new-FilSegment creation, `removeThing` swap-compaction) are captured by the dirty-set audit in `GPUMoveThing.buildDeltaSet` and applied to the resident pose by a `scatterPose` kernel declared **first** in the chained TaskGraph. Delta buffer cap is `POSE_DELTA_CAP=4096`; overflow triggers a plan rebuild fallback (FIRST_EXECUTION re-uploads everything).
+- **Single unified TaskGraph** carries scatter → bind (segBbox/gridAssemble/bindResident) → joints → chain → boundary → motorForce → segMotorForce → move → derived in one declaration-order chain. The bind kernel reads device-resident pose directly (no per-step bind-side host upload). One `ExecutionPlan`, one buffer allocation set → routes around the multi-graph executor OOM that blocked the 4.5 merge. Toggle off with `BOA_SINGLE_GRAPH=0` (legacy two-plan path; mostly for A/B + rollback).
+- **Per-step host pose pull (`demandSyncPoseToHost`) is GATED OFF** when `Env.noMonomersSimd.isActive()` (production gliding). The output-frame writers (`ThreeJSWriter.writeFrame`, `buildInspectJson`, `FileOps.writeSimJSons*Frame`, `GlidingAssayEvaluator.outputInterval`) get fresh pose via `GPUMoveThing.refreshHostMirrorsForOutput()`, which itself demand-syncs first. **For biochem-active configs (`noMonomersSimd:false`, e.g. `boxSpaghetti`)** the per-step pull stays on because biochem's relative `incCoord(±halfmono/2, uVecAsPt3D())` needs a fresh host coord baseline. Retiring the pull there is a scoped follow-on (biochem-cadence gating, or device-side biochem deltas).
+
+### Drag, force, joints, derived fields
+
+Per-segment chain forces (F3/F4), per-Myosin joint constraints (F8/F9/F10), the per-step Brownian forcing, the box-boundary kernel (F1), and the per-Thing derived-field recompute (end1/end2/zVec/yVec'/transXTox) all run as kernels inside the chained graph. `OP_PACK_FULL` runs per-step to refresh the per-step EVERY_EXECUTION inputs (force sums, joint zero-init, Brownian scales, drag/length); its pose-related writes are dead (the FIRST_EXECUTION pose buffers never re-upload from host) but the CPU pack still runs — a small follow-up optimization, not blocking.
+
+### CPU fallback
+
+`cpuFallback[i]` holds non-GPU-classified Things — Chamber/Crucible/AnchorNode (empty `moveThing`), MyoMiniFilament, ProteinNode, StickyNode, Bug, ActA-bound or branched FilSegments. They keep CPU pose throughout, integrated in their own `moveThing()` after the chained-graph execute. They don't read GPU-neighbour host pose during integration, so they don't pin the per-step demand-sync.
+
+### What is still on CPU
+
+- biochem state machines (FilSegment polymerization gates, MyoMotor nucleotide cycle, MyoFilLink release/catch — though device motors defer `ckRelease` to the writeback bridge for step-N force consistency)
+- xLink phase (`FilLink`, `Arp23`, `ActA`) and membrane links (`NodeLink`) — both no-op in gliding production
+- mesh fill + CPU collisions (mesh fill still runs every step on the GPU path; its consumers `filSegMeshCollisions` etc. are typically no-op in gliding production)
+- output frame builders (`ThreeJSWriter`, `GlidingAssayEvaluator`, Simularium writers)
+
+### Design history
+
+The arc that landed this architecture is documented in `RESIDENT_POSE_DELTA_SCATTER.md` (Steps 1–4 writeups with run logs, validation tables, and the deferred follow-ons), `MYOSIN_VALIDATION.md` (float32 binding systematic, 1-step bind-lag deferred items), and the corresponding `JOURNAL.md` entries from 2026-06-07. The earlier Phase 4 / 4.5 history is in `JOURNAL.md` and the binding-residency campaign references on main pre-merge.
 
 ## Biological Context
 

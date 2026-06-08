@@ -1,8 +1,93 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (Step 4 — pose-pull reduction; bind-lag filed as deferred)
+Last updated: 2026-06-07 (residency arc Steps 2–4 merged to main)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — MILESTONE: pose residency achieved (production gliding) — merged to main
+
+Branch `probe/scatter-resident` merged into main at `24a05c7`
+(parent `7759be7`, the Phase 4.5 binding-residency campaign merge).
+Post-merge smoke (`glidingAssay500_val` seed=1, SG default on):
+bindEvents=844, gv=7.75, `demandSyncPose=0.329s(calls=102)`,
+`poseDelta sum=20 overflow=0 planRebuild=1` — main builds and
+runs.
+
+**The residency goal is met for production gliding.** Canonical
+`coord`/`uVec`/`yVec`/`soaLengthArr` live on the GPU as
+FIRST_EXECUTION + UNDER_DEMAND buffers; host sync runs at output-
+frame cadence only (`demandSyncPose` 1101 → 3 calls on dense
+smoke, -99.7%). The 4.5-era "multi-graph executor OOM" pathology
+is structurally routed around (one TaskGraph, one ExecutionPlan,
+one buffer allocation).
+
+The Steps 2–4 arc that delivered it:
+- **Step 1** scatter-into-resident TornadoVM probe — proved
+  FIRST_EXECUTION resident buffers can be kernel-written, scatter-
+  modified from EVERY_EXECUTION host deltas, and persist across
+  executes within one graph (declaration order = execution order).
+- **Step 2** resident pose + delta-scatter — restored Phase-4
+  FIRST_EXECUTION pose; per-step host pose-writes (biochem poly/
+  depoly, splitSegment, creation, removeThing swap) flow through
+  a small EVERY_EXECUTION delta consumed by a `scatterPose` task
+  declared first in the chained graph.
+- **Step 3** single unified move+bind TaskGraph — folded the three
+  bind tasks (segBboxResident/gridAssemble/bindResident) into the
+  chained move plan; the bind kernel reads device-resident
+  `coord`/`uVec`/`soaLengthArr` directly. Sidesteps the 4.5 multi-
+  graph executor OOM by structural simplification.
+- **Step 4** retire per-step `demandSyncPoseToHost` — gated on
+  `!Env.noMonomersSimd.isActive()`; production gliding configs
+  (biochem off) get the full retire to output cadence. Caught and
+  fixed a latent gv-collapse bug where
+  `ThreeJSWriter.writeFrame()`'s no-consumer early-return skipped
+  `refreshHostMirrorsForOutput` — the per-step demand-sync had
+  been masking it.
+
+**Validation snapshot (relative to main `7759be7`):**
+- N=4 paired ensemble on `glidingAssay500_val`: bindEvents and gv
+  stable within seed-spread noise across the entire arc; Step 4
+  vs Step 3 paired-t `|t|<0.3` for both metrics.
+- Dense smoke (`glidingDense_demo_smoke`, slotCap 588204): **no
+  OOM** (the 4.5-merge regression structurally resolved by
+  single-graph). `gpuMoveThing total` dropped from the per-step-
+  demand-sync baseline ~120 s to ~104 s post-Step-4 (-16 s, the
+  retired pull share). Combined move+bind exec dropped 2.12 s in
+  Step 3 (the bind-side pose upload retired) and total wall
+  another 5.11 s in Step 4 (the move-side demand-sync retired).
+
+**Deferred / scoped follow-ons** (recorded in
+`RESIDENT_POSE_DELTA_SCATTER.md` §"Step 4 — Remaining per-step
+pull" and §"Sequence", and in `MYOSIN_VALIDATION.md`):
+1. **Extend the retire to biochem-active configs** (high-churn
+   spaghetti, future polymerizing gliding) — two options. The
+   cheap interim is **biochem-cadence pull gating**: biochem
+   events fire far less often than rigid-body physics steps
+   (likely every ~10–50 steps), so the pull biochem's relative
+   pose writes require need not be per-step — gate it to biochem-
+   event cadence and most of the pull is reclaimed without a
+   device port. Pends a planned survey of biochemical rates and
+   dice-roll intervals (jba + planner). The fuller fix is
+   **device-side biochem deltas**: apply biochem's relative
+   mutations to the resident pose on-device via the existing
+   `scatterPose` pipeline, retiring the biochem pull entirely.
+2. **Delta-buffer cap tuning** — crossover at ~13K things;
+   `boxSpaghetti` (`slotCap=1024`) is a regression because the
+   ~160 KB delta buffer dominates the ~12 KB pose buffer; dense
+   (`slotCap=588204`) wins. Crossover point can be lowered by
+   shrinking `POSE_DELTA_CAP` (currently 4096) once a per-config
+   tuning sweep exists.
+3. **1-step bind-decision lag** (Step 3 single-graph fold; filed
+   in `MYOSIN_VALIDATION.md` §"1-step bind lag (single-graph
+   fold)") — borderline systematic shift in N=4 paired-t
+   (`t≈2.1`), uniform-positive, attributed to the bind task
+   reading pose one integration step more advanced than the
+   legacy two-plan path. Not blocking; revisit alongside the
+   float32 binding systematic.
+
+Merge commit `24a05c7`; pushed to `origin/main` at the same hash.
+
+## 2026-06-07 — Step 4: reduce per-step pose pull to output cadence (branch only)
 
 ## 2026-06-07 — Step 4: reduce per-step pose pull to output cadence (branch only)
 
