@@ -1,8 +1,16 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (POSE_DELTA_CAP startup-sized; 8× GPU ceiling lifted)
+Last updated: 2026-06-08 (GPU_STRATEGY.md now resident in BoA; POSE_DELTA_CAP startup-sized; 8× GPU ceiling lifted)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — GPU_STRATEGY.md copied from Sim3D into BoA
+
+`GPU_STRATEGY.md` (the running architectural doc — originally Sim3D-resident, already carrying the
+2026-06 campaign-landed-state section appended last session) is now a first-class BoA doc at the
+repo root, with a short provenance header noting its Sim3D origin. The Sim3D copy is left untouched
+(a copy, not a move). All in-repo references were mention-by-name (no Sim3D-pathed links), so they
+resolve to the new BoA-resident copy without edits.
 
 ## 2026-06-08 — POSE_DELTA_CAP: startup-sized cap, persistent-identity delta buffers, defused fallback
 
