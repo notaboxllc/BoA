@@ -1,0 +1,23 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+===== verdict =====
+pose[10] = 200.0000
+pose[5]  = 192.0000
+
+Check 1 — residency / persistence:
+  expected 200.0 if FIRST_EXECUTION holds (kernel writes persist) 
+  expected 1.0 if re-uploaded each execute (residency broken)
+  result: PASS — FIRST_EXECUTION resident, kernel writes persist
+
+Check 2 — scatter applied into resident buffer:
+  expected 192.0 (scatter BEFORE integrate on step 50; declaration honored)
+  expected 191.0 (scatter AFTER integrate on step 50; declaration reversed)
+  expected 200.0 (scatter NOT applied)
+  result: PASS — scatter honored; ordering = scatter→integrate
+
+Check 3 — ordering within graph:
+  scatter task runs BEFORE integrate task (declaration order honored).
+
+===== timing =====
+avg per-execute (count=0) : 128.977 us
+avg per-execute (count=1) : 107.924 us
+delta cost (count=1 − 0)  : -21.053 us

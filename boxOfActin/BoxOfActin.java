@@ -1102,6 +1102,17 @@ public class BoxOfActin {
 					// AnchorNode have empty moveThing overrides and the fallback
 					// dispatch is a no-op for them.
 					GPUMoveThing.moveThings();
+					// Step 3 (2026-06-07) — single-graph mode: the chained
+					// graph just ran its bind subgraph (segBbox/gridAssemble/
+					// bind) and transferred boundSegId+arcOnFilDev back to
+					// host. Drain those into ontoFilament() so the next step's
+					// packMotorBinding sees the new bindings (a 1-step lag vs
+					// the separate-plan path, where bind dispatched at
+					// detectBindings()-time). No-op in the legacy two-plan
+					// path (detectBindings already drained).
+					if (GPUMoveThing.SINGLE_GRAPH) {
+						GPUMotorBinding.drainBoundResults();
+					}
 					// Phase 4.5 scoping — poison the frame-only host mirrors
 					// (Thing.soaEnd1/End2/ZVec/TransXTox + per-FilSegment
 					// xRange/end1Pt/end2Pt + per-MyoMotor bindTip) so any
@@ -1669,6 +1680,19 @@ public class BoxOfActin {
 			int    prc  = GPUMoveThing.getPlanRebuildCount();
 			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d%n",
 				dspN, dspC, dsdN, dsdC, prc);
+			// Step 2 — per-step pose-delta scatter stats. avg=mean entries per
+			// gathered step (excludes the freshPlan steps that snapshot only);
+			// max=largest single delta; overflow=times the cap was exceeded
+			// and a plan rebuild fell back. Resident-only ticks counted
+			// separately (FIRST_EXECUTION carried the pose, no delta packed).
+			long pdSum   = GPUMoveThing.getPoseDeltaCountSum();
+			long pdMax   = GPUMoveThing.getPoseDeltaCountMax();
+			long pdOver  = GPUMoveThing.getPoseDeltaOverflowCount();
+			long pdFresh = GPUMoveThing.getPoseDeltaCallsResident();
+			long pdCalls = Math.max(1, dspC - pdFresh);
+			double pdAvg = (double) pdSum / (double) pdCalls;
+			System.out.printf("[STATS] gpuMoveThing poseDelta avg=%.2f max=%d sum=%d fresh=%d overflow=%d cap=%d%n",
+				pdAvg, pdMax, pdSum, pdFresh, pdOver, GPUMoveThing.POSE_DELTA_CAP);
 			GPUMoveThing.reportDerivedCheckpointSummary();
 		}
 		GPUMoveThing.reportMoveAB();

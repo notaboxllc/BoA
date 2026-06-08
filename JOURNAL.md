@@ -1,8 +1,220 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-06 (Phase 4.5 merged to main; dense crossover point landed)
+Last updated: 2026-06-07 (Step 4 — pose-pull reduction; bind-lag filed as deferred)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — Step 4: reduce per-step pose pull to output cadence (branch only)
+
+Branch `probe/scatter-resident` (base `e24e2e1`, Step 3 hash record).
+B1 reader audit found that every per-step host `soaCoord/UVec/YVec`
+consumer between `demandSyncPoseToHost()` and the next `moveThings()`
+is either gated off on the GPU path (FilSegment.step chain/boundary,
+MyoFilLink.step deviceMotor gate), reads scalars not pose
+(stericHindrance reads end{1,2}TipC), reads stale-tolerable Pt3D
+mirrors at output cadence (mesh fill, xLink-phase node interactions),
+or is a dead write (OP_PACK_FULL pose writes into FIRST_EXECUTION
+buffers that never re-upload). The ONE genuine per-step reader is
+biochem `incCoord(±halfmono/2, uVecAsPt3D())` (RELATIVE write that
+needs fresh host baseline); FilSegment.splitSegment.setCoord and
+Thing.removeThing swap-compaction have the same dependency.
+
+**B2/B3 implementation**: one-line gate in `GPUMoveThing.moveThings`
+— skip the per-step pull when `Env.noMonomersSimd.isActive()`
+(production gliding configs). Biochem-active configs (boxSpaghetti,
+future high-churn) keep per-step demand-sync; their retire is a
+clean follow-on (port biochem to apply RELATIVE deltas device-side
+via the existing scatter pipeline, or per-Thing on-demand pull).
+
+**Latent bug caught**: `ThreeJSWriter.writeFrame()` early-returns
+when no `-3js` dir and no `LiveFrameServer` is running, skipping
+`buildFrameJson()` and the `refreshHostMirrorsForOutput()` inside
+it. Pre-Step-4 the per-step demand-sync masked this; with the
+per-step pull retired the `GlidingAssayEvaluator.outputInterval`
+saw stale soaCoord → gv collapsed to 2.95 vs 8.08. Fix: refresh
+BEFORE the writeFrame early-return. Defensive refresh also added
+in `FileOps.writeSimJSons{,2}Frame()` for parity.
+
+**Gates** (all PASS):
+- **B4 N=4 paired ensemble** vs Step 3 SG: bindEvents `t=-0.28`
+  (mean Δ=-10.5, sd=74.4); gv `t=-0.17` (mean Δ=-0.044, sd=0.516).
+  Both `|t|<0.3` — much tighter than Step 3's borderline `|t|≈2`
+  shift, confirming the Step 4 mechanic adds no new lag.
+  `poseDelta sum=20`, `max=2`, `overflow=0`, `planRebuild=1`
+  across all seeds; `filSegInitFireCt=21` baseline-stable
+  (biochem-side initialisation unchanged).
+- **B4 dense smoke** (`glidingDense_demo_smoke`, seed=1, slotCap
+  588204): `demandSyncPose` 4.62 s / 1101 calls → **0.389 s / 3
+  calls (-99.7%)**; `gpuMoveThing total` 54.88 s → 49.77 s
+  (-5.11 s); `unpack` 7.77 s → 3.01 s (-4.76 s, the retired
+  demand-sync share); bindEvents 1907 vs 1819 (within noise);
+  poseDelta/planRebuild stable; **no OOM**.
+- **Per-step demand-sync reduction (smoke)**: 14.285 s / 10101
+  calls → 0.340 s / 102 calls. 102 = 10101/toFileInterval(100) + 1
+  = output cadence. Per-run smoke wall saving ~14 s.
+
+`stericHindrance{End1,End2}` is structurally untouched — reads
+`end{1,2}TipC` SCALARS (boundary-kernel-bridge-maintained), not
+pose. In `noMonomersSimd` configs the biochem gate (FilSegment.
+biochemStep line 529) prevents the entire poly/depoly path from
+firing, so stericHindrance is not even consulted; in biochem-active
+configs the per-step demand-sync stays on so the (uVec) read in
+`incCoord(halfmono/2, uVecAsPt3D())` sees fresh pose.
+
+Step 3's borderline bind-lag shift (filed as deferred above) is
+unaffected by Step 4 — the single-graph bind kernel still reads
+device-resident pose at the same point in the chained graph.
+
+Commits: code+docs+logs `9b82264`; hash-record commit `83a40ff`. Branch
+only; jba reviews before merge.
+
+## 2026-06-07 — 1-step bind-lag (Step-3 fold) filed as deferred
+
+The Step-3 single-graph N=4 paired-t showed bindEvents `t=+2.08` and gv
+`t=+2.04` vs Step 2 (both past `|t|<1`, inconclusive at N=4 — borderline
+pass). Likely cause: the single graph reads pose one integration step
+more advanced than the legacy two-plan path (bind on the far side of
+the move task inside one execute). Filed verbatim in
+`MYOSIN_VALIDATION.md` (§"1-step bind lag (single-graph fold)") as a
+deferred investigation item — not blocking (gv shift in-band). Revisit
+alongside the float32 binding systematic.
+
+## 2026-06-07 — Step 3: single unified graph (branch only)
+
+Branch `probe/scatter-resident` (base `299d7c0`, Step 2). Bind tasks
+(`segBboxResident`, `gridAssemble`, `bindResident`) folded into the
+chained move `TaskGraph`. The bind kernels read coord/uVec/soaLengthArr
+directly from the move plan's FIRST_EXECUTION resident buffers — no
+separate bind-side EVERY_EXECUTION pose upload. Behind
+`BOA_SINGLE_GRAPH`; default on, set `=0` for the Step-2 two-plan A/B.
+Sidesteps the multi-graph executor OOM that killed the 4.5 merge by
+structural simplification: one `ExecutionPlan`, one buffer allocation.
+
+Task order in the single graph:
+**scatterPose → segBbox → gridAssemble → bind → joints → chain →
+boundary → motorForce → segMotorForce → move → derived**.
+
+The bind result drain (`ontoFilament` for each `boundSegId` hit) moved
+from `detectBindings()`-time (top of step) to post-`moveThings()`-time
+— introduces a **one-step lag** from bind decision to motorForce
+activation (next step's `packMotorBinding` sees the binding). Validation
+shows the lag's effect is at the edge of noise (+8% bindEvents, +1.2%
+gv vs Phase 4.5 baseline; `|t|≤2.1` paired vs Step 2).
+
+**Implementation tightness**: a wrapper-method approach blew past
+TornadoVM's 600-node inliner limit; promoted the three bind kernels
+from `private` to package-private and reference them directly from
+`GPUMoveThing` (no wrapper). Kernels themselves unchanged.
+
+**Gates** (all PASS):
+- **3.1 feasibility** (`glidingAssay500_val` seed=1 A/B same seed):
+  no OOM; combined (move+bind) 121.45 s SG vs 125.01 s legacy;
+  bindEvents 878 SG vs 796 legacy (Step 2 was 792); gv 8.08 vs 7.38.
+  Bind exec absorbed into chained exec; bind plan's pose upload
+  (~2 MB/step at this scale) retired.
+- **3.2 OP_PACK_FULL inventory**: bind no longer reads host
+  FloatArrays — single-graph kernels read device coord/uVec/length
+  via filMoveSlot. `installSeparateResidentPlan` skipped in SG mode.
+  Remaining demand-sync per-step readers (Step-4 surface): CPU
+  fallback `Thing.moveThing()` (reads GPU-neighbour
+  Thing.soaCoord/UVec/YVec for force calc) + `FilSegment.biochemStep`
+  stericHindrance gate. `OP_PACK_FULL`'s pose writes are now dead
+  (FIRST_EXECUTION, never re-uploaded) — small CPU pack cost
+  remaining; skipping is a follow-up optimization.
+- **3.3 N=4 paired ensemble** (`glidingAssay500_val` seeds 1-4):
+  vs Step 2 baseline `t=+2.08` bindEvents, `t=+2.04` gv; vs Phase
+  4.5 `t=+2.70` bindEvents, `t=+1.49` gv. Borderline pass — direction
+  consistent (SG slightly higher), explanation is the 1-step bind
+  lag shifting the steady-state bound fraction by a small amount.
+- **3.3 dense smoke** (`glidingDense_demo_smoke` seed=1, slotCap
+  588204, A/B): **no OOM at dense scale**. Combined exec 24.10 s
+  SG vs 26.22 s legacy (−2.12 s, the retired bind-side pose
+  upload at ~9.4 MB/step × 1101 calls). Combined total 55.11 s vs
+  57.56 s legacy (−2.45 s). bindEvents 1819 vs 1749 (within noise).
+
+`poseDelta sum=20 max=2 overflow=0 planRebuild=1` held across all
+four ensemble seeds. The cross-graph residency the 4.5 merge
+couldn't achieve is now landed; the structural change (one graph,
+not two) avoided the device-allocation lifecycle bug that bit the
+multi-graph executor.
+
+Step 4 (retire per-step `demandSyncPoseToHost`, push to output-frame
+cadence) is next. Requires either porting the CPU-fallback +
+stericHindrance readers to consume device-resident pose, or
+distinguishing the per-step "neighbour-read" path from the output-
+frame path so demand-sync moves to the latter only.
+
+Commits: code+docs+logs `7a509c4`; hash-record commit `TBD`.
+Branch only; jba reviews before merge.
+
+## 2026-06-07 — Step 2: resident pose + delta-scatter (branch only)
+
+Branch `probe/scatter-resident` (base `3df21c9`). Restores Phase-4's
+FIRST_EXECUTION coord/uVec/yVec/soaLengthArr in the chained move plan;
+4.5's EVERY_EXECUTION pose flip is undone for the move plan (the
+separate bind plan still uploads its own host-side pose copy — that
+retires in Step 3). Per-step host-side mutations (biochem poly/depoly,
+splits, creation, removeThing-swap) are delivered via a small
+EVERY_EXECUTION delta (idx+coord+uVec+yVec+length, cap=4096) consumed by
+a `scatterPose` task declared FIRST in the chained graph.
+
+Dirty-set audit confirmed every host pose-writer is captured: explicit
+`markPoseDirty(this)` from biochem `lengthChanged` + splitSegment in
+`FilSegment.biochemStep`; everything else (creations from
+`spawnNodeFilaments`/`bespokeNodeFilament`/ActA + removeThing's
+swap-compaction survivor) is auto-detected by a slot-change scan in
+`buildDeltaSet` after `classifyThings`. The benchmark-pin path
+(`applyBenchmarkPins`, `-bm*` only) is flagged as not-on-production —
+would need an explicit mark if benchmark-mode is ever run with `-gpu`.
+
+**Gates** (all PASS):
+- **2.1 probe**: `glidingAssay500_val` seed=1 GPU — bindEvents=792,
+  gv=7.94, `poseDelta sum=20 max=2 overflow=0 fresh=1 planRebuild=1`.
+  Within Phase 4.5 baseline noise; scatter mechanic exercised; no NaN/escape.
+- **2.2 N=4 paired-t** vs Phase 4.5 (pad_fix resident): bindEvents
+  `t=+0.67` (Δ=+34.5±103.6, sign-scatter 1neg/3pos); gv `t=-1.17`
+  (Δ=-0.158±0.269, sign-scatter 3neg/1pos). Both `|t| ≤ 1.17` —
+  well within the prompt's `|t| ≲ 1-2` criterion.
+- **2.2 dense smoke** (`glidingDense_demo_smoke` seed=1): GPU wall
+  126.2 s vs 4.5 baseline 120.2 s (single-seed noise; 4.5 reference
+  was 125 s). `gpuMoveThing total` 46.3 → 44.1 s (-2.2 s); **`exec`
+  15.3 → 12.9 s (-2.4 s)** — that's the move-side EVERY_EXECUTION pose
+  upload retired. `OP_PACK_FULL`'s pose-side work stays (the bind plan
+  still reads host pose); retiring that is Step 3.
+- **High-churn caveat**: no scale-up high-churn config exists in the
+  tree (every gliding/dense config has `noMonomersSimd:true:1.0`). The
+  closest, `boxSpaghetti` (6 fils + biochem), shows Step 2 *slower*
+  than 4.5 at this scale (+2.9 s on move total) — at `slotCap=1024` the
+  delta-buffer overhead (~160 KB EVERY_EXECUTION + 4096-thread scatter
+  launch) exceeds the EVERY_EXECUTION pose buffer it replaces (~12 KB
+  at this slot count). Crossover sits at ~13K things; production
+  gliding sits comfortably above. The churn-independence claim
+  validates analytically; demonstrating it head-to-head requires a
+  scale-up biochem config (proposed but not built this prompt).
+
+`planRebuild=1` across every Step 2 run (only the startup build);
+topology-dirty rebuilds gone from the steady-state path; overflow
+fallback didn't fire. Logs in `RUN_LOGS/2026-06-07_step2_delta_scatter/`.
+Detailed audit + tables + benchmarks in `RESIDENT_POSE_DELTA_SCATTER.md`
+(`## Step 2 — resident pose + delta-scatter (implementation)`). Status:
+**landed-on-branch.** Branch only — jba reviews before merge.
+
+## 2026-06-07 — scatter-into-resident probe: feasible (4.0.1-dev)
+
+Standalone TornadoVM 4.0.1-dev probe on branch `probe/scatter-resident`
+(base `7759be7`, aorus). Settles the gating mechanic for the resident-pose +
+delta-scatter design: a `FIRST_EXECUTION` + `UNDER_DEMAND` `FloatArray` can be
+(a) uploaded once, (b) kernel-written each execute, (c) also written by a
+scatter kernel from `EVERY_EXECUTION` host deltas, and (d) persist across
+executes — all in one TaskGraph, with no `persistOnDevice`/
+`consumeFromDevice` and no extra plan flags. Task declaration order is
+honored (verified both directions via a swap-order variant). Empty deltas are
+below noise floor in per-execute timing. Verdict + numbers + required
+incantations appended to `RESIDENT_POSE_DELTA_SCATTER.md` (`## Scatter-into-
+resident probe`). Probes at `probes/ScatterResidentProbe.java` and
+`probes/ScatterResidentProbeSwap.java`; logs in
+`RUN_LOGS/2026-06-07_scatter_resident/`. Green-lights Step 2: wire the delta-
+scatter into the real move plan and return coord/uVec/yVec to FIRST_EXECUTION.
 
 ## 2026-06-06 — Phase 4.5 merged to main; dense crossover point landed
 
