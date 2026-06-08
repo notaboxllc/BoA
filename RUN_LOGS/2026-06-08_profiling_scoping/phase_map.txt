@@ -1,0 +1,112 @@
+# JFR top-frame → doLoop phase mapping
+# Each line: <method_substring> → <phase>
+# Phases: mesh, motorBind, brownian, xlink, membrane, joints, stepMoveBiochem, cleanup, gpu_bind, gpu_move, output, jvm, other
+
+# --- Mesh fill (phase 1) ---
+boxOfActin.Mesh.fillMotorMesh → mesh
+boxOfActin.Mesh.fillFilSegMesh → mesh
+boxOfActin.Mesh$MeshThreads.execute → mesh
+boxOfActin.Mesh.binToFil → mesh
+boxOfActin.Mesh.binToMotor → mesh
+boxOfActin.Mesh.addToMesh → mesh
+
+# --- Motor-filament collisions / motor binding (phase 2) ---
+boxOfActin.MotorBindGrid3D → motorBind
+boxOfActin.MyoMotor.checkFilSegCollision → motorBind
+boxOfActin.FilSegment.filSegMeshCollisions → motorBind
+
+# --- Brownian forces (phase 3) ---
+boxOfActin.Thing$ThingBrownianThreads.execute → brownian
+boxOfActin.UCircRnd.newValue → brownian
+ec.util.MersenneTwister.nextDouble → brownian
+ec.util.MersenneTwisterFast.nextDouble → brownian
+
+# --- Crosslinkers / Arp23 / ActA (phase 4) ---
+boxOfActin.FilLink → xlink
+boxOfActin.Arp23 → xlink
+boxOfActin.ActA → xlink
+boxOfActin.FilSegment.addLinkForces → xlink
+boxOfActin.FilSegment.validateEnd1Link → xlink
+boxOfActin.FilSegment.validateEnd2Link → xlink
+boxOfActin.FilSegment.addTorsionSpringForces → xlink
+boxOfActin.FilSegment.zeroAllLinkCts → xlink
+
+# --- Membrane (phase 5) ---
+boxOfActin.NodeLink → membrane
+
+# --- Myosin joints (phase 6) ---
+boxOfActin.Myosin$MyosinThreads.execute → joints
+boxOfActin.Myosin.jointConstraints → joints
+boxOfActin.Myosin.applyLeverMotorJointTorque → joints
+boxOfActin.MyoMotor.atpOnMyo → joints
+java.lang.StrictMath.acos → joints
+java.lang.FdLibm$Acos.compute → joints
+boxOfActin.MyoMotor.initialize → joints
+
+# --- Thing step/move/biochem (phases 7-9) ---
+boxOfActin.Thing$ThingStepThreads.execute → stepMoveBiochem
+boxOfActin.Thing.gatherThreadAccumulators → stepMoveBiochem
+boxOfActin.Thing.recomputeDerivedSoA → stepMoveBiochem
+boxOfActin.Thing.step → stepMoveBiochem
+boxOfActin.Thing.moveThing → stepMoveBiochem
+boxOfActin.Thing.biochemStep → stepMoveBiochem
+boxOfActin.MyoMotor.moveThing → stepMoveBiochem
+boxOfActin.MyoMotor.fillSoaArrays → stepMoveBiochem
+boxOfActin.MyoMotor.biochemStep → stepMoveBiochem
+boxOfActin.MyoMotor.hydrolize → stepMoveBiochem
+boxOfActin.MyoMotor.sampleBoundMotors → stepMoveBiochem
+boxOfActin.MyoFilLink → stepMoveBiochem
+boxOfActin.FilSegment.step → stepMoveBiochem
+boxOfActin.FilSegment.fillSoaArrays → stepMoveBiochem
+boxOfActin.FilSegment.initialize → stepMoveBiochem
+boxOfActin.MyoRod.initialize → stepMoveBiochem
+boxOfActin.MyoLever.initialize → stepMoveBiochem
+boxOfActin.MyoRod → stepMoveBiochem
+boxOfActin.MyoLever → stepMoveBiochem
+boxOfActin.ValueTracker → stepMoveBiochem
+
+# --- Cleanup (phase 11) ---
+boxOfActin.Thing.resetCounters → cleanup
+boxOfActin.Thing.removeDeadThings → cleanup
+boxOfActin.MyoMotor.cleanupMyoMotors → cleanup
+boxOfActin.Myosin.cleanupMyos → cleanup
+
+# --- GPU-only: binding graph (per-step in chained TG) ---
+boxOfActin.GPUMotorBinding.packMotorBinding → gpu_bind
+boxOfActin.GPUMotorBinding.drainBoundResults → gpu_bind
+boxOfActin.GPUMoveThing.packMotorBinding → gpu_bind
+
+# --- GPU-only: chained move graph (slot pack / joint pack / kernel exec / unpack / sync) ---
+boxOfActin.GPUMoveThing.packRange → gpu_move
+boxOfActin.GPUMoveThing.packJointsRange → gpu_move
+boxOfActin.GPUMoveThing.buildDeltaSet → gpu_move
+boxOfActin.GPUMoveThing.classifyThings → gpu_move
+boxOfActin.GPUMoveThing.bridgeBoundaryTipC → gpu_move
+boxOfActin.GPUMoveThing.bridgeMotorForceWriteback → gpu_move
+boxOfActin.GPUMoveThing.demandSyncPoseToHost → gpu_move
+uk.ac.manchester.tornado → gpu_move
+jdk.internal.foreign.AbstractMemorySegmentImpl → gpu_move
+
+# --- Output (gliding evaluator + 3JS writer) ---
+boxOfActin.GlidingAssayEvaluator → output
+boxOfActin.ThreeJSWriter → output
+boxOfActin.FileOps.writeToOutFile → output
+
+# --- JVM / framework / WebSocket ---
+java.util.ArrayList → jvm
+java.util.HashMap → jvm
+java.util.HashSet → jvm
+java.util.LinkedHashMap → jvm
+java.lang.ThreadLocal → jvm
+sun.nio.ch → jvm
+java.lang.Thread → jvm
+java.util.Formatter → jvm
+java.lang.Integer.valueOf → jvm
+java.util.Arrays.fill → jvm
+boxOfActin.Parameter → jvm
+boxOfActin.Thing.lineSegmentIntersectTest → motorBind
+boxOfActin.Thing.getEnd1X → stepMoveBiochem
+boxOfActin.Thing.getEnd2X → stepMoveBiochem
+boxOfActin.Thing.getCoordX → stepMoveBiochem
+boxOfActin.Thing.getCoordY → stepMoveBiochem
+boxOfActin.Thing.getCoordZ → stepMoveBiochem

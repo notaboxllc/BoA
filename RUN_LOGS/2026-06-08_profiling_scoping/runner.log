@@ -1,0 +1,40 @@
+[10:29:46] >>> 1x_gpu K=500 JFR delay=10s duration=40s jmap_after=none
+[10:29:46]     pid=950249
+[10:31:10] <<< 1x_gpu rc=0 wall=84.15s
+[10:31:10] all 1x_gpu done — elapsed 84s
+[10:31:55] >>> 1x_cpu K=500 JFR delay=10s duration=60s jmap_after=none
+[10:31:55]     pid=951395
+[10:33:30] <<< 1x_cpu rc=0 wall=94.77s
+[10:33:30] all 1x_cpu done — elapsed 95s
+[10:33:44] >>> 4x_gpu K=400 JFR delay=20s duration=100s jmap_after=none
+[10:33:44]     pid=952284
+[10:39:59] <<< 4x_gpu rc=0 wall=375.45s
+[10:39:59] all 4x_gpu done — elapsed 375s
+[10:40:27] >>> 8x_gpu K=300 JFR delay=30s duration=150s jmap_after=none
+[10:40:27]     pid=954836
+[10:43:52] >>> 4x_gpu K=400 JFR delay=20s duration=100s jmap_after=none
+[10:43:52]     pid=956312
+[10:47:12] <<< 4x_gpu rc=0 wall=200.26s
+[10:47:12] all 4x_gpu done — elapsed 200s
+[10:49:49] >>> 8x_gpu K=300 JFR delay=30s duration=150s jmap_after=none
+[10:49:49]     pid=958659
+[10:55:12] <<< 8x_gpu rc=0 wall=323.67s
+[10:55:12] all 8x_gpu done — elapsed 323s
+[11:11:32] >>> 4x_cpu K=2200 JFR delay=30s duration=120s jmap_after=1050
+[11:11:32]     pid=965957
+[11:29:02]     jmap -histo:live at +1050s (settled, post-step-2000)...
+[11:29:08]     jmap FAILED
+[11:30:45] <<< 4x_cpu rc=0 wall=1152.24s
+[11:30:45] all 4x_cpu done — elapsed 1153s
+[11:38:19] jmap run starting: 4x (K=2100, jmap at +1050s)
+[11:38:19]   JVM pid=974233
+[11:55:49]   capturing jmap -histo:live on pid=974233...
+[11:55:50]   jmap captured to /home/jba/Code/BoA/RUN_LOGS/2026-06-08_profiling_scoping/4x_cpu_jmap_histo.txt
+[11:55:50]   killing JVM pid=974233
+[11:55:53] 4x jmap done
+[11:59:54] >>> 8x_cpu K=2200 JFR delay=60s duration=240s jmap_after=2050
+[11:59:54]     bash pid=980989
+[12:34:04]     jmap -histo:live on JVM pid=980993 (bash wrapper pid=980989) at +2050s...
+[12:34:07]     jmap captured
+[12:39:39] <<< 8x_cpu rc=0 wall=2385.46s
+[12:39:39] all 8x_cpu done — elapsed 2385s

@@ -1,0 +1,198 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_profiling_scoping/4x_cpu_jmap.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.021
+     Parameter assigned: toFileInterval set to 100000000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 28.0
+     Parameter assigned: boxYDim set to 28.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 1600
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 141; xBinWidth = 0.2 µm
+nYBins = 141; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 141 x 141 x 4 cells (0.2 µm each)
+Exception in thread "Thread-64" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-79" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-75" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-74" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-72" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-73" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-78" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-71" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-77" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-70" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-69" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-76" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-68" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-67" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-65" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more
+Exception in thread "Thread-66" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.Myosin.jointConstraints(Myosin.java:370)
+	at boxOfActin.MyosinFixed.jointConstraints(MyosinFixed.java:24)
+	at boxOfActin.Myosin$MyosinThreads.execute(Myosin.java:128)
+	at boxOfActin.ThreadSet$ThreadSpawn.run(ThreadSet.java:40)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 4 more

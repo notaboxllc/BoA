@@ -1,8 +1,256 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (GPU_STRATEGY.md now resident in BoA; POSE_DELTA_CAP startup-sized; 8× GPU ceiling lifted)
+Last updated: 2026-06-08 (host-graph + orchestration profiling — Pt3D ranked #1 SoA-conversion target; P2/P3/P6 immaterial at research scale)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — Host-graph + orchestration profiling (refactor scoping)
+
+Survey-only pass to decide (a) which host-side subsystem to convert to SoA-
+canonical-with-thin-view first, and (b) whether the orchestration items P2
+(derivedFieldsKernel gating), P3 (sparse `boundSegId` readback), and P6 (inert
+phase-wave culling) carry material per-step cost at research scale. JDK-built-in
+JFR (`-XX:StartFlightRecording`, settings=profile) for self-time-by-method;
+`jmap -histo:live` for retained-heap class ranking. No source edits.
+
+Same scaling-study config generator (`boxXY = 14·√N µm`, `initialFilaments =
+400·N`, 500 motors/µm², pure gliding, no biochem, dt = 1e-5; aorus, Java 21,
+TornadoVM 4.0.1-dev PTX, RTX 5070, -Xmx28G). JFR delay set past the warmup
+transient; `toFileInterval` overridden to suppress the one-shot
+`GlidingAssayEvaluator.outputInterval` call at step 0 (see *Discovered along
+the way* below). Raw JFR / topframe / phase-grouped / jmap files in
+`RUN_LOGS/2026-06-08_profiling_scoping/` (+ runner `run_profile.sh`, jmap-only
+runner `run_jmap.sh`, phase-mapping table `phase_map.txt`, aggregation
+`group_by_phase.sh`).
+
+### Table 1 — Per-step CPU-time profile (JFR self-time by method → doLoop phase)
+
+JFR ExecutionSample samples / total during a steady-state window. CPU rows use
+the K=500 (1×), K=2200 (4×/8×) runs; GPU rows use K=500 (1×), K=400 (4×), K=300
+(8×). All percentages of total samples in the JFR window. End-of-run ThreadSet
+totals (`ThingStep Threads took X seconds`) corroborate the per-phase ranking
+on every row.
+
+**CPU path** (sample totals: 1×=16 220, 4×=40 299, 8×=84 131):
+
+| phase | 1× | 4× | 8× |
+|---|---:|---:|---:|
+| Brownian (RNG + UCircRnd) | 39.5 % | 43.6 % | 42.1 % |
+| step/move/biochem | 24.2 % | 24.9 % | 23.6 % |
+| motor binding (CPU collisions + grid fill) | 15.0 % | 12.6 % | 17.1 % |
+| JVM / framework | 7.3 % | 7.0 % | 5.6 % |
+| Mesh fill | 4.9 % | 3.5 % | 3.6 % |
+| Myosin joints | 4.5 % | 4.0 % | 3.9 % |
+| cleanup / compaction | 4.1 % | 3.9 % | 3.7 % |
+| xlink / Arp2.3 / ActA / membrane | 0.4 % | 0.2 % | 0.2 % |
+| output (`GlidingAssayEvaluator.sampleStep`, etc.) | 0.0 % | 0.0 % | 0.0 % |
+
+**GPU path** (sample totals: 1×=5 506, 4×=21 065, 8×=30 736):
+
+| phase | 1× | 4× | 8× |
+|---|---:|---:|---:|
+| GPU move pipeline (`packRange` + `packJointsRange` + `buildDeltaSet` + bridges) | 40.5 % | 40.6 % | 41.8 % |
+| step/move/biochem (CPU-fallback Things) | 21.6 % | 28.6 % | 26.9 % |
+| Brownian (CPU side of cpuFallback Things + per-step `brownianScales` pack) | 12.7 % | 10.2 % | 9.1 % |
+| Mesh fill | 5.2 % | 7.2 % | 8.7 % |
+| cleanup / compaction | 4.0 % | 8.4 % | 7.9 % |
+| GPU bind drain (`packMotorBinding` + `drainBoundResults`) | 3.7 % | 2.5 % | 2.6 % |
+| JVM / framework | 10.6 % | 1.3 % | 1.3 % |
+| Myosin joints (CPU residual) | 1.0 % | 0.5 % | 0.7 % |
+| motor binding (CPU residual collisions) | 0.5 % | 0.5 % | 0.7 % |
+| xlink / membrane / output | 0.0 % | 0.0 % | 0.0 % |
+
+**Per-call wall (ms) for the GPU pipeline** (from end-of-run STATS):
+
+| size | calls | gpu_move slotPack | jointPack | exec (chained kernels + PCIe) | unpack | gpu_bind drain |
+|---|---:|---:|---:|---:|---:|---:|
+| 1× | 601 | 15.9 | 6.7 | 42.6 | 3.1 | 0.235 |
+| 4× | 501 | 61.3 | 26.0 | 99.8 | 12.8 | 0.878 |
+| 8× | 400 | 126.1 | 54.6 | 172.1 | 26.1 | 1.762 |
+
+The CPU-side `packRange` + `packJointsRange` halves of the chained-graph dispatch
+(slotPack + jointPack) scale **linearly** with M and already make up 33–48 % of
+the per-call wall by 8× — together they are the GPU path's per-step CPU pinch
+point. On the CPU path, **Brownian RNG dominates** every row at 40 %+, mostly
+`MersenneTwister.nextDouble` reached via `UCircRnd.newValue`. Phases that are
+**effectively zero** at research scale (xlink, membrane, ActA, glidingEvaluator
+output, MyoDimer/MiniFil/ProteinNode/Chamber Threadsets) are **P6 inert-wave-
+cull candidates** — see *Reading* below.
+
+### Table 2 — `derivedFieldsKernel` consumer graph (Part 2, P2 gate)
+
+Static read of `boxOfActin/GPUMoveThing.java`. The kernel outputs five
+device-resident FloatArrays and one side-effect (re-orthogonalised yVec).
+
+| output buffer | consumers | classification |
+|---|---|---|
+| `derivedEnd1` | `transferToHost(UNDER_DEMAND)` on output frames; `transferToHost(EVERY_EXECUTION)` only when `DIAG_DUMP_*_STEP ≥ 0`; parity harness (gated by `BOA_PHASE45_PARITY`) | **host/output/demand-sync only** |
+| `derivedEnd2` | same | **host/output/demand-sync only** |
+| `derivedZVec` | same | **host/output/demand-sync only** |
+| `derivedYVecOrtho` | same | **host/output/demand-sync only** |
+| `derivedTransXTox` | same | **host/output/demand-sync only** |
+| **yVec overwrite** (side effect, lines 2621–2623) | next step's `joints`, `chain`, `motorForce`, `move` kernels read this resident `yVec` directly | **per-step GPU kernel** (load-bearing) |
+
+No downstream **GPU** kernel reads any of the five `derived*` buffers in the
+chained graph (verified by tracing every `tg.task(...)` argument list at lines
+~2900–3140). **Verdict (P2):** the kernel's bulk per-element work — writing 21
+floats per slot into `derivedEnd1/End2/ZVec/YVecOrtho/TransXTox` — is dead on
+non-output steps. The yVec re-orthog side effect is the only load-bearing per-
+step write. A gated variant that computes yVec re-orthog every step but only
+writes the five `derived*` buffers on output-frame ticks is structurally
+defensible; per-step weight likely small (kernel exec scales with M but is just
+arithmetic + global writes — bounded by memory bandwidth, not flops). Worth
+landing as a follow-on, but **not** the highest-priority refactor: total per-
+step kernel exec on the chained graph at 8× is ~172 ms of 614 ms total per-step
+wall, and the derived-fields portion within that is a small slice.
+
+### Part 2b — `boundSegId` readback cost + bound sparsity (P3 gate)
+
+`bindBoundSegId` and `bindArcOnFilDev` are both sized `motorCap = MyoMotor.soaX.length =
+8 000 000` (post scaling-study cap raise), giving **32 MB + 32 MB = 64 MB**
+PCIe device→host per `chained.execute()` *regardless of N*. The transfer is
+buried inside the chained graph's `exec` timer (no per-task profile); the
+host-side **drain** (`drainBoundResults`) is timed separately as
+`gpuMotorBinding.unpack`:
+
+| size | gpu_bind drain / call | exec / call | PCIe readback ms (est., 16 GB/s) | readback as % of exec | motorCt | meanBoundMotors | bound / motorCap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1× | 0.24 ms | 42.6 ms | ~4.0 ms | ~9 % | 98 000 | 261.6 | 3.3 × 10⁻⁵ |
+| 4× | 0.88 ms | 99.8 ms | ~4.0 ms | ~4 % | 392 000 | 435.8 | 5.4 × 10⁻⁵ |
+| 8× | 1.76 ms | 172.1 ms | ~4.0 ms | ~2 % | 784 000 | 526.8 | 6.6 × 10⁻⁵ |
+
+The readback volume is **constant** (fixed by motorCap, not by motorCt or by
+actual bound count), so the readback's share of per-step time falls with size.
+True bound sparsity is extreme: ~10⁻⁵ of motorCap, ~10⁻³ of motorCt — a sparse
+hit-list readback would cut ~64 MB to ~1–2 KB. **Verdict (P3):** the absolute
+PCIe savings are bounded at ~4 ms/step regardless of size, and the per-step
+fraction *decreases* with scale (9 % at 1× → 2 % at 8×). Drain (`unpack`) cost
+also stays sub-2 ms even at 8×. P3 is a real lever **only at small scale**, and
+even there it is a modest few-percent win. **Not material at research scale.**
+
+### Table 3 — Retained-heap histogram (jmap -histo:live, CPU path)
+
+Captured ~step 2000 (4× at +1050 s, 8× at +2050 s — past the warmup transient).
+Top classes by retained byte count; instance counts cross-checked against the
+scaling-study population sizes. Ranks shown in `(rank by shallow size, rank by
+instance count)`.
+
+| class | 4× instances | 4× MB | 8× instances | 8× MB | rank (size, count) |
+|---|---:|---:|---:|---:|---|
+| `[I` (int arrays, mostly Mesh bins / HashMap.tab / dirty buffers) | 2 597 605 | 3 716 | 5 295 471 | 7 509 | (1, 1) |
+| `[D` (double arrays — per-Thing tensor scratch + ValueTracker buffers) | 469 216 | 2 175 | 1 284 158 | 3 995 | (2, 6) |
+| **`boxOfActin.Pt3D`** | 45 199 818 | 1 808 | 92 935 324 | 3 717 | (3, **2**) |
+| `[F` (float arrays — Thing.soaCoord/uVec/yVec/end1/end2/zVec/transXTox + FilSegment soaEnd1/2 + MyoMotor soaX/Y/Z arrays) | 14 | 176 | 14 | 344 | (4, —) |
+| `boxOfActin.UCircRnd` (3× per Thing: xVals/yVals/zVals) | 3 532 806 | 170 | 7 169 691 | 344 | (5, **3**) |
+| `[LboxOfActin.Thing;` (`Thing.theThings[32M]` capacity) | 1 | 128 | 1 | 128 | (6, —) |
+| `boxOfActin.MyoMotor` | 392 000 | 85 | 784 000 | 169 | (7, —) |
+| `boxOfActin.MyosinFixed` | 392 000 | 82 | 784 000 | 163 | (8, —) |
+| `boxOfActin.MyoLever` / `MyoRod` | 2 × 392 000 | 2 × 78 | 2 × 784 000 | 2 × 157 | (9, 10) |
+| `boxOfActin.Thing$RetObj` (per-Thing collision return) | 1 177 602 | 75 | 2 389 897 | 153 | (11, 5) |
+| `boxOfActin.CollisionEvent` (per-Thing reusable) | 1 177 602 | 47 | 2 389 897 | 96 | (12, 6) |
+| `ec.util.MersenneTwisterFast` (per-Thing PRNG) | 1 177 602 | 47 | 2 389 897 | 96 | (13, 6) |
+| `boxOfActin.MyoFilLink` | 392 000 | 44 | 784 000 | 88 | (14, —) |
+| `j.u.c.ConcurrentHashMap$Node` (`instanceRegistry`) | 1 179 252 | 38 | 2 393 346 | 76 | (15, 4) |
+| `boxOfActin.ValueTracker` (per-FilLink force buffers) | 405 675 | 16 | 1 088 866 | 44 | (22, 12) |
+| `boxOfActin.FilSegment` | 6 397 | 4 | 37 896 | 22 | (~23, 23) |
+
+Total live heap at 4× ≈ **8.97 GB**, at 8× ≈ **18.3 GB** — scales near-linearly
+with N as the scaling study predicted from the host-OOM at 16×. The `[I` / `[D`
+buckets are dominated by Mesh internals (`141×141×1000` int-bin grid at 4× /
+`281×281×1000` at 8×) plus HashMap tables; the `[F` bucket is just the 14
+Thing-level SoA float arrays (cap-sized at `slotCap = 2 355 204` for 4× / `4 710
+404` for 8×, ~12 MB each).
+
+**Headline:** every per-Thing helper class — Pt3D (3rd by size, **2nd by
+instance count**, 1.8 → 3.7 GB), UCircRnd (5th, 3rd by count, 170 → 344 MB),
+RetObj (11th, 5th by count), CollisionEvent and MersenneTwisterFast (12–13th,
+6th by count, 47 → 96 MB each), ValueTracker (~22nd, 16 → 44 MB) — represents
+heap weight per Thing that an SoA-canonical refactor would shed. **Pt3D is the
+single dominant Thing-graph object class by both shallow size and instance
+count** (45 M instances at 4×, 93 M at 8× — roughly 38 Pt3Ds per Thing across
+its declared `v1/v2/rsq/facterm/fac1/fac2/tempPt/rForce/tempTorq` reusable
+scratch slots + `RetObj.conPt1/conPt2/ray1..4` + UCircRnd's own Pt3Ds).
+
+### Discovered along the way — outputInterval is O(M·F·S) and load-bearing only at step 0
+
+A first 4× / 8× GPU JFR pair came back with ≥ 98 % of samples inside
+`GlidingAssayEvaluator.outputInterval()` (line 142 nested duty-ratio loop:
+`for each motor { for each filGroup { for each segment { distToAxis(...) } } }`),
+called once at step 0 because `threeJSCounter` is initialised to `1e6`. With
+`toFileInterval = 5000` and `K ≤ 2200` in the difference-method windows the
+call **fires once, never again** — but at 8× the one call costs ~800–900 s of
+wall (≈ 10¹⁰ host-side distance ops). It cancels cleanly under the difference
+method (warmup overhead is identical at K1 and K2), which is why the scaling-
+study CPU/GPU ms/step rows are unaffected, but it dominates any unbounded JFR
+window. Re-runs with `toFileInterval: true: 100000000.0` (suppress the initial
+fire) gave clean per-step profiles; the first-pass JFR files for 4× GPU are
+preserved as `4x_gpu_BAD_outputInterval.{jfr,topframes.txt}` as a forward
+reference for the P6 cull list.
+
+This is the textbook P6 inert-wave-cull case: a function that is **dead in
+research-scale runs** (K ≪ toFileInterval ⇒ never fires after step 0), and
+when it does fire is O(M·F·S) at scale. The initial fire is gated by the
+`threeJSCounter = 1e6` sentinel — a small change (initialise to 0, or gate the
+inner duty-ratio loop on `simulationTime > 0`) eliminates the startup hit
+entirely without touching the per-step profile.
+
+### Reading — which way to push first
+
+**Host-graph SoA conversion target #1 is `Pt3D`** (Table 3): #1 Thing-graph
+object class by both retained bytes and instance count, with the per-Thing
+helper constellation behind it (UCircRnd / RetObj / CollisionEvent /
+MersenneTwisterFast / ValueTracker) almost all carrying multiple Pt3Ds. Converting
+`Pt3D` to a per-field `double[]` SoA store keyed by `Thing.myThingNumber`
+(`coordX[]`, `coordY[]`, `coordZ[]`, `v1X[]`, `v1Y[]`, `v1Z[]`, … and so on
+through the ~38 scratch Pt3Ds per Thing) is the single highest-value lever
+on host heap: it sheds Pt3D's 1.8 → 3.7 GB directly, eliminates the
+allocation pressure that drives the `[I` HashMap and ConcurrentHashMap node
+counts (~1.2 M / 2.4 M), and moves the per-Thing scratch into contiguous
+arrays for cache locality. The downstream wins compound (UCircRnd / RetObj /
+CollisionEvent share the same fate once their Pt3D fields are SoA-shaped).
+This is the v2 ECS direction GPU_STRATEGY.md already anticipates; today's
+data ranks it ahead of the other Thing-side rewrites by a clear margin.
+
+**Per-step CPU time goes** to (i) Brownian RNG (40 %+ on CPU path; even on
+the GPU path, the residual `ThingBrownian Threads` for cpuFallback Things +
+the kernel-input `brownianScales` pack adds ~10 % on top of the chained
+graph), (ii) `Thing.step`/`moveThing`/`biochem` dispatch (~24 % CPU, ~22–29 %
+GPU), and (iii) on GPU, the slot-pack + joint-pack halves of the chained-
+graph dispatch (33–48 % of per-call wall, scales linearly with M). The
+slot-pack/joint-pack bottleneck is the natural neighbour of the SoA refactor
+— once pose lives in primitive arrays end-to-end, slotPack becomes a
+contiguous `memcpy`/`MemorySegment.copy` instead of a per-slot indexed write
+into `FloatArray`.
+
+**Orchestration items P2 / P3 / P6 ranked by measured cost at research scale:**
+
+- **P6 (inert phase-wave culling)** — *materially worth doing*. ThreadSets
+  carrying zero per-step work (MyoDimer, ProteinNode, MyoMiniFil, Chamber
+  variants, ActA, NodeLink/Membrane in gliding) plus GlidingAssayEvaluator's
+  startup-only O(M·F·S) call together amount to small per-step samples (< 1 %
+  CPU) but consume the unique startup-transient window the JFR pinned (800–900 s
+  wall at 8×). Disabling the inert ThreadSets is a few-MB heap save and a
+  steady throughput gain near 1 %; gating the gliding-evaluator startup fire
+  is a one-line fix worth ~15 minutes of wall at 8×.
+- **P3 (sparse `boundSegId` readback)** — *immaterial at research scale*.
+  Per-step PCIe readback is ~64 MB ≈ 4 ms regardless of N, and the per-step
+  *fraction* falls from 9 % at 1× to 2 % at 8×. Sparse readback would save at
+  most ~4 ms/step at any size, with the absolute savings constant while
+  per-step time scales linearly. Not the next lever.
+- **P2 (`derivedFieldsKernel` gating)** — *small win, structurally clean*.
+  Five of the kernel's six output channels have no per-step GPU consumer
+  (Table 2); only the yVec re-orthog side effect is load-bearing per step. A
+  gated variant that runs yVec re-orthog every step and the five derived*
+  writes only on output-frame ticks is defensible but the per-step savings
+  are bounded by a fraction of the kernel's per-call exec, which is itself a
+  fraction of the chained-graph total. Land it as cleanup once Pt3D SoA is in;
+  not the headline lever.
+
+Net direction: **SoA-convert Pt3D first** (host-graph weight + per-step cache
+locality + GPU pack-side speedup all aligned), **cull inert phase-waves
+second** (cheap, P6), and treat P2 / P3 as opportunistic cleanups. The
+"open item in flight" slot in the older capstone block below now points
+here as the new item in flight.
 
 ## 2026-06-08 — GPU_STRATEGY.md copied from Sim3D into BoA
 
@@ -236,17 +484,12 @@ tuning knob — it requires shrinking the host object graph itself (SoA primitiv
 resident state instead of per-object Java fields), which is exactly the v2 ECS direction. This is
 empirical justification for v2's SoA core, recorded in GPU_STRATEGY.md.
 
-## Open item in flight — POSE_DELTA_CAP measure-then-fix
+## Open item in flight
 
-The deferred delta-cap item is now load-bearing (it is the 8× ceiling). A CC prompt is staged:
-**measure first** (true per-step dirty-slot demand + what drives the compaction in pure gliding,
-across 1×→8×), then a gate — if the delta is genuinely sparse (< ~25 % of total slots), **startup-size
-the cap** (scale with config, persistent identity allocated once — *not* per-step realloc, which would
-reopen the Phase-4.5 orphaned-identity leak) and make the overflow fallback a **non-leaky full-pose
-upload** (never a per-step plan rebuild); verify 8× runs with flat host memory and re-measure 8× GPU
-ms/step. If the delta approaches full-pose size (degenerate) or the churn looks artifactual, **bail to
-planner** — that's a design decision (full-pose upload vs delta-scatter), not a knob. Success moves the
-GPU ceiling from the engine-side cap out to the ~16× host-heap wall and fills the blank 8× cell.
+See the *2026-06-08 — Host-graph + orchestration profiling* entry above —
+**Pt3D-first SoA refactor** is the new in-flight item. (The
+POSE_DELTA_CAP item that previously occupied this slot landed on `a812c0c`,
+documented in the *POSE_DELTA_CAP* capstone above.)
 
 ## Deferred backlog (unchanged, for the record)
 

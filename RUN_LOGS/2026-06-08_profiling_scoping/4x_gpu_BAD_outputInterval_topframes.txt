@@ -1,0 +1,6 @@
+   7394 java.util.Formatter.parse(String)
+   2451 boxOfActin.GlidingAssayEvaluator.outputInterval()
+     15 boxOfActin.Thing.getCoordX()
+      8 java.util.ArrayList.iterator()
+      6 java.util.LinkedHashMap.values()
+      1 jdk.jfr.internal.PlatformRecorder.isToDisk()
