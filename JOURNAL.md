@@ -1,8 +1,76 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (cheap wins landed — outputInterval step-0 cost cut, inert-wave cull, derivedFieldsKernel reduced; Pt3D SoA refactor is next)
+Last updated: 2026-06-08 (Pt3D SoA increment 0 audit done — B = 58 % of the 45.2 M Pt3D bucket; preserve map = ptAtEnd1/2 ref-identity + MyoMotor.bindTip⇔MyoFilLink.motorPt; details in PT3D_SOA_MIGRATION.md)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — Pt3D SoA increment 0: partition + aliasing audit
+
+Survey-only pass (no code changes, no new runs). Full results in
+`PT3D_SOA_MIGRATION.md` under "Increment 0 — partition + aliasing audit
+(results)"; summary here.
+
+**Partition.** Cross-referenced every Pt3D field across `Thing` subclasses
+plus the retained helpers (`RetObj`, `CollisionEvent`, `UCircRnd`,
+`MersenneTwisterFast`, `ValueTracker`, `MyoFilLink`) against the
+`{4x,8x}_cpu_jmap_histo.txt` from this morning's profiling pass.
+
+- Per-Thing base = 33 Pt3D = 15 state (A) + 18 scratch (B). Of the 18 B:
+  9 are Brownian-RNG / torque scratch in Thing fields
+  (`v1, v2, rsq, facterm, fac1, fac2, tempPt, rForce, tempTorq`); 6 are
+  `RetObj.{conPt1, conPt2, ray1..4}`; 3 are
+  `CollisionEvent.{forceUVec, tmpPt1, tmpPt2}`. `UCircRnd` carries 0 Pt3D
+  (just doubles) despite the 3-per-Thing instance count.
+- At 4× the headline is **B ≈ 58 % of the 45.2 M Pt3D bucket
+  (~26 M instances, ~1.05 GB)**, A ≈ 42 %. At 8× the ratio holds: B ≈ 54 M
+  Pt3D, ~2.16 GB. 80 % of B sits in the three places above.
+- `Myosin`/`MyosinFixed`/`MyoFilLink` are **not** `Thing` subclasses
+  (verified by reading the class declarations); they carry Pt3D fields but
+  no Thing infrastructure, so the 1.178 M `RetObj` count = the Thing total
+  = FilSegment (1.6 K) + MyoMotor + MyoLever + MyoRod (3 × 0.392 M). Math
+  closes within rounding (45.6 M predicted vs 45.2 M observed).
+
+**Aliasing.** The prompt's stated domain fact — independent bodies do not
+share endpoint Pt3D objects — holds for inter-body endpoints (Arp23,
+FilLink/NodeLink, StickyNode/ProteinNode, MyosinFixed.myFixedPt is
+value-copied at construction). But two intra-machinery preserve-cases
+surface, both the same pattern (stable per-Thing handle, refreshed from SoA
+each step, shared by reference with a neighbor):
+
+- **A1 — `FilSegment.ptAtEnd1`/`ptAtEnd2` ⇒ neighbor's `end1Pt`/`end2Pt`.**
+  Direct alias, then **decoded by Java `==` reference identity** to encode
+  chain orientation. 20+ `==` sites in FilSegment.java plus 2 in
+  GPUMoveThing.java. The fil-merge cleanup at FilSegment.java:2825–2848
+  rewires the alias graph. Naively deleting `end1Pt`/`end2Pt` (because
+  soaEnd1/2 carry the values) breaks every check silently. Preserve recipe:
+  replace `ptAtEnd1`/`ptAtEnd2` with `(slot, side)` int pairs — the side
+  flag is **already derived this way on the GPU path**
+  (GPUMoveThing.java:4001), promote it to storage of record.
+- **A2 — `MyoMotor.bindTip` ⇔ `MyoFilLink.motorPt`.** Same Pt3D object;
+  passed by reference at MyoMotor.java:504. Read-only — no `==`. Simpler
+  recipe: delete both fields, MyoFilLink reads tip via `myMotor.getEnd2X/Y/Z`
+  → soaEnd2.
+
+**Cross-thread / external retention.** No Java3D / external retention.
+RetObj/CollisionEvent/UCircRnd are per-Thing — only the local worker
+touches them, so they pool/de-retain freely. **Crucible** holds 6 *static*
+Pt3D scratch used inside its multi-threaded `Chamber Myo Threads` dispatch
+(Crucible.java:21–26, l.100–105) — latent thread-safety race, dormant in
+gliding (inert per the cull plan), flagged as separate fixup.
+
+**Recommendation.**
+
+- 0a (scratch de-retention) is a real first win: B is the bulk (~58 %), 80 %
+  of it sits in three mechanically-convertible spots (Thing-base Brownian
+  scratch → stack locals; RetObj / CollisionEvent → per-thread pool or
+  primitive returns). Expected drop ~25 M Pt3D at 4× / ~50 M at 8× — bucket
+  roughly halves before any state conversion. No semantics surface, no
+  alias surface, CPU bit-identity is the bar.
+- For increment 1 (FilSegment state → SoA) the risk list is A1 — exactly
+  one case to preserve, with a known recipe.
+- Increment 2 (Myosin) adds A2, simpler. No index-pattern misfits found.
+
+The design doc's sequencing holds; 0b's preserve map is in hand.
 
 ## 2026-06-08 — Cheap wins landed (outputInterval, P6 cull, P2 derived) ahead of Pt3D SoA
 
