@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Thing extends Object {
 	
-	static Thing [] theThings = new Thing [2000000];	// array of all things
+	static Thing [] theThings = new Thing [32000000];	// array of all things
 	static int thingCt = 0;								// how many things
 	static Crucible theBox;								// only one bug/box
 	static Bug lmBug;				// only one listeria

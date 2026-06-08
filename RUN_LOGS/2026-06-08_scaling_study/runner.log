@@ -1,0 +1,145 @@
+[00:33:46] Scaling sweep starting: 8 sizes
+[00:33:46] === Size 1/8: 0.25x  N=0.25 boxXY=7.000 motors=24500 fil=100 K1=500 K2=2000 (elapsed 0s) ===
+[00:33:46]   running cpu K1 (boxXY=7.000 fil=100 K=500 runtime=0.005000, budget=2400s)...
+[00:34:13]     rc=0 wall=26.84s
+[00:34:13]   running cpu K2 (boxXY=7.000 fil=100 K=2000 runtime=0.020000, budget=2400s)...
+[00:35:41]     rc=0 wall=87.71s
+[00:35:41]   running gpu K1 (boxXY=7.000 fil=100 K=500 runtime=0.005000, budget=3000s)...
+[00:36:06]     rc=0 wall=25.43s
+[00:36:06]   running gpu K2 (boxXY=7.000 fil=100 K=2000 runtime=0.020000, budget=600s)...
+[00:37:23]     rc=0 wall=76.83s
+[00:37:23]   row done. elapsed=217s eta=1519s remaining
+[00:37:23] === Size 2/8: 0.5x  N=0.5 boxXY=9.899 motors=48995 fil=200 K1=500 K2=2000 (elapsed 217s) ===
+[00:37:23]   running cpu K1 (boxXY=9.899 fil=200 K=500 runtime=0.005000, budget=2400s)...
+[00:38:10]     rc=0 wall=46.77s
+[00:38:10]   running cpu K2 (boxXY=9.899 fil=200 K=2000 runtime=0.020000, budget=2400s)...
+[progress 00:38:46] elapsed=300s — [00:38:10] 0.5x cpu K2 (boxXY=9.899 fil=200 K=2000, budget=2400s)
+[00:40:44]     rc=0 wall=154.05s
+[00:40:44]   running gpu K1 (boxXY=9.899 fil=200 K=500 runtime=0.005000, budget=3000s)...
+[00:41:23]     rc=0 wall=39.63s
+[00:41:23]   running gpu K2 (boxXY=9.899 fil=200 K=2000 runtime=0.020000, budget=600s)...
+[00:43:23]     rc=0 wall=119.78s
+[00:43:23]   row done. elapsed=577s eta=1731s remaining
+[00:43:23] === Size 3/8: 1x  N=1.0 boxXY=14.000 motors=98000 fil=400 K1=500 K2=2000 (elapsed 577s) ===
+[00:43:23]   running cpu K1 (boxXY=14.000 fil=400 K=500 runtime=0.005000, budget=2400s)...
+[progress 00:43:46] elapsed=600s — [00:43:23] 1x cpu K1 (boxXY=14.000 fil=400 K=500, budget=2400s)
+[00:44:54]     rc=0 wall=90.51s
+[00:44:54]   running cpu K2 (boxXY=14.000 fil=400 K=2000 runtime=0.020000, budget=2400s)...
+[progress 00:48:46] elapsed=900s — [00:44:54] 1x cpu K2 (boxXY=14.000 fil=400 K=2000, budget=2400s)
+[00:49:42]     rc=0 wall=288.55s
+[00:49:42]   running gpu K1 (boxXY=14.000 fil=400 K=500 runtime=0.005000, budget=3000s)...
+[00:50:51]     rc=0 wall=68.56s
+[00:50:51]   running gpu K2 (boxXY=14.000 fil=400 K=2000 runtime=0.020000, budget=600s)...
+[progress 00:53:46] elapsed=1200s — [00:50:51] 1x gpu K2 (boxXY=14.000 fil=400 K=2000, budget=600s)
+[00:54:14]     rc=0 wall=203.12s
+[00:54:14]   row done. elapsed=1228s eta=2046s remaining
+[00:54:14] === Size 4/8: 2x  N=2.0 boxXY=19.799 motors=196000 fil=800 K1=500 K2=2000 (elapsed 1228s) ===
+[00:54:14]   running cpu K1 (boxXY=19.799 fil=800 K=500 runtime=0.005000, budget=2400s)...
+[00:57:31]     rc=0 wall=196.44s
+[00:57:31]   running cpu K2 (boxXY=19.799 fil=800 K=2000 runtime=0.020000, budget=2400s)...
+[progress 00:58:46] elapsed=1500s — [00:57:31] 2x cpu K2 (boxXY=19.799 fil=800 K=2000, budget=2400s)
+[progress 01:03:46] elapsed=1800s — [00:57:31] 2x cpu K2 (boxXY=19.799 fil=800 K=2000, budget=2400s)
+[01:07:09]     rc=0 wall=578.78s
+[01:07:09]   running gpu K1 (boxXY=19.799 fil=800 K=500 runtime=0.005000, budget=3000s)...
+[progress 01:08:46] elapsed=2100s — [01:07:09] 2x gpu K1 (boxXY=19.799 fil=800 K=500, budget=3000s)
+[01:09:43]     rc=0 wall=153.86s
+[01:09:43]   running gpu K2 (boxXY=19.799 fil=800 K=2000 runtime=0.020000, budget=984s)...
+[progress 01:13:46] elapsed=2400s — [01:09:43] 2x gpu K2 (boxXY=19.799 fil=800 K=2000, budget=984s)
+[01:16:30]     rc=0 wall=406.96s
+[01:16:30]   row done. elapsed=2564s eta=2564s remaining
+[01:16:30] === Size 5/8: 4x  N=4.0 boxXY=28.000 motors=392000 fil=1600 K1=400 K2=1600 (elapsed 2564s) ===
+[01:16:30]   running cpu K1 (boxXY=28.000 fil=1600 K=400 runtime=0.004000, budget=2400s)...
+[progress 01:18:46] elapsed=2700s — [01:16:30] 4x cpu K1 (boxXY=28.000 fil=1600 K=400, budget=2400s)
+[01:23:22]     rc=0 wall=411.58s
+[01:23:22]   running cpu K2 (boxXY=28.000 fil=1600 K=1600 runtime=0.016000, budget=2634s)...
+[progress 01:23:46] elapsed=3000s — [01:23:22] 4x cpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2634s)
+[progress 01:28:46] elapsed=3300s — [01:23:22] 4x cpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2634s)
+[progress 01:33:46] elapsed=3600s — [01:23:22] 4x cpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2634s)
+[progress 01:38:46] elapsed=3900s — [01:23:22] 4x cpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2634s)
+[01:40:19]     rc=0 wall=1017.63s
+[01:40:19]   running gpu K1 (boxXY=28.000 fil=1600 K=400 runtime=0.004000, budget=3000s)...
+[progress 01:43:46] elapsed=4200s — [01:40:19] 4x gpu K1 (boxXY=28.000 fil=1600 K=400, budget=3000s)
+[01:46:22]     rc=0 wall=362.50s
+[01:46:22]   running gpu K2 (boxXY=28.000 fil=1600 K=1600 runtime=0.016000, budget=2320s)...
+[progress 01:48:46] elapsed=4500s — [01:46:22] 4x gpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2320s)
+[progress 01:53:46] elapsed=4800s — [01:46:22] 4x gpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2320s)
+[progress 01:58:46] elapsed=5100s — [01:46:22] 4x gpu K2 (boxXY=28.000 fil=1600 K=1600, budget=2320s)
+[01:59:17]     rc=0 wall=774.90s
+[01:59:17]   row done. elapsed=5131s eta=3078s remaining
+[01:59:17] === Size 6/8: 8x  N=8.0 boxXY=39.598 motors=784000 fil=3200 K1=300 K2=1200 (elapsed 5131s) ===
+[01:59:17]   running cpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=2400s)...
+[01:59:22]     rc=1 wall=5.59s
+[01:59:22]   running gpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=3000s)...
+[01:59:28]     rc=1 wall=5.49s
+[01:59:28]   row done. elapsed=5142s eta=1714s remaining
+[01:59:28] === Size 7/8: 16x  N=16.0 boxXY=56.000 motors=1568000 fil=6400 K1=200 K2=700 (elapsed 5142s) ===
+[01:59:28]   running cpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=2400s)...
+[01:59:34]     rc=1 wall=5.65s
+[01:59:34]   running gpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=3000s)...
+[01:59:39]     rc=1 wall=5.75s
+[01:59:39]   row done. elapsed=5153s eta=736s remaining
+[01:59:39] === Size 8/8: 32x  N=32.0 boxXY=79.196 motors=3136003 fil=12800 K1=100 K2=400 (elapsed 5153s) ===
+[01:59:39]   running cpu K1 (boxXY=79.196 fil=12800 K=100 runtime=0.001000, budget=2400s)...
+[01:59:45]     rc=1 wall=5.49s
+[01:59:45]   running gpu K1 (boxXY=79.196 fil=12800 K=100 runtime=0.001000, budget=3000s)...
+[01:59:51]     rc=1 wall=5.73s
+[01:59:51]   row done. elapsed=5165s eta=0s remaining
+[01:59:51] === Scaling sweep complete (elapsed 5165s) ===
+[02:01:54] Scaling sweep starting: 3 sizes
+[02:01:54] === Size 1/3: 8x  N=8.0 boxXY=39.598 motors=784000 fil=3200 K1=300 K2=1200 (elapsed 0s) ===
+[02:01:54]   running cpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=2400s)...
+[02:02:00]     rc=1 wall=5.90s
+[02:02:00]   running gpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=3000s)...
+[02:02:05]     rc=1 wall=5.71s
+[02:02:05]   row done. elapsed=11s eta=22s remaining
+[02:02:05] === Size 2/3: 16x  N=16.0 boxXY=56.000 motors=1568000 fil=6400 K1=200 K2=700 (elapsed 11s) ===
+[02:02:05]   running cpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=2400s)...
+[02:02:11]     rc=1 wall=5.72s
+[02:02:11]   running gpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=3000s)...
+[02:02:17]     rc=1 wall=5.50s
+[02:02:17]   row done. elapsed=23s eta=11s remaining
+[02:02:17] === Size 3/3: 32x  N=32.0 boxXY=79.196 motors=3136003 fil=12800 K1=100 K2=400 (elapsed 23s) ===
+[02:02:17]   running cpu K1 (boxXY=79.196 fil=12800 K=100 runtime=0.001000, budget=2400s)...
+[02:02:22]     rc=1 wall=5.73s
+[02:02:22]   running gpu K1 (boxXY=79.196 fil=12800 K=100 runtime=0.001000, budget=3000s)...
+[02:02:28]     rc=1 wall=5.65s
+[02:02:28]   row done. elapsed=34s eta=0s remaining
+[02:02:28] === Scaling sweep complete (elapsed 34s) ===
+[02:03:48] Scaling sweep starting: 3 sizes
+[02:03:48] === Size 1/3: 8x  N=8.0 boxXY=39.598 motors=784000 fil=3200 K1=300 K2=1200 (elapsed 0s) ===
+[02:03:48]   running cpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=2400s)...
+[progress 02:08:48] elapsed=300s — [02:03:48] 8x cpu K1 (boxXY=39.598 fil=3200 K=300, budget=2400s)
+[progress 02:13:48] elapsed=600s — [02:03:48] 8x cpu K1 (boxXY=39.598 fil=3200 K=300, budget=2400s)
+[progress 02:18:48] elapsed=900s — [02:03:48] 8x cpu K1 (boxXY=39.598 fil=3200 K=300, budget=2400s)
+[02:21:16]     rc=0 wall=1048.18s
+[02:21:16]   running cpu K2 (boxXY=39.598 fil=3200 K=1200 runtime=0.012000, budget=6708s)...
+[progress 02:23:48] elapsed=1200s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:28:48] elapsed=1500s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:33:48] elapsed=1800s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:38:48] elapsed=2100s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:43:48] elapsed=2400s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:48:48] elapsed=2700s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[progress 02:53:48] elapsed=3000s — [02:21:16] 8x cpu K2 (boxXY=39.598 fil=3200 K=1200, budget=6708s)
+[02:53:57]     rc=0 wall=1960.63s
+[02:53:57]   running gpu K1 (boxXY=39.598 fil=3200 K=300 runtime=0.003000, budget=3000s)...
+[progress 02:58:48] elapsed=3300s — [02:53:57] 8x gpu K1 (boxXY=39.598 fil=3200 K=300, budget=3000s)
+[progress 03:03:48] elapsed=3600s — [02:53:57] 8x gpu K1 (boxXY=39.598 fil=3200 K=300, budget=3000s)
+[03:06:36]     rc=137 wall=758.69s
+[03:06:36]   row done. elapsed=3768s eta=7536s remaining
+[03:06:36] === Size 2/3: 16x  N=16.0 boxXY=56.000 motors=1568000 fil=6400 K1=200 K2=700 (elapsed 3768s) ===
+[03:06:36]   running cpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=2400s)...
+[03:07:20]     rc=1 wall=44.61s
+[03:07:20]   running gpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=3000s)...
+[03:07:53]     rc=1 wall=32.79s
+[03:07:53]   row done. elapsed=3845s eta=1922s remaining
+[03:07:53] Both CPU and GPU exhausted — stopping sweep
+[03:07:53] === Scaling sweep complete (elapsed 3845s) ===
+[03:09:39] Scaling sweep starting: 2 sizes
+[03:09:39] === Size 1/2: 16x  N=16.0 boxXY=56.000 motors=1568000 fil=6400 K1=200 K2=700 (elapsed 0s) ===
+[03:09:39]   running cpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=2400s)...
+[03:10:18]     rc=1 wall=39.77s
+[03:10:18]   running gpu K1 (boxXY=56.000 fil=6400 K=200 runtime=0.002000, budget=3000s)...
+[03:11:47]     rc=1 wall=88.91s
+[03:11:47]   row done. elapsed=128s eta=128s remaining
+[03:11:47] Both CPU and GPU exhausted — stopping sweep
+[03:11:47] === Scaling sweep complete (elapsed 128s) ===

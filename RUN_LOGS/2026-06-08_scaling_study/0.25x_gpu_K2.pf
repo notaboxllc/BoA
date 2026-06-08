@@ -1,0 +1,33 @@
+<BOA> Scaling study base config — derived per-size from this template
+// Base 1x is the retro sweep config: 14x14x0.5 µm bed @ 500/µm² (~98K motors),
+// 400 random filaments. Scaling by N: boxXY = 14*sqrt(N), initialFilaments = 400*N,
+// density held constant so motor count = 500 * boxXY^2.
+// runTime is overridden by the harness via K1/K2.
+deltaT:true:1.0E-5;
+biochemDeltaT:true:0.01;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:0.020000;
+toFileInterval:true:5000.0;
+remoteWriteInterval:true:1000.0;
+fracMove:true:0.5;
+fracR:true:0.1;
+fracMoveTorq:true:0.2;
+boxXDim:true:7.000;
+boxYDim:true:7.000;
+boxZDim:true:0.5;
+aeta:true:0.1;
+noMonomersSimd:true:1.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+initialFilaments:true:100;
+minFilLength:true:1.0;
+maxFilLength:true:3.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+glidingAssay:true:1.0;
+externalDensitySweep:true:1.0;
+fixedMyosinDensity:true:500;
+fixedMyosinZValue:true:-0.05;
+glidingFilamentLength:true:2.0;
+filSegLength:true:64.0;

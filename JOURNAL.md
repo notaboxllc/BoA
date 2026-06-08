@@ -1,8 +1,74 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (retrospective speed sweep across the campaign)
+Last updated: 2026-06-08 (scaling study — CPU + GPU ms/step vs simulation size)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — Scaling study: CPU + GPU ms/step vs simulation size, current code
+
+Holds **code fixed at current `main` HEAD** and varies the **simulation
+size** along `N ∈ {0.25, 0.5, 1, 2, 4, 8, 16, 32}`, scaling box area and
+filament count together at the dense-demo's 245 motors/filament ratio
+(`boxXY = 14·√N µm`, `initialFilaments = 400·N`, density fixed at
+500 motors/µm²). Same two-step-count difference method as the retro
+sweep; K1/K2 adapted per size. Pure gliding, no biochem. dt = 1e-5 s.
+
+Headline ms/step (RTX 5070, Aorus):
+
+```
+size   N    motors M  fil F   CPU ms/step   GPU ms/step   GPU÷CPU
+0.25×  0.25    24 500   100        40.58         34.27      0.84×
+0.5×   0.5     48 995   200        71.52         53.43      0.75×
+1×     1.0     98 000   400       132.03         89.71      0.68×
+2×     2.0    196 000   800       254.89        168.73      0.66×
+4×     4.0    392 000  1600       505.04        343.67      0.68×
+8×     8.0    784 000  3200      1013.83      [GPU ceiling]   —
+16×   16.0  1 568 000  6400  [CPU heap ceiling]    —          —
+```
+
+**Ceilings.**
+- **GPU practical ceiling at 8×.** Kernels execute; the per-step
+  pose-delta dirty count overruns `POSE_DELTA_CAP = 4096` (slot-renumber
+  churn from `theFilSegments` swap-compaction across 3200 filaments),
+  triggering a full plan rebuild every step → host memory monotonically
+  grows → SIGKILL at ~759 s. **VRAM itself is not exhausted** —
+  216 MB used / 12 227 MB total at kill. Structural ceiling of the
+  residency engine, not the hardware. First follow-on: grow
+  `POSE_DELTA_CAP` (and scatter kernel thread budget) so the steady-state
+  dirty set fits, or batch slot-renumber deltas across steps.
+- **CPU practical ceiling at 16×.** Last clean CPU row at 8× already at
+  ≈ 1 s/step — on the edge of biological practicality. At 16× the JVM
+  fails to initialize at any heap the 31 GB host can safely commit
+  (persistent `OutOfMemoryError: Java heap space` at `Mesh.<init>`/
+  `Thing.<init>` even with `-Xmx28G`).
+
+**Scaling.**
+- CPU 1× → 8× is 132 → 1014 ms/step over 8× the work = factor 7.68×
+  (near-linear, slight sub-linear).
+- GPU 1× → 4× is 90 → 344 ms/step over 4× the work = factor 3.83×
+  (also near-linear).
+- **GPU÷CPU ratio settles around 0.66–0.68× from 1× through 4×** —
+  GPU ~33 % faster than CPU at any sustainable scale. Below 1× the
+  ratio loosens (0.75× at 0.5×, 0.84× at 0.25×) as GPU dispatch
+  overhead amortizes less well at small M.
+- **The GPU advantage is widest at 4× in absolute terms** (CPU 505 vs
+  GPU 344 ms/step — gap 161 ms). Beyond 4× the residency engine's
+  structural limit bites before the silicon does — the next ~2× of
+  GPU headroom is gated by engine work, not hardware.
+
+**Cross-validation.** 1× row (132.03 / 89.71 ms/step) reproduces the
+2026-06-07 retro sweep's `498bb7c` row (129.84 / 88.87) within
+seed-noise — new harness consistent with the established one.
+
+Cap raises committed alongside this study (current code only, dead in
+gliding sub-1×/1× configs but load-bearing at ≥ 4×):
+`Myosin.theMyosins[]` / `MyoMotor.theMotors[]` / `MyoFilLink.maxLinks`
+/ `MyoMotor.soa*[]` (10 SoA pose+orient arrays)  **500K → 8M**,
+`Thing.theThings[]` **2M → 32M**.
+
+Full writeup: `BENCHMARK_dense.md` → `## Scaling study (current code)`.
+Per-size param-files, run logs, wall-time files, and reproduction harness
+under `RUN_LOGS/2026-06-08_scaling_study/`.
 
 ## 2026-06-07 — Retrospective CPU+GPU sweep across the campaign
 

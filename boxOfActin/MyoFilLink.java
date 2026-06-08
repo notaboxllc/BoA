@@ -1,7 +1,7 @@
 package boxOfActin;
 
 public class MyoFilLink {
-	static final int maxLinks = 500000;
+	static final int maxLinks = 8000000;
 	static MyoFilLink [] theMyoFilLinks = new MyoFilLink [maxLinks];
 	static int myoFilLinkCt = 0;
 	int myMyoFilLinkNumber;

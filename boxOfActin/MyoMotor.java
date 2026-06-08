@@ -1,23 +1,23 @@
 package boxOfActin;
 
 public class MyoMotor extends Thing {
-	static MyoMotor [] theMotors = new MyoMotor[500000];
+	static MyoMotor [] theMotors = new MyoMotor[8000000];
 	static int motorCt = 0;
 	int myMotorNumber;
 
 	// SoA arrays for GPU-ready motor-binding path
 	// Step 1a: motor head position + bound-state flag
 	// Step 1b: motor head orientation (uVecAsPt3D()) + rod orientation (myMyosin.myoRod.uVecAsPt3D()) — fine-check inputs
-	static double[]  soaX     = new double[500000];
-	static double[]  soaY     = new double[500000];
-	static double[]  soaZ     = new double[500000];
-	static boolean[] soaOnFil = new boolean[500000];
-	static double[]  soaUX    = new double[500000];
-	static double[]  soaUY    = new double[500000];
-	static double[]  soaUZ    = new double[500000];
-	static double[]  soaRodUX = new double[500000];
-	static double[]  soaRodUY = new double[500000];
-	static double[]  soaRodUZ = new double[500000];
+	static double[]  soaX     = new double[8000000];
+	static double[]  soaY     = new double[8000000];
+	static double[]  soaZ     = new double[8000000];
+	static boolean[] soaOnFil = new boolean[8000000];
+	static double[]  soaUX    = new double[8000000];
+	static double[]  soaUY    = new double[8000000];
+	static double[]  soaUZ    = new double[8000000];
+	static double[]  soaRodUX = new double[8000000];
+	static double[]  soaRodUY = new double[8000000];
+	static double[]  soaRodUZ = new double[8000000];
 
 	static void fillSoaArrays() {
 		// Read per-motor pose from the canonical SoA pose arrays

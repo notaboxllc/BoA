@@ -1,0 +1,44 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_scaling_study/32x_gpu_K1.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.001
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 79.196
+     Parameter assigned: boxYDim set to 79.196
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 12800
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+Exception in thread "main" java.lang.ArrayIndexOutOfBoundsException: Index 500000 out of bounds for length 500000
+	at boxOfActin.MyoFilLink.addMyoFilLink(MyoFilLink.java:366)
+	at boxOfActin.MyoFilLink.<init>(MyoFilLink.java:52)
+	at boxOfActin.MyoMotor.makeMyoFilLinks(MyoMotor.java:504)
+	at boxOfActin.MyoMotor.<init>(MyoMotor.java:120)
+	at boxOfActin.Myosin.<init>(Myosin.java:60)
+	at boxOfActin.MyosinFixed.<init>(MyosinFixed.java:19)
+	at boxOfActin.MyosinFixed.fillPlaneWithFixedMyosins(MyosinFixed.java:115)
+	at boxOfActin.MyosinFixed.setUpGlidingAssay(MyosinFixed.java:88)
+	at boxOfActin.BoxOfActin.makeInitialThings(BoxOfActin.java:2481)
+	at boxOfActin.BoxOfActin.begin(BoxOfActin.java:397)
+	at BoxOfActin.main(BoxOfActin.java:6)

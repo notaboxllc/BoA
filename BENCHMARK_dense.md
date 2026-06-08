@@ -231,3 +231,91 @@ runs K1 + K2 on both paths, appends results immediately to
 `results.md`, and returns the repo to `main` at the end (or on any
 failure path via `trap`). Logs:
 `RUN_LOGS/2026-06-07_retro_sweep/{hash}_{cpu,gpu}_K{1,2}.{log,wall}`.
+
+## Scaling study (current code)
+
+Distinct from the retrospective sweep above (which holds the *config*
+fixed and varies the *code*), this study holds the **code fixed at
+current `main` HEAD** and **varies the simulation size** along a
+geometric multiplier `N ∈ {0.25, 0.5, 1, 2, 4, 8, 16, 32}`. Holds the
+245:1 motor/filament ratio of the dense-demo base by scaling box area
+and filament count together: `boxXY = 14·√N µm`, `initialFilaments =
+400·N`, density fixed at 500 motors/µm² and ~2 filaments/µm². Same
+two-step-count difference method as the retro sweep, with K1/K2
+adapted per size to keep each single run bounded. Pure gliding, no
+biochem. Heap `-Xmx24G -XX:-UseGCOverheadLimit` (one 16× retry at
+`-Xmx28G`). Aorus, Java 21, TornadoVM 4.0.1-dev (PTX), RTX 5070
+(12 GB), 31 GB host RAM.
+
+Cap raises committed with this study (current code only):
+`Myosin.theMyosins[]` / `MyoMotor.theMotors[]` / `MyoFilLink.maxLinks`
+/ `MyoMotor.soa*[]` (10 arrays) **500K → 8M**, `Thing.theThings[]`
+**2M → 32M**.
+
+| size | N | motors M | filaments F | CPU ms/step | GPU ms/step | GPU÷CPU | K1 → K2 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| 0.25×    | 0.25 |  24 500   |   100 |   40.58 |  34.27 | 0.84× |  500 → 2000 |
+| 0.5×     | 0.5  |  48 995   |   200 |   71.52 |  53.43 | 0.75× |  500 → 2000 |
+| 1×       | 1.0  |  98 000   |   400 |  132.03 |  89.71 | 0.68× |  500 → 2000 |
+| 2×       | 2.0  | 196 000   |   800 |  254.89 | 168.73 | 0.66× |  500 → 2000 |
+| 4×       | 4.0  | 392 000   |  1600 |  505.04 | 343.67 | 0.68× |  400 → 1600 |
+| 8×       | 8.0  | 784 000   |  3200 | 1013.83 | **GPU ceiling** | — |  300 → 1200 |
+| 16×      | 16.0 | 1 568 000 |  6400 | **CPU heap ceiling** | — | — | 200 → 700 |
+
+**Ceilings (the headline result).**
+
+- **GPU practical ceiling at 8×.** Last clean GPU row at 4× (343.67 ms/step,
+  ratio 0.68× vs CPU 505.04). At 8× the bind+move kernels execute, but
+  the per-step pose-delta dirty count overruns `POSE_DELTA_CAP=4096`
+  (the slot-renumber churn from `theFilSegments` swap-compaction across
+  3200 filaments creates more dirty entries per step than the cap allows).
+  Plan rebuilds fire every step, host memory grows monotonically, the
+  process is SIGKILL'd at ~759 s. **VRAM itself is not exhausted** —
+  `nvidia-smi` reports 216 MB used / 12 227 MB total when the run dies;
+  the kill is on the host. This is a structural ceiling of the current
+  engine (poseDelta scatter sizing), not the hardware. The first
+  follow-on would be growing `POSE_DELTA_CAP` and the scatter kernel's
+  per-step thread budget, or batching slot-renumber deltas across steps.
+
+- **CPU practical ceiling at 16×.** Last clean CPU row at 8× (1013.83
+  ms/step ≈ 1 s/step — already at the wall-time edge for any multi-second
+  biological window). At 16× the JVM fails to even initialize at any
+  heap the 31 GB host can safely commit: `java.lang.OutOfMemoryError:
+  Java heap space` at `Mesh.<init>` for the 281×281×4 bin grid +
+  Thing/Myosin object graph, persistent at `-Xmx28G`.
+
+**Curve.**
+
+- CPU per-step is **near-linear** in N over the whole working range:
+  132 → 254 → 505 → 1014 ms/step from 1× to 8× is factor 7.68× over
+  8× the work (slight sub-linear due to fixed per-step overhead).
+- GPU per-step is **near-linear** too over its working range:
+  90 → 169 → 344 ms/step from 1× to 4× is factor 3.83× over 4× the work.
+- **Ratio settles around 0.66–0.68×** from 1× through 4× — GPU is
+  ~33 % faster than CPU at any sustainable scale, with the absolute gap
+  widening with size (1× gap 42 ms, 2× gap 86 ms, 4× gap 161 ms).
+  Below 1× the ratio loosens (0.75× at 0.5×, 0.84× at 0.25×) — GPU
+  dispatch overhead amortizes less well at small M.
+- **The GPU advantage is widest at 4×** in absolute ms/step (CPU 505,
+  GPU 344). Beyond 4× the residency engine structural limit (`POSE_DELTA_CAP`)
+  bites before the hardware does — meaning the next ~2× of GPU headroom
+  is gated by engine work, not silicon.
+
+**Cross-validation.** The 1× row (132.03 / 89.71 ms/step) reproduces
+the 2026-06-07 retro sweep's `498bb7c` (post-residency) row
+(129.84 / 88.87) within the seed-1 noise band — same method, same
+config, same code → the new harness is consistent with the existing
+one.
+
+### Reproduction
+
+```
+bash RUN_LOGS/2026-06-08_scaling_study/run_scaling.sh
+```
+
+The harness writes each row to `results.md` immediately after both K1 and
+K2 land (crash-safe), and overwrites `.last_run_status` per run with a
+size-i-of-N progress line. To resume only a subset of sizes, edit the
+`SIZES=( … )` array; existing rows in `results.md` are preserved (the
+init step uses `[ ! -s $RESULTS ]`). Per-size files:
+`RUN_LOGS/2026-06-08_scaling_study/{size}_{cpu,gpu}_K{1,2}.{pf,log,wall}`.

@@ -1,7 +1,7 @@
 package boxOfActin;
 
 public class Myosin {
-	static Myosin [] theMyosins = new Myosin [500000];
+	static Myosin [] theMyosins = new Myosin [8000000];
 	static int myoCt = 0;
 	int myMyoNumber = 0;
 	static double uncockedLever_MotorAngle = 0; // degrees
