@@ -206,8 +206,12 @@ Logs under `RUN_LOGS/2026-06-08_scaling_study/`; full writeup in BENCHMARK_dense
 | 1× | 98,000 | 400 | 132.03 | 89.71 | 0.68× |
 | 2× | 196,000 | 800 | 254.89 | 168.73 | 0.66× |
 | 4× | 392,000 | 1600 | 505.04 | 343.67 | 0.68× |
-| 8× | 784,000 | 3200 | 1013.83 | *engine ceiling* | — |
+| 8× | 784,000 | 3200 | 1013.83 | 659.12¹ | 0.65×¹ |
 | 16× | 1,568,000 | 6400 | *host-heap ceiling* | — | — |
+
+¹ 8× GPU was originally the **engine-side ceiling** at the scaling-study commit
+(`0cbfa20`) — see the *POSE_DELTA_CAP* capstone entry above. The value here is
+the post-fix re-measurement (K1=300 / K2=1200) committed under `a812c0c`.
 
 Findings: both paths scale **near-linearly** (CPU exponent ≈0.98, GPU ≈0.97). The GPU advantage does
 **not** widen with scale — it amortizes fixed GPU overhead from 0.84× at 0.25× to ~0.67× by 1×, then
@@ -277,7 +281,7 @@ size   N    motors M  fil F   CPU ms/step   GPU ms/step   GPU÷CPU
 1×     1.0     98 000   400       132.03         89.71      0.68×
 2×     2.0    196 000   800       254.89        168.73      0.66×
 4×     4.0    392 000  1600       505.04        343.67      0.68×
-8×     8.0    784 000  3200      1013.83      [GPU ceiling]   —
+8×     8.0    784 000  3200      1013.83        659.12¹       0.65×¹
 16×   16.0  1 568 000  6400  [CPU heap ceiling]    —          —
 ```
 
