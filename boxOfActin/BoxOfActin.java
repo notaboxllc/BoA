@@ -1693,6 +1693,20 @@ public class BoxOfActin {
 			double pdAvg = (double) pdSum / (double) pdCalls;
 			System.out.printf("[STATS] gpuMoveThing poseDelta avg=%.2f max=%d sum=%d fresh=%d overflow=%d cap=%d%n",
 				pdAvg, pdMax, pdSum, pdFresh, pdOver, GPUMoveThing.POSE_DELTA_CAP);
+			// Phase-A churn stats: true (pre-clamp) per-step dirty demand, split
+			// by source (slot-change vs explicit pendingDirty marks). slotChangeMax
+			// is the headline number for the cap-sizing decision.
+			long tdc        = GPUMoveThing.getTrueDirtyCalls();
+			long tdscSum    = GPUMoveThing.getTrueDirtySlotChangeSum();
+			long tdscMax    = GPUMoveThing.getTrueDirtySlotChangeMax();
+			long tdpSum     = GPUMoveThing.getTrueDirtyPendingSum();
+			long tdpMax     = GPUMoveThing.getTrueDirtyPendingMax();
+			long tdTotalMax = GPUMoveThing.getTrueDirtyTotalUpperMax();
+			double tdscAvg  = tdc > 0 ? (double) tdscSum / (double) tdc : 0.0;
+			double tdpAvg   = tdc > 0 ? (double) tdpSum  / (double) tdc : 0.0;
+			System.out.printf("[STATS] gpuMoveThing trueDirty calls=%d slotChange avg=%.2f max=%d pending avg=%.2f max=%d totalUpperMax=%d slotCount=%d slotCap=%d%n",
+				tdc, tdscAvg, tdscMax, tdpAvg, tdpMax, tdTotalMax,
+				GPUMoveThing.getSlotCount(), GPUMoveThing.getSlotCap());
 			GPUMoveThing.reportDerivedCheckpointSummary();
 		}
 		GPUMoveThing.reportMoveAB();

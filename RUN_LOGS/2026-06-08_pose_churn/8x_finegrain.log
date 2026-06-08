@@ -1,0 +1,77 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_pose_churn/_finegrain_8x.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 3.0E-4
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 39.598
+     Parameter assigned: boxYDim set to 39.598
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 3200
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 199; xBinWidth = 0.2 µm
+nYBins = 199; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 199 x 199 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=4710404 myoCap=1568000 moveBlock=64 jointBlock=64 runSeed=990502477 nWorkers=16
+[POSE_CHURN] step=1 slotCount=2358402 slotCap=4710404 trueSlotChange=3201 truePendingDirty=3201 trueTotalUpper=6402 cap=65536
+[POSE_CHURN] step=2 slotCount=2361603 slotCap=4710404 trueSlotChange=3201 truePendingDirty=3201 trueTotalUpper=6402 cap=65536
+[POSE_CHURN] step=3 slotCount=2364804 slotCap=4710404 trueSlotChange=3201 truePendingDirty=3201 trueTotalUpper=6402 cap=65536
+[POSE_CHURN] step=4 slotCount=2368005 slotCap=4710404 trueSlotChange=3201 truePendingDirty=3201 trueTotalUpper=6402 cap=65536
+[POSE_CHURN] step=5 slotCount=2371179 slotCap=4710404 trueSlotChange=3174 truePendingDirty=3174 trueTotalUpper=6348 cap=65536
+[POSE_CHURN] step=6 slotCount=2374213 slotCap=4710404 trueSlotChange=3034 truePendingDirty=3034 trueTotalUpper=6068 cap=65536
+[POSE_CHURN] step=7 slotCount=2377078 slotCap=4710404 trueSlotChange=2865 truePendingDirty=2865 trueTotalUpper=5730 cap=65536
+[POSE_CHURN] step=8 slotCount=2379728 slotCap=4710404 trueSlotChange=2650 truePendingDirty=2650 trueTotalUpper=5300 cap=65536
+[POSE_CHURN] step=9 slotCount=2382126 slotCap=4710404 trueSlotChange=2398 truePendingDirty=2398 trueTotalUpper=4796 cap=65536
+[POSE_CHURN] step=10 slotCount=2384295 slotCap=4710404 trueSlotChange=2169 truePendingDirty=2169 trueTotalUpper=4338 cap=65536
+[POSE_CHURN] step=11 slotCount=2386191 slotCap=4710404 trueSlotChange=1896 truePendingDirty=1896 trueTotalUpper=3792 cap=65536
+[POSE_CHURN] step=12 slotCount=2387761 slotCap=4710404 trueSlotChange=1570 truePendingDirty=1570 trueTotalUpper=3140 cap=65536
+[POSE_CHURN] step=13 slotCount=2388998 slotCap=4710404 trueSlotChange=1237 truePendingDirty=1237 trueTotalUpper=2474 cap=65536
+[POSE_CHURN] step=14 slotCount=2389888 slotCap=4710404 trueSlotChange=890 truePendingDirty=890 trueTotalUpper=1780 cap=65536
+[POSE_CHURN] step=15 slotCount=2390393 slotCap=4710404 trueSlotChange=505 truePendingDirty=505 trueTotalUpper=1010 cap=65536
+[POSE_CHURN] step=16 slotCount=2390545 slotCap=4710404 trueSlotChange=152 truePendingDirty=152 trueTotalUpper=304 cap=65536
+[POSE_CHURN] step=17 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=18 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=19 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=20 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=21 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=22 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=23 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=24 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=25 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=26 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=27 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=28 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=29 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=30 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=31 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=32 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=33 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=34 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=35 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=36 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536
+[POSE_CHURN] step=37 slotCount=2390545 slotCap=4710404 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=65536

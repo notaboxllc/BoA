@@ -1,0 +1,89 @@
+[08:31:58] Phase C starting
+[08:31:58] === 1x ===
+[08:31:58]   running 1x K=500 (budget 900s)...
+[08:33:23]     rc=0 wall=84.60s
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=400, peakModel=802, safety=4x, floor=8192)
+[STATS] bindEvents=1900
+[STATS] gpuMoveThing demandSyncPose=0.018s(calls=1) demandSyncDerived=0.023s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=8502.00 max=802 sum=8502 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=600 slotChange avg=7.09 max=401 pending avg=7.09 max=401 totalUpperMax=802 slotCount=298652 slotCap=588804
+[STATS] glidingVelocity=0.0000
+[08:33:23]   running 1x K=2000 (budget 900s)...
+[progress 08:36:58] elapsed=300s — [08:33:23] phaseC 1x K=2000 runTime=0.020000 budget=900s
+[08:37:36]     rc=0 wall=253.40s
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=400, peakModel=802, safety=4x, floor=8192)
+[STATS] bindEvents=6254
+[STATS] gpuMoveThing demandSyncPose=0.026s(calls=1) demandSyncDerived=0.025s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=8722.00 max=802 sum=8722 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=2100 slotChange avg=2.08 max=401 pending avg=2.08 max=401 totalUpperMax=802 slotCount=298762 slotCap=588804
+[STATS] glidingVelocity=0.0000
+[08:37:36]   ms/step = 112.53  (baseline 89.71, Δ +22.82)
+[08:37:36] === 4x ===
+[08:37:36]   running 4x K=400 (budget 2400s)...
+[08:51:54] Phase C starting
+[08:51:54] === 1x ===
+[08:51:54]   running 1x K=500 (budget 900s)...
+[08:53:21]     rc=0 wall=87.72s
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=400, peakModel=802, safety=4x, floor=8192)
+[STATS] bindEvents=1912
+[STATS] gpuMoveThing demandSyncPose=0.021s(calls=1) demandSyncDerived=0.024s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=8738.00 max=802 sum=8738 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=600 slotChange avg=7.28 max=401 pending avg=7.28 max=401 totalUpperMax=802 slotCount=298770 slotCap=588804
+[STATS] glidingVelocity=0.0000
+[08:53:21]   running 1x K=2000 (budget 900s)...
+[progress 08:56:54] elapsed=300s — [08:53:21] phaseC 1x K=2000 runTime=0.020000 budget=900s
+[08:57:34]     rc=0 wall=252.22s
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=400, peakModel=802, safety=4x, floor=8192)
+[STATS] bindEvents=5834
+[STATS] gpuMoveThing demandSyncPose=0.025s(calls=1) demandSyncDerived=0.025s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=8812.00 max=802 sum=8812 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=2100 slotChange avg=2.10 max=401 pending avg=2.10 max=401 totalUpperMax=802 slotCount=298807 slotCap=588804
+[STATS] glidingVelocity=0.0000
+[08:57:34]   ms/step = 109.67  (baseline 89.71, Δ +19.96)
+[08:57:34] === 4x ===
+[08:57:34]   running 4x K=400 (budget 2400s)...
+[progress 09:01:54] elapsed=600s — [08:57:34] phaseC 4x K=400 runTime=0.004000 budget=2400s
+[09:03:43]     rc=0 wall=369.47s
+[POSE_CHURN] sized POSE_DELTA_CAP=12808 (initialFilaments=1600, peakModel=3202, safety=4x, floor=8192)
+[STATS] bindEvents=2928
+[STATS] gpuMoveThing demandSyncPose=0.606s(calls=1) demandSyncDerived=0.066s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=35040.00 max=3202 sum=35040 fresh=1 overflow=0 cap=12808
+[STATS] gpuMoveThing trueDirty calls=500 slotChange avg=35.04 max=1601 pending avg=35.04 max=1601 totalUpperMax=3202 slotCount=1195121 slotCap=2355204
+[STATS] glidingVelocity=0.0000
+[09:03:43]   running 4x K=1600 (budget 2400s)...
+[progress 09:06:54] elapsed=900s — [09:03:43] phaseC 4x K=1600 runTime=0.016000 budget=2400s
+[progress 09:11:54] elapsed=1200s — [09:03:43] phaseC 4x K=1600 runTime=0.016000 budget=2400s
+[progress 09:16:54] elapsed=1500s — [09:03:43] phaseC 4x K=1600 runTime=0.016000 budget=2400s
+[09:17:10]     rc=0 wall=806.93s
+[POSE_CHURN] sized POSE_DELTA_CAP=12808 (initialFilaments=1600, peakModel=3202, safety=4x, floor=8192)
+[STATS] bindEvents=7723
+[STATS] gpuMoveThing demandSyncPose=0.508s(calls=1) demandSyncDerived=0.066s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=35380.00 max=3202 sum=35380 fresh=1 overflow=0 cap=12808
+[STATS] gpuMoveThing trueDirty calls=1700 slotChange avg=10.41 max=1601 pending avg=10.41 max=1601 totalUpperMax=3202 slotCount=1195291 slotCap=2355204
+[STATS] glidingVelocity=0.0000
+[09:17:10]   ms/step = 364.55  (baseline 343.67, Δ +20.88)
+[09:17:10] === 8x ===
+[09:17:10]   running 8x K=300 (budget 3000s)...
+[09:17:24]     rc=137 wall=13.63s
+[POSE_CHURN] sized POSE_DELTA_CAP=25608 (initialFilaments=3200, peakModel=6402, safety=4x, floor=8192)
+[09:17:24]   K1 failed (rc=137) — skipping K2 for 8x
+[09:17:24] === Phase C done (elapsed 1530s) ===
+[09:18:33] Phase C starting
+[09:18:33] === 8x ===
+[09:18:33]   running 8x K=300 (budget 3000s)...
+[progress 09:23:33] elapsed=300s — [09:18:33] phaseC 8x K=300 runTime=0.003000 budget=3000s
+[progress 09:28:33] elapsed=600s — [09:18:33] phaseC 8x K=300 runTime=0.003000 budget=3000s
+[progress 09:33:33] elapsed=900s — [09:18:33] phaseC 8x K=300 runTime=0.003000 budget=3000s
+[09:36:30]     rc=0 wall=1076.71s
+[POSE_CHURN] sized POSE_DELTA_CAP=25608 (initialFilaments=3200, peakModel=6402, safety=4x, floor=8192)
+[STATS] bindEvents=3300
+[STATS] gpuMoveThing demandSyncPose=0.586s(calls=1) demandSyncDerived=0.118s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=71362.00 max=6402 sum=71362 fresh=1 overflow=0 cap=25608
+[STATS] gpuMoveThing trueDirty calls=399 slotChange avg=89.43 max=3201 pending avg=89.43 max=3201 totalUpperMax=6402 slotCount=2390882 slotCap=4710404
+[STATS] glidingVelocity=0.0000
+[09:36:30]   running 8x K=1200 (budget 3000s)...
+[progress 09:38:33] elapsed=1200s — [09:36:30] phaseC 8x K=1200 runTime=0.012000 budget=3000s
+[09:42:26]     rc=143 wall=s
+[POSE_CHURN] sized POSE_DELTA_CAP=25608 (initialFilaments=3200, peakModel=6402, safety=4x, floor=8192)
+[09:42:26]   K2 failed (rc=143)
+[09:42:26] === Phase C done (elapsed 1433s) ===

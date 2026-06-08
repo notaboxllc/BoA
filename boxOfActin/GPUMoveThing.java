@@ -443,18 +443,80 @@ public class GPUMoveThing {
     // the chained graph (before joints/chain/boundary/move). Empty-delta
     // (count=0) steps are common and effectively free.
     //
-    // Cap is intentionally generous (4096 entries ≈ 160 KB of EVERY_EXECUTION
-    // upload per step) so a full biochem turn cannot overflow at any realistic
-    // churn. Overflow triggers a plan rebuild fall-back (closePlan + a fresh
-    // FIRST_EXECUTION upload picks up everything) — logged so the cap can be
-    // grown if the rebuild rate ever turns up in a profile.
-    public static final int POSE_DELTA_CAP = 4096;
+    // Cap is intentionally generous so a full biochem turn cannot overflow at
+    // any realistic churn. Overflow triggers a plan rebuild fall-back (closePlan
+    // + a fresh FIRST_EXECUTION upload picks up everything) — logged so the
+    // cap can be grown if the rebuild rate ever turns up in a profile.
+    //
+    // 2026-06-08: cap is now **startup-sized from the config** (see
+    // sizePoseDeltaCapFromConfig() below) instead of the hardcoded 4096. The
+    // 4096 value was tuned for the 1×–4× dense smoke range; at 8× pure gliding
+    // (3200 filaments) the startup transient peaks at ~6400 dirty entries
+    // (≈ 2 × nFil) which overran the old cap and triggered a per-step plan
+    // rebuild — each rebuild re-allocates ~1 GB of resident FloatArrays,
+    // orphaning the old identities, and host memory walks until SIGKILL at
+    // ~750 s. The new sizing covers the measured peak with 4× headroom and
+    // the buffers are allocated once with persistent identity. Env var
+    // BOA_POSE_DELTA_CAP override remains for one-off measurement work and
+    // takes precedence over the config-derived sizing.
+    public static int POSE_DELTA_CAP = 4096;
+    private static boolean poseDeltaCapInitialized = false;
+    private static final int POSE_DELTA_CAP_FLOOR = 8192;
+    static {
+        String capOverride = System.getenv("BOA_POSE_DELTA_CAP");
+        if (capOverride != null && !capOverride.isEmpty()) {
+            try {
+                int v = Integer.parseInt(capOverride);
+                if (v > 0) { POSE_DELTA_CAP = v; poseDeltaCapInitialized = true; }
+            } catch (NumberFormatException nfe) {
+                System.err.printf("[POSE_CHURN] bad BOA_POSE_DELTA_CAP=%s — ignoring%n", capOverride);
+            }
+        }
+    }
+    /** Size POSE_DELTA_CAP from the live parameter set, called once before the
+     *  first plan build (so kernel JIT and buffer allocations see the chosen
+     *  value). The peak per-step dirty demand model is
+     *      peak ≈ 2 × (initialFilaments + 1)
+     *  (Phase-A measurement at 1×/2×/4× — slot-change pass and pending-mark
+     *  pass each contribute up to nFil + 1 entries on a handful of startup
+     *  transient steps, with the two sets disjoint so the post-dedup packed
+     *  count is the sum). The cap applies a 4× safety factor over the peak
+     *  model and is floored at 8192 for small sims. Env override wins. */
+    private static void sizePoseDeltaCapFromConfig() {
+        if (poseDeltaCapInitialized) return;
+        poseDeltaCapInitialized = true;
+        int nFil = Math.max(1, Env.initialFilaments.getIntValue());
+        int peakModel = 2 * (nFil + 1);
+        int safetyFactor = 4;
+        int sized = Math.max(POSE_DELTA_CAP_FLOOR, safetyFactor * peakModel);
+        POSE_DELTA_CAP = sized;
+        System.err.printf("[POSE_CHURN] sized POSE_DELTA_CAP=%d (initialFilaments=%d, peakModel=%d, safety=%dx, floor=%d)%n",
+            POSE_DELTA_CAP, nFil, peakModel, safetyFactor, POSE_DELTA_CAP_FLOOR);
+    }
+    // Per-step churn log cadence. -1 = disabled; n>0 = every n steps print
+    // [POSE_CHURN] with true (pre-clamp) dirty-slot demand split into
+    // slot-change and pendingDirty sources, plus slotCount/slotCap.
+    private static int churnLogInterval = -1;
+    static {
+        String iv = System.getenv("BOA_POSE_CHURN_LOG");
+        if (iv != null && !iv.isEmpty()) {
+            try { churnLogInterval = Integer.parseInt(iv); } catch (NumberFormatException nfe) {}
+        }
+    }
     private static FloatArray poseDeltaCoord;   // POSE_DELTA_CAP * 3
     private static FloatArray poseDeltaUVec;    // POSE_DELTA_CAP * 3
     private static FloatArray poseDeltaYVec;    // POSE_DELTA_CAP * 3
     private static FloatArray poseDeltaLength;  // POSE_DELTA_CAP
     private static IntArray   poseDeltaIdx;     // POSE_DELTA_CAP -- destination slot per entry
     private static IntArray   poseDeltaCount;   // 1 -- active count read by the scatter kernel
+    // Phase-A churn instrumentation: true (uncapped) per-step dirty demand,
+    // accumulated each call to buildDeltaSet for end-of-run reporting.
+    private static long trueDirtySlotChangeSum = 0L;
+    private static long trueDirtySlotChangeMax = 0L;
+    private static long trueDirtyPendingSum = 0L;
+    private static long trueDirtyPendingMax = 0L;
+    private static long trueDirtyTotalUpperMax = 0L;
+    private static long trueDirtyCalls = 0L;
 
     // Per-slot prev-step Thing instance id, for change detection in onStepStart.
     // -1 sentinel = "no Thing here last step". Reset on plan build/rebuild
@@ -2630,25 +2692,42 @@ public class GPUMoveThing {
     // -------------------------------------------------------------------------
     // Lazy allocation + chained plan build.
     // -------------------------------------------------------------------------
+    private static FloatArray ensureFloatArray(FloatArray existing, int size) {
+        if (existing != null && existing.getSize() == size) return existing;
+        return new FloatArray(size);
+    }
+    private static IntArray ensureIntArray(IntArray existing, int size) {
+        if (existing != null && existing.getSize() == size) return existing;
+        return new IntArray(size);
+    }
+
     private static void allocateAndBuildPlan(int newSlotCap, int newMyoCap) {
+        // Phase-A startup cap sizing: first call only, BEFORE any FloatArray
+        // allocation so the delta buffers below see the chosen value.
+        sizePoseDeltaCapFromConfig();
         slotCap = newSlotCap;
         myoCap  = Math.max(1, newMyoCap);
 
-        coord          = new FloatArray(slotCap * 3);
-        uVec           = new FloatArray(slotCap * 3);
-        yVec           = new FloatArray(slotCap * 3);
-        cpuForceSum    = new FloatArray(slotCap * 3);
-        cpuTorqueSum   = new FloatArray(slotCap * 3);
-        jointForceSum  = new FloatArray(slotCap * 3);  // host zeroed each step (sparse joint writes on device)
-        jointTorqueSum = new FloatArray(slotCap * 3);
-        bTransGam      = new FloatArray(slotCap * 3);
-        bRotGam        = new FloatArray(slotCap * 3);
-        brownianScales = new FloatArray(slotCap * 2);
-        velMask        = new FloatArray(slotCap * 3);
+        // Reuse existing FloatArray identities when sizes match — overflow
+        // fall-back re-enters allocateAndBuildPlan with the same slotCap
+        // (no capGrow), and we don't want to mint new buffer identities and
+        // orphan the old ones (the Phase 4.5 host-memory leak path). Only
+        // genuine capGrow events allocate fresh buffers, which is rare.
+        coord          = ensureFloatArray(coord,          slotCap * 3);
+        uVec           = ensureFloatArray(uVec,           slotCap * 3);
+        yVec           = ensureFloatArray(yVec,           slotCap * 3);
+        cpuForceSum    = ensureFloatArray(cpuForceSum,    slotCap * 3);
+        cpuTorqueSum   = ensureFloatArray(cpuTorqueSum,   slotCap * 3);
+        jointForceSum  = ensureFloatArray(jointForceSum,  slotCap * 3);
+        jointTorqueSum = ensureFloatArray(jointTorqueSum, slotCap * 3);
+        bTransGam      = ensureFloatArray(bTransGam,      slotCap * 3);
+        bRotGam        = ensureFloatArray(bRotGam,        slotCap * 3);
+        brownianScales = ensureFloatArray(brownianScales, slotCap * 2);
+        velMask        = ensureFloatArray(velMask,        slotCap * 3);
 
-        rodSlots       = new IntArray(myoCap);
-        leverSlots     = new IntArray(myoCap);
-        motorSlots     = new IntArray(myoCap);
+        rodSlots       = ensureIntArray(rodSlots,   myoCap);
+        leverSlots     = ensureIntArray(leverSlots, myoCap);
+        motorSlots     = ensureIntArray(motorSlots, myoCap);
 
         // Phase 4.5: slot maps for the resident-pose bind path. Sized to the
         // GPUMotorBinding plan's caps (MyoMotor.soaX.length and
@@ -2657,71 +2736,89 @@ public class GPUMoveThing {
         // merged executor's persistedObject set.
         bindMotorCap   = MyoMotor.soaX.length;
         bindSegCap     = FilSegment.soaEnd1X.length;
-        motMoveSlot    = new IntArray(bindMotorCap);
-        motRodMoveSlot = new IntArray(bindMotorCap);
-        filMoveSlot    = new IntArray(bindSegCap);
+        motMoveSlot    = ensureIntArray(motMoveSlot,    bindMotorCap);
+        motRodMoveSlot = ensureIntArray(motRodMoveSlot, bindMotorCap);
+        filMoveSlot    = ensureIntArray(filMoveSlot,    bindSegCap);
 
-        myoDrags       = new FloatArray(myoCap * 9);
-        cockedFlags    = new IntArray(myoCap);
-        anchorPts      = new FloatArray(myoCap * 3);
-        anchoredFlags  = new IntArray(myoCap);
-        jointSlotToMyoIdx = new int[myoCap];
+        myoDrags       = ensureFloatArray(myoDrags,      myoCap * 9);
+        cockedFlags    = ensureIntArray(cockedFlags,     myoCap);
+        anchorPts      = ensureFloatArray(anchorPts,     myoCap * 3);
+        anchoredFlags  = ensureIntArray(anchoredFlags,   myoCap);
+        if (jointSlotToMyoIdx == null || jointSlotToMyoIdx.length != myoCap) {
+            jointSlotToMyoIdx = new int[myoCap];
+        }
 
         // Phase 2 F3/F4: per-FilSegment chain topology + length buffers.
-        topoEnd2Slot = new IntArray(slotCap);
-        topoEnd2Side = new IntArray(slotCap);
-        topoEnd1Slot = new IntArray(slotCap);
-        topoEnd1Side = new IntArray(slotCap);
-        soaLengthArr = new FloatArray(slotCap);
+        topoEnd2Slot = ensureIntArray(topoEnd2Slot, slotCap);
+        topoEnd2Side = ensureIntArray(topoEnd2Side, slotCap);
+        topoEnd1Slot = ensureIntArray(topoEnd1Slot, slotCap);
+        topoEnd1Side = ensureIntArray(topoEnd1Side, slotCap);
+        soaLengthArr = ensureFloatArray(soaLengthArr, slotCap);
 
         // Phase 4 prep — derived-field outputs (device-only for now).
-        derivedEnd1      = new FloatArray(slotCap * 3);
-        derivedEnd2      = new FloatArray(slotCap * 3);
-        derivedZVec      = new FloatArray(slotCap * 3);
-        derivedYVecOrtho = new FloatArray(slotCap * 3);
-        derivedTransXTox = new FloatArray(slotCap * 9);
+        derivedEnd1      = ensureFloatArray(derivedEnd1,      slotCap * 3);
+        derivedEnd2      = ensureFloatArray(derivedEnd2,      slotCap * 3);
+        derivedZVec      = ensureFloatArray(derivedZVec,      slotCap * 3);
+        derivedYVecOrtho = ensureFloatArray(derivedYVecOrtho, slotCap * 3);
+        derivedTransXTox = ensureFloatArray(derivedTransXTox, slotCap * 9);
 
         // Phase 2 F1: per-slot boundary-kernel gate + box-geometry uniforms.
-        boundaryActive = new IntArray(slotCap);
-        boundaryParams = new FloatArray(6);
+        boundaryActive = ensureIntArray(boundaryActive, slotCap);
+        boundaryParams = ensureFloatArray(boundaryParams, 6);
         // tipC writeback (2026-06-03): per-segment per-endpoint clearance
         // read back from the device after plan.execute(). Two entries per
         // slot (end1, end2). Sentinel-initialised to 1e6 — the kernel writes
         // the sentinel at the top of every active thread BEFORE the
         // boundaryActive early-return, so inactive slots and the
         // DIAG_CPU_F1=true case are guaranteed safe no-ops in the min-combine.
-        boundaryTipC = new FloatArray(slotCap * 2);
+        boundaryTipC = ensureFloatArray(boundaryTipC, slotCap * 2);
         for (int i = 0; i < slotCap * 2; i++) { boundaryTipC.set(i, 1.0e6f); }
 
         // Phase 2 F8/F9/F10 — motor cross-bridge force port.
-        boundSegSlot     = new IntArray(myoCap);
-        posOnSegArr      = new FloatArray(myoCap);
-        segMotorOffsets  = new IntArray(slotCap + 1);
-        segMotorMyo      = new IntArray(Math.max(1, myoCap));
-        motorWriteback   = new FloatArray(myoCap * 2);
-        motorForceParams = new FloatArray(6);
+        boundSegSlot     = ensureIntArray(boundSegSlot,    myoCap);
+        posOnSegArr      = ensureFloatArray(posOnSegArr,   myoCap);
+        segMotorOffsets  = ensureIntArray(segMotorOffsets, slotCap + 1);
+        segMotorMyo      = ensureIntArray(segMotorMyo,     Math.max(1, myoCap));
+        motorWriteback   = ensureFloatArray(motorWriteback, myoCap * 2);
+        motorForceParams = ensureFloatArray(motorForceParams, 6);
 
-        params      = new FloatArray(2);
-        jointParams = new FloatArray(13);
-        chainParams = new FloatArray(7);
-        counts      = new IntArray(4);
+        params      = ensureFloatArray(params, 2);
+        jointParams = ensureFloatArray(jointParams, 13);
+        chainParams = ensureFloatArray(chainParams, 7);
+        counts      = ensureIntArray(counts, 4);
 
-        gpuThingIndices       = new int[slotCap];
-        brownianRule          = new int[slotCap];
-        cpuFallback           = new Thing[Math.max(64, slotCap)];
+        if (gpuThingIndices == null || gpuThingIndices.length != slotCap) {
+            gpuThingIndices = new int[slotCap];
+        }
+        if (brownianRule == null || brownianRule.length != slotCap) {
+            brownianRule = new int[slotCap];
+        }
+        if (cpuFallback == null || cpuFallback.length != Math.max(64, slotCap)) {
+            cpuFallback = new Thing[Math.max(64, slotCap)];
+        }
 
         // Step 2 — delta-scatter buffers + slot-change tracker. freshPlan
         // tells buildDeltaSet() that the upcoming FIRST_EXECUTION upload
         // covers the whole resident pose; no delta entries needed this step.
-        poseDeltaCoord  = new FloatArray(POSE_DELTA_CAP * 3);
-        poseDeltaUVec   = new FloatArray(POSE_DELTA_CAP * 3);
-        poseDeltaYVec   = new FloatArray(POSE_DELTA_CAP * 3);
-        poseDeltaLength = new FloatArray(POSE_DELTA_CAP);
-        poseDeltaIdx    = new IntArray(POSE_DELTA_CAP);
-        poseDeltaCount  = new IntArray(1);
-        prevSlotInstanceId = new int[slotCap];
-        slotAlreadyDeltaed = new boolean[slotCap];
-        java.util.Arrays.fill(prevSlotInstanceId, -1);
+        // Delta-buffer identities are PERSISTENT — sized once from
+        // sizePoseDeltaCapFromConfig() above, never resized on plan rebuild.
+        // The kernel JIT and TornadoVM buffer pool see one identity across
+        // the run, no orphans even in the overflow fall-back path.
+        poseDeltaCoord  = ensureFloatArray(poseDeltaCoord,  POSE_DELTA_CAP * 3);
+        poseDeltaUVec   = ensureFloatArray(poseDeltaUVec,   POSE_DELTA_CAP * 3);
+        poseDeltaYVec   = ensureFloatArray(poseDeltaYVec,   POSE_DELTA_CAP * 3);
+        poseDeltaLength = ensureFloatArray(poseDeltaLength, POSE_DELTA_CAP);
+        poseDeltaIdx    = ensureIntArray(poseDeltaIdx,      POSE_DELTA_CAP);
+        poseDeltaCount  = ensureIntArray(poseDeltaCount,    1);
+        // prevSlotInstanceId / slotAlreadyDeltaed: rebuild grows in step with
+        // slotCap, but identity is preserved when slotCap is unchanged.
+        if (prevSlotInstanceId == null || prevSlotInstanceId.length < slotCap) {
+            prevSlotInstanceId = new int[slotCap];
+        }
+        if (slotAlreadyDeltaed == null || slotAlreadyDeltaed.length < slotCap) {
+            slotAlreadyDeltaed = new boolean[slotCap];
+        }
+        java.util.Arrays.fill(prevSlotInstanceId, 0, slotCap, -1);
         pendingDirty.clear();
         freshPlan = true;
 
@@ -4004,49 +4101,95 @@ public class GPUMoveThing {
 
         java.util.Arrays.fill(slotAlreadyDeltaed, 0, slotCap, false);
 
+        // Single-pass slot-change scan: walk slots once, packing dirty entries
+        // up to POSE_DELTA_CAP and counting the TRUE (uncapped) dirty demand
+        // alongside. The previous instrumentation did a separate O(slotCount)
+        // pass for the true count — at 1× / slotCount ≈ 300K that doubled the
+        // walk cost and showed up as a +25 % regression in ms/step. Merged
+        // here so the measurement is essentially free.
         int count = 0;
-        // 1. Slot-change detection — catches creation + removeThing-swap.
+        int trueSlotChangeDirty = 0;
+        boolean overflowed = false;
         for (int s = 0; s < slotCount; s++) {
             Thing t = Thing.theThings[gpuThingIndices[s]];
             int curId = (t == null) ? -1 : t.thingInstanceId;
             if (prevSlotInstanceId[s] != curId) {
-                if (count >= POSE_DELTA_CAP) { count = -1; break; }
-                if (t != null) packDelta(count, s, t);
-                else clearDeltaSlot(count, s);
-                count++;
-                slotAlreadyDeltaed[s] = true;
+                trueSlotChangeDirty++;
+                if (count < POSE_DELTA_CAP) {
+                    if (t != null) packDelta(count, s, t);
+                    else clearDeltaSlot(count, s);
+                    count++;
+                    slotAlreadyDeltaed[s] = true;
+                } else {
+                    overflowed = true;
+                }
             }
             prevSlotInstanceId[s] = curId;
         }
-        if (count >= 0) {
-            for (int s = slotCount; s < slotCap; s++) {
-                prevSlotInstanceId[s] = -1;
-            }
-            // 2. Explicit biochem marks — catches same-slot in-place mutations.
-            if (!pendingDirty.isEmpty()) {
-                for (Thing t : pendingDirty) {
-                    if (t == null || t.removeMe) continue;
-                    int idx = t.myThingNumber;
-                    if (idx < 0 || idx >= thingNumberToMoveSlot.length) continue;
-                    int slot = thingNumberToMoveSlot[idx];
-                    if (slot < 0 || slot >= slotCount) continue;
-                    if (slotAlreadyDeltaed[slot]) continue;
-                    if (count >= POSE_DELTA_CAP) { count = -1; break; }
-                    packDelta(count, slot, t);
-                    count++;
-                    slotAlreadyDeltaed[slot] = true;
-                }
+        for (int s = slotCount; s < slotCap; s++) {
+            prevSlotInstanceId[s] = -1;
+        }
+        int truePendingDirty = pendingDirty.size();
+        // 2. Explicit biochem marks — catches same-slot in-place mutations.
+        if (truePendingDirty > 0) {
+            for (Thing t : pendingDirty) {
+                if (t == null || t.removeMe) continue;
+                int idx = t.myThingNumber;
+                if (idx < 0 || idx >= thingNumberToMoveSlot.length) continue;
+                int slot = thingNumberToMoveSlot[idx];
+                if (slot < 0 || slot >= slotCount) continue;
+                if (slotAlreadyDeltaed[slot]) continue;
+                if (count >= POSE_DELTA_CAP) { overflowed = true; break; }
+                packDelta(count, slot, t);
+                count++;
+                slotAlreadyDeltaed[slot] = true;
             }
         }
         pendingDirty.clear();
 
+        // Phase-A churn telemetry: record uncapped demand for end-of-run [STATS].
+        int trueTotalUpper = trueSlotChangeDirty + truePendingDirty;
+        trueDirtySlotChangeSum += trueSlotChangeDirty;
+        if (trueSlotChangeDirty > trueDirtySlotChangeMax) trueDirtySlotChangeMax = trueSlotChangeDirty;
+        trueDirtyPendingSum    += truePendingDirty;
+        if (truePendingDirty   > trueDirtyPendingMax)    trueDirtyPendingMax    = truePendingDirty;
+        if (trueTotalUpper     > trueDirtyTotalUpperMax) trueDirtyTotalUpperMax = trueTotalUpper;
+        trueDirtyCalls++;
+        if (churnLogInterval > 0 && (stepCounter % churnLogInterval) == 0) {
+            System.err.printf("[POSE_CHURN] step=%d slotCount=%d slotCap=%d trueSlotChange=%d truePendingDirty=%d trueTotalUpper=%d packCount=%d cap=%d%n",
+                stepCounter, slotCount, slotCap, trueSlotChangeDirty, truePendingDirty, trueTotalUpper, count, POSE_DELTA_CAP);
+        }
+        if (overflowed) count = -1;
+
         if (count < 0) {
-            // Overflow: fall back to a fresh plan, which FIRST_EXECUTION-
-            // uploads the whole resident pose next step.
+            // Overflow: with startup-sized cap this path is essentially
+            // unreachable. If it does fire (an unforeseen churn pattern
+            // beyond the 4× safety headroom over the measured peak model),
+            // fall back to a non-leaky full-pose re-upload via plan rebuild
+            // — but the persistent FloatArray identities installed in
+            // allocateAndBuildPlan() mean the close+reopen reuses the same
+            // buffers; no orphans are minted, no host-memory walk.
+            //
+            // Before rebuilding, demand-sync the device pose to host so the
+            // new plan's FIRST_EXECUTION upload reflects the latest
+            // integrated state (not a stale snapshot from the last
+            // output-cadence demand-sync). In Step-4 gating
+            // (noMonomersSimd.isActive()) the per-step pull is off, so host
+            // coord/uVec/yVec can lag the device by many steps without a
+            // refresh here.
             poseDeltaOverflowCount++;
-            System.err.printf("[Step2] poseDelta overflow (>%d entries) — rebuilding plan%n", POSE_DELTA_CAP);
+            System.err.printf("[POSE_CHURN] OVERFLOW: per-step dirty demand (slotChange=%d pending=%d) exceeded cap=%d at step=%d slotCount=%d — falling back to non-leaky full-pose re-upload (persistent buffers)%n",
+                trueSlotChangeDirty, truePendingDirty, POSE_DELTA_CAP, stepCounter, slotCount);
+            if (lastExecResult != null) {
+                try {
+                    lastExecResult.transferToHost(coord, uVec, yVec);
+                } catch (Exception e) {
+                    System.err.printf("[POSE_CHURN] OVERFLOW: demand-sync before rebuild threw %s — proceeding with possibly-stale host pose%n", e);
+                }
+            }
             closePlan();
-            // Re-enter onStepStart immediately to rebuild + reset prev/freshPlan.
+            // Re-enter onStepStart: persistent buffer identities mean
+            // allocateAndBuildPlan reuses the existing FloatArrays.
             onStepStart();
             return;
         }
@@ -5128,6 +5271,14 @@ public class GPUMoveThing {
     public static long getPoseDeltaCountMax()       { return poseDeltaCountMax;       }
     public static long getPoseDeltaOverflowCount()  { return poseDeltaOverflowCount;  }
     public static long getPoseDeltaCallsResident()  { return poseDeltaCallsResident;  }
+
+    // Phase-A churn stats — true (pre-clamp) per-step dirty demand.
+    public static long getTrueDirtyCalls()             { return trueDirtyCalls; }
+    public static long getTrueDirtySlotChangeSum()     { return trueDirtySlotChangeSum; }
+    public static long getTrueDirtySlotChangeMax()     { return trueDirtySlotChangeMax; }
+    public static long getTrueDirtyPendingSum()        { return trueDirtyPendingSum; }
+    public static long getTrueDirtyPendingMax()        { return trueDirtyPendingMax; }
+    public static long getTrueDirtyTotalUpperMax()     { return trueDirtyTotalUpperMax; }
 
     public static int getSlotCount()     { return slotCount;     }
     public static int getCpuFallbackCt() { return cpuFallbackCt; }

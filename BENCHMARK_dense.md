@@ -259,23 +259,34 @@ Cap raises committed with this study (current code only):
 | 1×       | 1.0  |  98 000   |   400 |  132.03 |  89.71 | 0.68× |  500 → 2000 |
 | 2×       | 2.0  | 196 000   |   800 |  254.89 | 168.73 | 0.66× |  500 → 2000 |
 | 4×       | 4.0  | 392 000   |  1600 |  505.04 | 343.67 | 0.68× |  400 → 1600 |
-| 8×       | 8.0  | 784 000   |  3200 | 1013.83 | **GPU ceiling** | — |  300 → 1200 |
+| 8×       | 8.0  | 784 000   |  3200 | 1013.83 | 659.12¹ | 0.65×¹ |  300 → 1200 |
 | 16×      | 16.0 | 1 568 000 |  6400 | **CPU heap ceiling** | — | — | 200 → 700 |
+
+¹ Originally **GPU ceiling** at the scaling-study commit (`0cbfa20`) —
+the per-step pose-delta dirty demand (peak ≈ 2 × nFil = 6402 at 8×)
+overran `POSE_DELTA_CAP = 4096`, triggering a leaky `closePlan() +
+allocateAndBuildPlan()` rebuild that orphaned every resident FloatArray
+identity each cycle until the host OOM-killer fired at ~759 s.
+**Lifted by the cap-sizing + persistent-buffer fix landed in the
+2026-06-08 follow-on (`POSE_DELTA_CAP` now sized from
+`initialFilaments` at startup; delta + slotCap-sized buffers reuse
+identities across plan rebuilds; overflow fallback demand-syncs before
+non-leaky rebuild)**: 8× now runs with `planRebuild = 1` (initial only),
+`overflow = 0`, and host memory flat — the 8× GPU ms/step value above
+was measured after that fix using the same K1=300, K2=1200 difference
+method. The 1× and 4× rows are pre-fix scaling-study numbers, but the
+fix is inert there (peak demand 802 / 3202 both fit the old 4096 cap,
+verified by replay in `RUN_LOGS/2026-06-08_pose_churn/phaseC_results.md`).
+With the engine ceiling gone the next ceiling is the host-heap wall
+documented in the 16× row.
 
 **Ceilings (the headline result).**
 
-- **GPU practical ceiling at 8×.** Last clean GPU row at 4× (343.67 ms/step,
-  ratio 0.68× vs CPU 505.04). At 8× the bind+move kernels execute, but
-  the per-step pose-delta dirty count overruns `POSE_DELTA_CAP=4096`
-  (the slot-renumber churn from `theFilSegments` swap-compaction across
-  3200 filaments creates more dirty entries per step than the cap allows).
-  Plan rebuilds fire every step, host memory grows monotonically, the
-  process is SIGKILL'd at ~759 s. **VRAM itself is not exhausted** —
-  `nvidia-smi` reports 216 MB used / 12 227 MB total when the run dies;
-  the kill is on the host. This is a structural ceiling of the current
-  engine (poseDelta scatter sizing), not the hardware. The first
-  follow-on would be growing `POSE_DELTA_CAP` and the scatter kernel's
-  per-step thread budget, or batching slot-renumber deltas across steps.
+- **GPU practical ceiling now at the 16× host-heap wall** (was 8× pre-fix).
+  Last clean GPU row at 4× (343.67 ms/step, ratio 0.68× vs CPU 505.04).
+  8× pre-fix was the engine-side cap (see footnote 1); post-fix the 8× GPU
+  row completes cleanly and the next wall is the same JVM heap budget
+  that caps the CPU path at 16×.
 
 - **CPU practical ceiling at 16×.** Last clean CPU row at 8× (1013.83
   ms/step ≈ 1 s/step — already at the wall-time edge for any multi-second
@@ -289,17 +300,24 @@ Cap raises committed with this study (current code only):
 - CPU per-step is **near-linear** in N over the whole working range:
   132 → 254 → 505 → 1014 ms/step from 1× to 8× is factor 7.68× over
   8× the work (slight sub-linear due to fixed per-step overhead).
-- GPU per-step is **near-linear** too over its working range:
-  90 → 169 → 344 ms/step from 1× to 4× is factor 3.83× over 4× the work.
-- **Ratio settles around 0.66–0.68×** from 1× through 4× — GPU is
-  ~33 % faster than CPU at any sustainable scale, with the absolute gap
-  widening with size (1× gap 42 ms, 2× gap 86 ms, 4× gap 161 ms).
-  Below 1× the ratio loosens (0.75× at 0.5×, 0.84× at 0.25×) — GPU
-  dispatch overhead amortizes less well at small M.
-- **The GPU advantage is widest at 4×** in absolute ms/step (CPU 505,
-  GPU 344). Beyond 4× the residency engine structural limit (`POSE_DELTA_CAP`)
-  bites before the hardware does — meaning the next ~2× of GPU headroom
-  is gated by engine work, not silicon.
+- GPU per-step is **near-linear** too: 90 → 169 → 344 → 659 ms/step
+  from 1× to 8× is factor 7.35× over 8× the work. The 8× row was a
+  post-fix re-measurement on the same machine (footnote 1); the 1×–4×
+  rows are the pre-fix scaling-study numbers, but the fix is inert at
+  those sizes (the old cap was sufficient).
+- **Ratio settles around 0.65–0.68×** from 1× through 8× — GPU is
+  ~32–35 % faster than CPU at every sustainable scale, with the
+  absolute gap widening monotonically with size (1× 42 ms, 2× 86 ms,
+  4× 161 ms, 8× 355 ms). Below 1× the ratio loosens (0.75× at 0.5×,
+  0.84× at 0.25×) — GPU dispatch overhead amortizes less well at
+  small M.
+- **The GPU advantage widens through 8×** in absolute ms/step (CPU
+  1014, GPU 659 — gap 355 ms). The engine-side ceiling at 8× that the
+  scaling study originally hit (`POSE_DELTA_CAP=4096` blown by the
+  measured ~6400 startup-transient dirty count, triggering a leaky
+  rebuild) has been lifted by the 2026-06-08 cap-sizing fix; the
+  GPU's next ceiling is the same 16× host-heap wall that already caps
+  the CPU path.
 
 **Cross-validation.** The 1× row (132.03 / 89.71 ms/step) reproduces
 the 2026-06-07 retro sweep's `498bb7c` (post-residency) row

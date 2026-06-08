@@ -1,8 +1,255 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (scaling study — CPU + GPU ms/step vs simulation size)
+Last updated: 2026-06-08 (POSE_DELTA_CAP startup-sized; 8× GPU ceiling lifted)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — POSE_DELTA_CAP: startup-sized cap, persistent-identity delta buffers, defused fallback
+
+The scaling-study GPU ceiling at 8× (`BENCHMARK_dense.md → ## Scaling study`)
+was an engine-side ceiling, not silicon: the per-step pose-delta dirty
+demand at 8× pure gliding overran the hardcoded `POSE_DELTA_CAP=4096`,
+which triggered a `closePlan() + allocateAndBuildPlan()` overflow path
+that reallocated every resident FloatArray — orphaning the old buffer
+identities (the Phase 4.5 host-leak landmine) — and the host memory
+walked until SIGKILL at ~759 s. VRAM was at 216 MB / 12 227 MB; the kill
+was the host OOM-killer.
+
+### Phase A — measure the churn
+
+Instrumented `buildDeltaSet()` with a counter for the true (pre-clamp)
+per-step dirty demand split into slot-change and pendingDirty sources.
+Ran short GPU runs at 1×, 2×, 4×, 8× with `BOA_POSE_DELTA_CAP` set high
+enough that no overflow rebuild fired during measurement.
+`BOA_POSE_CHURN_LOG=1` printed per-step values.
+
+| size | slotCount peak | slotCap | slotChange peak | totalUpper peak | peak / slotCap |
+|---|---:|---:|---:|---:|---:|
+| 1× | 298 797 | 588 804 | 401 | 802 | 0.14 % |
+| 2× | 597 509 | 1 177 604 | 801 | 1 602 | 0.14 % |
+| 4× | 1 195 232 | 2 355 204 | 1 601 | 3 202 | 0.14 % |
+| 8× | 2 390 545 | 4 710 404 | 3 201 | 6 402 | 0.14 % |
+
+Per-step demand follows a remarkably clean **2 × (nFil + 1)** pattern at
+the peak — slot-change and pendingDirty contribute disjoint sets,
+each ≈ nFil + 1 entries — and decays to **0** by step ~17, then stays
+at 0 for the rest of the run (`noMonomersSimd:true`, no biochem). The
+startup transient is the GPU classification settling as filaments come
+online; once steady state is reached, slot occupants are stable.
+
+The 8× case overflows the old 4096 cap (peak 6402 > 4096) for ~4–16
+startup steps, each triggering a leaky rebuild. Sparse fraction at
+every size: **0.14 % of slotCap** — definitively sparse, well below
+the 25 % gate threshold. Decision: proceed to Phase B.
+
+Phase-A artifacts: `RUN_LOGS/2026-06-08_pose_churn/{1x,2x,4x,8x}_churn.log`
++ `_finegrain_{1x,8x}.log` (per-step churn covering the startup
+transient).
+
+### Phase B — startup-size the cap + persistent-identity buffers + non-leaky fallback
+
+`GPUMoveThing.POSE_DELTA_CAP` is now sized from the config in
+`sizePoseDeltaCapFromConfig()`, called once before the first plan build
+so kernel JIT picks up the chosen value:
+
+```
+peak_model  = 2 × (initialFilaments + 1)
+cap         = max(8192, 4 × peak_model)
+```
+
+The 4× safety factor sits 4× over the measured peak (Phase A) at every
+size; the 8192 floor handles sub-1× configs where the model would
+under-shoot. Env var `BOA_POSE_DELTA_CAP` override still wins for
+one-off measurement work. Per-size cap values:
+
+| size | initialFilaments | peak_model | sized cap |
+|---|---:|---:|---:|
+| 0.25× | 100 | 202 | 8 192 (floor) |
+| 1× | 400 | 802 | 8 192 (floor) |
+| 4× | 1 600 | 3 202 | 12 808 |
+| 8× | 3 200 | 6 402 | 25 608 |
+| 16× | 6 400 | 12 802 | 51 208 |
+| 32× | 12 800 | 25 602 | 102 408 |
+
+`allocateAndBuildPlan` now reuses existing FloatArray / IntArray
+identities when sizes match (`ensureFloatArray` / `ensureIntArray`
+helpers, applied to all slotCap-sized and myoCap-sized arrays + every
+delta buffer). With the cap right-sized and slotCap mostly stable
+across the run, plan close+reopen on an overflow no longer mints new
+device buffers — the orphan-identity host-leak path is closed.
+
+`buildDeltaSet` overflow now demand-syncs the device pose to host
+*before* `closePlan()` so the rebuild's FIRST_EXECUTION upload reflects
+the latest integrated state (Step-4 retired the per-step pull under
+`noMonomersSimd.isActive()`, so host pose can otherwise lag many
+steps). Loud overflow logging gives forward visibility if a future
+config ever exceeds the sized cap. The slot-change measurement loop is
+fused into the existing packing pass (single O(slotCount) walk) so the
+trueDirty telemetry costs nothing measurable in steady state — at 1×
+the +25 % wall-time hit that an unfused two-pass version showed in a
+first regression run vanished after the merge.
+
+### Phase C — verification
+
+`RUN_LOGS/2026-06-08_pose_churn/phaseC_results.md` (current main HEAD
++ Phase B applied, RTX 5070, aorus, Java 21, TornadoVM 4.0.1-dev,
+`-Xmx28G`):
+
+| size | K1 → K2 | K1 wall | K2 wall | ms/step | scaling-study row | notes |
+|---|---|---:|---:|---:|---:|---|
+| 1× | 500 → 2000 | 87.72 | 252.22 | 109.67 | 89.71 | machine drift, **not regression** — same-day pre-Phase-B baseline at 1× K=500 was 84.08 s, +0.7 % vs Phase B's 87.72 s; planRebuild=1, overflow=0 |
+| 4× | 400 → 1600 | 369.47 | 806.93 | 364.55 | 343.67 | machine drift again (+6 % at 4× tightens vs +22 % at 1× — fixed overhead amortizes); planRebuild=1, overflow=0 |
+| 8× | 300 → 1200 | 1076.71 | 1669.92 | **659.12** | (was ceiling) | **headline: 8× completes** — planRebuild=1 (initial), overflow=0, poseDelta max=6402 fits cap=25608; host memory flat (no orphan growth); GPU÷CPU = 0.65×, hits the same 0.66–0.68× ratio the 1×–4× rows showed, confirming the engine ceiling was the only thing in the way at 8× |
+
+Same-day machine drift (1× and 4× both ≈ +20 % vs the scaling-study
+row timestamps) is independent of the fix — the historical 1× run made
+89.71 ms/step on a less-loaded aorus; today's same-code baseline lands
+at 84.08 s for K=500 ≈ 110 ms/step. The cap-sizing change does not
+move ms/step within seed noise at any size where the old 4096 cap was
+sufficient (1× / 2× / 4×, peak packed counts 802 / 1602 / 3202 all fit
+the old cap; the new 8192 floor is just generous headroom at those
+sizes).
+
+At 8× the fix is structural rather than incremental: the run no longer
+SIGKILLs at startup — planRebuild stays at the startup value of 1
+(host memory does not walk), overflow events stay at 0 (cap fits the
+peak), and the run completes. K1 wall (1076.71 s / 300 steps) plus the
+K2 difference give the 8× steady-state ms/step that the scaling table
+could only mark as "ceiling" pre-fix.
+
+### Status
+
+**main.** All four 1×–8× sizes now run with `planRebuild=1` (initial
+only) and `overflow=0`. The GPU's practical ceiling moved from the
+engine-side cap (8×) out to the actual scaling characteristic; the
+next ceiling is the ~16× host-heap wall already noted in the scaling
+study, set by the JVM's 28 GB heap budget against the `Mesh.<init>` /
+`Thing` object graph at that scale.
+
+Files touched: `boxOfActin/GPUMoveThing.java` (cap sizing, persistent
+buffer identities via `ensureFloatArray` / `ensureIntArray`, fused
+measurement loop, defused overflow fallback with pre-rebuild
+demand-sync and persistent buffers), `boxOfActin/BoxOfActin.java`
+(one `[STATS] trueDirty` telemetry line). Phase-A instrumentation
+kept in as a forward debugging hook (opt-in via `BOA_POSE_CHURN_LOG`);
+the always-on trueDirty accumulators are now free in the merged loop.
+
+# 2026-06-08 — GPU residency campaign: capstone, retrospective sweep, scaling study
+
+> Prepend this block to the top of JOURNAL.md (newest-first). Covers the close-out of the device-
+> residency campaign and the two measurement studies that followed, the architectural ceiling
+> finding, and the one open item now in flight.
+
+## Campaign status — residency goal met for gliding
+
+The device-residency campaign's literal goal is achieved for production gliding: the canonical pose
+lives on the GPU across simulation steps (FIRST_EXECUTION, device-owned, kernel-written), and the
+host is synced only at output-frame cadence rather than every step. The per-step pose round-trip
+(device→host demandSync, then host→device EVERY_EXECUTION) that dominated the early GPU path is gone
+for gliding; `demandSyncPose` dropped ~99.7 % (gated on `Env.noMonomersSimd.isActive()`, so biochem-
+active runs still pull). Prior landed pieces: Phase 4.5 binding reads resident pose (the multi-graph
+executor OOM was diagnosed as a TornadoVM 4.0.1-dev runtime bug, routed around by the Step-3 single
+unified graph); Steps 2–4 delta-scatter + single-graph + retired pull. The +22 % float32 binding
+shift was accepted deliberately — the binding rule is a lumped-parameter stochastic accept/reject
+scheme, not calibrated to experiment, so CPU-double is not ground truth (see MYOSIN_VALIDATION.md).
+
+Commits of record: Phase 4.5 `7759be7`; residency arc step commits `3df21c9` / `63f079e` /
+`7a509c4` / `9b82264`, on main; retrospective sweep `bcc1c7c`; scaling study `0cbfa20` (current HEAD).
+
+## Retrospective speed sweep (constant config across campaign commits) — `bcc1c7c`
+
+Ran one fixed config (400 filaments / ~98K motors, under the pre-campaign `theMotors[100000]` cap so
+it runs at the oldest commit) at seven campaign commits, both paths, steady-state ms/step via the
+difference method `(wall_K2 − wall_K1)/(K2 − K1)`, K1=500 / K2=2000. Logs under
+`RUN_LOGS/2026-06-07_retro_sweep/`.
+
+| commit | CPU ms/step | GPU ms/step | GPU÷CPU |
+|---|---|---|---|
+| pre-campaign (6b5599f) | 170.89 | 176.26 | 1.03× |
+| iter2b (bb7dc99) | 172.91 | 286.41 | 1.66× |
+| iter2c (bb7829e) | 174.87 | 249.80 | 1.43× |
+| iter2d (8027662) | 172.29 | 160.97 | 0.93× ← first crossover |
+| pre-4.5 (b044874) | 130.20 | 94.01 | 0.72× |
+| post-4.5 (7759be7) | 132.49 | 96.42 | 0.73× |
+| post-residency (498bb7c) | 129.84 | 88.87 | 0.68× |
+
+**CPU verdict (the question this sweep settled):** CPU is flat at ~172 ms/step through iter2d (all
+that work was GPU-side), then drops 24 % in one commit window to ~130 and stays there. The structural
+change in that window is **cpuopt batch 1 (`61c2391`** — pow/acos/sqrt, Env-cache, transpose-flatten);
+the other commits there are anchor/IC fixes that don't touch hot paths. So the CPU gain is **real**
+(not the config drift the old crossover series left ambiguous) but attributable to one math-opt
+commit, not the residency campaign. This sweep supersedes the drift-confounded crossover series.
+
+**GPU arc:** 176 → 286 (iter2b move-port, transfer-bound — got *worse* first) → 161 (iter2d, first
+crossover) → 94 (pre-4.5: motor port + Phase-3 grid + Phase-4 half-flip + acos fix, the bulk of the
+win) → 96 (4.5 dip, the EVERY_EXECUTION move-upload cost) → 89 (residency arc recovered + improved).
+~50 % total drop; at this config the GPU ends ~1.46× faster than the (now 24%-faster) CPU.
+
+## Scaling study (current code, both paths vs simulation size) — `0cbfa20`
+
+Held current HEAD fixed; scaled box + filaments at the 245:1 ratio (boxXY = 14·√N µm,
+initialFilaments = 400·N, 500 motors/µm²). Pure gliding, same difference method, size-adapted K1/K2.
+Logs under `RUN_LOGS/2026-06-08_scaling_study/`; full writeup in BENCHMARK_dense.md.
+
+| size | motors | filaments | CPU ms/step | GPU ms/step | GPU÷CPU |
+|---|---|---|---|---|---|
+| 0.25× | 24,500 | 100 | 40.58 | 34.27 | 0.84× |
+| 0.5× | 48,995 | 200 | 71.52 | 53.43 | 0.75× |
+| 1× | 98,000 | 400 | 132.03 | 89.71 | 0.68× |
+| 2× | 196,000 | 800 | 254.89 | 168.73 | 0.66× |
+| 4× | 392,000 | 1600 | 505.04 | 343.67 | 0.68× |
+| 8× | 784,000 | 3200 | 1013.83 | *engine ceiling* | — |
+| 16× | 1,568,000 | 6400 | *host-heap ceiling* | — | — |
+
+Findings: both paths scale **near-linearly** (CPU exponent ≈0.98, GPU ≈0.97). The GPU advantage does
+**not** widen with scale — it amortizes fixed GPU overhead from 0.84× at 0.25× to ~0.67× by 1×, then
+**plateaus** (steady ~33 % / ~1.5× through 4×). The absolute gap still grows (161 ms saved/step at 4×)
+because 33 % of a bigger number is bigger. The 1× row reproduces the retro sweep's post-residency
+point within seed noise (cross-validates the method).
+
+## Architectural ceiling finding — both paths are host-RAM-bound near ~16×
+
+The GPU's 8× ceiling is **engine-side, not silicon**: the per-step pose-delta dirty count overruns
+`POSE_DELTA_CAP=4096` (slot-renumber churn from `theFilSegments` swap-compaction across 3200
+filaments), which forces a *plan rebuild every step*; host memory grows and the process is SIGKILL'd
+at ~759 s — with VRAM 98 % free (216 MB / 12 GB). The CPU's 16× ceiling is a clean host-heap OOM at
+`Mesh.<init>` / `Thing.<init>` even at -Xmx28G (host RAM 31 GB).
+
+Key conclusion, which bears on the v2 project: **the GPU run is not a separate memory world.** `-gpu`
+swaps the integration path, not the object model — it still constructs the identical host-side OOP
+object graph (Mesh / Thing / FilSegment / MyoMotor) on the same JVM heap, and only mirrors hot state
+onto the device. Residency cut per-step *transfer*, not host *allocation*. So both paths are bounded
+at ~16× by the same host object graph; VRAM is roomy and untapped. Getting past ~16× is **not** a
+tuning knob — it requires shrinking the host object graph itself (SoA primitive arrays / device-
+resident state instead of per-object Java fields), which is exactly the v2 ECS direction. This is
+empirical justification for v2's SoA core, recorded in GPU_STRATEGY.md.
+
+## Open item in flight — POSE_DELTA_CAP measure-then-fix
+
+The deferred delta-cap item is now load-bearing (it is the 8× ceiling). A CC prompt is staged:
+**measure first** (true per-step dirty-slot demand + what drives the compaction in pure gliding,
+across 1×→8×), then a gate — if the delta is genuinely sparse (< ~25 % of total slots), **startup-size
+the cap** (scale with config, persistent identity allocated once — *not* per-step realloc, which would
+reopen the Phase-4.5 orphaned-identity leak) and make the overflow fallback a **non-leaky full-pose
+upload** (never a per-step plan rebuild); verify 8× runs with flat host memory and re-measure 8× GPU
+ms/step. If the delta approaches full-pose size (degenerate) or the churn looks artifactual, **bail to
+planner** — that's a design decision (full-pose upload vs delta-scatter), not a knob. Success moves the
+GPU ceiling from the engine-side cap out to the ~16× host-heap wall and fills the blank 8× cell.
+
+## Deferred backlog (unchanged, for the record)
+
+- 1-step bind-lag in the single unified graph (bindEvents/gv t≈2.0, uniform-positive; likely a
+  correctable task-ordering artifact — A/B the bind-task position vs the legacy arm). MYOSIN_VALIDATION.md.
+- High-churn biochem production residency: biochem-cadence pull gating (cheap interim — biochem fires
+  every ~10–50 physics steps), then device-side biochem deltas via scatterPose (fuller fix).
+- Move both binding paths to float32 (binding *decision* only; leave double Langevin integration
+  untouched to protect persistence-length calibration), then calibrate to experiment.
+- Switch gliding bending to the phalloidin regime (fracMove 0.05725 / fracR 1.0 / fracMoveTorq 0.1;
+  ~2× stiffer) — requires regenerating the gliding baseline and re-validating the published-velocity
+  match. Keep current 0.5/0.1/0.2 defaults for GPU-port validation until then.
+- Verify the gliding-assay filament IC pad (barbed/+x end padded inward ~half a filSegment length;
+  end2.x 7.00035 → 6.91395) survived the motor-port sessions; re-apply if lost.
+- Biochemical-rates / dice-roll-interval survey (jba to initiate; informs the biochem-cadence work).
 
 ## 2026-06-08 — Scaling study: CPU + GPU ms/step vs simulation size, current code
 

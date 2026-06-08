@@ -1,0 +1,38 @@
+[07:46:32] Phase A starting
+[07:46:32] === 1x cap=5000000 runTime=0.001000 budget=600s ===
+[07:47:18]   rc=0 wall=45.81s
+[POSE_CHURN] step=150 slotCount=298780 slotCap=588804 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=160 slotCount=298780 slotCap=588804 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=170 slotCount=298780 slotCap=588804 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=180 slotCount=298780 slotCap=588804 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=190 slotCount=298780 slotCap=588804 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[STATS] gpuMoveThing poseDelta avg=8758.00 max=802 sum=8758 fresh=1 overflow=0 cap=5000000
+[STATS] gpuMoveThing trueDirty calls=199 slotChange avg=22.01 max=401 pending avg=22.01 max=401 totalUpperMax=802 slotCount=298780 slotCap=588804
+[07:47:18] === 2x cap=5000000 runTime=0.001000 budget=600s ===
+[07:48:55]   rc=0 wall=97.80s
+[POSE_CHURN] step=150 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=160 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=170 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=180 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=190 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[STATS] gpuMoveThing poseDelta avg=17416.00 max=1602 sum=17416 fresh=1 overflow=0 cap=5000000
+[STATS] gpuMoveThing trueDirty calls=199 slotChange avg=43.76 max=801 pending avg=43.76 max=801 totalUpperMax=1602 slotCount=597509 slotCap=1177604
+[07:48:55] === 4x cap=5000000 runTime=0.001000 budget=900s ===
+[progress 07:51:32] elapsed=300s — [07:48:55] phaseA 4x cap=5000000 runTime=0.001000 budget=900s
+[07:53:32]   rc=0 wall=276.94s
+[POSE_CHURN] step=150 slotCount=1195232 slotCap=2355204 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=160 slotCount=1195232 slotCap=2355204 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=170 slotCount=1195232 slotCap=2355204 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=180 slotCount=1195232 slotCap=2355204 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=190 slotCount=1195232 slotCap=2355204 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[STATS] gpuMoveThing poseDelta avg=35262.00 max=3202 sum=35262 fresh=1 overflow=0 cap=5000000
+[STATS] gpuMoveThing trueDirty calls=199 slotChange avg=88.60 max=1601 pending avg=88.60 max=1601 totalUpperMax=3202 slotCount=1195232 slotCap=2355204
+[07:53:32] === 8x cap=5000000 runTime=0.000500 budget=1800s ===
+[07:54:02]   rc=1 wall=29.73s
+[07:54:02] === Phase A done (elapsed 450s) ===
+[07:57:28] Phase A starting
+[07:57:28] === 8x cap=5000000 runTime=0.000500 budget=1800s ===
+[progress 08:02:28] elapsed=300s — [07:57:28] phaseA 8x cap=5000000 runTime=0.000500 budget=1800s
+[progress 08:07:28] elapsed=600s — [07:57:28] phaseA 8x cap=5000000 runTime=0.000500 budget=1800s
+[08:08:55]   rc=137 wall=686.88s
+[08:08:55] === Phase A done (elapsed 687s) ===

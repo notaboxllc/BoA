@@ -1,0 +1,99 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_pose_churn/2x_churn.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.001
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 19.799
+     Parameter assigned: boxYDim set to 19.799
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 800
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 100; xBinWidth = 0.2 µm
+nYBins = 100; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 100 x 100 x 4 cells (0.2 µm each)
+GPUMoveThing: slotCap=1177604 myoCap=392000 moveBlock=64 jointBlock=64 runSeed=1157447958 nWorkers=16
+[POSE_CHURN] step=10 slotCount=595985 slotCap=1177604 trueSlotChange=517 truePendingDirty=517 trueTotalUpper=1034 cap=5000000
+[POSE_CHURN] step=20 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=30 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=40 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=50 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=60 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=70 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=80 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=90 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=100 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=110 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=120 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=130 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=140 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=150 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=160 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=170 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=180 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+[POSE_CHURN] step=190 slotCount=597509 slotCap=1177604 trueSlotChange=0 truePendingDirty=0 trueTotalUpper=0 cap=5000000
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=1145
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=1290993
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=1145
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=57529
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=18217
+[STATS] motorInitFireCt=196000
+[STATS] meanBoundMotors=287.945
+[STATS] gpuMotorBinding total=0.094s calls=200 pack=0.029s gridPack=0.000s exec=0.000s unpack=0.094s
+[STATS] gpuMoveThing total=29.298s calls=200 slotPack=6.952s jointPack=2.807s exec=18.237s unpack=1.301s
+[STATS] gpuMoveThing demandSyncPose=0.133s(calls=1) demandSyncDerived=0.040s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=17416.00 max=1602 sum=17416 fresh=1 overflow=0 cap=5000000
+[STATS] gpuMoveThing trueDirty calls=199 slotChange avg=43.76 max=801 pending avg=43.76 max=801 totalUpperMax=1602 slotCount=597509 slotCap=1177604
+[STATS] glidingVelocity=0.0000
+ThingStep Threads took 7.985000 seconds.
+ThingBrownian Threads took 1.094000 seconds.
+Myosin Threads took 0.172000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 2.029000 seconds.
+Ck Mesh Threads took 0.363000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.105000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!

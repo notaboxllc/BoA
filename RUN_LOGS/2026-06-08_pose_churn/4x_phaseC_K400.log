@@ -1,0 +1,82 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_pose_churn/4x_phaseC_K400.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.004
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 28.0
+     Parameter assigned: boxYDim set to 28.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 1600
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 141; xBinWidth = 0.2 µm
+nYBins = 141; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 141 x 141 x 4 cells (0.2 µm each)
+[POSE_CHURN] sized POSE_DELTA_CAP=12808 (initialFilaments=1600, peakModel=3202, safety=4x, floor=8192)
+GPUMoveThing: slotCap=2355204 myoCap=784000 moveBlock=64 jointBlock=64 runSeed=-531386216 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=8.2 cumMaxPerThread=12
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=2928
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=6031102
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=2928
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=217969
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=36641
+[STATS] motorInitFireCt=392000
+[STATS] meanBoundMotors=435.405
+[STATS] gpuMotorBinding total=0.441s calls=501 pack=0.126s gridPack=0.000s exec=0.000s unpack=0.441s
+[STATS] gpuMoveThing total=95.776s calls=501 slotPack=30.419s jointPack=13.035s exec=46.004s unpack=6.315s
+[STATS] gpuMoveThing demandSyncPose=0.606s(calls=1) demandSyncDerived=0.066s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=35040.00 max=3202 sum=35040 fresh=1 overflow=0 cap=12808
+[STATS] gpuMoveThing trueDirty calls=500 slotChange avg=35.04 max=1601 pending avg=35.04 max=1601 totalUpperMax=3202 slotCount=1195121 slotCap=2355204
+[STATS] glidingVelocity=0.0000
+ThingStep Threads took 35.960000 seconds.
+ThingBrownian Threads took 5.553000 seconds.
+Myosin Threads took 0.446000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 8.785000 seconds.
+Ck Mesh Threads took 1.464000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.281000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!
