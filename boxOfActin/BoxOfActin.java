@@ -409,7 +409,9 @@ public class BoxOfActin {
 
 		// multithreading
 		loadAllThreadSets();
-		
+		recomputeActiveThreadSets();
+		printActiveThreadSetPlan();
+
 		// make the time loop instance
 		timeLoop = new TimeLoop();
 		timeLoop.start();
@@ -874,7 +876,60 @@ public class BoxOfActin {
 		tSets[15] = ActA.actAThreads;
 		tSets[16] = MotorBindGrid3D.FillThreads.fillThreads;
 
+		tSetActive = new boolean[tSets.length];
+		java.util.Arrays.fill(tSetActive, true);
+	}
 
+	// Per-ThreadSet active flag. Recomputed each loop step in
+	// recomputeActiveThreadSets() from the live subsystem counts so empty
+	// subsystems' waves are skipped. The existing per-ThreadSet
+	// divideAndConquer/regroup methods already early-return on count==0; this
+	// just elides the dispatch entirely so cull is bit-exact wherever the
+	// subsystem is non-empty.
+	private static boolean[] tSetActive;
+
+	// Recomputed once per loop step. ThreadSets whose count is currently 0 are
+	// marked inactive; ThreadSets that always have phase work (Thing.step /
+	// Thing.brownian / Mesh / MotorBindGrid3D fill / Myosin joints — read
+	// population counts internally) stay active. Counts may grow during the
+	// run via biochem; the per-step recompute catches that.
+	private static void recomputeActiveThreadSets () {
+		// Always-on (handle phase work from heterogeneous populations or have
+		// internal count gates that cover all their phases).
+		tSetActive[0]  = true;                                         // Thing.stepThreads
+		tSetActive[1]  = true;                                         // Thing.brownianThreads
+		tSetActive[2]  = true;                                         // Myosin.myoThreads
+		tSetActive[8]  = true;                                         // Mesh.meshThreads (per-phase gated internally on filSegmentCt / nodeCt / motorCt)
+		tSetActive[9]  = true;                                         // Mesh.ckMeshThreads (filament-filament collisions)
+		tSetActive[10] = true;                                         // Mesh.ckMotsThreads
+		tSetActive[16] = true;                                         // MotorBindGrid3D.FillThreads
+
+		// Count-gated. When the count is 0 the divideAndConquer/regroup
+		// switches early-return anyway; skipping dispatch saves the call.
+		tSetActive[3]  = MyosinDimer.myoDimerCt > 0;
+		tSetActive[4]  = ProteinNode.nodeCt > 0;
+		tSetActive[5]  = MyoMiniFilament.myoMiniFilCt > 0;
+		tSetActive[6]  = Env.numChamberFixedMyos.getIntValue() > 0;
+		tSetActive[7]  = Env.numChamberFixedMyoDimers.getIntValue() > 0;
+		tSetActive[11] = FilLink.filLinkCt > 0;
+		tSetActive[12] = Arp23.arp23Ct > 0;
+		tSetActive[13] = NodeLink.nodeLinkCt > 0;
+		tSetActive[14] = ProteinNode.nodeCt > 0;  // StickyNode.MembraneNodeThreads gates on ProteinNode.nodeCt
+		tSetActive[15] = ActA.actACt > 0;
+	}
+
+	private static void printActiveThreadSetPlan () {
+		String ts = new java.text.SimpleDateFormat("HH:mm").format(new java.util.Date());
+		System.out.printf("[%s] [phase-plan] inert-wave cull — ThreadSet activation snapshot:%n", ts);
+		int onCt = 0, offCt = 0;
+		for (int i = 0; i < tSets.length; i++) {
+			System.out.printf("[%s]   %s  %s%n", ts,
+				tSetActive[i] ? "ON " : "OFF",
+				tSets[i].commandName);
+			if (tSetActive[i]) onCt++; else offCt++;
+		}
+		System.out.printf("[%s] [phase-plan] %d active, %d inert (will skip dispatch)%n",
+			ts, onCt, offCt);
 	}
 	
 	private static void reportAllThreadSetTimes () {
@@ -906,13 +961,15 @@ public class BoxOfActin {
 	
 	private static void startAllThreadSets (int waveNum) {
 		for (int i=0; i < tSets.length; i++) {
+			if (!tSetActive[i]) continue;
 			tSets[i].divideAndConquer(waveNum);
 			//System.out.println(tSets[i].commandName + " calling wave # " + waveNum);
 		}
 	}
-	
+
 	private static void waitOnAllThreadSets(int waveNum) {
 		for (int i=0; i < tSets.length; i++) {
+			if (!tSetActive[i]) continue;
 			tSets[i].regroup(waveNum);
 		}
 	}
@@ -934,6 +991,10 @@ public class BoxOfActin {
 				}
 				if (Env.terminating) break outer;
 
+				// Inert-wave cull: refresh per-ThreadSet active flags from live
+				// counts. Cheap (17 int compares); catches mid-run population
+				// growth in biochem-active configs.
+				recomputeActiveThreadSets();
 				// set biophysical values needed for this next time step
 				FilSegment.setBiophysValues();
 				// Per-thread force/torque accumulators need at least thingCt slots.

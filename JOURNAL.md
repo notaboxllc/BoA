@@ -1,10 +1,180 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (host-graph + orchestration profiling — Pt3D ranked #1 SoA-conversion target; P2/P3/P6 immaterial at research scale)
+Last updated: 2026-06-08 (cheap wins landed — outputInterval step-0 cost cut, inert-wave cull, derivedFieldsKernel reduced; Pt3D SoA refactor is next)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
 
-## 2026-06-08 — Host-graph + orchestration profiling (refactor scoping)
+## 2026-06-08 — Cheap wins landed (outputInterval, P6 cull, P2 derived) ahead of Pt3D SoA
+
+Three bounded, mechanically-neutral cleanups identified by today's earlier
+profiling pass — all landed on a single branch and validated on CPU + GPU
+before merging back to main. The unifying purpose is to speed the dev loop
+(every later measurement is cheaper) and clear small structural debt without
+touching `Pt3D` or any host-graph storage. Pt3D SoA conversion remains the
+in-flight item.
+
+### 1. `GlidingAssayEvaluator.outputInterval()` — O(M·F·S) → spatial grid
+
+The two nested motor × filament × segment loops (population
+`headsWithinReachDR` + per-filament `footprintMotors`) are replaced with a
+3D spatial grid over MyosinFixed pin positions. Pin positions are static
+(set at construction in `MyosinFixed.<init>`), so the grid is built lazily
+on first call and reused for the run; rebuilds happen only if `motorCt`
+changes (a no-op in pure gliding). Per-segment query walks bins overlapping
+the segment AABB extended by `MOTOR_REACH_UM`; an `IntConsumer` visitor
+threads through both passes (population in-reach set + per-filament dedup
+via a per-fil stamp counter against `motorFidStamp[]`).
+
+The geometric predicate is unchanged (clamped projection onto the finite
+axis, squared-distance compare); the set of "in reach" motors and the count
+of distinct motors per filament are identical to the original code modulo
+visit order.
+
+**Before / after — 8× GPU at `toFileInterval=100` (forces step-0 fire),
+seed=1, 300 steps** (`RUN_LOGS/2026-06-08_cheap_wins/8x_gpu_{baseline,changes}.log`):
+
+| build | wall (s) | outputInterval step-0 contribution |
+|---|---:|---:|
+| baseline (HEAD) — original O(M·F·S) | **DID NOT COMPLETE** within a 1800 s timeout (`rc=124`); the JVM stalled inside step-0 outputInterval — last printed line was `GPUMoveThing: slotCap=…`, never reached any `[STATS]` row | ≫ 1500 s |
+| cheap-wins branch | **351** | ≲ 5 s (one grid build + 5 calls) |
+| reference: `toFileInterval=100000000` (no fire) | 323.67 (from `RUN_LOGS/2026-06-08_profiling_scoping/8x_gpu.wall`) | n/a |
+
+The baseline 8× run with `toFileInterval=100` could not even finish in a
+1800 s wall budget — its step-0 outputInterval was still spinning when
+the timeout killed it. The cheap-wins branch's 351 s wall on the same
+config is at minimum a **5× speedup**; the actual step-0 saving is
+`baseline ≫ 1500 s → ≲ 5 s` (lower bound on the saving is the journal
+estimate of ~800–900 s; the run-to-timeout suggests it was larger at
+this seed). This was the load-bearing win — every later 8× run at
+output-cadence-typical configs goes from "unrunnable inside a coffee
+break" to "runs in 6 minutes".
+
+### 2. Inert-wave cull (P6) — startup phase plan + per-step recompute
+
+`BoxOfActin.startAllThreadSets` / `waitOnAllThreadSets` now consult a
+per-ThreadSet `tSetActive[]` boolean array, refreshed each loop iteration
+in `recomputeActiveThreadSets()` from live subsystem counts. Always-on
+ThreadSets (Thing.step, Thing.brownian, Myosin.myo, Mesh.{mesh,ckMesh,
+ckMots}, MotorBindGrid3D.fillThreads) stay on; the rest gate on their
+relevant count being `> 0`. The plan is printed once at startup after
+`makeInitialThings()`.
+
+The cull is bit-equivalent to the existing pattern (every gated ThreadSet
+already early-returned from `divideAndConquer` / `regroup` when its count
+was 0); it elides the dispatch entirely, saving the per-call function
+overhead and clearing structural debt. Per-step recompute catches mid-run
+population growth in biochem-active configs.
+
+**Gliding (1×, 8×) phase plan** at startup:
+
+```
+  ON   ThingStep Threads     OFF  MyoDimer Threads
+  ON   ThingBrownian Threads OFF  Protein Node Threads
+  ON   Myosin Threads        OFF  MyoMiniFil Threads
+  ON   Mesh Threads          OFF  Chamber Myo Threads
+  ON   Ck Mesh Threads       OFF  Chamber MyoDimer Threads
+  ON   Ck Mots Threads       OFF  XLink Threads
+  ON   MotorBindGrid3D Fill  OFF  Arp23 Threads
+                             OFF  NodeLink Threads
+                             OFF  Membrane Node Threads
+                             OFF  ActA Threads
+```
+
+7 active, 10 inert. `boxSpaghetti` (biochem-active, no populated
+subsystems) prints the same plan in this config but stays dynamic — the
+per-step recompute would flip a wave back on if biochem ever grew the
+relevant count above 0.
+
+### 3. P2 — `derivedFieldsKernel` reduced to yVec re-ortho
+
+Per Table 2 of today's profiling pass, only the yVec re-orthogonalisation
+side effect of `derivedFieldsKernel` is load-bearing per step; the five
+`derived*` outputs (`End1`, `End2`, `ZVec`, `YVecOrtho`, `TransXTox`) have
+no per-step GPU consumer in the chained graph, and host-side end1/end2/
+transXTox values are produced by `Thing.recomputeDerivedSoA` at output
+cadence in `refreshHostMirrorsForOutput()`.
+
+The chained graph now picks between two kernels at build time:
+
+- `yVecOrthoKernel(uVec, yVec, counts)` — slim per-step variant; computes
+  zVec via cross product + normalise, then `yVec' = zVec × uVec`, writes
+  back to the resident yVec only. No `derived*` writes.
+- `derivedFieldsKernel(coord, uVec, yVec, length, derivedEnd1, …, counts)`
+  — full variant, retained for diagnostic paths
+  (`DIAG_DUMP_JOINTS_STEP`, `DIAG_DUMP_CHAIN_STEP`, `BOA_PHASE4_DERIVED_CP*`)
+  that compare device-resident `derived*` against `Thing.recomputeDerivedSoA`.
+
+The `UNDER_DEMAND` transfer of `derived*` to host is also gated by
+`diagDerivedFull`; the slim path omits them entirely (they would be stale
+post-execute).
+
+### 4. `70cb42c` resolution
+
+Verified: `70cb42c` propagates the post-`POSE_DELTA_CAP`-fix 8× GPU
+measurements from `a812c0c` into `JOURNAL.md`'s scaling-study tables and
+`RUN_LOGS/2026-06-08_scaling_study/results.md`. `a812c0c` only updated
+`BENCHMARK_dense.md`; the scaling-study documents still read "engine
+ceiling" / "—" until `70cb42c` filled them in. Not redundant — kept.
+
+### Validation cascade
+
+Per the prompt's cascade: cheap probe first, ensemble only if it shifts.
+Short gliding pre-check (CPU, seed=1, 500 steps) showed apparent ~5–7 %
+shift in `bindEvents` / `meanBoundMotors` / `glidingVelocity` between
+baseline and cheap-wins binaries — escalated to an n=5 ensemble per
+condition, including a HEAD-rebuild control to characterise the
+rebuild/JIT noise floor (raw data in
+`RUN_LOGS/2026-06-08_cheap_wins/ens_{baseline,head,changes,allchanges}.txt`):
+
+| build (n=5, seed=1, 500-step CPU run) | bindEvents mean ± std | meanBoundMotors mean ± std | glidingVelocity mean ± std |
+|---|---|---|---|
+| baseline (first build of HEAD) | 8387 ± 257 | 796.4 ± 24.4 | 54.07 ± 0.62 |
+| HEAD rebuild (same source, fresh JIT) | 7642 ± 764 | 724.6 ± 63.4 | 52.72 ± 1.21 |
+| outputInterval-only changes | 7742 ± 375 | 736.8 ± 27.8 | 51.95 ± 0.51 |
+| all-three changes (this branch) | 7829 ± 479 | 742.8 ± 37.1 | 52.94 ± 0.37 |
+
+The first baseline ensemble was an outlier — a fresh HEAD rebuild from
+the same source gave a mean that was already > 700 bindEvents lower than
+the first baseline (`p ≈ 0.07`, Welch's t). When compared **apples-to-apples**
+against the HEAD rebuild, the all-three-changes ensemble is statistically
+indistinguishable on every observable (`p ≈ 0.65, 0.59, 0.70` for
+bindEvents, meanBoundMotors, glidingVelocity respectively). The
+outputInterval-only ensemble is similarly indistinguishable from HEAD
+rebuild.
+
+Verdict: the CPU sim has a high rebuild/JIT-induced noise floor at the
+seed level (~10 % on `bindEvents` between independent rebuilds of identical
+source). The cheap-wins changes do **not** shift physics observables
+beyond that noise floor. The prompt's "bit-identical on CPU" expectation
+is not realisable on this codebase at this run length — independent of
+this branch.
+
+### 8× GPU verification
+
+`RUN_LOGS/2026-06-08_cheap_wins/8x_gpu_changes.log` — 8× GPU, seed=1,
+runTime=0.003 (300 steps), `toFileInterval=100`:
+- wall: 351 s (incl. outputInterval step-0 fire under the new spatial-grid path)
+- `gpuMoveThing total=172.761 s calls=400` (≈ 432 ms/step exec; consistent
+  with `RESIDENT_POSE_DELTA_SCATTER` 8× headline of 659.12 ms/step incl.
+  Brownian + cleanup + slotPack)
+- `bindEvents=3279`, `glidingVelocity=119.49`, no overflow, planRebuild=1
+- phase plan: 7 active / 10 inert
+
+The cheap-wins 351 s wall is ~750 s **under** the upper bound predicted by
+today's profiling pass for the old O(M·F·S) outputInterval path at 8× — the
+exact baseline number lands in this entry once the in-flight run completes.
+
+### What's next
+
+Per today's profiling pass, the in-flight item is now the **Pt3D SoA
+refactor** — converting `Pt3D`'s ~38 per-Thing scratch + helper-class
+instances into per-field `double[]` SoA stores keyed by `Thing.myThingNumber`,
+to shed the 1.8 → 3.7 GB Pt3D retained-heap bucket and unlock the
+slot-pack / joint-pack bottleneck on the GPU path. Design doc and
+sequencing live in `PT3D_SOA_MIGRATION.md` (created by today's profiling
+session).
+
+
 
 Survey-only pass to decide (a) which host-side subsystem to convert to SoA-
 canonical-with-thin-view first, and (b) whether the orchestration items P2

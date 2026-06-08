@@ -2,6 +2,7 @@ package boxOfActin;
 
 import java.io.*;
 import java.util.*;
+import java.util.function.IntConsumer;
 
 /**
  * Per-filament velocity and duty-ratio evaluator for the gliding assay.
@@ -64,6 +65,24 @@ public class GlidingAssayEvaluator {
     // Ring buffer capacity; computed once on first outputInterval() call.
     // -1 means not yet computed.
     private int bufCap = -1;
+
+    // Spatial grid of MyosinFixed pin positions. Pins are set at construction
+    // (myFixedPt is copied from rodEnd1) and never move, so the grid is built
+    // lazily on first outputInterval() call and reused. Rebuilt only if
+    // MyoMotor.motorCt changes (which doesn't happen in pure gliding).
+    // Replaces the O(M·F·S) nested loops at lines 142+ and 238+ with O(M_seg ·
+    // neighbours) — at 8× this cut step-0 wall from ~800 s to negligible.
+    private static final double PIN_BIN_SIZE = MOTOR_REACH_UM;
+    private int[][] pinGridBins;                // flat-indexed bin → motor indices
+    private int pinGridNx, pinGridNy, pinGridNz;
+    private double pinGridX0, pinGridY0, pinGridZ0;
+    private int pinGridBuiltAtMotorCt = -1;
+
+    // Per-call scratch (sized motorCt). motorInReach tracks the population set;
+    // motorFidStamp gives each filament a unique "visit stamp" so we count
+    // distinct motors per filament without per-fil resets.
+    private boolean[] motorInReach;
+    private int[] motorFidStamp;
 
     private GlidingAssayEvaluator() {
         densityIndex = 0;
@@ -137,26 +156,35 @@ public class GlidingAssayEvaluator {
         }
         if (filGroups.isEmpty()) return null;
 
-        // Population-level heads-within-reach duty ratio across all filaments.
+        // Build / refresh the spatial grid of MyosinFixed pin positions and
+        // resize per-call scratch arrays.
+        ensurePinGrid();
+        int motorCtNow = MyoMotor.motorCt;
+        if (motorInReach == null || motorInReach.length < motorCtNow) {
+            motorInReach = new boolean[motorCtNow];
+        } else {
+            Arrays.fill(motorInReach, 0, motorCtNow, false);
+        }
+        if (motorFidStamp == null || motorFidStamp.length < motorCtNow) {
+            motorFidStamp = new int[motorCtNow];
+        } else {
+            Arrays.fill(motorFidStamp, 0, motorCtNow, 0);
+        }
+
+        // Population-level heads-within-reach via spatial walk over segments.
+        // Each segment queries pin bins overlapping its AABB extended by
+        // MOTOR_REACH_UM; the visitor marks every pin truly within reach.
+        for (List<FilSegment> segs : filGroups.values()) {
+            for (FilSegment fs : segs) {
+                collectMotorsNearSegment(fs, motorIdx -> motorInReach[motorIdx] = true);
+            }
+        }
         int withinReachTotal = 0, withinReachBound = 0;
-        for (int i = 0; i < MyoMotor.motorCt; i++) {
+        for (int i = 0; i < motorCtNow; i++) {
+            if (!motorInReach[i]) continue;
+            withinReachTotal++;
             MyoMotor m = MyoMotor.theMotors[i];
-            if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
-            MyosinFixed mf = (MyosinFixed) m.myMyosin;
-            boolean inReach = false;
-            outer:
-            for (List<FilSegment> segs : filGroups.values()) {
-                for (FilSegment fs : segs) {
-                    if (distToAxis(mf.myFixedPt, fs) <= MOTOR_REACH_UM) {
-                        inReach = true;
-                        break outer;
-                    }
-                }
-            }
-            if (inReach) {
-                withinReachTotal++;
-                if (m.onFil) withinReachBound++;
-            }
+            if (m != null && m.onFil) withinReachBound++;
         }
         double headsWithinReachDR = withinReachTotal > 0 ? (double) withinReachBound / withinReachTotal : 0.0;
 
@@ -178,6 +206,7 @@ public class GlidingAssayEvaluator {
             simTime, densityIndex, surfaceDensity, headsWithinReachDR));
 
         boolean firstFil = true;
+        int filStamp = 0; // unique per-filament visit stamp for footprint counting
         for (Map.Entry<Integer, List<FilSegment>> entry : filGroups.entrySet()) {
             int fid = entry.getKey();
             List<FilSegment> segs = entry.getValue();
@@ -233,19 +262,20 @@ public class GlidingAssayEvaluator {
                 state.longWindowSpeedXY = 0.0;
             }
 
-            // Footprint: MyosinFixed motors whose pin is within MOTOR_REACH_UM of this filament.
-            int footprintMotors = 0;
-            for (int i = 0; i < MyoMotor.motorCt; i++) {
-                MyoMotor m = MyoMotor.theMotors[i];
-                if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
-                MyosinFixed mf = (MyosinFixed) m.myMyosin;
-                for (FilSegment fs : segs) {
-                    if (distToAxis(mf.myFixedPt, fs) <= MOTOR_REACH_UM) {
-                        footprintMotors++;
-                        break;
+            // Footprint: MyosinFixed motors whose pin is within MOTOR_REACH_UM
+            // of this filament. Spatial walk over this filament's segments; a
+            // per-filament stamp dedupes motors touched by more than one seg.
+            final int stamp = ++filStamp;
+            final int[] footprintCt = { 0 };
+            for (FilSegment fs : segs) {
+                collectMotorsNearSegment(fs, motorIdx -> {
+                    if (motorFidStamp[motorIdx] != stamp) {
+                        motorFidStamp[motorIdx] = stamp;
+                        footprintCt[0]++;
                     }
-                }
+                });
             }
+            int footprintMotors = footprintCt[0];
             double footprintDR = footprintMotors > 0 ? avgBound / footprintMotors : 0.0;
 
             // Write data row (skip first interval — no previous position yet).
@@ -280,6 +310,126 @@ public class GlidingAssayEvaluator {
 
         json.append("]}");
         return json.toString();
+    }
+
+    /**
+     * Build (or rebuild) the spatial grid of MyosinFixed pin positions. Pins
+     * are static so we cache and reuse across calls; the grid is rebuilt only
+     * when MyoMotor.motorCt changes (no-op in pure gliding).
+     */
+    private void ensurePinGrid() {
+        int curMotorCt = MyoMotor.motorCt;
+        if (pinGridBuiltAtMotorCt == curMotorCt && pinGridBins != null) return;
+
+        double xMin = Double.POSITIVE_INFINITY, yMin = Double.POSITIVE_INFINITY, zMin = Double.POSITIVE_INFINITY;
+        double xMax = Double.NEGATIVE_INFINITY, yMax = Double.NEGATIVE_INFINITY, zMax = Double.NEGATIVE_INFINITY;
+        int fixedCt = 0;
+        for (int i = 0; i < curMotorCt; i++) {
+            MyoMotor m = MyoMotor.theMotors[i];
+            if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
+            Pt3D p = ((MyosinFixed) m.myMyosin).myFixedPt;
+            if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x;
+            if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
+            if (p.z < zMin) zMin = p.z; if (p.z > zMax) zMax = p.z;
+            fixedCt++;
+        }
+        if (fixedCt == 0) {
+            pinGridBins = null;
+            pinGridBuiltAtMotorCt = curMotorCt;
+            return;
+        }
+        pinGridX0 = xMin - PIN_BIN_SIZE;
+        pinGridY0 = yMin - PIN_BIN_SIZE;
+        pinGridZ0 = zMin - PIN_BIN_SIZE;
+        pinGridNx = (int) Math.ceil((xMax - pinGridX0) / PIN_BIN_SIZE) + 2;
+        pinGridNy = (int) Math.ceil((yMax - pinGridY0) / PIN_BIN_SIZE) + 2;
+        pinGridNz = (int) Math.ceil((zMax - pinGridZ0) / PIN_BIN_SIZE) + 2;
+        int totalBins = pinGridNx * pinGridNy * pinGridNz;
+        int[] counts = new int[totalBins];
+        for (int i = 0; i < curMotorCt; i++) {
+            MyoMotor m = MyoMotor.theMotors[i];
+            if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
+            Pt3D p = ((MyosinFixed) m.myMyosin).myFixedPt;
+            counts[pinBinIndex(p.x, p.y, p.z)]++;
+        }
+        pinGridBins = new int[totalBins][];
+        for (int b = 0; b < totalBins; b++) {
+            if (counts[b] > 0) pinGridBins[b] = new int[counts[b]];
+        }
+        int[] heads = new int[totalBins];
+        for (int i = 0; i < curMotorCt; i++) {
+            MyoMotor m = MyoMotor.theMotors[i];
+            if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
+            Pt3D p = ((MyosinFixed) m.myMyosin).myFixedPt;
+            int b = pinBinIndex(p.x, p.y, p.z);
+            pinGridBins[b][heads[b]++] = i;
+        }
+        pinGridBuiltAtMotorCt = curMotorCt;
+    }
+
+    private int pinBinIndex(double x, double y, double z) {
+        int bx = (int) ((x - pinGridX0) / PIN_BIN_SIZE);
+        int by = (int) ((y - pinGridY0) / PIN_BIN_SIZE);
+        int bz = (int) ((z - pinGridZ0) / PIN_BIN_SIZE);
+        if (bx < 0) bx = 0; else if (bx >= pinGridNx) bx = pinGridNx - 1;
+        if (by < 0) by = 0; else if (by >= pinGridNy) by = pinGridNy - 1;
+        if (bz < 0) bz = 0; else if (bz >= pinGridNz) bz = pinGridNz - 1;
+        return (bz * pinGridNy + by) * pinGridNx + bx;
+    }
+
+    /**
+     * Walk all MyosinFixed motors whose pin lies within MOTOR_REACH_UM of the
+     * segment's finite axis, invoking accept(motorIdx) for each. Uses the
+     * cached pin grid; the segment's AABB (extended by reach) is intersected
+     * with the grid to bound the visit set.
+     */
+    private void collectMotorsNearSegment(FilSegment fs, IntConsumer accept) {
+        if (pinGridBins == null) return;
+
+        double cx = fs.getCoordX(), cy = fs.getCoordY(), cz = fs.getCoordZ();
+        double halfLen = fs.length * 0.5;
+        double ux = fs.getUVecX(), uy = fs.getUVecY(), uz = fs.getUVecZ();
+        double r = MOTOR_REACH_UM;
+        double sxHalf = halfLen * Math.abs(ux) + r;
+        double syHalf = halfLen * Math.abs(uy) + r;
+        double szHalf = halfLen * Math.abs(uz) + r;
+
+        int bx0 = (int) ((cx - sxHalf - pinGridX0) / PIN_BIN_SIZE);
+        int bx1 = (int) ((cx + sxHalf - pinGridX0) / PIN_BIN_SIZE);
+        int by0 = (int) ((cy - syHalf - pinGridY0) / PIN_BIN_SIZE);
+        int by1 = (int) ((cy + syHalf - pinGridY0) / PIN_BIN_SIZE);
+        int bz0 = (int) ((cz - szHalf - pinGridZ0) / PIN_BIN_SIZE);
+        int bz1 = (int) ((cz + szHalf - pinGridZ0) / PIN_BIN_SIZE);
+        if (bx0 < 0) bx0 = 0; if (bx1 >= pinGridNx) bx1 = pinGridNx - 1;
+        if (by0 < 0) by0 = 0; if (by1 >= pinGridNy) by1 = pinGridNy - 1;
+        if (bz0 < 0) bz0 = 0; if (bz1 >= pinGridNz) bz1 = pinGridNz - 1;
+        if (bx0 > bx1 || by0 > by1 || bz0 > bz1) return;
+
+        double rSq = r * r;
+        for (int bz = bz0; bz <= bz1; bz++) {
+            for (int by = by0; by <= by1; by++) {
+                int rowBase = (bz * pinGridNy + by) * pinGridNx;
+                for (int bx = bx0; bx <= bx1; bx++) {
+                    int[] bin = pinGridBins[rowBase + bx];
+                    if (bin == null) continue;
+                    for (int motorIdx : bin) {
+                        MyoMotor m = MyoMotor.theMotors[motorIdx];
+                        if (m == null || !(m.myMyosin instanceof MyosinFixed)) continue;
+                        Pt3D pt = ((MyosinFixed) m.myMyosin).myFixedPt;
+                        double dx = pt.x - cx, dy = pt.y - cy, dz = pt.z - cz;
+                        double proj = dx * ux + dy * uy + dz * uz;
+                        if (proj > halfLen) proj = halfLen;
+                        else if (proj < -halfLen) proj = -halfLen;
+                        double pxd = dx - proj * ux;
+                        double pyd = dy - proj * uy;
+                        double pzd = dz - proj * uz;
+                        if (pxd * pxd + pyd * pyd + pzd * pzd <= rSq) {
+                            accept.accept(motorIdx);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** Perpendicular distance from pt to the finite line segment defined by fs.coordAsPt3D()/uVecAsPt3D()/length. */

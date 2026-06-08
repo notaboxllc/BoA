@@ -2648,6 +2648,57 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // P2 reduction (2026-06-08) — slim per-step replacement for derivedFieldsKernel.
+    //
+    // Table 2 of the host-graph profiling pass found no GPU kernel reads the
+    // derivedEnd1/End2/ZVec/YVecOrtho/TransXTox outputs; only the yVec re-
+    // orthog side effect is load-bearing per step (read by next step's joints/
+    // chain/motorForce/move kernels). Host-side end1/end2/transXTox/etc. are
+    // produced by Thing.recomputeDerivedSoA at output cadence in
+    // refreshHostMirrorsForOutput, never from the device-resident derived*.
+    //
+    // This slim kernel keeps only the yVec re-orthog write. The full
+    // derivedFieldsKernel remains wired for DIAG_DUMP_* / parity diag steps
+    // where the device-side derived* buffers are demand-synced for kernel-vs-
+    // CPU validation.
+    // -------------------------------------------------------------------------
+    private static void yVecOrthoKernel(
+            FloatArray uVec,
+            FloatArray yVec,
+            IntArray   counts) {
+
+        int N = counts.get(0);
+
+        for (@Parallel int m = 0; m < uVec.getSize() / 3; m++) {
+            if (m >= N) { return; }
+
+            int i3 = m * 3;
+
+            float ux = uVec.get(i3);
+            float uy = uVec.get(i3 + 1);
+            float uz = uVec.get(i3 + 2);
+            float yx = yVec.get(i3);
+            float yy = yVec.get(i3 + 1);
+            float yz = yVec.get(i3 + 2);
+
+            // zVec = uVec × yVec (right-handed body frame), normalised.
+            float zx = uy * yz - uz * yy;
+            float zy = uz * yx - ux * yz;
+            float zz = ux * yy - uy * yx;
+            float zmag2 = zx * zx + zy * zy + zz * zz;
+            if (zmag2 > 0f) {
+                float inv = (float) (1.0 / Math.sqrt((double) zmag2));
+                zx *= inv; zy *= inv; zz *= inv;
+            }
+            // yVec' = zVec × uVec (restores orthogonality). Overwrite yVec so
+            // the device-resident pose stays orthonormal across .execute().
+            yVec.set(i3,     zy * uz - zz * uy);
+            yVec.set(i3 + 1, zz * ux - zx * uz);
+            yVec.set(i3 + 2, zx * uy - zy * ux);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Step 2 — scatterPoseKernel: writes a small delta into the device-resident
     // pose buffers ahead of joints/chain/move. Launched with POSE_DELTA_CAP
     // threads; threads past the active count (poseDeltaCount.get(0)) early-out.
@@ -3074,16 +3125,30 @@ public class GPUMoveThing {
 
         // Phase 4 prep — derived-field kernel runs AFTER move so it sees the
         // new coord/uVec/yVec the move kernel just wrote into device buffers.
-        // Outputs are device-resident; today's CPU recomputeDerivedSoA still
-        // runs in moveThings() and the CPU SoA arrays remain the source of
-        // truth for downstream readers. The flip will retire the CPU
-        // recompute and wire downstream kernels to these device buffers.
-        tg = tg.task("derived",
-                  GPUMoveThing::derivedFieldsKernel,
-                  coord, uVec, yVec, soaLengthArr,
-                  derivedEnd1, derivedEnd2, derivedZVec,
-                  derivedYVecOrtho, derivedTransXTox,
-                  counts);
+        // P2 reduction (2026-06-08): the per-step kernel writes only the
+        // yVec re-orthog (load-bearing for next step's joints/chain/
+        // motorForce/move). The five derived* device buffers have no GPU
+        // consumer in the chained graph; host-side end1/end2/transXTox come
+        // from Thing.recomputeDerivedSoA at output cadence. Diag paths that
+        // demand-sync derived* for kernel-vs-CPU validation (DIAG_DUMP_JOINTS,
+        // DIAG_DUMP_CHAIN, BOA_PHASE4_DERIVED_CP*) keep the full kernel so
+        // the device-resident derived* values stay populated for comparison.
+        boolean diagDerivedFull = (DIAG_DUMP_JOINTS_STEP >= 0
+                                || DIAG_DUMP_CHAIN_STEP >= 0
+                                || DERIVED_CP_STEP >= 0
+                                || DERIVED_CP_START >= 0);
+        if (diagDerivedFull) {
+            tg = tg.task("derived",
+                      GPUMoveThing::derivedFieldsKernel,
+                      coord, uVec, yVec, soaLengthArr,
+                      derivedEnd1, derivedEnd2, derivedZVec,
+                      derivedYVecOrtho, derivedTransXTox,
+                      counts);
+        } else {
+            tg = tg.task("derived",
+                      GPUMoveThing::yVecOrthoKernel,
+                      uVec, yVec, counts);
+        }
 
         // Phase 4 flip — transferToHost split by demand:
         //   EVERY_EXECUTION (still per-step; small):
@@ -3132,11 +3197,21 @@ public class GPUMoveThing {
             }
             // Phase 4.5 small-fix Step 2 — soaLengthArr also persists on device
             // so the bind ITG can consumeFromDevice it.
-            tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
-                                   coord, uVec, yVec,
-                                   soaLengthArr,
-                                   derivedEnd1, derivedEnd2, derivedZVec,
-                                   derivedYVecOrtho, derivedTransXTox);
+            // P2 reduction (2026-06-08): the slim per-step kernel does not
+            // write derived* buffers, so they're omitted from UNDER_DEMAND
+            // pull on the production path. Host-side end1/end2/transXTox are
+            // produced by Thing.recomputeDerivedSoA at output cadence.
+            if (diagDerivedFull) {
+                tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
+                                       coord, uVec, yVec,
+                                       soaLengthArr,
+                                       derivedEnd1, derivedEnd2, derivedZVec,
+                                       derivedYVecOrtho, derivedTransXTox);
+            } else {
+                tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
+                                       coord, uVec, yVec,
+                                       soaLengthArr);
+            }
         }
 
         // Step 3 — single-graph bind outputs: boundSegId + arcOnFilDev land
