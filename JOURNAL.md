@@ -1,8 +1,83 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-07 (Step 3 — single unified graph landed on branch)
+Last updated: 2026-06-07 (Step 4 — pose-pull reduction; bind-lag filed as deferred)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-07 — Step 4: reduce per-step pose pull to output cadence (branch only)
+
+Branch `probe/scatter-resident` (base `e24e2e1`, Step 3 hash record).
+B1 reader audit found that every per-step host `soaCoord/UVec/YVec`
+consumer between `demandSyncPoseToHost()` and the next `moveThings()`
+is either gated off on the GPU path (FilSegment.step chain/boundary,
+MyoFilLink.step deviceMotor gate), reads scalars not pose
+(stericHindrance reads end{1,2}TipC), reads stale-tolerable Pt3D
+mirrors at output cadence (mesh fill, xLink-phase node interactions),
+or is a dead write (OP_PACK_FULL pose writes into FIRST_EXECUTION
+buffers that never re-upload). The ONE genuine per-step reader is
+biochem `incCoord(±halfmono/2, uVecAsPt3D())` (RELATIVE write that
+needs fresh host baseline); FilSegment.splitSegment.setCoord and
+Thing.removeThing swap-compaction have the same dependency.
+
+**B2/B3 implementation**: one-line gate in `GPUMoveThing.moveThings`
+— skip the per-step pull when `Env.noMonomersSimd.isActive()`
+(production gliding configs). Biochem-active configs (boxSpaghetti,
+future high-churn) keep per-step demand-sync; their retire is a
+clean follow-on (port biochem to apply RELATIVE deltas device-side
+via the existing scatter pipeline, or per-Thing on-demand pull).
+
+**Latent bug caught**: `ThreeJSWriter.writeFrame()` early-returns
+when no `-3js` dir and no `LiveFrameServer` is running, skipping
+`buildFrameJson()` and the `refreshHostMirrorsForOutput()` inside
+it. Pre-Step-4 the per-step demand-sync masked this; with the
+per-step pull retired the `GlidingAssayEvaluator.outputInterval`
+saw stale soaCoord → gv collapsed to 2.95 vs 8.08. Fix: refresh
+BEFORE the writeFrame early-return. Defensive refresh also added
+in `FileOps.writeSimJSons{,2}Frame()` for parity.
+
+**Gates** (all PASS):
+- **B4 N=4 paired ensemble** vs Step 3 SG: bindEvents `t=-0.28`
+  (mean Δ=-10.5, sd=74.4); gv `t=-0.17` (mean Δ=-0.044, sd=0.516).
+  Both `|t|<0.3` — much tighter than Step 3's borderline `|t|≈2`
+  shift, confirming the Step 4 mechanic adds no new lag.
+  `poseDelta sum=20`, `max=2`, `overflow=0`, `planRebuild=1`
+  across all seeds; `filSegInitFireCt=21` baseline-stable
+  (biochem-side initialisation unchanged).
+- **B4 dense smoke** (`glidingDense_demo_smoke`, seed=1, slotCap
+  588204): `demandSyncPose` 4.62 s / 1101 calls → **0.389 s / 3
+  calls (-99.7%)**; `gpuMoveThing total` 54.88 s → 49.77 s
+  (-5.11 s); `unpack` 7.77 s → 3.01 s (-4.76 s, the retired
+  demand-sync share); bindEvents 1907 vs 1819 (within noise);
+  poseDelta/planRebuild stable; **no OOM**.
+- **Per-step demand-sync reduction (smoke)**: 14.285 s / 10101
+  calls → 0.340 s / 102 calls. 102 = 10101/toFileInterval(100) + 1
+  = output cadence. Per-run smoke wall saving ~14 s.
+
+`stericHindrance{End1,End2}` is structurally untouched — reads
+`end{1,2}TipC` SCALARS (boundary-kernel-bridge-maintained), not
+pose. In `noMonomersSimd` configs the biochem gate (FilSegment.
+biochemStep line 529) prevents the entire poly/depoly path from
+firing, so stericHindrance is not even consulted; in biochem-active
+configs the per-step demand-sync stays on so the (uVec) read in
+`incCoord(halfmono/2, uVecAsPt3D())` sees fresh pose.
+
+Step 3's borderline bind-lag shift (filed as deferred above) is
+unaffected by Step 4 — the single-graph bind kernel still reads
+device-resident pose at the same point in the chained graph.
+
+Commits: code+docs+logs `TBD`; hash-record commit `TBD`. Branch
+only; jba reviews before merge.
+
+## 2026-06-07 — 1-step bind-lag (Step-3 fold) filed as deferred
+
+The Step-3 single-graph N=4 paired-t showed bindEvents `t=+2.08` and gv
+`t=+2.04` vs Step 2 (both past `|t|<1`, inconclusive at N=4 — borderline
+pass). Likely cause: the single graph reads pose one integration step
+more advanced than the legacy two-plan path (bind on the far side of
+the move task inside one execute). Filed verbatim in
+`MYOSIN_VALIDATION.md` (§"1-step bind lag (single-graph fold)") as a
+deferred investigation item — not blocking (gv shift in-band). Revisit
+alongside the float32 binding systematic.
 
 ## 2026-06-07 — Step 3: single unified graph (branch only)
 

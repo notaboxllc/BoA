@@ -4968,29 +4968,40 @@ public class GPUMoveThing {
         }
 
         // Phase 4 flip — demand-sync coord/uVec/yVec from device → host and
-        // unpack to Thing.soaCoord/UVec/YVec. Replaces the old OP_UNPACK in
-        // the same logical position (post-execute) so downstream CPU phases
-        // — biochem (which gates poly/depoly on stericHindrance and reads
-        // uVecAsPt3D for the bond direction), the cleanup phase, the
-        // output-frame writers — all see this step's freshly-integrated
-        // pose, identical to the pre-flip OP_UNPACK behaviour.
+        // unpack to Thing.soaCoord/UVec/YVec. Step 4 (2026-06-07) — gated on
+        // whether biochem MIGHT mutate host pose this run. The B1 audit
+        // showed every per-step host pose reader between this point and the
+        // next moveThings is either (a) gated off on the GPU path
+        // (FilSegment.step's chain/boundary, MyoFilLink.step for device-
+        // handled motors), (b) reads scalars not pose (stericHindrance reads
+        // end{1,2}TipC which the boundary kernel bridge maintains), (c)
+        // reads stale-tolerable Pt3D mirrors that are already at output
+        // cadence (mesh fill, xLink-phase node interactions), or (d) is
+        // a dead write (OP_PACK_FULL's pose writes into FIRST_EXECUTION
+        // buffers that never re-upload). The one path that genuinely needs
+        // fresh host pose per step is biochem incCoord/splitSegment, which
+        // performs RELATIVE writes — stale baseline would clobber device
+        // pose on the next delta-scatter. That path is gated on
+        // !Env.noMonomersSimd.isActive() inside FilSegment.biochemStep, so
+        // we mirror the gate here: skip the device→host pull when biochem
+        // is off (production gliding configs), keep it otherwise.
         //
-        // The savings vs OP_UNPACK come from the input side (transferToDevice
-        // is now FIRST_EXECUTION instead of EVERY_EXECUTION for the same
-        // buffers), not from this download. The download is functionally
-        // unchanged — it is the demand-sync API path that lets us
-        // selectively turn it OFF for other UNDER_DEMAND buffers (derived*
-        // are output-frame-only) and lets future Phase 4.5 work consume the
-        // resident pose from a sibling task-graph without bringing it back
-        // to the host.
+        // Output-frame readers (ThreeJSWriter / inspect / GlidingAssay-
+        // Evaluator.outputInterval) still see fresh pose because
+        // refreshHostMirrorsForOutput() — called from each output writer
+        // — itself calls demandSyncPoseToHost() unconditionally.
         if (sc > 0) {
             if (DIAG_CPU_DELTA_ADD) {
                 // executeSplit's moveOnlyPlan has transferToHost
                 // EVERY_EXECUTION for coord/uVec/yVec already — just scatter.
                 dispatchAndWait(OP_UNPACK, sc);
-            } else {
+            } else if (!Env.noMonomersSimd.isActive()) {
                 demandSyncPoseToHost();
             }
+            // else: per-step pull retired; output cadence handled via
+            // refreshHostMirrorsForOutput. Host soaCoord/UVec/YVec stay
+            // stale between frames but no per-step CPU reader depends on
+            // them in noMonomersSimd configs (B1 audit, Step 4 writeup).
         }
 
         // For CPU-fallback Things (gpuHandled == false), their moveThing()

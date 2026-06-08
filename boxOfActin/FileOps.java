@@ -796,8 +796,12 @@ public class FileOps {
 	
 	public static void writeSimJSonsFrame () {
 		//System.out.print("Writing JSonFile frame" + (simJSonCounter+1) + "/" + simJSonSteps + " ...");
+		// Step 4 (2026-06-07) — per-step demand-sync is now gated off in
+		// noMonomersSimd configs; refresh host pose at output cadence so
+		// per-Thing getJSonString readers see fresh coord/uVec/yVec.
+		if (Env.useGPU) { GPUMoveThing.refreshHostMirrorsForOutput(); }
 		idCt = 0;
-		String openFrameStr = "{ \"frameNumber\" : "+simJSonCounter+",\"time\" : "+String.format("%.4f",Env.simulationTime)+",\"data\" : ["; 
+		String openFrameStr = "{ \"frameNumber\" : "+simJSonCounter+",\"time\" : "+String.format("%.4f",Env.simulationTime)+",\"data\" : [";
 		String closeFrameStr = "]}";
 		jSonPW.print(openFrameStr);
 
@@ -829,6 +833,8 @@ public class FileOps {
 	
 	public static void writeSimJSonsFrame2 () {
 		if (simJSon2Counter > simJSon2Steps) { return; }  // failsafe
+		// Step 4 (2026-06-07) — see writeSimJSonsFrame() comment.
+		if (Env.useGPU) { GPUMoveThing.refreshHostMirrorsForOutput(); }
 		idCt = 0;
 		String openFrameStr = "{ \"frameNumber\" : "+simJSon2Counter+",\"time\" : "+String.format("%.4f",Env.simulationTime)+",\"data\" : ["; 
 		String closeFrameStr = "]}";

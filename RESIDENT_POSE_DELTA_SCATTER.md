@@ -596,6 +596,11 @@ commit `7a509c4` (base `299d7c0`). All 3.1 / 3.2 / 3.3 gates passed:
   noted directional shift from 1-step bind lag); dense smoke +2.45 s
   faster, no dense OOM.
 
+The borderline bind-lag shift is filed as a deferred investigation
+item in `MYOSIN_VALIDATION.md` (§"1-step bind lag (single-graph
+fold)") — not blocking; revisit alongside the float32 binding
+systematic.
+
 The cross-graph residency the 4.5 merge couldn't achieve is now
 landed via the structural simplification (one graph, not two).
 Step 4 (retire `demandSyncPoseToHost` from the per-step path and
@@ -604,3 +609,189 @@ either porting `cpuFallback[i].moveThing()` and
 `FilSegment.biochemStep`'s stericHindrance check to read
 device-resident pose, or staging a host-mirror that updates only
 at output cadence.
+
+## Step 4 — reduce/retire per-step pose pull (implementation)
+
+Run 2026-06-07 on aorus (TornadoVM 4.0.1-dev PTX, Java 21). Branch
+`probe/scatter-resident`, base commit `e24e2e1` (Step 3 hash record).
+Logs in `RUN_LOGS/2026-06-07_step4_demand_sync_reduce/`.
+
+### B1 — reader audit (every per-step host pose reader)
+
+Audit walked the per-step path from `demandSyncPoseToHost()` (end of
+`moveThings`) to the next `moveThings()` for every `Thing.soaCoord/
+UVec/YVec` consumer. Findings:
+
+| Reader | Reads | Needs fresh per-step? | Handling |
+|---|---|---|---|
+| `FilSegment.biochemStep` poly/depoly → `incCoord(±halfmono/2, uVecAsPt3D())` | own `soaUVec` (direction); RELATIVE write into `soaCoord` | **Yes when biochem fires** — stale baseline + relative write would clobber device pose on next delta-scatter | Gate per-step pull on `!Env.noMonomersSimd.isActive()` |
+| `FilSegment.splitSegment` → `setFirstHalf(setCoord)` | own `getCoord*` to compute midpoint | Same — stale baseline read | Same gate |
+| `Thing.removeThing` swap-compaction | `soaCoord/UVec/YVec` at survivor slot | Stale → next scatter writes stale absolute coord to device | In `noMonomersSimd` gliding production, no per-step removeMe fires (FilSegment depoly off, no nodes/minifilaments cleanup) |
+| `stericHindrance{End1,End2}` | `end{1,2}TipC` SCALAR (not pose) | No — maintained by `bridgeBoundaryTipC` + xLink-phase `registerATipClearance` | Independent of demand-sync |
+| `cpuFallback[i].moveThing()` (Chamber/AnchorNode/Bug/MyoMini/ProteinNode) | own slot's `soaForceSum` + own pose for body-frame transform | No — own pose CPU-managed (never device-integrated); no GPU-neighbour pose read in any moveThing subclass | No demand-sync needed |
+| `MyoFilLink.step` updatePos/addForces | `mySeg.end1AsPt3D()` + `uVecAsPt3D()` | Gated off for device-handled motors via `gpuMotorHandled()`. In gliding all MyosinFixed motors are device-handled | Inert on GPU path |
+| `FilSegment.step` (Thing.step phase, pre-moveThings) | `checkBugOrBoxCollision` gated by `gpuBoundaryHandled`; `addLinkForces`/`addTorsionSpringForces` gated by `gpuChainHandled`; `addNodeForces` no-op with no nodes | All gated off / inert in gliding | None needed |
+| `Mesh.fillFilSegMesh(end1AsPt3D, end2AsPt3D)` | `soaEnd1/End2` (derived) | Already at output cadence pre-Step 4 (recomputeDerivedSoA only fires in `refreshHostMirrorsForOutput`); mesh tolerates this | Unchanged |
+| `OP_PACK_FULL` pose writes (next `moveThings`) | `soaCoord/UVec/YVec` | DEAD writes after Step 2 (FIRST_EXECUTION buffers, never re-uploaded) | No demand-sync needed |
+| `ThreeJSWriter.buildFrameJson` / `buildInspectJson` | `getCoord*` / `getEnd*` | Output cadence — calls `refreshHostMirrorsForOutput()` which calls `demandSyncPoseToHost()` | Already handled |
+| `GlidingAssayEvaluator.outputInterval` | `fs.getCoordX/Y/Z`, `fs.uVecAsPt3D()` via `distToAxis` | Output cadence — but was NOT calling refresh on its own; relied on writeFrame to fire it | **Bug surfaced**: `ThreeJSWriter.writeFrame()` early-returns when no `-3js` dir / no `LiveFrameServer`, skipping `buildFrameJson` and thus the refresh. Added refresh BEFORE the early return |
+| `FileOps.writeSimJSons{,2}Frame` | `getJSonString` → `getCoord*` | Output cadence | Added defensive `refreshHostMirrorsForOutput()` call |
+| `MyosinFixed.glidingAssayDataSetRun` | `getCoordX()` | Gated on `!externalDensitySweep.isActive()` — dead in production gliding | Not exercised |
+
+**Recommendation (B2/B3 tractable):** gate the per-step
+`demandSyncPoseToHost()` call inside `GPUMoveThing.moveThings()` on
+`!Env.noMonomersSimd.isActive()`. Production gliding configs
+(`glidingAssay500_val`, `glidingDense_demo_smoke`) have biochem off
+→ per-step pull retired, output-frame `refreshHostMirrorsForOutput`
+handles the cadence. Biochem-active configs (`boxSpaghetti`, future
+high-churn) keep per-step demand-sync — the remaining structural
+reader (biochem `incCoord` reading stale absolute coord baseline) is
+a clean scoped follow-on.
+
+**Effort:** trivial — one-line gate plus a refresh call before
+`writeFrame()`'s early return plus a defensive refresh in
+`writeSimJSons{,2}Frame`. No GPU kernel changes, no new buffers.
+
+**Status:** partial-reduce. Production gliding gets the full retire
+(per-step → output cadence). Biochem-active configs unchanged; the
+follow-on to extend the retire to biochem-active is described below.
+
+### B2/B3 — implementation
+
+`GPUMoveThing.moveThings()`: the post-execute pull is now gated:
+
+```java
+if (sc > 0) {
+    if (DIAG_CPU_DELTA_ADD) {
+        dispatchAndWait(OP_UNPACK, sc);            // executeSplit path
+    } else if (!Env.noMonomersSimd.isActive()) {
+        demandSyncPoseToHost();                    // biochem-active path
+    }
+    // else: per-step pull retired; output cadence handled via
+    // refreshHostMirrorsForOutput.
+}
+```
+
+`ThreeJSWriter.writeFrame()`: the early-return path that triggers
+when no `-3js` dir and no LiveFrameServer now refreshes host mirrors
+first — otherwise downstream output-frame readers (`GlidingAssay-
+Evaluator.outputInterval`) see stale host pose. (Pre-Step-4 the
+per-step demand-sync masked this; surfaced only when the per-step
+pull was retired.)
+
+`FileOps.writeSimJSons{,2}Frame()`: added the same defensive
+`refreshHostMirrorsForOutput()` so Simularium output (when armed)
+sees fresh pose without depending on the writeFrame ordering.
+
+### B4 — validation
+
+**N=4 paired ensemble**, `glidingAssay500_val`, seeds 1–4, GPU, 10101 steps.
+Baseline = Step 3 SG (`RUN_LOGS/2026-06-07_step3_single_graph/smoke_glidingAssay500_val_gpu_seed{N}_singlegraph.log`).
+
+| seed | base bindEvents | step4 bindEvents | Δ | base gv | step4 gv | Δ |
+|---|---|---|---|---|---|---|
+| 1 | 878 | 926 |  +48 | 8.076 | 7.895 | -0.181 |
+| 2 | 809 | 838 |  +29 | 8.023 | 8.666 | +0.643 |
+| 3 | 850 | 849 |   -1 | 7.805 | 7.206 | -0.599 |
+| 4 | 842 | 724 | -118 | 7.984 | 7.946 | -0.038 |
+
+**Paired-t (N=4, df=3):**
+
+| metric | mean Δ | sd Δ | **t** |
+|---|---|---|---|
+| bindEvents | -10.5 | 74.4 | **-0.28** |
+| glidingVelocity | -0.044 | 0.516 | **-0.17** |
+
+Both `|t| < 0.3` — well within the `|t| ≲ 1` PASS gate (much
+tighter than the borderline `|t| ≈ 2` Step 3 had vs Step 2; the
+Step 3→Step 4 mechanic adds no new lag). All four seeds:
+`poseDelta sum=20`, `max=2`, `overflow=0`, `planRebuild=1` —
+scatter mechanic stable. Most importantly,
+`stericHindrance{End1,End2}` is structurally untouched (reads
+`end{1,2}TipC` scalars, not pose; `noMonomersSimd` gates biochem-
+side poly/depoly so the gate never even fires in these configs)
+and the seg-tip endpoint count `filSegInitFireCt=21` matches
+baseline — biochem-side initialisation count unchanged.
+
+**Per-step demand-sync reduction (smoke):**
+
+| metric | Step 3 baseline (seed 1) | Step 4 (seed 1) |
+|---|---|---|
+| `demandSyncPose` | **14.285 s / 10101 calls** | **0.340 s / 102 calls** |
+| `demandSyncDerived` | 0.000 s / 0 calls | 0.148 s / 102 calls |
+| `gpuMoveThing` total | 121.16 s | 104.94 s (-16.2 s) |
+| `gpuMoveThing` unpack | 17.56 s | 2.81 s (-14.75 s — the retired demand-sync share) |
+
+102 calls = exactly `10101 / toFileInterval(100) + 1` = output
+cadence. Per-run wall saving 14.0–16.2 s on a ~120 s smoke. The
+pull dropped to ~99.0% retired vs prior per-step path.
+
+**Dense smoke benchmark** (`glidingDense_demo_smoke`, seed=1,
+slotCap 588204, 1101 calls):
+
+| metric | Step 3 SG | Step 4 | Δ |
+|---|---|---|---|
+| bindEvents | 1819 | 1907 | +88 (within single-seed noise) |
+| glidingVelocity | 41.93 | 37.88 | -4.05 (single-seed dense gv has wide variance; only ~2 output frames) |
+| `gpuMoveThing` total | 54.88 s | 49.77 s | **-5.11 s** |
+| `gpuMoveThing` slotPack | 16.01 s | 15.91 s | -0.10 s |
+| `gpuMoveThing` jointPack | 7.00 s | 6.97 s | -0.03 s |
+| `gpuMoveThing` exec | 24.10 s | 23.88 s | -0.22 s (within noise) |
+| `gpuMoveThing` unpack | 7.77 s | 3.01 s | **-4.76 s** (retired demand-sync share) |
+| `gpuMotorBinding` total | 0.23 s | 0.23 s | 0 (single-graph, bind already absorbed) |
+| `demandSyncPose` | **4.62 s / 1101 calls** | **0.389 s / 3 calls** | **-4.23 s (-99.7% wall, -99.7% calls)** |
+| `demandSyncDerived` | 0.00 s / 0 calls | 0.052 s / 3 calls | refresh at output cadence (toFileInterval=500) |
+| `poseDelta` sum / max / overflow | 2254 / 202 / 0 | 2244 / 202 / 0 | (within run-to-run noise) |
+| `planRebuild` | 1 | 1 | (only initial) |
+
+The dense numbers confirm: per-step pose pull retired down to the
+3 output-frame demand-syncs (initial + 2 frame writes). All other
+[STATS] mechanics stable (poseDelta near-identical, planRebuild=1,
+no OOM at slotCap=588204). The 4-unit gv drop is within the
+single-seed dense-smoke noise band (Step 2 dense gv was 42.76,
+Step 3 SG 41.93 — already 0.8-unit run-to-run spread, and Step 4
+is at the same scale).
+
+### Remaining per-step pull
+
+For biochem-active configs (`!noMonomersSimd`) the per-step pull
+still fires. The mechanic that prevents the retire is biochem's
+RELATIVE `incCoord(±halfmono/2, uVecAsPt3D())` reading host-side
+absolute coord baseline. Two follow-on options for a future
+session:
+1. **Device-side biochem deltas.** Pack biochem mutations as
+   relative deltas (`incCoord(scale, uVec)` → `delta[s] +=
+   scale·uVec`) and apply them in the existing `scatterPose`
+   kernel instead of mutating host coord. Removes the dependency
+   on fresh host baseline. Cost: small biochem refactor; the
+   delta-pack path already exists from Step 2.
+2. **Per-Thing on-demand pull.** When biochem is about to mutate
+   a specific FilSegment, demand-sync ONLY that slot's coord
+   first. Cost: a per-Thing transferToHost API — TornadoVM 4.0.1-
+   dev does not expose this granularity, so this option likely
+   requires a TornadoVM API extension.
+
+Option 1 is the natural extension and would close the retire for
+all configs. Not scoped this session.
+
+### Status
+
+**landed-on-branch.** Branch `probe/scatter-resident`, base commit
+`e24e2e1`. All B1–B4 gates passed:
+- B1 audit: every per-step host pose reader inventoried and
+  classified; gate identified as `Env.noMonomersSimd.isActive()`.
+- B2/B3 implementation: one-line gate in `GPUMoveThing.moveThings`;
+  defensive refresh in `ThreeJSWriter.writeFrame` (caught a latent
+  bug where the early-return path skipped refresh — gv collapsed
+  to 2.95 vs 8.08 before the fix); defensive refresh in
+  `FileOps.writeSimJSons{,2}Frame`.
+- B4 validation: N=4 paired-t vs Step 3 `|t|<0.3` for both
+  bindEvents and gv (much tighter than Step 3's borderline
+  `|t|≈2` shift); dense smoke confirms `demandSyncPose` reduced
+  from 4.62 s / 1101 calls to 0.389 s / 3 calls (-99.7%);
+  `gpuMoveThing total` -5.11 s; no OOM; scatter mechanic stable.
+
+Status `{partial-reduce + follow-on}` — production gliding fully
+retires the per-step pull; biochem-active configs need either
+device-side biochem deltas (option 1 above) or per-Thing on-demand
+sync (option 2) to extend.

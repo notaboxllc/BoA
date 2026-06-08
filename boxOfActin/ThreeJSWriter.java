@@ -238,7 +238,16 @@ public class ThreeJSWriter {
      */
     public static void writeFrame() {
         // Skip expensive JSON build when there is no consumer (no -3js dir, no live WebSocket).
-        if (Env.threeJSOutputDir == null && !LiveFrameServer.isRunning()) { frameNumber++; return; }
+        // Step 4 (2026-06-07) — even when JSON build is skipped, the
+        // per-step demand-sync is now gated off in noMonomersSimd configs,
+        // so output-frame readers further down logAndDraw (notably
+        // GlidingAssayEvaluator.outputInterval) need a refresh here. Cheap
+        // when no GPU run.
+        if (Env.threeJSOutputDir == null && !LiveFrameServer.isRunning()) {
+            if (Env.useGPU) { GPUMoveThing.refreshHostMirrorsForOutput(); }
+            frameNumber++;
+            return;
+        }
 
         String json = buildFrameJson();
 

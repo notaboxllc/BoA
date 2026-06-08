@@ -257,6 +257,19 @@ the new release law would also need to apply to the existing tracker (or the
 new law would replace it). Any future principled rewrite of the release-rate
 law should subsume both code paths simultaneously.
 
+## 1-step bind lag (single-graph fold) — observed, deferred for investigation
+
+Step 3 (single unified graph) showed a borderline systematic shift vs the legacy two-plan path:
+bindEvents t=+2.08, gv t=+2.04 (N=4, glidingAssay500_val), both uniform-positive, past the
+|t|<1 gate (inconclusive at N=4). Likely cause: in the single graph the bind task reads pose one
+integration step more advanced than the legacy two-plan path (bind on the far side of the move
+task), so motors that moved a step closer bind slightly more often — positive in both binding
+and velocity. To investigate: A/B the bind-task ordering against the legacy arm
+(BOA_SINGLE_GRAPH=0); if reordering so the bind reads pose at the legacy point (pre-move) pulls
+t back under 1, fix it; if the single graph can't reproduce the cross-plan timing, document as a
+deliberate phase choice (binding is an approximate scheme; gv stays in the published band).
+Not blocking — gv shift is small and in-band. Revisit alongside the float32 binding systematic.
+
 ## float32 binding systematic (CPU-double vs GPU-float32) — observed, deferred
 
 Observation (Phase 4.5, seeds 1–4): the resident GPU bind path produces ~+22% bindEvents
