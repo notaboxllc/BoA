@@ -1,0 +1,5 @@
+[15:30] allchanges rep1 rc=0 bind=8037 mean=758.266 vel=52.5489
+[15:31] allchanges rep2 rc=0 bind=7908 mean=727.774 vel=53.4141
+[15:33] allchanges rep3 rc=0 bind=7092 mean=692.765 vel=53.2761
+[15:34] allchanges rep4 rc=0 bind=8416 mean=793.321 vel=52.8296
+[15:36] allchanges rep5 rc=0 bind=7690 mean=741.982 vel=52.6271

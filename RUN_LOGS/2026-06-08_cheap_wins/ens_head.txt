@@ -1,0 +1,5 @@
+[15:11] head rep1 rc=0 bind=6525 mean=635.331 vel=51.1853
+[15:15] head rep2 rc=0 bind=7729 mean=711.536 vel=52.3745
+[15:19] head rep3 rc=0 bind=8633 mean=803.092 vel=54.4473
+[15:22] head rep4 rc=0 bind=7838 mean=744.962 vel=52.0717
+[15:26] head rep5 rc=0 bind=7483 mean=727.850 vel=53.4960

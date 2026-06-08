@@ -1,0 +1,5 @@
+[14:49] baseline rep1 rc=0 bind=8501 mean=777.451 vel=54.3774
+[14:52] baseline rep2 rc=0 bind=8482 mean=827.882 vel=54.1871
+[14:56] baseline rep3 rc=0 bind=8201 mean=790.955 vel=53.2524
+[15:00] baseline rep4 rc=0 bind=8055 mean=770.702 vel=54.9377
+[15:03] baseline rep5 rc=0 bind=8698 mean=815.245 vel=53.6050

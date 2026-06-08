@@ -1,0 +1,5 @@
+[14:39] changes rep1 rc=0 bind=7734 mean=737.379 vel=51.8419
+[14:40] changes rep2 rc=0 bind=7997 mean=752.940 vel=52.2670
+[14:42] changes rep3 rc=0 bind=8175 mean=773.784 vel=51.8913
+[14:43] changes rep4 rc=0 bind=7205 mean=706.892 vel=51.1976
+[14:45] changes rep5 rc=0 bind=7599 mean=712.844 vel=52.5464

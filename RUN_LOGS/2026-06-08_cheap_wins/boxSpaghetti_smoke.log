@@ -1,0 +1,86 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_cheap_wins/boxSpaghetti_smoke.pf...
+     Parameter assigned: deltaT set to 1.0E-4
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.05
+     Parameter assigned: fracMove set to 0.4
+     Parameter assigned: fracR set to 0.134
+     Parameter assigned: fracMoveTorq set to 0.013685
+     Parameter assigned: drawInterval set to 100
+     Parameter assigned: toFileInterval set to 200
+     Parameter assigned: remoteWriteInterval set to 100000
+     Parameter assigned: bugShapedCrucible set to false
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: boxXDim set to 0.6
+     Parameter assigned: boxYDim set to 0.6
+     Parameter assigned: boxZDim set to 0.4
+     Parameter assigned: initialFilaments set to 6
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: minFilLength set to 0.05
+     Parameter assigned: maxFilLength set to 0.15
+     Parameter assigned: stdDevActinDist set to 0.3
+     Parameter assigned: actinConc set to 50.0
+     Parameter assigned: actinConcNonHydro set to 0.0
+     Parameter assigned: aeta set to 1.0
+     Parameter assigned: capConc set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: nodeZone set to 0.9
+     Parameter assigned: nodeRadius set to 0.025
+     Parameter assigned: forminsPerNode set to 0
+     No match found for parameter label myosPerNode ... you best check that out!
+     Parameter assigned: actinSeed set to 3
+     Parameter assigned: actinOnCortex set to true
+Done... there were 1 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 4; xBinWidth = 0.2 µm
+nYBins = 4; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 4 x 4 x 3 cells (0.2 µm each)
+[13:58] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[13:58]   ON   ThingStep Threads
+[13:58]   ON   ThingBrownian Threads
+[13:58]   ON   Myosin Threads
+[13:58]   OFF  MyoDimer Threads
+[13:58]   OFF  Protein Node Threads
+[13:58]   OFF  MyoMiniFil Threads
+[13:58]   OFF  Chamber Myo Threads
+[13:58]   OFF  Chamber MyoDimer Threads
+[13:58]   ON   Mesh Threads
+[13:58]   ON   Ck Mesh Threads
+[13:58]   ON   Ck Mots Threads
+[13:58]   OFF  XLink Threads
+[13:58]   OFF  Arp23 Threads
+[13:58]   OFF  NodeLink Threads
+[13:58]   OFF  Membrane Node Threads
+[13:58]   OFF  ActA Threads
+[13:58]   ON   MotorBindGrid3D Fill
+[13:58] [phase-plan] 7 active, 10 inert (will skip dispatch)
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=0.6 cumMaxPerThread=1
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+Exception in thread "Thread-256" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.BoxOfActin.doLoop(BoxOfActin.java:1773)
+	at boxOfActin.BoxOfActin$TimeLoop.run(BoxOfActin.java:851)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 2 more
