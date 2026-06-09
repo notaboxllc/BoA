@@ -115,8 +115,10 @@ public class MyoRod extends Thing {
 		// the body-fixed angular velocities can just be transformed into fixed-frame velocities, and the coordAsPt3D() updated
 		veloc.xToX(this, bVeloc);
 		incCoord(Env.deltaT.getValue(),veloc);  // just position = velocity*time
-		
-		Pt3D scratch = new Pt3D();
+
+		// Per-worker reused scratch (Pt3D SoA inc 0b sub-(a)) — each setVals
+		// below is a full write, so no carryover from prior moveThing call.
+		Pt3D scratch = currentScratch().moveScratch;
 		double uVecTransInZ = -bAngVeloc.y * Env.deltaT.getValue();
 		double uVecTransInY = bAngVeloc.z * Env.deltaT.getValue();
 		scratch.setVals(1, uVecTransInY, uVecTransInZ);

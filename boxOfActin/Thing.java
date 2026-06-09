@@ -184,6 +184,13 @@ public class Thing extends Object {
 		// pattern as retObj — written by amICollidingOuter/Inner/FromOutside,
 		// read by the immediate next caller block.
 		final CollisionEvent cE = new CollisionEvent();
+		// Per-worker move scratch — reused by MyoRod/MyoLever/MyoMotor.moveThing
+		// to hold the unrotated body-frame {1,uy,uz} / {yx,1,yz} triple before
+		// xToX/unitVec/setUVec/setYVec. Each use begins with a full setVals(...)
+		// call (write-before-read), so no carryover. Pt3D SoA migration
+		// increment 0b sub-(a) — these used to be `new Pt3D()` per call,
+		// 1.18 M/step at 4× config.
+		final Pt3D moveScratch = new Pt3D();
 	}
 
 	static final WorkerScratch[] workerScratch;
