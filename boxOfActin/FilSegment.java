@@ -657,10 +657,10 @@ public class FilSegment extends Thing {
 		initialize();
 	}
 
-	public void calcRandomForces () {  // override Thing.calRandomForces to account for sync'd brownian motion and to avoid wasting calculation of independent values
+	public void calcRandomForces (WorkerScratch ws) {  // override Thing.calRandomForces to account for sync'd brownian motion and to avoid wasting calculation of independent values
 		if (isLpSeg && Env.lpActive.getValue() == 0) return;
 		if (motherFil == null) {
-			super.calcRandomForces();
+			super.calcRandomForces(ws);
 			if (arpChildCt > 0) {	// if this filSegment has branches that will ~share brownian motion then store this once
 				randForcesInX.xToX(this,randForces);
 				randTorquesInX.xToX(this,randTorques);

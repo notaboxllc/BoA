@@ -146,8 +146,8 @@ public class Bug extends Crucible {
 		StepProfiler.add(StepProfiler.FX_BUG_DRAG_TENSOR, _spT);
 	}
 	
-	public void calcRandomForces () {  // override Thing.calRandomForces to share bug random forces/torques with small attached filaments
-		super.calcRandomForces();
+	public void calcRandomForces (WorkerScratch ws) {  // override Thing.calRandomForces to share bug random forces/torques with small attached filaments
+		super.calcRandomForces(ws);
 		randForcesInX.xToX(this,randForces);
 		randTorquesInX.xToX(this,randTorques);
 	}

@@ -138,17 +138,13 @@ public class Thing extends Object {
 	UCircRnd xVals = new UCircRnd(Env.deltaT.getValue());
 	UCircRnd yVals = new UCircRnd(Env.deltaT.getValue());
 	UCircRnd zVals = new UCircRnd(Env.deltaT.getValue());
-	Pt3D v1 = new Pt3D();
-	Pt3D v2 = new Pt3D();
-	Pt3D rsq = new Pt3D();
-	Pt3D facterm =new Pt3D();
-	Pt3D fac1 = new Pt3D();
-	Pt3D fac2 = new Pt3D();
-	Pt3D tempPt = new Pt3D();
-	
-	// reused in torque calculations
-	Pt3D rForce = new Pt3D();
-	Pt3D tempTorq = new Pt3D();
+	// Per-Thing Brownian/torque/friction scratch (v1,v2,rsq,facterm,fac1,fac2,tempPt,
+	// rForce,tempTorq) used to be Pt3D fields here — 9 Pt3D × Thing.thingCt of
+	// retained scratch with no semantics surface. Pt3D SoA migration increment 0a
+	// moves them to per-worker-thread WorkerScratch instances looked up by the
+	// integer in tlsThreadId. Brownian path (the hot one) passes WorkerScratch
+	// down as a parameter (one array load per worker, not per Thing) — see
+	// ThingBrownianThreads.execute and calcRandomForces(WorkerScratch).
 	
 	static DecimalFormat expFormat = new DecimalFormat ("0.000E0");
 	
@@ -165,6 +161,41 @@ public class Thing extends Object {
 		setYVec(0, 1, 0);
 	}
 	
+	// Per-worker scratch — owns the working memory that used to be retained as
+	// per-Thing Pt3D fields. One instance per worker thread (indexed by the
+	// integer in tlsThreadId); the last slot (accumThreadCt) is the main thread
+	// (tlsThreadId == -1). Lifetime is the JVM; allocations are O(workers), not
+	// O(Things). Sub-item (a) of Pt3D SoA increment 0a holds the 9 Brownian /
+	// torque / friction Pt3Ds; (b) adds RetObj, (c) adds CollisionEvent.
+	public static final class WorkerScratch {
+		// Brownian RNG scratch — written/read inside calcRandomForces only.
+		final Pt3D v1      = new Pt3D();
+		final Pt3D v2      = new Pt3D();
+		final Pt3D rsq     = new Pt3D();
+		final Pt3D facterm = new Pt3D();
+		final Pt3D fac1    = new Pt3D();
+		final Pt3D fac2    = new Pt3D();
+		final Pt3D tempPt  = new Pt3D();
+		// Torque/friction scratch — written/read inside incFrictionSum only.
+		final Pt3D rForce   = new Pt3D();
+		final Pt3D tempTorq = new Pt3D();
+	}
+
+	static final WorkerScratch[] workerScratch;
+	static {
+		workerScratch = new WorkerScratch[accumThreadCt + 1];
+		for (int i = 0; i < workerScratch.length; i++) workerScratch[i] = new WorkerScratch();
+	}
+	// Main thread (tlsThreadId == -1) uses the last pool slot. Worker threads
+	// use their threadId directly. Callers in the Brownian hot path should
+	// resolve once per worker and pass the WorkerScratch down — see
+	// ThingBrownianThreads.execute and brownianMotionForAll. Cooler paths
+	// (incFrictionSum, collision tests in (b)/(c)) can call currentScratch().
+	public static WorkerScratch currentScratch() {
+		final int tid = tlsThreadId.get()[0];
+		return workerScratch[tid < 0 ? accumThreadCt : tid];
+	}
+
 	public static class RetObj {
 		// this is the object passed by from line-line and line-point intersect tests
 		Pt3D conPt1, conPt2, ray1, ray2, ray3, ray4;
@@ -282,6 +313,10 @@ public class Thing extends Object {
 		public void execute (int threadId) {
 			switch (jobId) {
 				case Env.bForcesStart:
+					// Resolve worker scratch once per dispatch; pass down so
+					// calcRandomForces stays out of ThreadLocal.get() in the
+					// per-Thing inner loop (~40% of CPU per-step).
+					final WorkerScratch ws = workerScratch[threadId];
 					if (Env.useGPU) {
 						// iter2c: GPU kernel generates Brownian inline via Wang hash.
 						// Skip CPU calcRandomForces for Things flagged by
@@ -289,11 +324,11 @@ public class Thing extends Object {
 						// (Bug, branch FilSegments, etc.) still need it.
 						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
 							Thing t = theThings[i];
-							if (!t.removeMe && !t.gpuHandled) { t.calcRandomForces(); }
+							if (!t.removeMe && !t.gpuHandled) { t.calcRandomForces(ws); }
 						}
 					} else {
 						for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-							if (!theThings[i].removeMe) { theThings[i].calcRandomForces(); }
+							if (!theThings[i].removeMe) { theThings[i].calcRandomForces(ws); }
 						}
 					}
 					break;
@@ -325,20 +360,12 @@ public class Thing extends Object {
 		//bTorqueTrack = null;
 		
 		retObj = null;
-				
+
 		xVals = null;
 		yVals = null;
 		zVals = null;
-		v1 = null;
-		v2 = null;
-		rsq = null;
-		facterm = null;
-		fac1 = null;
-		fac2 = null;
-		tempPt = null;
-		
-		rForce = null;
-		tempTorq = null;
+		// v1/v2/rsq/facterm/fac1/fac2/tempPt and rForce/tempTorq are no longer
+		// per-Thing fields (moved to per-thread WorkerScratch in increment 0a).
 	}
 	
 	public void initialize(){}
@@ -841,14 +868,18 @@ public class Thing extends Object {
 	
 	public synchronized void incFrictionSum (Pt3D forceVec, Pt3D forcePt) {  // send in as body-fixed frame force, fixed-frame point!!!
 		// friction force and torque are stored and used in movePlayer as body-fixed frame forces!!!
+		// rForce/tempTorq used to be per-Thing Pt3D fields (pure scratch); they
+		// now live in WorkerScratch — one per worker, not one per Thing. Friction
+		// is dormant in gliding so the TLS lookup here is on the cold path.
+		final WorkerScratch ws = currentScratch();
 		bFricForceSum.inc(forceVec);
-		rForce.x = forcePt.x - getCoordX();
-		rForce.y = forcePt.y - getCoordY();
-		rForce.z = forcePt.z - getCoordZ();
-		rForce.scale(1e-6);	// units (from µm to m)
-		rForce.XTox(this);
-		tempTorq.cross(rForce, forceVec);
-		incFricTorqueSum(tempTorq);
+		ws.rForce.x = forcePt.x - getCoordX();
+		ws.rForce.y = forcePt.y - getCoordY();
+		ws.rForce.z = forcePt.z - getCoordZ();
+		ws.rForce.scale(1e-6);	// units (from µm to m)
+		ws.rForce.XTox(this);
+		ws.tempTorq.cross(ws.rForce, forceVec);
+		incFricTorqueSum(ws.tempTorq);
 	}
 	
 	public void incFricTorqueSum (Pt3D torque) {
@@ -870,10 +901,12 @@ public class Thing extends Object {
 	
 	public void divide() {}
 	
-	public void calcRandomForces () {
+	public void calcRandomForces (WorkerScratch ws) {
 		// this method takes uniform deviates and finds random numbers with a
 		// Gaussian distribution of mean=0, variance=2Dt, as applies for diffusive
 		// motion of a particle with diffusivity D.
+		// WorkerScratch carries the per-thread v1/v2/rsq/facterm/fac1/fac2/tempPt
+		// Pt3Ds — they used to be per-Thing fields (10.6 M Pt3D / 0.42 GB at 4×).
 		double bDt = Env.brownianDeltaT.getValue();
 		double invBDt = 1.0 / bDt;
 		// get fresh random value pairs in unit circle {v1,v2,rsq,facterm}
@@ -881,23 +914,24 @@ public class Thing extends Object {
 		yVals.newValue(bDt,this);
 		zVals.newValue(bDt,this);
 		// rearrange values into v1, v2, rsq, and facterm Pt3Ds
-		v1.setVals(xVals.v1,yVals.v1,zVals.v1);
-		v2.setVals(xVals.v2,yVals.v2,zVals.v2);
-		rsq.setVals(xVals.rsq,yVals.rsq,zVals.rsq);
-		facterm.setVals(xVals.facterm,yVals.facterm,zVals.facterm);
+		ws.v1.setVals(xVals.v1,yVals.v1,zVals.v1);
+		ws.v2.setVals(xVals.v2,yVals.v2,zVals.v2);
+		ws.rsq.setVals(xVals.rsq,yVals.rsq,zVals.rsq);
+		ws.facterm.setVals(xVals.facterm,yVals.facterm,zVals.facterm);
 		// this part actually depends on the objects diffusion and drag coefficients
-		tempPt.mult(bTransDiff, facterm);
-		fac1.vecSqrt(tempPt);
-		tempPt.mult(bRotDiff, facterm);
-		fac2.vecSqrt(tempPt);
-		randForces.mult(invBDt, v1, fac1, bTransGam);
-		randTorques.mult(invBDt, v2, fac2, bRotGam);
+		ws.tempPt.mult(bTransDiff, ws.facterm);
+		ws.fac1.vecSqrt(ws.tempPt);
+		ws.tempPt.mult(bRotDiff, ws.facterm);
+		ws.fac2.vecSqrt(ws.tempPt);
+		randForces.mult(invBDt, ws.v1, ws.fac1, bTransGam);
+		randTorques.mult(invBDt, ws.v2, ws.fac2, bRotGam);
 	}
-	
+
 	public static void brownianMotionForAll () {
 		//talkln ("brownian apply @ " + Env.simulationTime + " seconds");
+		final WorkerScratch ws = currentScratch();
 		for (int i=0;i<thingCt;i++) {
-			theThings[i].calcRandomForces();
+			theThings[i].calcRandomForces(ws);
 		}
 	}
 	
