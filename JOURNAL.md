@@ -1,8 +1,118 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (Pt3D SoA increment 0b — transient-alloc de-retention landed. Two sub-commits pool Myo{Rod,Lever,Motor}.moveThing scratch + FilSegment.checkToLink RetObj into the per-worker WorkerScratch pool. JFR re-profile at 4× CPU: ~97 % of per-step Pt3D allocation eliminated (zero Pt3D events in the post-fix recording vs 1071 events / 33.9 GB in the scalar-Brownian baseline). Paired-ensemble n=5 t-test confirms value-neutrality (all paired-t < 1.5). GPU walls flat. **16× CPU ceiling did NOT move** — same `OutOfMemoryError` from a worker thread during the per-step phase; the inc0b kill freed only GC-throughput, not retained-heap (both sites were method-local `new`, not retained fields). Next: 16× JFR-at-OOM to localise the remaining peak-heap allocator. Full results in PT3D_SOA_MIGRATION.md "Increment 0b — transient-alloc de-retention".)
+Last updated: 2026-06-09 (Pt3D SoA increment 1 — FilSegment A1 == identity → (slot, side) byte storage. 22 reference-identity sites in FilSegment.java + 2 derivations in GPUMoveThing.java collapsed to direct reads of new `end1NbrSide`/`end2NbrSide` byte fields, promoted from the per-step derivation already at GPUMoveThing.java:4001. Heap-dump-at-OOM diagnostic on 16× CPU: 27.74 GB total retained heap dominated by Mesh int[] bins (14.7 GB), per-Thing double[]s (6.8 GB), Pt3D A-state (2.3 GB), GPU SoA float[]s (672 MB) — 98.5 % necessary state. **Verdict: 16× on this 31 GB box is RAM-limited, not code-limited.** Shed-able fat is ~430 MB (Thing/Myosin object-array over-sizing) — 1.5 % of peak, not a needle-mover. The wider end1Pt/end2Pt + bridge-accessor deletion the audit rolled into inc1 turned out to be a ~70 + ~327 site mechanical refactor for ~2 MB retained at gliding scale — deferred per discovery-and-bail (the urgency for retained-heap shed is gone). Pack-source survey names Increment 2's targets: `Thing.bTransGam`/`bRotGam` and `MyosinFixed.myFixedPt` → SoA float[]. Full results in PT3D_SOA_MIGRATION.md "Increment 1 — FilSegment endpoint cleanup (A1 == identity)".)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-09 — Pt3D SoA increment 1: FilSegment A1 == identity → (slot, side) + heap-dump verdict
+
+The CC prompt scoped inc1 as (a) eliminate the `==` reference-identity
+orientation/neighbour checks in FilSegment that were the risk gate to
+deleting `end1Pt`/`end2Pt`, (b) take a 16× CPU heap-dump-at-OOM to
+classify whether the ceiling is data-dominated or shed-able, and (c)
+survey the GPU per-step pack sources to name the increment-2
+conversion targets. The headline of the increment is the heap-dump's
+verdict: 16× on this 31 GB box is RAM-limited.
+
+**Heap-dump verdict (Task 1).** 16× CPU ceiling probe with
+`-XX:+HeapDumpOnOutOfMemoryError` produced a 30 GB hprof at the
+moment of OOM. Streamed through a hand-rolled
+`HprofHistogram.java` parser (jhat would have been ~30 min, the
+streamer turned around in 2). Top retained-bytes classes:
+
+- `int[]` 14.73 GB (10.77 M arrays) — Mesh + MotorBindGrid3D bins
+- `double[]` 6.80 GB — per-Thing `linkLocs`/`linkedTo`/`arpChildLoc` + ValueTrackers
+- `Pt3D` 2.34 GB (97.51 M instances) — A-state + residual after 0a/0b
+- `float[]` 672 MB (14 arrays) — GPU SoA pose/force/length
+- `UCircRnd` 455 MB — per-Thing Brownian RNG state
+- Myosin sub-objects (Motor/Fixed/Rod/Lever/FilLink) 1.78 GB
+- Over-sized Thing/Myosin object arrays 448 MB (32 M slots vs 1.6 M things)
+- rest: PRNG, hash maps, FS instances
+
+Classification: **~27.3 GB necessary state, ~430 MB shed-able fat**.
+Removing the 50 K `end1Pt/end2Pt` Pt3D handles per inc1 = 1.2 MB =
+0.004 % of the 28 GB ceiling. The path past 16× on this hardware is
+more RAM (or sparse-mesh storage for the int[] bins), not more code
+shedding. Full top-80 in
+`RUN_LOGS/2026-06-09_pt3d_inc1/hprof_histogram.txt`.
+
+**Pack-source survey (Task 2).** Per-step GPU pack reads:
+
+- `packRange` (per-Thing): gathers `Thing.bTransGam`/`bRotGam` Pt3D
+  fields (6 axes per slot) — **the dominant Pt3D-gather cost.**
+- `packDynamicRange`: scalar gathers only (brownianOff, linkedToCt,
+  filAtEnd?), already-SoA pose/force reads.
+- `packJointsRange`: 9 axes of rod/lever/motor drag tensors per Myosin
+  + `MyosinFixed.myFixedPt`.
+- `packMotorBinding` / `bridgeMotorForceWriteback`: scalar/array refs
+  only, no Pt3D gather.
+
+**Increment-2 conversion targets:** `Thing.bTransGam` /
+`Thing.bRotGam` → SoA float[], and `MyosinFixed.myFixedPt` → SoA
+float[]. Pure A-state, no aliasing surface, writers localised to
+`calculateProperties` + `drainParamQueue` aeta-hook. This is the named
+follow-on; the joint state itself (slot maps, isCocked, force/torque
+deltas) is already mostly-scalar — it's the drag pack that carries the
+gather.
+
+**A1 == identity → (slot, side) byte (Task 3).** Two new bytes on
+FilSegment: `end1NbrSide`/`end2NbrSide` (0 = my end → neighbour's
+end1, 1 = my end → neighbour's end2). Set in
+`setEnd?Links`/`cleanup`-join-event/split-FS constructor. Read at all
+22 `==` identity sites in FilSegment (`addLinkForces` ×6,
+`addLinkForcesOld` ×6, `addTorsionSpringForces` ×8,
+`validateEnd?Link` ×2, `breakAtEnd?` ×2, `joinSegments` ×2, cleanup
+×2) and the 2 GPUMoveThing derivations at `classifyThings`
+(lines 4001/4011 — `e?Side = f.end?NbrSide` direct read). 6 value-read
+sites for the old `ptAtEnd?` aliases (`Pt3D.ptDist`/`linkUVec.unitVec`)
+become `Pt3D nbrEnd? = (end?NbrSide == 0) ? end?Fil.end1Pt :
+end?Fil.end2Pt;` locals — zero allocation, the chosen branch is the
+neighbour's existing stable Pt3D. `ptAtEnd?` fields and null-checks
+gone; `end1Pt`/`end2Pt` Pt3D handles kept as auxiliary value-readers.
+
+**Scope decision (discovery-and-bail).** The audit's `==` count (22 +
+2) was accurate. The wider piece — deleting `end1Pt`/`end2Pt` plus the
+`*AsPt3D` bridge accessors — turned out to be ~70 + ~327 site
+mechanical refactor for ~2 MB retained-heap savings at gliding scale.
+With the heap-dump verdict that 16× is RAM-limited, the urgency for
+that work is gone. **Deferred to a future increment** as a pure
+cleanliness win, alongside the increment-2 drag-tensor SoA-isation
+which is the matched tool for the actual remaining lever (the per-step
+GPU pack cost).
+
+**Validation — paired ensemble t-test (n=5, glidingAssay500_val, 1×
+CPU).** All paired |t| < 0.5 (df=4, two-sided 5 % critical 2.78) —
+well inside the noise envelope:
+
+| metric | baseline μ±σ | inc1 μ±σ | paired t |
+|---|---|---|---:|
+| bindEvents      | 893.8 ± 168.2 | 890.6 ± 80.7  | −0.06 |
+| meanBoundMotors | 7.581 ± 1.091 | 7.521 ± 0.639 | −0.20 |
+| glidingVelocity | 7.280 ± 0.700 | 7.362 ± 0.455 | +0.33 |
+
+**PASS** — same noise band as 0a's (up to 1.48) and 0b's (up to 1.40);
+identity-encoding refactor with no arithmetic change is correctly
+indistinguishable from baseline.
+
+**GPU sanity.** Short `-gpu` run rc=0; slotCount=597 650 (vs 0b's
+597 640), poseDelta avg/max identical. Kernel-side `classifyThings`
+produces the same slot-count and delta-count as 0b — the device-side
+derivation `e?Side = f.end?NbrSide` is now a direct memory load
+instead of the prior two-load-plus-compare, identical in outcome.
+Host wall-time inflated ~3× on slot/joint pack vs 0b — single-run
+variance from cold caches (the prior 30 GB hprof sitting in page
+cache + a leftover jhat 20 GB JVM); the code that does pack was not
+touched.
+
+**16× CPU ceiling re-probe.** Same wall as 0a / 0b / scalar-Brownian
+— OOM in Thread-15 during per-step phase. Expected: inc1's identity
+storage change shed ~zero retained heap. The task-1 heap-dump
+already explained why the lever doesn't apply here.
+
+Branched on `pt3d-soa-inc1-endpoint-cleanup`. Implementation in
+`boxOfActin/FilSegment.java`, `boxOfActin/GPUMoveThing.java`, and the
+HeldChainF3F4Diag label sync. Doc: PT3D_SOA_MIGRATION.md "Increment 1
+— FilSegment endpoint cleanup (A1 == identity)".
 
 ## 2026-06-08 — Pt3D SoA increment 0b: transient-alloc de-retention (Myo*.moveThing + checkToLink)
 

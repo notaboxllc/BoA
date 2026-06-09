@@ -1068,3 +1068,330 @@ the expected partial.
   per-step allocator carries the remaining peak. Until that is known,
   pushing the ceiling further is fishing blind.
 
+## Increment 1 — FilSegment endpoint cleanup (A1 == identity)
+
+Landed on `pt3d-soa-inc1-endpoint-cleanup` (2026-06-09). The A1 risk —
+the `==` reference-identity orientation/neighbor checks in FilSegment
+addLinkForces/validateLink/breakAtEnd?/joinSegments/cleanup-merge — is
+resolved by promoting the `(slot, side)` derivation that already lived
+on the GPU path (GPUMoveThing.java:4001/4011) to canonical CPU storage.
+The bundle is value-neutral by construction (no arithmetic change, just
+identity-encoding storage), and the GPU-side derivation collapses to a
+direct read of the new state.
+
+Diagnostics from tasks 1 and 2 are summarized first (they bear on
+scope), then the implementation, then the validation.
+
+### Task 1 — Heap-dump-at-OOM classification (16× CPU, `-Xmx28G`)
+
+Re-ran the 16× ceiling probe (same setup as 0b) with
+`-XX:+HeapDumpOnOutOfMemoryError`. OOM landed in the per-step phase as
+before; the 30 GB hprof file
+(`RUN_LOGS/2026-06-09_pt3d_inc1/heapdump_16x_cpu.hprof`) was dumped at
+the moment of failure (`Heap dump file created [31445739396 bytes in
+36.1 secs]`). Parsed with a streaming hprof parser
+(`HprofHistogram.java`, in the same dir) — jhat on a 30 GB file would
+have been > 30 min; the streaming parser turned around in ~2 min.
+
+Top retained-bytes classes at OOM (full top-80 in
+`hprof_histogram.txt`):
+
+| rank | class | bytes | count | classification |
+|---|---|---:|---:|---|
+| TOTAL | retained heap | **27.74 GB** | 151.5 M | (at OOM) |
+| 1 | `int[]` | 14.73 GB | 10.77 M | **necessary** — dominated by `MersenneTwisterFast` state (4.74 M MT × 2 int[] each = 9.48 M, ~12 GB; the 624-int Mersenne Twister state vector + 2-int magic per Thing's PRNG) + MotorBindGrid3D bin arrays (281×281×4 cells × `BIN_DEPTH=1000` → ~790 K int[1000] × 2 fields ≈ 3 GB) |
+| 2 | `double[]` | 6.80 GB | 2.17 M | **necessary** — per-Thing `linkLocs`/`linkedTo`/`arpChildLoc` arrays + ValueTracker doubles |
+| 3 | `boxOfActin.Pt3D` | 2.34 GB | 97.51 M | **mostly necessary** — A-state + remaining scratch after 0a/0b |
+| 4 | `float[]` | 672 MB | 14 | **necessary** — GPU SoA arrays (`soaCoord`/`soaUVec`/`soaYVec`/`soaForceSum`/`soaTorqueSum`/`soaLength` + derived) |
+| 5 | `boxOfActin.UCircRnd` | 455 MB | 14.21 M | **necessary** — per-Thing Brownian RNG state (3 per Thing) |
+| 6–9, 11 | `MyoMotor/MyosinFixed/MyoRod/MyoLever/MyoFilLink` | 1.78 GB total | 7.84 M | **necessary** — myosin sub-object instance bodies (5 per myo) |
+| 10, 17–19 | `[LboxOfActin/Thing;`, `[LboxOfActin/MyoMotor;`, `[LboxOfActin/MyoFilLink;`, `[LboxOfActin/Myosin;` | 448 MB | 5 arrays | **partially shed-able** — pre-sized to 32 M slots each (1 capacity = 256 MB, the four arrays = 448 MB) vs ~1.6 M things actually present; right-sizing recovers ~430 MB |
+| 12 | `MersenneTwisterFast` | 137 MB | 4.74 M | **necessary** — per-Thing PRNG state |
+| 13 | `ConcurrentHashMap$Node` | 133 MB | 4.74 M | **necessary-ish** — `Thing.findByInstanceId` reverse map (1 node per Thing × HM-overhead) |
+| 15 | `ValueTracker` | 68 MB | 1.84 M | **necessary** — per-Thing trackers |
+| 20–25 | FilSegment instances + `[LboxOfActin/FilSegment;` / `[LboxOfActin/Arp23;` | ~58 MB | ~133 K | **necessary** — FilSegment instance bodies + per-FS arrays |
+| rest | sub-1 % each | ~30 MB | | startup/JVM internals |
+
+**Classification summary:**
+
+- **Necessary state (data-dominated): ~27.3 GB** of the 27.74 GB
+  retained — the int[] bins, double[] per-Thing arrays, Pt3D A-state,
+  GPU SoA float[]s, Myosin sub-objects, RNG state, per-FS arrays. All
+  of this scales with the physics-domain size (number of Things × per-
+  Thing storage) — these are the actual degrees of freedom.
+- **Shed-able structure: ~430 MB (1.5 % of peak)** — the four
+  over-allocated object arrays at rows 10, 17, 18, 19. Each is pre-sized
+  to 32 M slots × 8 bytes = 256 MB, four such arrays = ~1 GB nominal,
+  ~448 MB actually present in the dump. Right-sizing them to the actual
+  population (1.568 M things) would shave ~430 MB. Not a needle-mover
+  at the 28 GB ceiling.
+
+**Verdict — 16× on a 31 GB box is RAM-limited, not code-limited.**
+The 27.74 GB retained heap at OOM is 98.5 % necessary state. Removing
+the ~50 K `end1Pt/end2Pt` Pt3D handles per inc1 (the audit's headline
+retained-heap target at the FilSegment level) would shed ~1.2 MB at
+16× — 0.004 % of the ceiling. The two biggest **engineering levers
+that could be moved on this front are not Pt3D fields:**
+
+1. **Replace `MersenneTwisterFast` with a small-state PRNG.** Each per-
+   Thing `MersenneTwisterFast` retains a 624-int state vector (~2.5 KB);
+   1.568 M Things × 2 int[] each = 9.48 M arrays = ~12 GB at 16×. A
+   xorshift / SplitMix64 / pcg-style PRNG (1–4 longs of state) would
+   cut that to <20 MB. Independent quality bar (the simulation already
+   uses MTF for the simulation-thread RNGs); validating that a smaller
+   PRNG preserves the Brownian noise spectrum needed for the physics is
+   a real piece of work but the heap math is unambiguous.
+2. **MotorBindGrid3D bin compaction.** `int[BIN_DEPTH=1000]` per cell is
+   provisioned for worst-case density. At 16× the structure totals ~3 GB
+   raw. A sparse / dynamically-grown bin would recover most of this.
+
+Both are increment-scale projects in their own right. The path past
+16× on this hardware is one of those — or **more RAM** — not further
+Pt3D / bridge-accessor trimming.
+
+**This redirects the migration's risk/reward.** The original
+"retained-heap shed at scale" framing for the end1Pt/end2Pt deletion +
+bridge accessor cleanup is invalidated for the gliding-production
+working point — the heap budget the work would unlock isn't there.
+The (slot, side) `==` identity cleanup remains worth doing on
+**correctness/maintenance** grounds (silent-bug avoidance under future
+Pt3D deletions, simpler code at the cleanup-merge site), which is the
+ground this inc1 stands on. The wider end1Pt/end2Pt + bridge accessor
+deletion can still proceed in a future increment as a pure cleanliness
+win, but the urgency for a 16× ceiling unlock is gone.
+
+### Task 2 — Pack-source survey (no code change)
+
+What the per-step pack routines (`packRange` /
+`packDynamicRange` / `packJointsRange` / `packMotorBinding`) read each
+step, classified as **already-SoA** (cheap memcpy from primitive
+arrays) vs **gathered-from-objects** (per-Thing pointer chase, hot for
+the 33–48 % per-step GPU pack cost the deep survey called out):
+
+| Caller | Already-SoA reads | Gathered-from-Pt3D (Object→Pt3D→field) | Gathered scalar/flag (Object→primitive) |
+|---|---|---|---|
+| `packRange` (OP_PACK_FULL / OP_PACK_RESIDENT) | `soaCoord`, `soaUVec`, `soaYVec`, `soaForceSum`, `soaTorqueSum`, `soaLength` | **`t.bTransGam.{x,y,z}`**, **`t.bRotGam.{x,y,z}`** (drag tensors, 6 Pt3D fields per Thing — the audit's A-state that has not yet been SoA-ised) | `f.brownianOff`, `f.linkedToCt`, `f.filAtEnd1`, `f.filAtEnd2` |
+| `packDynamicRange` (OP_PACK_DYNAMIC) | `soaForceSum`, `soaTorqueSum` | — | `f.brownianOff`, `f.linkedToCt`, `f.filAtEnd1`, `f.filAtEnd2` |
+| `packJointsRange` (OP_PACK_JOINTS) | — | **`rod.bTransGam.{x,y}`, `rod.bRotGam.y`** (× 3 sub-bodies = 9 axis reads per Myosin) plus **`MyosinFixed.myFixedPt.{x,y,z}`** | `myo instanceof MyosinFixed`, `motor.isCocked()` |
+| `packMotorBinding` | `thingNumberToMoveSlot` (int[]) | — | `myo`/`motor`/`link`/`mySeg` refs, `mySeg.removeMe`, `mySeg.myThingNumber`, `link.posOnSeg` |
+| `bridgeMotorForceWriteback` | `motorWriteback` (FloatArray) | — | `link.forceMag/forceDotFil`, `mySeg.thingInstanceId` |
+
+**Increment-2 conversion targets** (named here so a future prompt can
+take them without re-surveying):
+1. **`Thing.bTransGam` / `Thing.bRotGam`** → `Thing.soaBTransGam[3*i]`,
+   `soaBRotGam[3*i]`. Per the audit table these are A-state Pt3D fields
+   already classified as "drag/diffusion tensors (recomputed on `aeta`
+   change)" — pure value storage, no aliasing surface. Touches every
+   Thing, but writers are localised to `calculateProperties()` plus
+   the `aeta`-mutate hook in `drainParamQueue()`. Eliminates 6 Pt3D
+   gathers per slot per step in packRange + 9 axis reads per Myosin in
+   packJointsRange.
+2. **`MyosinFixed.myFixedPt`** → `soaMyFixedPt[3*i]`. One Pt3D per
+   MyosinFixed (~0.39 M at 4×). The anchor coord is value-copied at
+   construction (`MyosinFixed.java:20`) and never re-aliased — clean
+   conversion.
+
+The **dominant pack source by Pt3D-gather count** is the drag tensors
+on Thing (and its subclasses), not the myosin joint state. Joint state
+itself (slot maps, `isCocked()`, force/torque deltas) is already
+mostly-scalar; the joint kernel's per-Myosin _drag_ pack is what carries
+the gather cost. Increment-2 focuses on the Thing-level drag SoA-isation.
+
+### Task 3 — A1 == identity → `(slot, side)` storage
+
+**Scope decision (discovery-and-bail).** The audit's "20+ in
+FilSegment.java, 2 in GPUMoveThing.java" `==` count was accurate — 22
+identity sites + 2 derivation sites, all converted in this increment.
+The **wider piece** the recipe rolled in — deleting the
+`Pt3D end1Pt/end2Pt` handle fields and rewiring every value-reader to
+`soaEnd?` — turned out to be ~70 value-read sites in FilSegment alone
+(collision, link-force, mesh fill, biochem, viz, AnchorNode construction,
+annealing), plus the wider `*AsPt3D` bridge-accessor cleanup that hits
+~327 sites across ~20 files (184 `uVec*AsPt3D` + 103 `coordAsPt3D` + 40
+`end?AsPt3D`). At gliding production scale the FilSegment population is
+1.6 K (4×) – 37.9 K (8×); shedding the two endpoint Pt3D handles per FS
+yields **~50 K Pt3D total at 16×, ~2 MB retained** — 0.007 % of the
+28 GB ceiling. Per the prompt's discovery-and-bail rule (a half-converted
+identity scheme is worse than none), the identity work (the risk-bearing
+piece, in scope) is done; the value-read deletion + bridge cleanup is
+deferred to its own increment after Task 1 confirms whether further heap
+shedding is the right next move.
+
+**Mechanism.** Two new bytes on FilSegment:
+
+```java
+byte end1NbrSide = 0;   // 0 → my end1 attaches to neighbour's end1
+byte end2NbrSide = 0;   // 1 → my end? attaches to neighbour's end2
+```
+
+Maintained by:
+
+- `setEnd1Links(at1, normOrientation)`: `end1NbrSide = normOrientation ? 1 : 0`
+- `setEnd2Links(at2, normOrientation)`: `end2NbrSide = normOrientation ? 0 : 1`
+- `cleanup(...)` join-event (FilSegment.java:2843): propagates
+  `end?NbrSide` from cleanF to the surviving neighbour in each of the
+  four pointer-rewrite branches, replacing the previous
+  pointer-graph identity propagation that used `cleanF.end1Fil.ptAtEnd2 = cleanF.ptAtEnd2`.
+
+Read by:
+
+- 22 `if (ptAtEnd? == endNFil.end?Pt)` sites in FilSegment.java →
+  `if (end?NbrSide == 0/1)`. `addLinkForces` (×6),
+  `addLinkForcesOld` (×6), `addTorsionSpringForces` (×8),
+  `validateEnd?Link` (×2), `breakAtEnd?` (×2), `joinSegments` (×2),
+  the new-FilSegment split orientation (×1), `cleanup` join-event (×2).
+- 2 derivations in GPUMoveThing.java (`classifyThings`, lines 4001/4011)
+  → direct read `e?Side = f.end?NbrSide`.
+
+The `ptAtEnd1`/`ptAtEnd2` Pt3D fields are deleted from FilSegment
+(line 166–167 in the pre-state). Their previous *value*-reads (6 sites:
+`Pt3D.ptDist(linkPt, ptAtEnd?)` and `linkUVec.unitVec(..., ptAtEnd?, ...)`
+inside addLinkForces / addLinkForcesOld) are replaced by a local
+`Pt3D nbrEnd? = (end?NbrSide == 0) ? end?Fil.end1Pt : end?Fil.end2Pt;`
+declared at the top of each block — zero allocation (the chosen branch
+is the neighbour's existing stable Pt3D, no new object).
+
+The `end1Pt`/`end2Pt` Pt3D handles on FilSegment are **kept** as
+auxiliary CPU value-readers; `initialize()` refreshes them each step
+from `soaEnd?`. The stale comment at FilSegment.java:101–104 (which
+described the identity-encoding mechanism) is removed, replaced by a
+note that these are now pure value-read handles. The diagnostic
+`HeldChainF3F4Diag` labels referencing `ptAtEnd2` are updated to refer
+to `end2NbrSide` semantics.
+
+Null checks on `ptAtEnd?` (e.g. `end2Fil.ptAtEnd1 == null` meaning
+"neighbour's end1 has no link") collapse into `!filAtEnd?` since the
+two flags are set/cleared together by `setEnd?Links` / `removeEnd?Links`
+/ cleanup. The flag-based form is what survives.
+
+**Compile check.** Clean `javac --release 21 --enable-preview`,
+137 class files emitted (`/tmp/inc1_classes_v2`).
+
+**Smoke run.** `runTime=5e-4` (50 steps), 1× CPU,
+`/tmp/inc1_smoke.pf` → completed cleanly with `[STATS]
+meanBoundMotors=340.593` and the usual phase wall totals. No
+exceptions, no orientation/neighbor decode anomalies surfaced through
+output.
+
+### Task 4 — DEFERRED
+
+Bridge accessor cleanup (`end?AsPt3D`, `uVec*AsPt3D`, `coordAsPt3D` —
+each returns `new Pt3D()` per call). Scope: ~327 call sites across 20
+files. Per the 0b JFR these accessors account for ~3.5 % of per-step
+Pt3D bytes, the residual after 0b's transient-alloc kill. Deferred for
+the same reason as the end1Pt/end2Pt deletion: the retained-heap budget
+at gliding scale is small enough that a careful 327-site refactor isn't
+the matched tool, and the task-1 verdict (16× is RAM-bounded) confirms
+the lever is in the wrong place. Increment 2's drag-tensor SoA-isation
+(named in task 2) is the next-best step.
+
+### Validation — paired-ensemble t-test (n=5 seeds, 1× CPU)
+
+Reuse-only refactor (storage change for identity encoding; no arithmetic
+touched). Bar: value-neutrality at the paired-ensemble noise floor.
+Same configuration as 0a/0b: `glidingAssay500_val` (runTime 0.1 s, 10 000
+steps), `-Xmx8G`. Baseline = main at `066d5a2` (post-0b merge), inc1 =
+HEAD of `pt3d-soa-inc1-endpoint-cleanup`. Per-seed logs in
+`RUN_LOGS/2026-06-09_pt3d_inc1/ens_{main_baseline,inc1}/seed{1..5}/stdout.txt`.
+
+| metric | baseline μ±σ (n=5) | inc1 μ±σ (n=5) | shift | shift/σ_b | paired t (df=4) |
+|---|---|---|---:|---:|---:|
+| bindEvents       | 893.8 ± 168.2 | 890.6 ± 80.7  | −3.2   | −0.02 σ | −0.06 |
+| meanBoundMotors  | 7.581 ± 1.091 | 7.521 ± 0.639 | −0.059 | −0.05 σ | −0.20 |
+| glidingVelocity  | 7.280 ± 0.700 | 7.362 ± 0.455 | +0.082 | +0.12 σ | +0.33 |
+
+All paired |t| < 0.5 — well inside the noise envelope at df = 4
+(two-sided 5 % critical ≈ 2.78). **PASS.** Same magnitude as 0a's
+(up to 1.48) and 0b's (up to 1.40); a reuse/identity-encoding refactor
+with no arithmetic change is correctly indistinguishable from baseline.
+Full summary in `RUN_LOGS/2026-06-09_pt3d_inc1/ensemble_summary.txt`.
+
+### GPU sanity
+
+Short `-gpu` run (`/tmp/inc1_gpu_short.pf`, runTime 0.005 s = 601
+gpuMoveThing calls + warmup) completes rc=0
+(`RUN_LOGS/2026-06-09_pt3d_inc1/gpu_sanity_inc1.log`).
+
+| metric | 0b baseline | inc1 |
+|---|---|---|
+| `slotCount` at steady state | 597 640 | 597 650 |
+| `poseDelta avg` | 17 558 | 17 578 |
+| `poseDelta max` | 1 602 | 1 602 |
+| `gpuMoveThing exec` | 43.33 s / 601 | 50.28 s / 601 |
+| `gpuMoveThing slotPack` | 19.13 s | 56.97 s |
+| `gpuMoveThing jointPack` | 7.21 s | 18.50 s |
+| `glidingVelocity` | 0.0000 | 0.0000 |
+
+The kernel-side `classifyThings` produces the same slot-count and
+delta-count as 0b — the device-side derivation
+`e?Side = f.end?NbrSide` is a direct memory load instead of the prior
+`(f.ptAtEnd? == nbr.end1Pt) ? 0 : 1` two-load-plus-compare, identical
+in outcome (and one fewer ld instruction on the device per slot per
+step).
+
+**Host-side pack-time inflation note.** Wall-clock pack times in the
+inc1 run are ~3× the 0b baseline despite touching code that inc1 did
+not change (`packRange` / `packJointsRange` read no FilSegment endpoint
+state). This is single-run wall-clock variance — different `-Xmx`
+(20 GB vs 0b's earlier 8 GB on the same script), different JIT warmup
+ordering, possible host cache pressure from the earlier 30 GB hprof
+sitting in page cache. The structural output (slotCount, delta
+counts, glidingVelocity, slot derivation result) is identical, which
+is what GPU sanity needs to show for a value-neutral storage change.
+The kernel exec wall (+16 %) is in the same band as the noise the 0b
+doc reported. A proper before/after CPU profile on a quiet box (no
+process competition, equal heap) would be needed to claim a pack
+regression — that's out of scope for inc1's sanity gate.
+
+### 16× CPU ceiling re-probe
+
+`RUN_LOGS/2026-06-09_pt3d_inc1/ceiling_16x_cpu_inc1.log`, `-Xmx28G`:
+
+- Mesh × 3 cleared
+- `makeInitialThings` (1.568 M Things) completed
+- `[phase-plan]` printed, per-step phase entered
+- `java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler
+  in thread "Thread-15"` — **same wall as 0a, 0b, and scalar-Brownian**
+
+**Honest status: the 16× transient-allocation ceiling is unchanged.**
+Exactly as predicted by the task-1 heap-dump verdict — inc1's
+identity-encoding storage change shed ~zero retained heap (the
+deleted `ptAtEnd?` fields were object references, not retained Pt3D
+objects; the two new `byte` fields per FilSegment add ~50 KB at 16×).
+The wall sits where the data-dominated heap (Mersenne Twister state +
+Mesh int[] bins + per-Thing scaling) puts it; closing it requires the
+levers task-1 named (smaller-state PRNG, sparse mesh bins) or more
+RAM, not endpoint-handle deletion. **Honest delivery on the prompt's
+"ceiling re-probe shows whether the endpoint shed moved the wall"
+ask: no, and now we know exactly why.**
+
+### Deliverable summary
+
+- **A1 identity hazard removed.** 22 `==` reference-identity sites in
+  FilSegment.java and 2 derivations in GPUMoveThing.java collapsed
+  into a stored byte (`end1NbrSide`, `end2NbrSide`). The GPU-side
+  derivation that already encoded the same scheme is now a direct read
+  of the canonical storage.
+- **Value-neutrality validated.** Paired-ensemble n=5 t-test, all
+  |t| < 0.5 (well inside the noise envelope; df=4 critical = 2.78).
+  GPU sanity rc=0, identical slotCount + delta counts.
+- **Heap-dump verdict on the 16× ceiling: RAM-limited, not
+  code-limited.** 27.74 GB retained heap = 98.5 % necessary state (MT
+  PRNG int[] ~12 GB, Mesh bins ~3 GB, Pt3D A-state 2.3 GB, GPU SoA 672
+  MB, Myosin sub-objects 1.78 GB, …). Shed-able fat ~430 MB (1.5 %),
+  in over-sized object arrays. The endpoint Pt3D handle deletion the
+  audit projected as "retained heap shed at scale" would have saved
+  ~1.2 MB at 16× — wrong lever for the wall the prompt asked about.
+- **Pack-source survey delivers Increment 2 conversion targets:**
+  `Thing.bTransGam` / `Thing.bRotGam` (per-Thing drag tensors, 6
+  Pt3D-gather reads in `packRange` + 9 in `packJointsRange`) →
+  SoA float[]. `MyosinFixed.myFixedPt` → SoA float[]. Pure A-state,
+  no aliasing surface.
+- **Deferred (with rationale):** end1Pt/end2Pt Pt3D handle deletion
+  + `*AsPt3D` bridge-accessor cleanup (~70 + ~327 sites for ~2 MB
+  retained-heap savings at gliding scale). Not the matched tool for
+  the actual ceiling lever and not justified for its own sake at this
+  scale.
+- **16× ceiling re-probe: wall did NOT move** — same OOM in Thread-15
+  as 0a/0b/scalar-Brownian. Expected: inc1 shed ~zero retained heap.
+
