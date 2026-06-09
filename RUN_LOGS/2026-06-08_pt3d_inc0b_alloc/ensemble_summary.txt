@@ -1,0 +1,34 @@
+Paired ensemble validation — Pt3D SoA inc 0b transient-alloc de-retention
+Configuration: glidingAssay500_val (runTime=0.1 s, 10000 steps), 1× CPU, -Xmx8G
+Seeds: 1..5 (per-seed PRNG seed reused across baseline/inc0b but Thing.myPRNG
+       is independently `MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()))`,
+       so bit-identity is impossible even at fixed -seed — paired stats only).
+
+Baseline: main = a77499b (scalar-Brownian merged).
+inc0b   : HEAD of pt3d-soa-inc0b-transient-alloc (sub-(a) + sub-(b)).
+
+Per-seed metrics:
+                 bindEvents      meanBoundMotors  glidingVelocity
+ baseline seed=1 708             7.277            6.6297
+ baseline seed=2 765             6.595            6.6932
+ baseline seed=3 848             7.579            7.4477
+ baseline seed=4 858             7.147            7.3151
+ baseline seed=5 846             7.300            6.9056
+
+ inc0b    seed=1 935             7.890            6.8913
+ inc0b    seed=2 751             7.187            6.5453
+ inc0b    seed=3 900             7.916            7.1228
+ inc0b    seed=4 702             6.624            7.3349
+ inc0b    seed=5 792             7.759            7.0303
+
+Paired-difference t (df=4):
+  bindEvents      baseline 805.0 ± 65.86  inc0b 816.0 ± 98.76  shift +11.0  +0.17 σ_b  paired t +0.17
+  meanBoundMotors baseline 7.180 ± 0.36   inc0b 7.475 ± 0.56   shift +0.30  +0.81 σ_b  paired t +1.40
+  glidingVelocity baseline 6.998 ± 0.37   inc0b 6.985 ± 0.29   shift -0.01  −0.04 σ_b  paired t −0.13
+
+All paired t < 1.5 — well inside the noise envelope at df=4 (two-sided 5 % critical
+≈ 2.78). No detectable shift. PASS.
+
+Reuse-only refactor — no arithmetic change, so this is the expected outcome.
+The 0a precedent had paired-t up to 1.48 for the same metrics at the same n=5;
+this run is statistically indistinguishable from that null.

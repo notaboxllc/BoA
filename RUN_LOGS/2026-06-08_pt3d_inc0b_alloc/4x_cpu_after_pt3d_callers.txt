@@ -1,0 +1,28 @@
+# Pt3D allocations grouped by first non-Pt3D caller (Pt3D total bytes: 0)
+# inc0b binary: pt3d-soa-inc0b-transient-alloc HEAD (sub-(a) + sub-(b))
+# JFR window: 200s delay, 200s requested duration, recorded 46s
+#   (process ended before requested duration — same behaviour as prior run)
+# Source JFR: 4x_cpu_after.jfr (8 ObjectAllocationSample events total).
+#
+# **Zero `boxOfActin/Pt3D` allocation events captured in the entire JFR window.**
+# The Myo*.moveThing + checkToLink kill is complete — the previously-dominant
+# transient Pt3D allocators are gone, and the residual end1/end2/uVec*AsPt3D
+# bridge accessors (3.5% in the scalar-Brownian baseline) plus
+# FilSegment.moveThing (0.2%) fall below the JFR sample threshold
+# (~512 KB / thread / sample interval).
+#
+# Top non-Pt3D allocators in the recording (for context — all infrastructure):
+#  java/lang/Integer  229.0 MB  100.0%  (GlidingAssayEvaluator.sampleStep Integer.valueOf boxing)
+#  java/util/ArrayList  31.6 KB    0.0%  (JFR Periodic Tasks internal)
+#
+# Compare with the scalar-Brownian baseline (4x_cpu_after.jfr from prior increment):
+# 33.9 GB of Pt3D weighted-bytes, broken down as:
+#   MyoLever.moveThing      30.3%   ← killed by sub-(a)
+#   MyoMotor.moveThing      30.2%   ← killed by sub-(a)
+#   Thing$RetObj.<init>     25.1%   ← killed by sub-(b)
+#   MyoRod.moveThing        10.9%   ← killed by sub-(a)
+#   end1/end2/uVec*AsPt3D    3.5%   ← out of scope (deferred to inc 1)
+#   FilSegment.moveThing     0.2%   ← out of scope
+# Sum of killed = 96.5% of Pt3D bytes. Residual = 3.7% × 33.9 GB ≈ 1.25 GB
+# over the same 39 s window → ~32 MB / s of Pt3D allocation, divided across
+# the worker threads, lands below JFR's sample threshold and emits 0 events.
