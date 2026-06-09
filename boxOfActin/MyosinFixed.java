@@ -18,6 +18,13 @@ public class MyosinFixed extends Myosin {
 	public MyosinFixed (Pt3D rodEnd1,Pt3D unitVec) {
 		super(rodEnd1,unitVec);
 		myFixedPt.copy(rodEnd1);
+		// Inc2 — populate the per-myo anchor SoA. addMyosin() ran inside
+		// super(...) and stamped myMyoNumber, so the slot index is final here.
+		int b = myMyoNumber * 3;
+		soaMyFixedPt[b]     = (float) myFixedPt.x;
+		soaMyFixedPt[b + 1] = (float) myFixedPt.y;
+		soaMyFixedPt[b + 2] = (float) myFixedPt.z;
+		soaMyAnchored[myMyoNumber] = 1;
 	}
 	
 	public void jointConstraints () {

@@ -200,6 +200,7 @@ public class ProteinNode extends Thing {
 		}
 		
 		talkln ("Node trans/rot diff =" + String.valueOf(expFormat.format(bTransDiff.x)) + " / " + String.valueOf(expFormat.format(bRotDiff.x)));
+		pushDragToSoa();
 	}
 	
 	public void initialize () {

@@ -150,7 +150,7 @@ public class MyoMotor extends Thing {
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
-		
+		pushDragToSoa();
 	}
 	
 	// Phase 4.5 diag (2026-06-05): count MyoMotor.initialize() calls on -gpu.

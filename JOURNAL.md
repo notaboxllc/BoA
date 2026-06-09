@@ -1,8 +1,120 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (Pt3D SoA per-worker RNG consolidation — the per-Thing `MersenneTwisterFast myPRNG` was the #1 line item in inc1's 16× heap-dump (4.74 M MTF × 2 int[] = ~12 GB / 43 % of the 27.74 GB OOM heap); replaced with one MTF per worker slot (17 total) carried on `Thing.WorkerScratch`, seeded via SplitMix64 from a `BOA_RNG_SEED`-or-entropy master for independent well-mixed streams. Per-Thing `UCircRnd` xVals/yVals/zVals (~14.2 M / 455 MB at 16×) folded into WorkerScratch in the same pass. Heap shed at 4× CPU: −2.99 GB int[] + −47 MB MTF instances + −170 MB UCircRnd ≈ **−3.2 GB at 4×, projected ~12 GB at 16×**. **16× CPU ceiling re-probe completes rc=0 — first successful 16× CPU run across the migration**, confirming inc1's heap-dump verdict that MTF state was the lever past the per-step wall. Paired-ensemble n=10 validation: all |t|<1.4, glidingVelocity shift = +0.000 (borderline n=5 t=+2.46 collapsed to zero at n=10 — small-sample noise). ThingBrownian CPU wall −30 %, ThingStep −10 %. GPU on-device Wang-hash RNG untouched. Reproducibility: `BOA_RNG_SEED` env var → master seed → per-worker SplitMix64 seeds (pre-consolidation per-Thing MTF was seeded from `Math.random()` and was never reproducible). Full results in PT3D_SOA_MIGRATION.md "Increment — per-worker RNG consolidation".)
+Last updated: 2026-06-09 (Pt3D SoA inc2 — pack-source SoA. Attacked the deep-survey's 33–48 % pack-dominated GPU per-step cost by retiring inc1-task-2's named Pt3D-gather pack sources. `Thing.bTransGam` / `bRotGam` (6 Pt3D field gathers per slot in `packRange` + 9 axis reads per Myosin in `packJointsRange`) and `MyosinFixed.myFixedPt` (3 gathers per fixed myo + `instanceof` cast) replaced with contiguous `float[]` SoA reads. **Discovery-and-bail call**: drag tensors get rewritten mid-step by `FilSegment.calculateProperties()` on biochem length-change, and `anchorPts` joint-slot indexing is remapped by `classifyThings()` without plan rebuild — both disqualified pure FIRST_EXECUTION residency. Went **contiguous-pack**: SoA dual-write in every `calculateProperties()` override, swap-compact-safe in `removeThing()`/`cleanupMyos()`, no transferMode changes, no scatter changes. Headline at 4×: GPU pack/total **37.6 % → 29.1 %** (−8.5 pp), pack µs/call **−32.7 %**, GPU ms/step **342.57 → 307.77 (−10.2 %)**, GPU÷CPU ratio **0.890 → 0.797** — lead widens with scale (1× margin grows from 1.2 % → 6.4 %). CPU unchanged (noise-band, +0.32 % at 4×) as expected — CPU readers untouched. Paired-ensemble n=10 validation all |t|<1.1 (df=9 critical 2.26); meanBoundMotors borderline n=5 (t=−1.49) collapsed to t=−0.53 at n=10, same small-sample-noise pattern as pwrng. Full writeup in PT3D_SOA_MIGRATION.md "Increment 2 — pack-source SoA".)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-09 — Pt3D SoA inc2: pack-source SoA — GPU pack fraction down 8.5 pp at 4×, GPU÷CPU lead widens to 0.797
+
+Followed inc1's task-2 pack-source survey directly. That survey named
+`Thing.bTransGam` / `bRotGam` (6 Pt3D-gather reads per slot in
+`packRange`, 9 axis reads per Myosin in `packJointsRange`) and
+`MyosinFixed.myFixedPt` (3 Pt3D gathers per fixed myosin per step plus
+an `instanceof MyosinFixed` cast) as the dominant per-step pack work
+behind the deep survey's 33–48 % pack-dominated GPU cost. Inc1 also
+foreshadowed the conversion: SoA `float[]` storage, contiguous pack.
+
+**Step-invariance survey (Task A).** Both targets pass the "no per-step
+writers in gliding production" bar:
+
+- `bTransGam`/`bRotGam`: All `calculateProperties()` overrides
+  (`StickyNode`, `FillNode`, `ProteinNode`, `MyoMiniFilament`,
+  `MyoRod`, `MyoLever`, `MyoMotor`, `Bug`) write at construction
+  only. `FilSegment.calculateProperties()` also fires on biochem
+  `lengthChanged`, split, cleanup-merge join, and the
+  `drainParamQueue` aeta hook — **mid-step in biochem-active configs
+  (`noMonomersSimd:false`).** `Bug.setViscousDrag()` writes per step
+  if `linearDragSlope`/`quadraticDragSlope` active (off in gliding;
+  Bug is CPU-fallback anyway, never feeds the GPU pack).
+- `myFixedPt`: Truly invariant — only writer is the `MyosinFixed`
+  constructor (`MyosinFixed.java:20`). Confirmed by the existing
+  `GlidingAssayEvaluator.java:70` comment.
+
+**Discovery-and-bail (Task B).** The biochem mid-step writes on
+`bTransGam`/`bRotGam` disqualify pure FIRST_EXECUTION residency
+without extending the `scatterPose` kernel (out of scope per "Do not
+touch ... the GPU kernel math"). `myFixedPt` is invariant, but
+`anchorPts` is indexed by joint slot (not Myosin slot);
+`classifyThings()` remaps joint slots on topology change without plan
+rebuild (Phase 4.5 small-fix invariant). Going resident for
+`anchorPts` would force plan rebuild on every topology change —
+fights the established residency pattern.
+
+Both targets land in the **contiguous-pack** bucket. The win is
+gather→sequential: 6 Pt3D pointer-chasing reads per slot collapse
+into 6 SoA `float[]` reads at `myThingNumber*3+{0,1,2}`. Smaller win
+than full residency (the per-step pack work doesn't disappear,
+just compresses) but uniform across configs and refactor-surface-
+minimal.
+
+**Mechanism.** `Thing.soaBTransGam[3*N]` / `soaBRotGam[3*N]` added as
+SoA float[] storage, lock-step with the existing
+`soaCoord`/`soaUVec`/`soaYVec` capacity machinery. Compaction-safe
+(swap-compact in `Thing.removeThing()`). Helper `pushDragToSoa()`
+flushes Pt3D → SoA, called at the end of every
+`calculateProperties()` override. The Pt3D fields are kept (dual-
+write) so the ~30 CPU readers across FilLink, JointDiag,
+MyosinDimer, MyoMiniFilament, Myosin, FilSegment, MyoMotor, etc.
+don't need surgery — zero aliasing surface (one writer, two
+synchronised targets).
+
+`Myosin.soaMyFixedPt[3*myoCap]` and `Myosin.soaMyAnchored[myoCap]`
+added at the Myosin level. Populated by `MyosinFixed` constructor;
+swap-compacted by `cleanupMyos()`; zeroed by `removeAll()` for
+restart. `packJointsRange()` now reads contiguous SoA + a single
+byte flag check, replacing the `if (myo instanceof MyosinFixed)`
+cast + 3 Pt3D-gather reads.
+
+**Headline GPU performance.** Measured at the 2026-06-08 scaling-
+study's K1/K2 two-point method on aorus (RTX 5070, TornadoVM PTX).
+
+| scale | metric | baseline | inc2 | shift |
+|---|---|---:|---:|---:|
+| 1× | pack/total | 27.61 % | 21.48 % | **−6.13 pp** |
+| 1× | pack µs/call | 17 922 | 12 755 | **−28.8 %** |
+| 1× | GPU ms/step | 102.13 | 95.64 | **−6.4 %** |
+| 1× | GPU÷CPU ratio | 0.988 | 0.926 | (1.2 % → 6.4 %) |
+| 4× | pack/total | 37.56 % | 29.11 % | **−8.45 pp** |
+| 4× | pack µs/call | 74 932 | 50 464 | **−32.7 %** |
+| 4× | GPU ms/step | 342.57 | 307.77 | **−10.2 %** |
+| 4× | GPU÷CPU ratio | 0.890 | 0.797 | (11.0 % → 20.3 %) |
+
+The baseline 4× 37.6 % sits inside the deep-survey's 33–48 % band
+inc2 targets. Trimming ~8 pp confirms the gather→contiguous
+attack worked exactly where the survey said it would.
+
+**GPU÷CPU lead widens with scale**, restoring (and exceeding) the
+margin that the pwrng CPU win narrowed. The absolute GPU lead grows
+from 1.2 ms → 7.7 ms at 1× and from 42.5 ms → 78.6 ms at 4×.
+
+CPU is noise-band unchanged (1× CPU +0.04 %, 4× CPU +0.32 %) — CPU
+readers go through the unchanged Pt3D fields, only the GPU-pack
+reads switched to SoA.
+
+**Validation.** Paired-ensemble n=10 t-test on `glidingAssay500_val`
+(1× CPU, 10 000 steps): bindEvents t=−0.57, meanBoundMotors t=−0.53,
+glidingVelocity t=+1.02 — all |t| < 2.26 (df=9 critical). The
+borderline meanBoundMotors at n=5 (t=−1.49) collapsed to −0.53 at
+n=10, same small-sample-noise pattern as pwrng's glidingVelocity
+t=+2.46 → +0.00. PASS.
+
+GPU sanity at 1× and 4× both rc=0; `anchorFireCt=0` (anchor path
+correctly on device, CPU fallback gated off as designed).
+
+**Open / deferred.** Pure residency for the drag arrays remains a
+future increment: would need either a `scatterDrag` kernel alongside
+`scatterPose` (extends the delta machinery for biochem mid-step
+mutations) or a config-gate that goes resident only when
+`noMonomersSimd:true`. Residency for `anchorPts` would need a
+`classifyThings()`-triggered re-upload mechanism. Both deliver the
+additional pack-elimination win the resident path would have
+unlocked but require the residency architecture's invariants to
+extend.
+
+Branch: `pt3d-soa-inc2-drag-anchor-pack`. Full writeup with
+implementation details and per-run logs in PT3D_SOA_MIGRATION.md
+"Increment 2 — pack-source SoA"; bench logs in
+`RUN_LOGS/2026-06-09_pt3d_inc2/`.
 
 ## 2026-06-09 — Pt3D SoA per-worker RNG consolidation: 12 GB shed, 16× ceiling broken
 
@@ -1179,10 +1291,24 @@ empirical justification for v2's SoA core, recorded in GPU_STRATEGY.md.
 
 ## Open item in flight
 
-See the *2026-06-08 — Host-graph + orchestration profiling* entry above —
-**Pt3D-first SoA refactor** is the new in-flight item. (The
-POSE_DELTA_CAP item that previously occupied this slot landed on `a812c0c`,
-documented in the *POSE_DELTA_CAP* capstone above.)
+**Pt3D-first SoA refactor — inc2 landed (2026-06-09).** Pack-source
+SoA for `bTransGam`/`bRotGam`/`myFixedPt`; GPU pack/total down
+8.5 pp at 4×, GPU ms/step −10.2 %, GPU÷CPU ratio 0.890 → 0.797.
+See the inc2 entry above. Active candidates for inc3:
+
+1. **Pure residency for drag arrays** (gated by `noMonomersSimd`,
+   or via a `scatterDrag` kernel that piggy-backs the existing
+   pose-delta machinery for biochem mid-step length-changes).
+   Extrapolated to deliver another ~6 pp pack-fraction drop and
+   ~10 % GPU ms/step at 4×.
+2. **Residency for `anchorPts`** — needs `classifyThings()`-triggered
+   re-upload mechanism (one-shot per topology change, infrequent in
+   gliding production).
+3. Anything else flagged by the orchestration-profiling entry that
+   inc1/inc2 haven't yet retired.
+
+(The POSE_DELTA_CAP item that previously occupied this slot landed on
+`a812c0c`, documented in the *POSE_DELTA_CAP* capstone above.)
 
 ## Deferred backlog (unchanged, for the record)
 

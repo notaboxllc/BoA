@@ -61,9 +61,9 @@ public class MyoLever extends Thing {
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
-		
+		pushDragToSoa();
 	}
-	
+
 	public void initialize () {
 		pushLengthToSoa(getDim());
 		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);

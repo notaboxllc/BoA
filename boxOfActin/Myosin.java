@@ -4,6 +4,15 @@ public class Myosin {
 	static Myosin [] theMyosins = new Myosin [8000000];
 	static int myoCt = 0;
 	int myMyoNumber = 0;
+	// Inc2 (2026-06-09) — anchor SoA for the MyosinFixed rod-tail anchor coord.
+	// Populated by MyosinFixed constructor at sim start; swap-compacted in
+	// cleanupMyos so the per-myo slot follows myMyoNumber. Layout: 3 floats per
+	// Myosin slot, flag is 1 for anchored (MyosinFixed) and 0 otherwise.
+	// GPUMoveThing.packJointsRange reads these arrays contiguously to fill the
+	// anchorPts / anchoredFlags FloatArrays — replaces the per-step
+	// `instanceof MyosinFixed` cast + 3 Pt3D-gather reads.
+	static float[] soaMyFixedPt = new float[theMyosins.length * 3];
+	static byte[]  soaMyAnchored = new byte[theMyosins.length];
 	static double uncockedLever_MotorAngle = 0; // degrees
 	static double cockedLever_MotorAngle = 60; // degrees
 	static double uncockedMotor_ActinAngle = 90; // degrees
@@ -403,10 +412,19 @@ public class Myosin {
 		for (int i=0;i<myoCt;i++) {
 			if (theMyosins[i] == null) { break; } // reached end of theMyosins array I guess
 			curM = theMyosins[i];
-			if (curM.removeMe) { 
+			if (curM.removeMe) {
 				theMyosins[i] = theMyosins[myoCt-1];
 				theMyosins[i].myMyoNumber = i;
 				theMyosins[myoCt-1] = null;
+				// Inc2 — drag the anchor SoA along with the surviving Myosin.
+				// myMyoNumber was just reassigned to i; the SoA slot must
+				// follow so packJointsRange's myMyoNumber lookup stays valid.
+				int dst = i * 3, src = (myoCt - 1) * 3;
+				soaMyFixedPt[dst]     = soaMyFixedPt[src];
+				soaMyFixedPt[dst + 1] = soaMyFixedPt[src + 1];
+				soaMyFixedPt[dst + 2] = soaMyFixedPt[src + 2];
+				soaMyAnchored[i]      = soaMyAnchored[myoCt - 1];
+				soaMyAnchored[myoCt - 1] = 0;
 				//System.out.println ("Removed " + String.valueOf(curM) + " from Myosin Array.  Its motor is " + String.valueOf(curM.myoMotor));
 				curM.remove();
 				curM.sepaku();
@@ -435,6 +453,9 @@ public class Myosin {
 			curM.remove();
 			curM.sepaku();
 		}
+		// Inc2 — reset the anchor flags for the slots we just blew away so a
+		// fresh population (after restartRun) starts from zero.
+		java.util.Arrays.fill(soaMyAnchored, 0, myoCt, (byte) 0);
 		MyoMotor.motorCt = 0;
 		myoCt = 0;
 	}

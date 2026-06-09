@@ -146,8 +146,9 @@ public class MyoMiniFilament extends Thing {
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
+		pushDragToSoa();
 	}
-	
+
 	public void initialize () {
 		pushLengthToSoa(length);
 		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
