@@ -116,8 +116,12 @@ public class Thing extends Object {
 	// multithreading
 	static ThingStepThreads stepThreads = new ThingStepThreads();
 	static ThingBrownianThreads brownianThreads = new ThingBrownianThreads();
-	//RanMT myPRNG = new RanMT((long)(Long.MAX_VALUE*Math.random()));
-	MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
+	// Per-Thing MersenneTwisterFast myPRNG used to live here — at 16× this was
+	// 1.568 M MT instances × ~2.5 KB state = ~12 GB retained (#1 line item in
+	// inc1's heap-dump verdict, 43 % of the 27.74 GB OOM heap). Pt3D SoA
+	// migration "per-worker RNG consolidation" moves the PRNG into
+	// WorkerScratch — one MTF per worker (+ one for the main thread) seeded
+	// via SplitMix64 from a master for independent, well-mixed streams.
 	// CollisionEvent scratch used to live here (3 Pt3D × Thing.thingCt — 3.53 M
 	// at 4×). Pt3D SoA migration increment 0a sub-item (c) moves it into
 	// WorkerScratch; collision-check methods cache currentScratch().cE locally.
@@ -137,10 +141,11 @@ public class Thing extends Object {
 	static int collisionCheckInt, biochemCheckInt,brownianApplyInt;
 	int collCheckCt, biochemCheckCt;
 	
-	// some Pt3Ds used in calculating random forces
-	UCircRnd xVals = new UCircRnd(Env.deltaT.getValue());
-	UCircRnd yVals = new UCircRnd(Env.deltaT.getValue());
-	UCircRnd zVals = new UCircRnd(Env.deltaT.getValue());
+	// Per-Thing UCircRnd xVals/yVals/zVals used to live here — three pure-
+	// scratch objects (v1,v2,rsq,facterm) retained per Thing, ~14.21 M
+	// instances / 455 MB at 16×. The per-worker RNG consolidation moves them
+	// into WorkerScratch alongside the rng (write-before-read inside
+	// calcRandomForces, no carryover, so per-worker is sufficient).
 	// Per-Thing Brownian/torque/friction scratch (v1,v2,rsq,facterm,fac1,fac2,tempPt,
 	// rForce,tempTorq) used to be Pt3D fields here — 9 Pt3D × Thing.thingCt of
 	// retained scratch with no semantics surface. Pt3D SoA migration increment 0a
@@ -169,7 +174,9 @@ public class Thing extends Object {
 	// integer in tlsThreadId); the last slot (accumThreadCt) is the main thread
 	// (tlsThreadId == -1). Lifetime is the JVM; allocations are O(workers), not
 	// O(Things). Sub-item (a) of Pt3D SoA increment 0a holds the 9 Brownian /
-	// torque / friction Pt3Ds; (b) adds RetObj, (c) adds CollisionEvent.
+	// torque / friction Pt3Ds; (b) adds RetObj, (c) adds CollisionEvent. The
+	// per-worker RNG consolidation increment adds `rng` and the three UCircRnd
+	// scratch instances (used to be 1 + 3 per Thing).
 	public static final class WorkerScratch {
 		// Brownian RNG scratch (v1/v2/rsq/facterm/fac1/fac2/tempPt Pt3Ds) was
 		// removed when calcRandomForces was scalarized — the per-component math
@@ -191,12 +198,73 @@ public class Thing extends Object {
 		// increment 0b sub-(a) — these used to be `new Pt3D()` per call,
 		// 1.18 M/step at 4× config.
 		final Pt3D moveScratch = new Pt3D();
+		// Per-worker PRNG. Replaces the per-Thing `myPRNG` MersenneTwisterFast
+		// (~12 GB retained at 16× — see PT3D_SOA_MIGRATION.md "per-worker RNG
+		// consolidation"). Independent streams across workers; each MTF is
+		// seeded via SplitMix64-derived seeds from a master in the static
+		// initializer below, preserving MT statistical quality.
+		final MersenneTwisterFast rng;
+		// Brownian uniform-deviate scratch (v1,v2,rsq,facterm) for the three
+		// translational/rotational axes. Used to be three UCircRnd fields per
+		// Thing (~14.21 M / 455 MB at 16×). Pure scratch — written by
+		// UCircRnd.newValue, read immediately by calcRandomForces, no
+		// carryover across calls.
+		final UCircRnd xVals;
+		final UCircRnd yVals;
+		final UCircRnd zVals;
+		WorkerScratch (long seed) {
+			rng   = new MersenneTwisterFast(seed);
+			xVals = new UCircRnd(Env.deltaT.getValue());
+			yVals = new UCircRnd(Env.deltaT.getValue());
+			zVals = new UCircRnd(Env.deltaT.getValue());
+		}
+	}
+
+	// Master seed for the per-worker RNG pool. Configurable via the
+	// `BOA_RNG_SEED` env var (parsed as a long); falls back to a high-entropy
+	// mix of System.nanoTime() and System.currentTimeMillis() if unset. With a
+	// fixed BOA_RNG_SEED *and* a fixed thread count *and* a deterministic
+	// work-split, the per-worker streams (and therefore the simulation as a
+	// whole, modulo any other entropy sources like Env.mtRNG) become
+	// reproducible — pre-consolidation runs were not reproducible (per-Thing
+	// MTF was seeded from `Math.random()` per Thing).
+	private static long resolveMasterSeed () {
+		String s = System.getenv("BOA_RNG_SEED");
+		if (s != null && !s.isEmpty()) {
+			try { return Long.parseLong(s); } catch (NumberFormatException e) {
+				System.err.println("[BOA_RNG_SEED] could not parse '" + s + "' as long; falling back to entropy");
+			}
+		}
+		long nano = System.nanoTime();
+		long ms   = System.currentTimeMillis();
+		return nano ^ (ms * 0x9E3779B97F4A7C15L);
+	}
+	static final long RNG_MASTER_SEED = resolveMasterSeed();
+	// SplitMix64 — the standard "seed-the-MTs" splitter (also what JDK's
+	// SplittableRandom uses). Stateless mix; given a counter, returns a
+	// well-distributed 64-bit output. Used to derive accumThreadCt+1
+	// independent seeds from RNG_MASTER_SEED in a way that avoids the close-
+	// seed correlations possible when seeding MT with adjacent integers.
+	private static long splitMix64 (long z) {
+		z = (z + 0x9E3779B97F4A7C15L);
+		z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+		z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+		return z ^ (z >>> 31);
 	}
 
 	static final WorkerScratch[] workerScratch;
 	static {
 		workerScratch = new WorkerScratch[accumThreadCt + 1];
-		for (int i = 0; i < workerScratch.length; i++) workerScratch[i] = new WorkerScratch();
+		// Derive (accumThreadCt + 1) independent seeds via SplitMix64. Slot
+		// accumThreadCt is the main-thread slot.
+		long counter = RNG_MASTER_SEED;
+		for (int i = 0; i < workerScratch.length; i++) {
+			counter = splitMix64(counter);
+			workerScratch[i] = new WorkerScratch(counter);
+		}
+		System.out.println("[RNG] per-worker RNG pool: " + workerScratch.length
+			+ " MTFs, masterSeed=" + RNG_MASTER_SEED
+			+ " (BOA_RNG_SEED " + (System.getenv("BOA_RNG_SEED") != null ? "set" : "unset") + ")");
 	}
 	// Main thread (tlsThreadId == -1) uses the last pool slot. Worker threads
 	// use their threadId directly. Callers in the Brownian hot path should
@@ -365,7 +433,8 @@ public class Thing extends Object {
 		bTorqueSum = null;
 		bFricForceSum = null;
 		bFricTorqueSum = null;
-		myPRNG = null;
+		// myPRNG is no longer a per-Thing field (moved to WorkerScratch in the
+		// per-worker RNG consolidation increment).
 		// cE is no longer a per-Thing field (moved to WorkerScratch).
 
 		//bForceTrack = null;
@@ -373,9 +442,8 @@ public class Thing extends Object {
 
 		// retObj is no longer a per-Thing field (moved to WorkerScratch).
 
-		xVals = null;
-		yVals = null;
-		zVals = null;
+		// xVals/yVals/zVals UCircRnd scratch is no longer a per-Thing field
+		// (moved to WorkerScratch in the per-worker RNG consolidation).
 		// v1/v2/rsq/facterm/fac1/fac2/tempPt and rForce/tempTorq are no longer
 		// per-Thing fields (moved to per-thread WorkerScratch in increment 0a).
 	}
@@ -920,14 +988,16 @@ public class Thing extends Object {
 		// randForces) is rewritten as scalar locals. Op order is preserved exactly
 		// (each component goes diff×facterm → sqrt → (invBDt*v*sqrt*gam) with
 		// left-to-right Java FP), so the result is bit-identical to the Pt3D form.
-		// ws is retained as a parameter for signature stability; the Brownian
-		// scratch Pt3Ds it used to hold (v1/v2/rsq/facterm/fac1/fac2/tempPt) are
-		// gone — see WorkerScratch.
+		// xVals/yVals/zVals and the PRNG used to be per-Thing; now both live in
+		// WorkerScratch (one set per worker) — see per-worker RNG consolidation.
 		final double bDt = Env.brownianDeltaT.getValue();
 		final double invBDt = 1.0 / bDt;
-		xVals.newValue(bDt, this);
-		yVals.newValue(bDt, this);
-		zVals.newValue(bDt, this);
+		final UCircRnd xVals = ws.xVals;
+		final UCircRnd yVals = ws.yVals;
+		final UCircRnd zVals = ws.zVals;
+		xVals.newValue(bDt, ws.rng);
+		yVals.newValue(bDt, ws.rng);
+		zVals.newValue(bDt, ws.rng);
 		// tempPt.mult(bTransDiff, facterm); fac1.vecSqrt(tempPt) — per component:
 		final double fac1x = Math.sqrt(bTransDiff.x * xVals.facterm);
 		final double fac1y = Math.sqrt(bTransDiff.y * yVals.facterm);
@@ -973,7 +1043,7 @@ public class Thing extends Object {
 		collisionCt =  0;
 	}
 	public double getRdmDelta (){
-		return myPRNG.nextDouble()*2-1;
+		return currentScratch().rng.nextDouble()*2-1;
 	}
 	
 	public static synchronized void addThing (Thing newThing) {

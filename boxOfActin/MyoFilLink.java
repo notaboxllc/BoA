@@ -323,7 +323,7 @@ public class MyoFilLink {
 		//System.out.println("Motor state is " + myMotor.getState() + " forceDotFil = " + forceDotFil + " ; guoCatchSlipProb = " + guoCatchSlipProb);
 		//System.out.println("Motor state is " + myMotor.getState() + " ForceMag = " + forceMag+ " ; forceDotFil = " + forceDotFil + " ; ReleaseProb = " + releaseProb + " ; guoCatchSlipProb = " + guoCatchTerm + " ; " +  guoSlipTerm + " ; " + guoCatchSlipProb);
 
-		boolean fired = (myMotor.myPRNG.nextDouble() < guoCatchSlipProb*Env.deltaT.getValue());
+		boolean fired = (Thing.currentScratch().rng.nextDouble() < guoCatchSlipProb*Env.deltaT.getValue());
 		if (fired) {
 			release();
 			normalRelease++;

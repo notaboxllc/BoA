@@ -257,7 +257,7 @@ public class FilSegment extends Thing {
 
 	double length;
 	double l;
-	double helixAng = 2*Math.PI*myPRNG.nextDouble();	// keeps track of the helix angle of minusMon.. starts randomly
+	double helixAng = 2*Math.PI*currentScratch().rng.nextDouble();	// keeps track of the helix angle of minusMon.. starts randomly
 	int monomerCt = 0;
 
 	// renderThicken: read by setRenderThicken() — dead call chain, defer to Phase 6
@@ -267,7 +267,7 @@ public class FilSegment extends Thing {
 		super(initCoord);
 		//synchronized (filSync) {
 			setUVec(initUVec);
-			setYVec(Pt3D.RandomUnitVec(myPRNG));
+			setYVec(Pt3D.RandomUnitVec(currentScratch().rng));
 			monomerCt = Env.actinSeed.getIntValue();
 			length = (monomerCt+1)*Env.actinMonoRadius;
 			addFilSegment(this);
@@ -284,7 +284,7 @@ public class FilSegment extends Thing {
 		super(initCoord);
 		//synchronized (filSync) {
 			setUVec(initUVec);
-			setYVec(Pt3D.RandomUnitVec(myPRNG));
+			setYVec(Pt3D.RandomUnitVec(currentScratch().rng));
 			this.monomerCt = monomerCt;
 			length = (monomerCt+1)*Env.actinMonoRadius;
 			addFilSegment(this);
@@ -303,7 +303,7 @@ public class FilSegment extends Thing {
 		super(initCoord);
 		//synchronized (filSync) {
 			setUVec(initUVec);
-			setYVec(Pt3D.RandomUnitVec(myPRNG));
+			setYVec(Pt3D.RandomUnitVec(currentScratch().rng));
 			this.monomerCt = monomerCt;
 			length = (monomerCt+1)*Env.actinMonoRadius;
 			addFilSegment(this);
@@ -1125,7 +1125,7 @@ public class FilSegment extends Thing {
 		}
 		
 		/*if (end2TipC < 0 && end2Capped) { // remove cap if collision of tip, with some probability... why not?
-			if (myPRNG.nextDouble() < 1e-4) { end2Capped = false; }
+			if (currentScratch().rng.nextDouble() < 1e-4) { end2Capped = false; }
 		}  	*/
 	}
 			
@@ -1134,7 +1134,7 @@ public class FilSegment extends Thing {
 		if (end2Capped) { return; } // already capped
 		if (nodeAtEnd2) { return; }  // no capping if formin at end2Pt
 		if (end2TipC < 2*Env.actinMonoDiam && end2NearArpFactor) { return; }  // steric conditions for end capping (replace with capping protein dimension!)
-		if (myPRNG.nextDouble() < Env.capRate.getValue()*Env.capConc.getValue()*Env.biochemDeltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < Env.capRate.getValue()*Env.capConc.getValue()*Env.biochemDeltaT.getValue()) {
 			end2Capped = true;
 		}
 	}
@@ -1155,7 +1155,7 @@ public class FilSegment extends Thing {
 	
 	public void checkBranching() {
 		if (!end2NearArpFactor) { return; }
-		if (myPRNG.nextDouble() < Env.branchRateNearArpFactors.getValue()*Env.arpConc.getValue()*Env.biochemDeltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < Env.branchRateNearArpFactors.getValue()*Env.arpConc.getValue()*Env.biochemDeltaT.getValue()) {
 			double bLoc = length - Math.random()*Env.branchZone.getValue();
 			makeArpBranch(bLoc);
 		}
@@ -1242,11 +1242,11 @@ public class FilSegment extends Thing {
 	// public void viscousBlobSim (double effectiveLength, double dT) {
 	//     if (numViscBlobs < Env.maxVBlobs) {
 	//         double blobAddProb = effectiveLength*Env.vBlobOnRate*dT;
-	//         if (myPRNG.nextDouble() < blobAddProb) { numViscBlobs++; lengthChanged = true; }
+	//         if (currentScratch().rng.nextDouble() < blobAddProb) { numViscBlobs++; lengthChanged = true; }
 	//     }
 	//     if (numViscBlobs == 0) return;
 	//     double blobRemoveProb = Env.vBlobOffRate*dT;
-	//     if (myPRNG.nextDouble() < blobRemoveProb) { numViscBlobs--; lengthChanged = true; }
+	//     if (currentScratch().rng.nextDouble() < blobRemoveProb) { numViscBlobs--; lengthChanged = true; }
 	// }
 	
 	public double getHelixAngleAtLoc(double loc) {
@@ -1338,10 +1338,10 @@ public class FilSegment extends Thing {
 			bugForcesFromOutside(cE,end2Pt);
 			//talkln ("collision");
 			//ActA.checkFilamentBinding(this,cE.tmpPt1);
-			if (myPRNG.nextDouble() < Env.checkActABindingProb.getValue()) {	// only check for ActA binding rarely
+			if (currentScratch().rng.nextDouble() < Env.checkActABindingProb.getValue()) {	// only check for ActA binding rarely
 				ActA.checkBindingToActA(this,cE.tmpPt1);
 			}
-			if (myPRNG.nextDouble() < Env.contactUncapsProb.getValue()) {		// uncap if contact with surface, with some probability
+			if (currentScratch().rng.nextDouble() < Env.contactUncapsProb.getValue()) {		// uncap if contact with surface, with some probability
 				end2Capped = false;
 			}
 		} else {
@@ -2158,8 +2158,8 @@ public class FilSegment extends Thing {
 		lineSegmentIntersectTest(fil1.end1Pt,fil1.end2Pt,fil2.end1Pt,fil2.end2Pt,retO);
 		double xLinkGrab = Env.crossLinkGrabDist.getValue();
 		if ((retO.collision) && retO.conDistSq < xLinkGrab*xLinkGrab) {
-			double loc1 = Pt3D.ptDist(fil1.end1Pt,retO.conPt1) + (2*fil1.myPRNG.nextDouble()-1)*minFilLinkSep;
-			double loc2 = Pt3D.ptDist(fil2.end1Pt,retO.conPt2) + (2*fil2.myPRNG.nextDouble()-1)*minFilLinkSep;
+			double loc1 = Pt3D.ptDist(fil1.end1Pt,retO.conPt1) + (2*currentScratch().rng.nextDouble()-1)*minFilLinkSep;
+			double loc2 = Pt3D.ptDist(fil2.end1Pt,retO.conPt2) + (2*currentScratch().rng.nextDouble()-1)*minFilLinkSep;
 			if (loc1 > fil1.length) { loc1 = fil1.length; }
 			if (loc1 < 0) { loc1 = 0; }
 			if (loc2 > fil2.length) { loc2 = fil2.length; }
@@ -2386,7 +2386,7 @@ public class FilSegment extends Thing {
 			boolean removeTether = false;
 			if ((Env.maxNodeTetherStrainDist.isActive()) & (end2ToPlasStrain.averageVal() > Env.maxNodeTetherStrainDist.getValue())) { 	// if strain greater than max allowable
 				removeTether = true; 
-			} else if ((Env.nodeTetherDetachRate.isActive()) & (myPRNG.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
+			} else if ((Env.nodeTetherDetachRate.isActive()) & (currentScratch().rng.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
 				removeTether = true;
 			} 
 			if (removeTether) {
@@ -2420,7 +2420,7 @@ public class FilSegment extends Thing {
 			boolean removeTether = false;
 			if ((Env.maxNodeTetherStrainDist.isActive()) & (end1ToPlasStrain.averageVal() > Env.maxNodeTetherStrainDist.getValue())) { 	// if strain greater than max allowable
 				removeTether = true; 
-			} else if ((Env.nodeTetherDetachRate.isActive()) & (myPRNG.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
+			} else if ((Env.nodeTetherDetachRate.isActive()) & (currentScratch().rng.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
 				removeTether = true;
 			} 
 			if (removeTether) {
@@ -2491,7 +2491,7 @@ public class FilSegment extends Thing {
 			boolean removeTether = false;
 			if ((Env.maxNodeTetherStrainDist.isActive()) & (end2ToPlasStrain.averageVal() > Env.maxNodeTetherStrainDist.getValue())) { 	// if strain greater than max allowable
 				removeTether = true; 
-			} else if ((Env.nodeTetherDetachRate.isActive()) & (myPRNG.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
+			} else if ((Env.nodeTetherDetachRate.isActive()) & (currentScratch().rng.nextDouble() < Env.nodeTetherDetachRate.getValue()*Env.deltaT.getValue())) {
 				removeTether = true;
 			} 
 			if (removeTether) {
@@ -2567,7 +2567,7 @@ public class FilSegment extends Thing {
 	
 	/*public boolean forminCanHold () {
 		// this version is random formin release
-		if (myPRNG.nextDouble() < Env.forminRelease.getValue()*Env.biochemDeltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < Env.forminRelease.getValue()*Env.biochemDeltaT.getValue()) {
 			//System.out.println ("forminCanHold says release formin");
 			return false;
 		}
@@ -2584,7 +2584,7 @@ public class FilSegment extends Thing {
 			releaseProb *= Math.exp(-log10*(-nodeForce/refForce));  // exp. decrease in releaseProb at nodeForce gets large in compression
 			//System.out.println (" ; releasePrb = " + releaseProb);
 		}
-		if (myPRNG.nextDouble() < releaseProb) {
+		if (currentScratch().rng.nextDouble() < releaseProb) {
 			return false;
 		}
 		return true;
@@ -2720,7 +2720,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public boolean addMonomerSim (double onRate){
-		if (myPRNG.nextDouble()< onRate*theBox.getMonomerConc()*Env.biochemDeltaT.getValue()){
+		if (currentScratch().rng.nextDouble()< onRate*theBox.getMonomerConc()*Env.biochemDeltaT.getValue()){
 			monomerCt++;
 			length+=halfmono;
 			theBox.takeMonomer(1);
@@ -2731,7 +2731,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public boolean addNonHydroMonomerSim (double onRate){
-		if (myPRNG.nextDouble()< onRate*theBox.getNonHydroMonomerConc()*Env.biochemDeltaT.getValue()){
+		if (currentScratch().rng.nextDouble()< onRate*theBox.getNonHydroMonomerConc()*Env.biochemDeltaT.getValue()){
 			monomerCt++;
 			length+=halfmono;
 			theBox.takeNonHydroMonomer(1);
@@ -2742,7 +2742,7 @@ public class FilSegment extends Thing {
 	}
 	
 	public boolean removeMonomerSim (double offRate, Monomer endMon) {
-		if (myPRNG.nextDouble()< offRate*Env.biochemDeltaT.getValue()){
+		if (currentScratch().rng.nextDouble()< offRate*Env.biochemDeltaT.getValue()){
 			monomerCt--;
 			length+= -halfmono;
 			if (endMon.hydrolyzable) {

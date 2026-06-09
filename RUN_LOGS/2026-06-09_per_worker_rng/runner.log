@@ -1,0 +1,9 @@
+[11:48:53] jmap run starting: 4x (K=2100, jmap at +1050s, classes=/tmp/pwrng_classes)
+[11:48:53]   JVM pid=1296077
+[12:06:23]   JVM exited before jmap window; histogram skipped
+[12:08:48] jmap run starting: 4x (K=12000, jmap at +600s, classes=/tmp/pwrng_classes)
+[12:08:48]   JVM pid=1300179
+[12:18:48]   capturing jmap -histo:live on pid=1300179...
+[12:18:49]   jmap captured to /home/jba/Code/BoA/RUN_LOGS/2026-06-09_per_worker_rng/4x_cpu_jmap_histo.txt
+[12:18:49]   killing JVM pid=1300179
+[12:18:52] 4x jmap done
