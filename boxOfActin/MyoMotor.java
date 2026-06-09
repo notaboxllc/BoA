@@ -318,7 +318,9 @@ public class MyoMotor extends Thing {
 		veloc.xToX(this, bVeloc);
 		incCoord(dt,veloc);  // just position = velocity*time
 
-		Pt3D scratch = new Pt3D();
+		// Per-worker reused scratch (Pt3D SoA inc 0b sub-(a)) — each setVals
+		// below is a full write, so no carryover from prior moveThing call.
+		Pt3D scratch = currentScratch().moveScratch;
 		double uVecTransInZ = -bAngVeloc.y * dt;
 		double uVecTransInY = bAngVeloc.z * dt;
 		scratch.setVals(1, uVecTransInY, uVecTransInZ);

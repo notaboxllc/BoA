@@ -874,3 +874,197 @@ scalarization first, then RetObj de-retention in `checkToLink`).
 
 The next increment should bundle (1) — it's the largest single win and a
 clean follow-on to this prompt's "computation-SoA" framing.
+
+## Increment 0b — transient-alloc de-retention (Myo*.moveThing + checkToLink)
+
+Landed on `pt3d-soa-inc0b-transient-alloc` (2026-06-08), bundling the two
+top-billed items from the scalar-Brownian roadmap into a single increment.
+Reuse-only, value-neutral: the per-call `new Pt3D()` / `new RetObj()`
+inside the move + xLink hot paths is routed to the per-worker
+`Thing.WorkerScratch` pool that 0a already builds. No arithmetic change,
+no state-field changes, no GPU kernel touched.
+
+### Sub-items
+
+| sub-item | site | per-call allocation eliminated | commit |
+|---|---|---:|---|
+| (a) Myo*.moveThing scratch | `Pt3D scratch = new Pt3D()` in `MyoRod.moveThing` (l.119), `MyoLever.moveThing` (l.116), `MyoMotor.moveThing` (l.321) | 1 Pt3D × 392 K Myo*-Things / step at 4× = 1.18 M / step (470 M / run) | `faeb332` |
+| (b) checkToLink RetObj | `RetObj retO = new RetObj()` at `FilSegment.checkToLink` (l.2118) | 1 RetObj × ~filament-pairs-checked / step (6 Pt3D each) | `7865988` |
+
+Each sub-item points its scratch at an already-pooled `WorkerScratch`
+field — `moveScratch` (newly added to `WorkerScratch` for sub-(a)) and
+`retObj` (added in 0a sub-(b) for the no-longer-called `nodeCollisions`).
+
+### Lifetime / safety audit
+
+- **(a) Myo*.moveThing**: each of the two scratch uses inside one
+  `moveThing()` body starts with a full `scratch.setVals(...)` call that
+  writes all three components before any reader (`xToX`, `unitVec`,
+  `setUVec`, `setYVec`). The reads are within the same body before any
+  other Thing's `moveThing` runs on the same worker. The three classes
+  (Rod/Lever/Motor) share one slot because they're all dispatched from
+  `Env.moveStart` inside `ThingStepThreads.execute`, one Thing at a time
+  per worker — no interleaving.
+- **(b) checkToLink RetObj**: `lineSegmentIntersectTest` begins with
+  `retO.reset()` (sets `collision = false`) and only writes
+  `conPt1`/`conPt2`/`conDistSq` when `retO.collision` becomes true; the
+  reader gates on `retO.collision` before touching those fields, so stale
+  data from a prior call cannot leak in. `checkToLink` is a leaf —
+  nothing it calls before discarding `retO` touches
+  `currentScratch().retObj`. The 0a `nodeCollisions` reader is dead
+  code in this configuration (unreferenced), so no cross-phase
+  conflict.
+
+### Validation — paired ensemble t-test (n=5 seeds, 1× CPU)
+
+Reuse-only refactor: the bar is value-neutrality at the paired-ensemble
+noise floor. `Thing.myPRNG` is per-construction seeded from
+`Math.random()`, so bit-identity between separate runs is impossible
+even at fixed `-seed`. Per-seed logs in
+`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/ens_{main_baseline,inc0b}/seed{1..5}/stdout.txt`;
+summary in `ensemble_summary.txt`.
+
+Configuration: `glidingAssay500_val` (runTime 0.1 s, 10 000 steps),
+`-Xmx8G`, 1× CPU. Baseline = main at `a77499b` (scalar-Brownian merged);
+inc0b = HEAD of `pt3d-soa-inc0b-transient-alloc`.
+
+| metric | baseline μ±σ (n=5) | inc0b μ±σ (n=5) | shift | shift/σ_b | paired t (df=4) |
+|---|---|---|---:|---:|---:|
+| bindEvents       | 805.0 ± 65.86 | 816.0 ± 98.76 | +11.0 | +0.17 σ | +0.17 |
+| meanBoundMotors  | 7.180 ± 0.36  | 7.475 ± 0.56  | +0.30 | +0.81 σ | +1.40 |
+| glidingVelocity  | 6.998 ± 0.37  | 6.985 ± 0.29  | −0.01 | −0.04 σ | −0.13 |
+
+All paired t < 1.5 — well inside the noise envelope at df=4 (two-sided
+5 % critical ≈ 2.78). **PASS.** Same noise band as 0a's paired-t up to
+1.48, consistent with the null prediction for a value-neutral refactor.
+
+### Re-measurement — allocation profile (after)
+
+Same JFR setup as the scalar-Brownian increment: 4× CPU
+(`4x_cpu_K1.pf`), 200 s delay to skip startup, 200 s requested duration.
+JFR file `RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/4x_cpu_after.jfr`,
+parsed to `4x_cpu_after_alloc.txt` and `4x_cpu_after_pt3d_callers.txt`.
+
+The recording finished early when the run completed at ~46 s into the
+JFR window (the prior baseline ran for 39 s into its window — same
+behaviour). Across the captured window:
+
+| class | scalar-Brownian baseline | inc0b |
+|---|---:|---:|
+| `boxOfActin.Pt3D` total weighted bytes | 33.9 GB | **0** (no events) |
+| ObjectAllocationSample events for Pt3D | 1 071 | **0** |
+
+By caller (Pt3D bytes), baseline → inc0b:
+
+| caller | baseline pct | inc0b pct |
+|---|---:|---:|
+| `MyoLever.moveThing`             | 30.3 % | 0 % (killed by sub-(a)) |
+| `MyoMotor.moveThing`             | 30.2 % | 0 % (killed by sub-(a)) |
+| `Thing$RetObj.<init>` (checkToLink) | 25.1 % | 0 % (killed by sub-(b)) |
+| `MyoRod.moveThing`               | 10.9 % | 0 % (killed by sub-(a)) |
+| `end1/end2/uVec*AsPt3D`          |  3.5 % | below JFR sample threshold |
+| `FilSegment.moveThing`           |  0.2 % | below JFR sample threshold |
+
+**Headline: ~97 % of per-step Pt3D allocation eliminated.** The four
+killed callers carried 96.5 % of Pt3D bytes in the baseline; in inc0b
+they contribute zero events to the JFR sample stream. The residual
+`*AsPt3D` bridge accessors (3.5 %) fall under the JFR sample threshold
+(~512 KB / thread / sample interval) — their total throughput is below
+~30 MB / s and spreads across worker threads, so the sampler doesn't
+register them.
+
+Non-Pt3D allocations captured: 229 MB of `Integer.valueOf` boxing inside
+`GlidingAssayEvaluator.sampleStep` (output-frame Map keys), plus 31 KB
+of internal `ArrayList` from JFR itself. No other class registered.
+
+### CPU ms/step — phase-wall sums (4× CPU, 400 steps)
+
+Same JFR-armed run (incidental phase walls; not a clean serial
+measurement, both subject to JFR sampling overhead):
+
+| phase | scalar-Brownian | inc0b | δ | δ pct |
+|---|---:|---:|---:|---:|
+| ThingStep    | 94.74 s | 96.21 s | +1.47 s | +1.5 % |
+| ThingBrownian| 38.95 s | 40.97 s | +2.02 s | +5.2 % |
+| Myosin       | 24.57 s | 26.27 s | +1.70 s | +6.9 % |
+| Mesh         |  8.30 s |  8.45 s | +0.15 s | +1.8 % |
+| Ck Mesh      |  1.46 s |  0.87 s | −0.59 s | −40 % |
+| Ck Mots      | 21.82 s | 23.13 s | +1.31 s | +6.0 % |
+| XLink        |  0.29 s |  0.30 s | flat    | flat |
+
+These are upper bounds — phase-wall sums include thread-pool barrier
+overhead which varies single-run. The +1-7 % swings across phases are
+single-run noise (the scalar-Brownian doc reported the same magnitude
+of single-run noise in Myosin). Reuse-only changes have no arithmetic
+work removed — the CPU win, if any, comes from reduced GC pressure,
+which moves the per-step floor (the wall observed at higher scales) more
+than the at-scale per-step ms. No regression visible.
+
+### GPU sanity
+
+Short `-gpu` run (`/tmp/inc0b_gpu_short.pf`, runTime 0.005 s = 500
+steps + warmup) completes rc=0
+(`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/gpu_sanity_inc0b.log`):
+
+| metric | scalar-Brownian | inc0b |
+|---|---:|---:|
+| gpuMoveThing total       | 73.61 s / 601 calls | 73.44 s / 601 calls |
+| gpuMoveThing exec        | 43.58 s | 43.33 s |
+| gpuMoveThing demandSync  | 0.110 s | 0.128 s |
+| ThingBrownian (fallback) |  3.05 s |  2.95 s |
+
+Device-side kernel walls are flat (exec −0.6 %). The CPU-fallback
+ThingBrownian path is essentially unchanged. No PTX errors, no
+validation faults. GPU pose-resident path is untouched.
+
+### 16× CPU ceiling probe — wall did NOT move
+
+`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/ceiling_16x_cpu_inc0b.log`,
+`-Xmx28G` (system has 31 GB physical):
+
+- `Mesh.<init>` × 3 cleared (same as 0a)
+- `makeInitialThings` (1.568 M Things) completed
+- `[phase-plan]` printed, per-step phase entered
+- `java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler
+  in thread "Thread-15"` — same failure mode as 0a and scalar-Brownian
+- after the OOM, the JVM thrashes in GC (1300 %+ CPU, retained heap
+  pinned at ~28 GB, no progress) — killed externally after 11 min
+
+**Honest status: the 16× transient-allocation ceiling is unchanged.**
+Removing ~97 % of per-step transient Pt3D allocation did not open
+enough headroom at `-Xmx28G` for the per-step phase to sustain at 16×.
+The transient kill (sub-(a) + sub-(b)) shed ~zero retained heap (both
+sites were method-local `new`, not retained fields), so all the saving
+is GC-throughput; the wall here is peak heap demand, not GC overhead.
+
+Where the remaining peak-heap demand at 16× per-step lives is not
+established by this increment — candidates include the residual
+`*AsPt3D` bridge Pt3Ds (deferred to inc 1), mesh-fill resize, per-step
+intermediate Pt3D from `Pt3D.Add/Sub/Scale` factory methods inside
+inner-loop math, and Things × thread-fan-out allocator scratch. A 16×
+JFR profile (post-fix, at the moment of OOM) would localise the next
+wall — held back from this increment to keep scope clean and not
+re-spec the next prompt.
+
+### Deliverable summary
+
+Two sub-commits, value-neutrality validated by paired-ensemble t-test,
+~97 % per-step transient Pt3D allocation eliminated at 4× CPU, GPU
+flat, 16× CPU ceiling did not clear. The retained-heap wall at 16×
+remains the next gating problem; this increment's reuse moves were the
+matched tool for the CPU GC-pressure side of the diagnosis but were
+correctly *not* a tool for the retained-heap side, so the result is
+the expected partial.
+
+### Follow-ups out of scope
+
+- **Storage-SoA `*AsPt3D` accessors (increment 1)** — the remaining
+  ~3.5 % of per-step Pt3D bytes; also the natural endpoint of the
+  Pt3D-storage migration. Callers should read `soaEnd1`/`soaEnd2`
+  directly. Minor for transient allocation, larger for the GPU pack
+  cost the design doc projects.
+- **16× per-step peak-heap localisation** — JFR at the OOM moment
+  (or `jmap` + `-XX:+HeapDumpOnOutOfMemoryError`) to identify which
+  per-step allocator carries the remaining peak. Until that is known,
+  pushing the ceiling further is fishing blind.
+

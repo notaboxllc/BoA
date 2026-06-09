@@ -1,8 +1,103 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (Pt3D SoA increment — Brownian/Langevin scalarization landed. Discovery from JFR pre-profile: per-step transient Pt3D alloc is dominated by Myo*.moveThing scratch (73 %) + FilSegment.checkToLink RetObj (24 %); Brownian (pooled in 0a) is not a transient allocator. Scalar rewrite shipped for cache-locality + dead-WorkerScratch cleanup; 16× ceiling did NOT move as predicted. Roadmap: Myo*.moveThing scalarization is the next increment. Full results in PT3D_SOA_MIGRATION.md "Increment (scalarization) — Brownian/Langevin (results)")
+Last updated: 2026-06-08 (Pt3D SoA increment 0b — transient-alloc de-retention landed. Two sub-commits pool Myo{Rod,Lever,Motor}.moveThing scratch + FilSegment.checkToLink RetObj into the per-worker WorkerScratch pool. JFR re-profile at 4× CPU: ~97 % of per-step Pt3D allocation eliminated (zero Pt3D events in the post-fix recording vs 1071 events / 33.9 GB in the scalar-Brownian baseline). Paired-ensemble n=5 t-test confirms value-neutrality (all paired-t < 1.5). GPU walls flat. **16× CPU ceiling did NOT move** — same `OutOfMemoryError` from a worker thread during the per-step phase; the inc0b kill freed only GC-throughput, not retained-heap (both sites were method-local `new`, not retained fields). Next: 16× JFR-at-OOM to localise the remaining peak-heap allocator. Full results in PT3D_SOA_MIGRATION.md "Increment 0b — transient-alloc de-retention".)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — Pt3D SoA increment 0b: transient-alloc de-retention (Myo*.moveThing + checkToLink)
+
+Reuse-only follow-on to the scalar-Brownian increment's task-1 finding.
+That JFR profile showed the per-step transient Pt3D wall is the
+`new Pt3D()` scratch inside Myo{Rod,Lever,Motor}.moveThing (~73 %) plus
+the `new RetObj()` inside FilSegment.checkToLink (~24 %) — neither
+arithmetic-hot, just allocation-hot. Matched tool is therefore reuse,
+not scalarization: route both call sites at the per-worker pool that 0a
+already builds, kill the `new` and its GC cost.
+
+**Sub-(a) — Myo*.moveThing scratch off WorkerScratch.** Added one Pt3D
+`moveScratch` to `Thing.WorkerScratch`; replaced the three identical
+`Pt3D scratch = new Pt3D()` locals at MyoRod.java:119, MyoLever.java:116,
+MyoMotor.java:321 with `currentScratch().moveScratch`. The two uses
+inside each `moveThing()` both begin with a full `setVals(...)` write
+before any read, so reuse is value-neutral; the three classes share one
+slot because they all run inside `Env.moveStart` of `ThingStepThreads`,
+one Thing at a time per worker. Commit `faeb332`.
+
+**Sub-(b) — checkToLink RetObj off WorkerScratch.** Replaced
+`RetObj retO = new RetObj()` at FilSegment.checkToLink (l.2118) with
+`currentScratch().retObj` (the slot added in 0a sub-(b) for the
+no-longer-called `nodeCollisions`). `lineSegmentIntersectTest` does
+`retO.reset()` then writes `conPt1/conPt2/conDistSq` only when
+`collision` becomes true; the reader gates on `collision` first, so
+stale data from a prior call cannot leak in. `checkToLink` is a leaf —
+no nested call touches `currentScratch().retObj` between the
+intersect-test and discard. Commit `7865988`.
+
+**Validation — paired ensemble t-test (n=5, 1× CPU, glidingAssay500_val).**
+Reuse-only refactor, so the bar is value-neutrality at the noise floor.
+Per-seed logs in `RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/ens_{main_baseline,inc0b}/`;
+summary in `ensemble_summary.txt`. Paired-t (df=4):
+
+| metric | baseline μ±σ | inc0b μ±σ | paired t |
+|---|---|---|---:|
+| bindEvents      | 805.0 ± 65.9  | 816.0 ± 98.8  | +0.17 |
+| meanBoundMotors | 7.180 ± 0.36  | 7.475 ± 0.56  | +1.40 |
+| glidingVelocity | 6.998 ± 0.37  | 6.985 ± 0.29  | −0.13 |
+
+All inside the noise envelope; same magnitude as 0a's paired-t up to
+1.48. **PASS.**
+
+**JFR allocation re-profile at 4× CPU.** Same setup as the
+scalar-Brownian "after" run (200 s delay, 200 s requested; recording
+ended at 46 s when the run completed — same as prior baseline). The
+JFR file
+(`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/4x_cpu_after.jfr`) captured
+**zero `boxOfActin.Pt3D` allocation events**. The four killed callers
+(MyoLever/MyoMotor/RetObj.<init>/MyoRod) accounted for 96.5 % of the
+baseline's 33.9 GB of Pt3D bytes — they're gone. The residual
+`*AsPt3D` bridge accessors (3.5 %) plus `FilSegment.moveThing` (0.2 %)
+emit at ~32 MB / s, below the JFR sample threshold per worker thread.
+
+Non-Pt3D allocations in the same window: 229 MB of `Integer.valueOf`
+boxing from `GlidingAssayEvaluator.sampleStep` (output-frame Map
+keys), 31 KB of JFR-internal ArrayList. Nothing else registers.
+
+**CPU ms/step — phase walls (4× CPU, 400 steps, JFR-armed run).**
+Single-run noise dominates: ThingStep +1.5 %, ThingBrownian +5.2 %,
+Myosin +6.9 %, Mesh +1.8 %, Ck Mots +6.0 % (going the "wrong" way) vs
+Ck Mesh −40 % (going the "right" way). Reuse-only changes don't shift
+arithmetic; CPU saving from GC-pressure relief shows up at the
+high-Thing-count scaling ceiling, not on the per-step wall at 4×. No
+regression.
+
+**GPU sanity (`-gpu` short run).** rc=0,
+`gpuMoveThing exec = 43.33 s` (601 calls) vs 43.58 s for the scalar-
+Brownian baseline. Flat as expected — kernels untouched.
+`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/gpu_sanity_inc0b.log`.
+
+**16× CPU ceiling probe — wall did NOT move.**
+`RUN_LOGS/2026-06-08_pt3d_inc0b_alloc/ceiling_16x_cpu_inc0b.log`,
+`-Xmx28G`: Mesh × 3 cleared, makeInitialThings completed, per-step
+phase entered, then `java.lang.OutOfMemoryError thrown from the
+UncaughtExceptionHandler in thread "Thread-15"` — same wall as 0a and
+scalar-Brownian. Inc0b's two sub-items removed ~zero from the retained
+heap (both `new`s were method-local, not retained fields); their kill
+shed GC throughput, not peak heap demand. The 16× wall at this
+`-Xmx28G` is peak heap demand during per-step, not GC overhead, so the
+inc0b lever didn't apply. **Honest status: 16× transient-allocation
+ceiling unchanged.**
+
+Where the remaining peak-heap demand lives at 16× per-step is not
+established by this increment — candidates include the residual
+`*AsPt3D` bridge Pt3Ds (deferred to inc 1), mesh-fill resize, per-step
+intermediate Pt3D from `Pt3D.Add/Sub/Scale` factory methods, or
+per-Thing × per-thread accumulator scratch. A 16× JFR-at-OOM (or
+`-XX:+HeapDumpOnOutOfMemoryError`) is the next diagnostic before
+pushing the ceiling further.
+
+Branched and merged on `pt3d-soa-inc0b-transient-alloc`. Two
+sub-commits (`faeb332`, `7865988`). Doc: PT3D_SOA_MIGRATION.md
+"Increment 0b — transient-alloc de-retention".
 
 ## 2026-06-08 — Pt3D SoA increment: Brownian/Langevin scalarization + transient-alloc profile
 

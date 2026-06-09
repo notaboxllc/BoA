@@ -1,0 +1,6 @@
+# ObjectAllocationSample events: 8  total weighted bytes: 229,068,200
+
+class                                                                     samples pct_smp   weighted_bytes pct_bytes
+--------------------------------------------------------------------------------------------------------------------
+java/lang/Integer                                                               7   87.5%      229,035,848    100.0%
+java/util/ArrayList                                                             1   12.5%           32,352      0.0%
