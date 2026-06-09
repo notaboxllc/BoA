@@ -190,7 +190,7 @@ public class StickyNode extends ProteinNode {
 		// hot spot origination
 		double getHotProb = 0;//2e-3*Env.biochemDeltaT.getValue();
 		if (hotSpotCt < maxHotSpots && !iAmHotRho) { 
-			if (myPRNG.nextDouble() < getHotProb) {  // testing only...
+			if (currentScratch().rng.nextDouble() < getHotProb) {  // testing only...
 				iAmHotRho = true;
 				iAmHotSpotOriginator = true;
 				myHotSpotOriginator = this;
@@ -202,7 +202,7 @@ public class StickyNode extends ProteinNode {
 		// hot spot spread, must have a rho hot neighbor
 		double hotSpotSpreadProb = 0;//2e-2*Env.biochemDeltaT.getValue();
 		if (rhoHotNeighbor() && !iAmHotRho) { 
-			if (myPRNG.nextDouble() < hotSpotSpreadProb) {  // testing only...
+			if (currentScratch().rng.nextDouble() < hotSpotSpreadProb) {  // testing only...
 				iAmHotRho = true;
 				myHotSpotOriginator = getOriginatorFromNeighbor();
 				hotTime = Env.simulationTime;
@@ -227,7 +227,7 @@ public class StickyNode extends ProteinNode {
 		
 		if (iAmHotRho) {
 			double nucFilProb = Env.nucRateNearArpFactors.getValue()*Env.biochemDeltaT.getValue();
-			if (myPRNG.nextDouble() < nucFilProb) {  // testing only...
+			if (currentScratch().rng.nextDouble() < nucFilProb) {  // testing only...
 				Pt3D nucVec = zVecAsPt3D();
 				Pt3D nucPt = Pt3D.Add(coordAsPt3D(), -1.3*Env.membraneNodeRadius.getValue(),nucVec);
 				FilSegment.makeArp23NucFilament(nucPt, nucVec);

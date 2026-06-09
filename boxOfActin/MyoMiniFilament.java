@@ -320,10 +320,10 @@ public class MyoMiniFilament extends Thing {
 	public void makeMyosinHeads () {
 		for (int i=0;i<numMyosinHeads;i++) {
 			myoPtsInx[i] = new Pt3D();
-			double ang = myPRNG.nextDouble()*Math.PI;
+			double ang = currentScratch().rng.nextDouble()*Math.PI;
 			myoPtsInx[i].y = getRadius()*Math.cos(ang);
 			myoPtsInx[i].z = getRadius()*Math.sin(ang);
-			myoPtsInx[i].x = (2*myPRNG.nextDouble()-1)*(length/2);
+			myoPtsInx[i].x = (2*currentScratch().rng.nextDouble()-1)*(length/2);
 			
 			myoPtsInX[i] = new Pt3D();
 			myoPtsInX[i].xToX(this,myoPtsInx[i]);
@@ -363,10 +363,10 @@ public class MyoMiniFilament extends Thing {
 		
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			myoDimerPtsEnd1Inx[i] = new Pt3D();
-			double ang = myPRNG.nextDouble()*Math.PI;
+			double ang = currentScratch().rng.nextDouble()*Math.PI;
 			myoDimerPtsEnd1Inx[i].y = 0;//getRadius()*Math.cos(ang);
 			myoDimerPtsEnd1Inx[i].z = 0;//getRadius()*Math.sin(ang);
-			myoDimerPtsEnd1Inx[i].x = -(length/2 - myPRNG.nextDouble()*headZone);
+			myoDimerPtsEnd1Inx[i].x = -(length/2 - currentScratch().rng.nextDouble()*headZone);
 			
 			myoDimerPtsEnd1InX[i] = new Pt3D();
 			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
@@ -377,10 +377,10 @@ public class MyoMiniFilament extends Thing {
 		
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			myoDimerPtsEnd2Inx[i] = new Pt3D();
-			double ang = myPRNG.nextDouble()*Math.PI;
+			double ang = currentScratch().rng.nextDouble()*Math.PI;
 			myoDimerPtsEnd2Inx[i].y = 0;//getRadius()*Math.cos(ang);
 			myoDimerPtsEnd2Inx[i].z = 0;//getRadius()*Math.sin(ang);
-			myoDimerPtsEnd2Inx[i].x = length/2 - myPRNG.nextDouble()*headZone;
+			myoDimerPtsEnd2Inx[i].x = length/2 - currentScratch().rng.nextDouble()*headZone;
 			
 			myoDimerPtsEnd2InX[i] = new Pt3D();
 			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);

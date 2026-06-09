@@ -202,7 +202,7 @@ public class MyoMotor extends Thing {
 	
 /*	public void checkCocking() {
 		if (!onFil) { return; }
-		if (myPRNG.nextDouble() < 100*Env.deltaT.getValue()) { 
+		if (currentScratch().rng.nextDouble() < 100*Env.deltaT.getValue()) { 
 			myMyosin.cocked = ! myMyosin.cocked; 
 			if (!myMyosin.cocked) {
 				releaseAllMyoFilLinks();
@@ -238,7 +238,7 @@ public class MyoMotor extends Thing {
 	}
 	
 	/*public void biochemStateSim () {
-		if (myPRNG.nextDouble() < 100*Env.deltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < 100*Env.deltaT.getValue()) {
 			graphicsUpdate = true;
 			if (notATP()) { setStateATP(); return; }
 			if (notADP()) { setStateADP(); return; }
@@ -246,30 +246,30 @@ public class MyoMotor extends Thing {
 	}*/
 	
 	public void atpOnMyo () {
-		if (myPRNG.nextDouble() < Env.atpOnMyo.getValue()*Env.deltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < Env.atpOnMyo.getValue()*Env.deltaT.getValue()) {
 			setStateATP();
         }
 	}
 	
 	public void hydrolize (){
 		if (onFil) {
-			if (myPRNG.nextDouble() < Env.myoOnFilATP_ADPPi.getValue()*Env.deltaT.getValue()) { setStateADPPi(); }
+			if (currentScratch().rng.nextDouble() < Env.myoOnFilATP_ADPPi.getValue()*Env.deltaT.getValue()) { setStateADPPi(); }
 		} else {
-			if (myPRNG.nextDouble() < Env.myoOffFilATP_ADPPi.getValue()*Env.deltaT.getValue()) { setStateADPPi(); }
+			if (currentScratch().rng.nextDouble() < Env.myoOffFilATP_ADPPi.getValue()*Env.deltaT.getValue()) { setStateADPPi(); }
 		}
 	}
 	
 	public void dissociatePi() {
 		if (onFil) {
-			if (myPRNG.nextDouble() < Env.myoOnFilADPPi_ADP.getValue()*Env.deltaT.getValue()) { setStateADP(); }
+			if (currentScratch().rng.nextDouble() < Env.myoOnFilADPPi_ADP.getValue()*Env.deltaT.getValue()) { setStateADP(); }
 		} else {
-			if (myPRNG.nextDouble() < Env.myoOffFilADPPi_ADP.getValue()*Env.deltaT.getValue()) { setStateADP(); }
+			if (currentScratch().rng.nextDouble() < Env.myoOffFilADPPi_ADP.getValue()*Env.deltaT.getValue()) { setStateADP(); }
 		}
 	}	  
 	
 	public void dissociateADP() {
 		if (tipLink.forceDotFilTrack.averageVal() > 0) { return; }
-		if (myPRNG.nextDouble() < Env.myoOnFilADP_None.getValue()*Env.deltaT.getValue()) {
+		if (currentScratch().rng.nextDouble() < Env.myoOnFilADP_None.getValue()*Env.deltaT.getValue()) {
 		     setStateNONE();
 		}
 	}	

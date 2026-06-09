@@ -324,7 +324,7 @@ public class ProteinNode extends Thing {
 	
 	public void makeMyosinSinglets () {
 		for (int i=0;i<myoCt;i++) {
-			myoPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
+			myoPtsInx[i] = Pt3D.RandomUnitVec(currentScratch().rng);
 			Pt3D myoUVec = new Pt3D(myoPtsInx[i]);
 			myoPtsInx[i].scale(getRadius());
 			
@@ -339,7 +339,7 @@ public class ProteinNode extends Thing {
 	
 	public void makeMyosinSinglets (Pt3D hemisphereNormal) {
 		for (int i=0;i<myoCt;i++) {
-			myoPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
+			myoPtsInx[i] = Pt3D.RandomUnitVec(currentScratch().rng);
 			// check if randomly created uVecAsPt3D() points to opposite hemisphere, if so change direction
 			if (Pt3D.Dot(hemisphereNormal, myoPtsInx[i]) < 0) {
 				myoPtsInx[i].reverse();
@@ -404,7 +404,7 @@ public class ProteinNode extends Thing {
 	
 	public void makeMyosinDimers () {
 		for (int i=0;i<myoDimerCt;i++) {
-			myoDimerPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
+			myoDimerPtsInx[i] = Pt3D.RandomUnitVec(currentScratch().rng);
 			Pt3D myoUVec = new Pt3D(myoDimerPtsInx[i]);
 			myoDimerPtsInx[i].scale(getRadius());
 			
@@ -419,7 +419,7 @@ public class ProteinNode extends Thing {
 	
 	public void makeMyosinDimers (Pt3D hemisphereNormal) {
 		for (int i=0;i<myoDimerCt;i++) {
-			myoDimerPtsInx[i] = Pt3D.RandomUnitVec(myPRNG);
+			myoDimerPtsInx[i] = Pt3D.RandomUnitVec(currentScratch().rng);
 			// check if randomly created uVecAsPt3D() points to opposite hemisphere, if so change direction
 			if (Pt3D.Dot(hemisphereNormal, myoDimerPtsInx[i]) < 0) {
 				myoDimerPtsInx[i].reverse();
@@ -700,7 +700,7 @@ public class ProteinNode extends Thing {
 	
 	public Pt3D getNucleationVec () {
 		FilSegment nucTo = null;
-		Pt3D nucVec = Pt3D.RandomUnitVec(myPRNG);
+		Pt3D nucVec = Pt3D.RandomUnitVec(currentScratch().rng);
 		
 		if (Env.twoForminsOpposite) {
 			if (forminCt >= 1) {
@@ -709,7 +709,7 @@ public class ProteinNode extends Thing {
 			}
 		}
 		
-		return Pt3D.RandomUnitVec(myPRNG);
+		return Pt3D.RandomUnitVec(currentScratch().rng);
 	}
 	
 	public boolean fullyBound() {

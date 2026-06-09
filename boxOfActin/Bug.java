@@ -377,7 +377,7 @@ public class Bug extends Crucible {
 			pt.z = zC*radius;
 			pt.x = (Env.mtRNG.nextDouble()*2-1)*halfCylLength;
 		} else {							// random point in one of the hemispheres
-			pt = Pt3D.RandomUnitVec(myPRNG);
+			pt = Pt3D.RandomUnitVec(currentScratch().rng);
 			pt.scale(radius*Env.mtRNG.nextDouble());
 			if (pt.x > 0) {
 				pt.x += halfCylLength;
@@ -417,7 +417,7 @@ public class Bug extends Crucible {
 
 			pt.x = (Env.mtRNG.nextDouble()*2-1)*halfCylLength;
 		} else {							// random point in one of the hemispheres
-			pt = Pt3D.RandomUnitVec(myPRNG);
+			pt = Pt3D.RandomUnitVec(currentScratch().rng);
 			pt.scale((radius-objRadius)*Env.mtRNG.nextDouble());
 			if (pt.x > 0) {
 				pt.x += halfCylLength;
@@ -433,7 +433,7 @@ public class Bug extends Crucible {
 	
 	
 	public Pt3D rdmPtInsideNodeZone () {
-		Pt3D pt = Pt3D.RandomUnitVec(myPRNG);
+		Pt3D pt = Pt3D.RandomUnitVec(currentScratch().rng);
 		//random point in cylinder
 		pt.x = 0;
 		pt.unitVec();
@@ -448,7 +448,7 @@ public class Bug extends Crucible {
 	}
 	
 	public Pt3D rdmPtOnRearHemisphere () {
-		Pt3D ptOnRear = Pt3D.RandomUnitVec(myPRNG);
+		Pt3D ptOnRear = Pt3D.RandomUnitVec(currentScratch().rng);
 		ptOnRear.scale(radius);
 		ptOnRear.x = -Math.abs(ptOnRear.x);
 		ptOnRear.x += -halfCylLength;
@@ -456,7 +456,7 @@ public class Bug extends Crucible {
 	}
 	
 	public Pt3D rdmPtOnCylinder () { 
-		Pt3D ptOnCyl = Pt3D.RandomUnitVec(myPRNG);
+		Pt3D ptOnCyl = Pt3D.RandomUnitVec(currentScratch().rng);
 		double xVal = ptOnCyl.x;
 		ptOnCyl.x = 0;
 		ptOnCyl.unitVec();
@@ -663,7 +663,7 @@ public class Bug extends Crucible {
 	public void mkSymActAOnBead() {
 		Pt3D rdmOnSphere = new Pt3D();
 		for (int i=0; i < Env.totalActACt.getIntValue(); i++) { 
-			rdmOnSphere.randomUnitVec(myPRNG);
+			rdmOnSphere.randomUnitVec(currentScratch().rng);
 			rdmOnSphere.scale(radius);
 			new ActA(rdmOnSphere,this);
 		}

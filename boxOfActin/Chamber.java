@@ -88,8 +88,8 @@ public class Chamber extends Crucible {
 	public void makeMyosinDimers () {
 		for (int i=0;i<Env.numChamberFixedMyoDimers.getIntValue();i++) {
 			myoDimerPtsInX[i] = new Pt3D();
-			myoDimerPtsInX[i].x = (2*myPRNG.nextDouble()-1)*0.5*Env.boxXDim.getValue();
-			myoDimerPtsInX[i].y = (2*myPRNG.nextDouble()-1)*0.5*Env.boxYDim.getValue();
+			myoDimerPtsInX[i].x = (2*currentScratch().rng.nextDouble()-1)*0.5*Env.boxXDim.getValue();
+			myoDimerPtsInX[i].y = (2*currentScratch().rng.nextDouble()-1)*0.5*Env.boxYDim.getValue();
 			myoDimerPtsInX[i].z = -0.5*Env.boxZDim.getValue();
 		
 			myodimers[i] = new MyosinDimer(myoDimerPtsInX[i]);

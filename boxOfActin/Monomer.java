@@ -181,13 +181,13 @@ public class Monomer {
 	
 	public void hydrolize (FilSegment fil){
 		if (!hydrolyzable) { return; }
-		if (fil.myPRNG.nextDouble() < Env.kHydrolysis.getValue()*Env.biochemDeltaT.getValue()) {
+		if (Thing.currentScratch().rng.nextDouble() < Env.kHydrolysis.getValue()*Env.biochemDeltaT.getValue()) {
 			setStateADPPi ();
          }
 	}
 
 	public void dissociate(FilSegment fil) {
-		if (fil.myPRNG.nextDouble() < Env.kDissociation.getValue()*Env.biochemDeltaT.getValue()) {
+		if (Thing.currentScratch().rng.nextDouble() < Env.kDissociation.getValue()*Env.biochemDeltaT.getValue()) {
 		     setStateADP ();
 		}
 	}	  
@@ -199,7 +199,7 @@ public class Monomer {
 	public void tropoBinding (FilSegment fil) {
 		if (cofilinOn) { return; } // can't bind monomer if cofilin already present
 		if (tropoOn) { return; } // return if already tropomyosin bound
-		if (fil.myPRNG.nextDouble() < Env.tropoConc.getValue()*Env.tropoOnRate.getValue()*Env.biochemDeltaT.getValue()) {
+		if (Thing.currentScratch().rng.nextDouble() < Env.tropoConc.getValue()*Env.tropoOnRate.getValue()*Env.biochemDeltaT.getValue()) {
 			tropoOn = true;
 			tropoCenter = true;  // mark this monomer as special, center of a tropomyosin protein
 			// tropomyosin spans seven actin monomers... set tropoOn for three monomers in each direction
@@ -220,7 +220,7 @@ public class Monomer {
 	public void tropoUnbinding (FilSegment fil) {
 		if (!tropoOn) { return; } // return if no tropomyosin bound
 		if (!tropoCenter) { return; } // only the center monomer will simulate tropomyosin unbinding
-		if (fil.myPRNG.nextDouble() < Env.tropoOffRate.getValue()*Env.biochemDeltaT.getValue()) {
+		if (Thing.currentScratch().rng.nextDouble() < Env.tropoOffRate.getValue()*Env.biochemDeltaT.getValue()) {
 			tropoOn = false;
 			tropoCenter = false;
 			// tropomyosin spans seven actin monomers... set tropoOff for three monomers in each direction
@@ -241,7 +241,7 @@ public class Monomer {
 		if (tropoOn) { return; } // no cofilin binding if protected by tropomyosin
 		double cofRate = Env.cofilinRate.getValue();
 		if ((fil.linkCt > 0) & (Env.bundleStableFactor.isActive())) { cofRate=cofRate/(Env.bundleStableFactor.getValue()*fil.linkCt); }		// alter cofilin binding for bundled fils
-		if (fil.myPRNG.nextDouble() < Env.cofilinConc.getValue()*cofRate*Env.biochemDeltaT.getValue()) {
+		if (Thing.currentScratch().rng.nextDouble() < Env.cofilinConc.getValue()*cofRate*Env.biochemDeltaT.getValue()) {
 			cofilinOn = true;
 		}
 	}
