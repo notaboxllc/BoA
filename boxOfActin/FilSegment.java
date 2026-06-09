@@ -2116,7 +2116,15 @@ public class FilSegment extends Thing {
 	}
 	
 	public static void checkToLink (FilSegment fil1, FilSegment fil2) {
-		RetObj retO = new RetObj();
+		// Per-worker reused RetObj (Pt3D SoA inc 0b sub-(b)). Lifetime is the
+		// single lineSegmentIntersectTest write + immediate read below — no
+		// nested xLink/collision call consumes it. lineSegmentIntersectTest
+		// begins with retO.reset() and only sets conPt1/conPt2/conDistSq
+		// when retO.collision becomes true; the reader gates on collision
+		// before touching those fields, so stale data from a prior call
+		// cannot leak in. Previously `new RetObj()` per filament-pair at
+		// ~24 % of per-step Pt3D allocation in the XLink phase.
+		RetObj retO = currentScratch().retObj;
 		if (fil1.nodeAtEnd2 && fil2.nodeAtEnd2) {
 			if (fil1.end2Node == fil2.end2Node) { return; }  // no xlinks between first segments from same node
 		}
