@@ -2187,6 +2187,9 @@ public class FilSegment extends Thing {
 	}
 	
 	public void nodeCollisions() {
+		// retObj is per-worker scratch (Pt3D SoA inc 0a sub-(b)); pointAndLine
+		// writes it then we read it before any other consumer can touch it.
+		final RetObj retObj = currentScratch().retObj;
 		ProteinNode curNode;
 		for (int i=0;i<ProteinNode.nodeCt;i++) {
 			curNode = ProteinNode.theNodes[i];

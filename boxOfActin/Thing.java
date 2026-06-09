@@ -124,8 +124,9 @@ public class Thing extends Object {
 	//ValueTracker bForceTrack = new ValueTracker(Env.forcesToTrack,ValueTracker.PT3D_TYPE);
 	//ValueTracker bTorqueTrack = new ValueTracker(Env.forcesToTrack,ValueTracker.PT3D_TYPE);
 	
-	//	 for collision tests
-	RetObj retObj = new RetObj();
+	//	 for collision tests — RetObj scratch (6 Pt3D × Thing.thingCt — 7.07 M at
+	// 4×) used to be a per-Thing field. Pt3D SoA migration increment 0a
+	// sub-item (b) moves it to WorkerScratch; callers use currentScratch().retObj.
 	boolean collidedWithBugThisStep = false;
 	int collisionCt = 0; 	// keep track of number of collisions at each time-step
 	double lastCollisionTime = 0; // stores sim. time of last collision
@@ -179,6 +180,9 @@ public class Thing extends Object {
 		// Torque/friction scratch — written/read inside incFrictionSum only.
 		final Pt3D rForce   = new Pt3D();
 		final Pt3D tempTorq = new Pt3D();
+		// Line/point-intersect return-by-mutation. Reused across collision /
+		// xLink checks on the same worker; lifetime is the single test call.
+		final RetObj retObj = new RetObj();
 	}
 
 	static final WorkerScratch[] workerScratch;
@@ -358,8 +362,8 @@ public class Thing extends Object {
 		
 		//bForceTrack = null;
 		//bTorqueTrack = null;
-		
-		retObj = null;
+
+		// retObj is no longer a per-Thing field (moved to WorkerScratch).
 
 		xVals = null;
 		yVals = null;
