@@ -1392,8 +1392,8 @@ public class GPUMoveThing {
                 tz += Rx * Fy - Ry * Fx;
 
                 // F4 torsion at end2 (CPU FilSegment.java:1698-1707):
-                //   side=0 (ptAtEnd2 == neighbour.end1Pt) → cross(uVec, neighbour.uVec)
-                //   side=1 (ptAtEnd2 == neighbour.end2Pt) → cross(uVec, neighbour.uVecR)
+                //   side=0 (end2NbrSide == 0, my end2 → nbr.end1) → cross(uVec, neighbour.uVec)
+                //   side=1 (end2NbrSide == 1, my end2 → nbr.end2) → cross(uVec, neighbour.uVecR)
                 // The sign convention here matters (unlike F3 which squares
                 // cosBeta) — a wrong sign flips the unit torsion vector AND
                 // produces angTween ≈ 180° on a straight chain, which would
@@ -1528,8 +1528,8 @@ public class GPUMoveThing {
                 tz += Rx * Fy - Ry * Fx;
 
                 // F4 torsion at end1 (CPU FilSegment.java:1752-1761):
-                //   side=0 (ptAtEnd1 == neighbour.end1Pt) → cross(uVecR, neighbour.uVec)
-                //   side=1 (ptAtEnd1 == neighbour.end2Pt) → cross(uVecR, neighbour.uVecR)
+                //   side=0 (end1NbrSide == 0, my end1 → nbr.end1) → cross(uVecR, neighbour.uVec)
+                //   side=1 (end1NbrSide == 1, my end1 → nbr.end2) → cross(uVecR, neighbour.uVecR)
                 // Same correct sign convention as end2 (uVec at side=0,
                 // uVecR at side=1).
                 double nuxE, nuyE, nuzE;
@@ -3998,7 +3998,7 @@ public class GPUMoveThing {
                             int ns = thingNumberToMoveSlot[nIdx];
                             if (ns >= 0) {
                                 e2Slot = ns;
-                                e2Side = (f.ptAtEnd2 == ne2.end1Pt) ? 0 : 1;
+                                e2Side = f.end2NbrSide;
                             }
                         }
                     }
@@ -4008,7 +4008,7 @@ public class GPUMoveThing {
                             int ns = thingNumberToMoveSlot[nIdx];
                             if (ns >= 0) {
                                 e1Slot = ns;
-                                e1Side = (f.ptAtEnd1 == ne1.end1Pt) ? 0 : 1;
+                                e1Side = f.end1NbrSide;
                             }
                         }
                     }
