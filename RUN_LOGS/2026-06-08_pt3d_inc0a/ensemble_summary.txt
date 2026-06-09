@@ -1,0 +1,39 @@
+Ensemble validation summary — Pt3D SoA inc 0a vs baseline
+Config: glidingAssay500_val, CPU, n=5, seeds 1..5
+Date: 2026-06-08, branch pt3d-soa-inc0a-scratch-deretention (HEAD = sub-(d)
+final, 47eebf0); baseline = main at b15ff84.
+
+=== BASELINE (n=5) ===
+bindEvents        : mean=874.40  std=136.56  values=[666, 935, 973, 990, 808]
+meanBoundMotors   : mean=7.5024  std=0.7243  values=[6.298, 7.808, 7.717, 8.215, 7.474]
+glidingVelocity   : mean=7.2282  std=0.5321  values=[6.413, 7.3919, 7.8634, 7.3732, 7.0994]
+
+=== INC0A (n=5) ===
+bindEvents        : mean=967.80  std=37.08   values=[917, 983, 1018, 955, 966]
+meanBoundMotors   : mean=7.9966  std=0.3803  values=[7.792, 8.277, 8.435, 7.481, 7.998]
+glidingVelocity   : mean=7.7717  std=0.2578  values=[7.9825, 8.0435, 7.4374, 7.8088, 7.5861]
+
+=== SHIFT ===
+bindEvents      :  +93.40  / σ_baseline 136.6  = +0.68σ_b   (two-sample t = 1.48)
+meanBoundMotors :  +0.494  / σ_baseline 0.72   = +0.68σ_b   (two-sample t = 1.34)
+glidingVelocity :  +0.544  / σ_baseline 0.53   = +1.02σ_b   (two-sample t = 2.05)
+
+=== ASSESSMENT ===
+Baseline at fixed seed is NOT bit-reproducible (Thing.myPRNG seeded from
+Math.random(), not Env.mtRNG). Two pre-ensemble baseline runs at seed=1
+differed by 31% in bindEvents.
+
+The Pt3D SoA inc0a change is mathematically null: WorkerScratch holds Pt3D
+objects with the same fields, written-before-read inside a single
+calcRandomForces / incFrictionSum / collision-check call body. No
+RNG draw order changes; no force/torque accumulation order changes; no
+state crosses call boundaries.
+
+Apparent t=2.05 shift on glidingVelocity is within the noise envelope
+of a single-seed-pair sample at n=5 of this non-deterministic
+benchmark. Baseline seed=1 contributes a low-end outlier
+(bindEvents=666 vs other 4 in [808, 990]); with seed=1 removed,
+glidingVelocity t drops to 1.65 — same order, no signal.
+
+PASS: ensemble agreement within expected noise. Math change is null
+under audit. No bail.

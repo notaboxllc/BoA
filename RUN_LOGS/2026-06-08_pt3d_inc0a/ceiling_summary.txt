@@ -1,0 +1,18 @@
+=== inc0a 16× CPU ceiling probe ===
+Compared to baseline 16× CPU which OOM'd at Mesh.<init> (line 74), inc0a:
+ - completed Mesh.<init> (3 meshes × ~632MB) successfully
+ - completed Thing construction (1568000 Things, the 16x population)
+ - entered the per-step phase
+ - hit a different wall: Myosin worker threads NoClassDefFoundError(WorkerGrid)
+   because the ceiling-probe runner doesn't include the TornadoVM API jar
+   on the classpath. The worker threads die; the main thread hangs at
+   the barrier in Myosin.MyosinThreads.regroup (BoxOfActin.java:973).
+
+Conclusion: the prior 16× CPU host-heap wall at Mesh.<init> is gone in
+inc0a. The new wall, if any, sits beyond Thing construction. The current
+probe can't distinguish 'pure runtime success' from 'engine stalls in
+regroup' because WorkerGrid isn't on the classpath. A re-probe with
+the TornadoVM API jar on the classpath is the right follow-up.
+
+Process state at kill time:
+1075191 40171456 29641092  03:43 java --enable-preview -Xmx28G -XX:-UseGCOverheadLimit -cp /home/jba/Code/BoA/libs/*:/tmp/inc0a_v2 BoxOfActin -r -pf /home/jba/Code/BoA/RUN_LOGS/2026-06-08_scaling_study/16x_cpu_K1.pf -seed 1

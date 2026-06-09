@@ -421,3 +421,204 @@ position via `myMotor.getEnd2X/Y/Z()` → `soaEnd2`. Mesh fill
    needed. 0b's preserve map is now in hand (A1 + A2). Increment 1 is
    unblocked. The plan's "B is the bulk" hypothesis is confirmed
    quantitatively (58 / 42 split at 4×).
+
+## Increment 0a — scratch de-retention (results)
+
+Three independently committed sub-items on
+`pt3d-soa-inc0a-scratch-deretention`, then merged to main. Targets the
+three places that hold 80 % of B per the increment 0 audit: Thing-base
+Brownian/torque scratch, `Thing$RetObj`, and `CollisionEvent`. Myosin /
+MyoFilLink joint scratch + Crucible statics deferred (see "Deferred"
+section below).
+
+### Mechanism
+
+Per-Thing Pt3D scratch is replaced by a per-worker-thread
+`Thing.WorkerScratch` pool indexed by `tlsThreadId`. `WorkerScratch`
+holds the 9 Brownian/torque Pt3Ds (`v1, v2, rsq, facterm, fac1, fac2,
+tempPt, rForce, tempTorq`), one `RetObj` (6 Pt3D), and one
+`CollisionEvent` (3 Pt3D) — 18 Pt3D × (`Env.allThreadCt` + 1) = 18 × 17
+= **306 Pt3D total scratch** (vs. **21.2 M** before at 4×; **42.4 M** at
+8×). The pool size is `accumThreadCt + 1`; the last slot (`tid == -1`)
+is the main thread.
+
+The Brownian hot path (~40 % CPU per-step) avoids
+`ThreadLocal.get()` in the per-Thing inner loop: the worker resolves
+its `WorkerScratch` once at `ThingBrownianThreads.execute` and passes
+it as a parameter through `calcRandomForces(WorkerScratch ws)` (Bug
+and FilSegment overrides forward through `super`). `brownianMotionForAll`
+resolves `currentScratch()` once before its loop. Friction and the two
+collision paths (RetObj's `FilSegment.nodeCollisions`, the four
+`check*BugCollision*` methods that use `cE`) are not the hot loop and
+take one `currentScratch()` lookup per outer call.
+
+### Sub-items
+
+| sub-item | targets | per-Thing Pt3D dropped | 4× drop | commit |
+|---|---|---:|---:|---|
+| (a) Brownian / torque scratch | `v1 v2 rsq facterm fac1 fac2 tempPt rForce tempTorq` on Thing | 9 | 10.6 M / ~420 MB | `f73befa` |
+| (b) RetObj | `Thing.retObj` | 6 | 7.07 M / ~283 MB | `8f25139` |
+| (c) CollisionEvent | `Thing.cE` | 3 | 3.53 M / ~141 MB | `9c2c56d` |
+| | | **18** | **21.2 M / ~0.85 GB** | |
+
+Each sub-item touches a contiguous slice (Brownian → RetObj →
+CollisionEvent), compiles cleanly on top of the previous, and runs a
+1× CPU gliding smoke. Sub-item (a) modifies `Thing.calcRandomForces`,
+`Thing.incFrictionSum`, `Thing.brownianMotionForAll`, `Bug.calcRandomForces`,
+and `FilSegment.calcRandomForces` (signature added; supers forward).
+Sub-item (b) only modifies `FilSegment.nodeCollisions` (the lone live
+`retObj` reader; `FilSegment.checkToLink`'s local `new RetObj()` is
+left alone — never retained). Sub-item (c) modifies the four
+`check*BugCollision*` methods across MyoMotor, MyoMiniFilament,
+ProteinNode, FilSegment.
+
+### Lifetime / safety check (audit before pooling)
+
+- RetObj is written by `lineSegmentIntersectTest` /
+  `pointAndLineIntersectTest` (both static, both write to their RetObj
+  parameter only) then read by the immediately following lines of the
+  same caller. No call site holds a RetObj reference across a later
+  intersect call on the same thread.
+- CollisionEvent is written by `Bug.amICollidingFromOutside` /
+  `Chamber.amICollidingOuter` etc. (each writes only its lcE parameter)
+  then read by the immediately following lines of the same caller.
+  `FilSegment.checkBugCollisionFromOutside` re-uses the same `cE` for
+  end1 and end2 sequentially; the end1 result is consumed before the
+  end2 call writes it.
+- Brownian scratch is fully write-before-read inside a single
+  `calcRandomForces` body.
+
+### Validation — paired ensemble at the union point
+
+Baseline at fixed seed is NOT bit-reproducible: `Thing.myPRNG` is
+`MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()))` — seeded
+from `Math.random()`, not from `Env.mtRNG`. Two baseline runs at
+`-seed 1` differ by ~25 % in bindEvents (see
+`RUN_LOGS/2026-06-08_pt3d_inc0a/baseline_runs/r{1,2}/stdout.txt`). So
+the bar reverts to paired-ensemble statistical agreement, not
+bit-identity.
+
+n=5 CPU ensemble, `glidingAssay500_val`, seeds 1..5, baseline = main
+at `b15ff84` (post-cheap-wins) vs `pt3d-soa-inc0a-scratch-deretention`
+HEAD (sub-items (a)+(b)+(c) cumulative). Per-seed logs in
+`RUN_LOGS/2026-06-08_pt3d_inc0a/ens_{baseline,inc0a}/seed{1..5}/stdout.txt`;
+summary in `RUN_LOGS/2026-06-08_pt3d_inc0a/ensemble_summary.txt`.
+
+| metric | baseline mean ± std (n=5) | inc0a mean ± std (n=5) | shift | shift / σ_b | 2-sample t |
+|---|---|---|---:|---:|---:|
+| bindEvents       | 874.40 ± 136.56 | 967.80 ± 37.08 | +93.40 | +0.68 σ_b | 1.48 |
+| meanBoundMotors  | 7.5024 ± 0.7243 | 7.9966 ± 0.3803 | +0.494 | +0.68 σ_b | 1.34 |
+| glidingVelocity  | 7.2282 ± 0.5321 | 7.7717 ± 0.2578 | +0.544 | +1.02 σ_b | 2.05 |
+
+Apparent t=2.05 on glidingVelocity is within the noise envelope at n=5
+of this non-deterministic benchmark. Baseline seed=1 is a low-end
+outlier (bindEvents=666 vs the other four in [808, 990]); with seed=1
+removed, glidingVelocity t drops to 1.65 — same order, no signal. The
+code change is mathematically null (WorkerScratch holds the same Pt3D
+objects, written-before-read inside a single
+`calcRandomForces`/`incFrictionSum`/collision-check call body — no RNG
+draw order, no accumulation order, no state crossing call boundaries).
+**PASS.**
+
+GPU validation: the pose path is unchanged; the only methods modified
+are CPU-side (`calcRandomForces` is gated by `!gpuHandled` on the GPU
+path so GPU Things never hit it; RetObj/CollisionEvent live in CPU
+collision paths that are no-op in gliding). No GPU run performed in
+this pass — orthogonal to the scratch de-retention.
+
+### Heap measurement — `jmap -histo:live` at 4× CPU
+
+Inc0a histo at `RUN_LOGS/2026-06-08_pt3d_inc0a/jmap/4x_cpu_jmap_inc0a_inc0a_v2_histo.txt`;
+baseline at `RUN_LOGS/2026-06-08_profiling_scoping/4x_cpu_jmap_histo.txt`.
+
+| class | inst (baseline) | bytes (baseline) | inst (inc0a) | bytes (inc0a) | inst drop | byte drop |
+|---|---:|---:|---:|---:|---:|---:|
+| `boxOfActin.Pt3D` | 45,199,818 | 1,807,992,720 | 24,002,312 | 960,092,480 | **21,197,506** | **847,900,240** |
+| `Thing$RetObj` | 1,177,602 | 75,366,528 | 0 | 0 | 1,177,602 | 75,366,528 |
+| `CollisionEvent` | 1,177,602 | 47,104,080 | 17 | 680 | 1,177,585 | 47,103,400 |
+| `Thing$WorkerScratch` | — | — | 17 | 952 | — | — |
+
+**Headline drop at 4× CPU: 21.20 M Pt3D / ~848 MB.** Matches the
+audit's per-Thing 18-Pt3D projection (1.178 M Things × 18 = 21.20 M).
+Including the RetObj + CollisionEvent container objects: **~970 MB
+saved at 4×** (proportionally ~1.94 GB at 8×).
+
+### Wall-time (no-regression check)
+
+Per-step phase-wall sums extracted from each `seed{1..5}/stdout.txt`
+(sum of `ThingStep Threads took`, `ThingBrownian Threads took`,
+`Myosin Threads took`, `Mesh Threads took`, `Ck Mesh Threads took`,
+`Ck Mots Threads took`, `MotorBindGrid3D Fill took`, divided by 10000
+steps). Both ensembles ran in parallel, so these are upper bounds on
+per-step wall under contention; the comparison is fair (both subject
+to the same contention).
+
+| config | baseline mean (n=5) | inc0a mean (n=5) | δ | δ / σ_combined |
+|---|---:|---:|---:|---:|
+| 1× CPU phase-wall sum | 23.08 ± 1.39 ms/step | 22.42 ± 2.09 ms/step | −0.67 ms | −0.59 σ |
+
+No regression. Slight improvement is within the noise of contended
+runs; clean serial measurement deferred. GPU walls unchanged in this
+pass (the scratch fields removed are CPU-only).
+
+### Ceiling probe
+
+Baseline 16× CPU at `-Xmx28G` OOMs in `Mesh.<init>` at line 74
+(`new double[nXBins][nYBins][binDepth]`) — see
+`RUN_LOGS/2026-06-08_scaling_study/16x_cpu_K1.log`. That allocation
+is ~1.9 GB for three meshes; the failure was post-print
+("Eulerian Mesh stats: nXBins=281..."), so the first or second
+`new Mesh()` triggered the OOM.
+
+The inc0a 16× CPU probe at `-Xmx28G`
+(`RUN_LOGS/2026-06-08_pt3d_inc0a/ceiling_16x_cpu_inc0a*.log`,
+`ceiling_summary.txt`):
+
+- `new Mesh()` × 3 completed successfully (**past the prior CPU wall**);
+- `makeInitialThings()` completed (the 1.568 M-Thing 16× population
+  was constructed, including all per-Thing fields except the
+  WorkerScratch-relocated 18 Pt3D);
+- the `[phase-plan]` print at the top of `doLoop()` was reached;
+- per-step phase started.
+
+So the prior 16× CPU heap wall at `Mesh.<init>` is gone — the savings
+from shedding ~3.4 GB of Pt3D scratch at 16× (extrapolated from 4×
+~848 MB) freed enough late-init headroom for Mesh + Thing construction
+to coexist at `-Xmx28G`.
+
+A re-probe with the TornadoVM API jar on the classpath (so Myosin
+worker threads don't trip the `WorkerGrid` `NoClassDefFoundError`)
+confirms: startup completes (Mesh, Thing construction, phase plan),
+the simulation enters its per-step phase, and the new wall is
+`java.lang.OutOfMemoryError` thrown by one of the worker threads
+during the per-step phase at `-Xmx28G`. The OOM occurs once the
+already-large 16× per-Thing heap meets per-step transient allocation
+(mesh fill, intermediate Pt3Ds inside Pt3D.Scale / Add, etc.) plus
+the GC headroom needed to recover them.
+
+**Headline: 16× CPU now starts past `Mesh.<init>` and reaches the
+per-step phase. The new wall is per-step transient allocation, not
+startup; the next lever is transient Pt3D allocation (the `Pt3D.Add /
+Sub / Scale / UnitVec` factory methods in inner loops), which is
+GC-pressure, not retained-heap — flagged in the design doc but
+deliberately out of scope for increment 0a.** Untangling it pushes the
+ceiling further out.
+
+### Deferred (fast-follows)
+
+- **Myosin / MyoFilLink joint scratch** (`F, R, RcrossF, torsionVec,
+  linkUVec1, linkUVec2` × 0.392 M Myosin + 0.392 M MyoFilLink at 4× =
+  ~4.7 M Pt3D / ~190 MB). The mechanism is identical (per-worker
+  scratch) but the dispatch differs: F/R/RcrossF are read across
+  multiple method bodies (Myosin.jointConstraints,
+  MyoFilLink.updateLink, MyoFilLink.checkRelease etc.), each called
+  from different sub-phases of MyosinThreads — folding into
+  WorkerScratch is a separate, larger refactor.
+- **Crucible statics** (`Crucible.F`, `Crucible.linkUVec1` — the other
+  4 are dead code). Latent multi-thread race in
+  `Chamber Myo Threads.execute → keepMyosinOnSurface(i)`, dormant in
+  gliding (numChamberFixedMyos = 0). Trivial fix (method-local Pt3Ds or
+  add to WorkerScratch), held back to keep increment 0a's scope clean.
+
+These are flagged here rather than slotted into a later increment — they
+are still scratch-de-retention, not the state→SoA work of increments 1+.
