@@ -622,3 +622,255 @@ ceiling further out.
 
 These are flagged here rather than slotted into a later increment — they
 are still scratch-de-retention, not the state→SoA work of increments 1+.
+
+## Increment (scalarization) — Brownian/Langevin (results)
+
+Landed on `pt3d-soa-inc-scalar-brownian` (2026-06-08), then merged to main.
+The CC prompt scoped this as the first computation-SoA step after the
+storage-SoA work of 0a: convert the Brownian/Langevin per-Thing inner loop
+to scalar `double` locals so it both (a) holds no per-step transient Pt3D
+allocation and (b) trades pointer-chasing for cache-resident component math.
+
+Per the prompt's task-1, we ran a JFR allocation profile first — to confirm
+the Brownian path is the meaningful transient allocator before converting
+it. The profile produced the headline finding of this increment.
+
+### Finding — Brownian is NOT a per-step transient allocator
+
+JFR `jdk.ObjectAllocationSample` capture at 4× CPU
+(`glidingAssay500_val`-shaped 4×_K1 config, 200 s delay to skip startup,
+~200 s of per-step phase captured;
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/4x_cpu_before.jfr`,
+parsed to `4x_cpu_before_alloc.txt` and `4x_cpu_before_pt3d_callers.txt`).
+
+Top per-step transient allocators by weighted bytes (96.1 % of the entire
+per-step allocation bucket is `Pt3D`):
+
+| class | samples | pct of weighted bytes |
+|---|---:|---:|
+| `boxOfActin.Pt3D` | 7851 | 96.1 % |
+| `boxOfActin.Thing$RetObj` | 1052 | 3.2 % |
+| everything else | — | < 1 % |
+
+`Pt3D` allocations grouped by first non-Pt3D caller:
+
+| caller | samples | pct of Pt3D bytes |
+|---|---:|---:|
+| `MyoRod.moveThing` | 1637 | **39.1 %** |
+| `Thing$RetObj.<init>` (from `FilSegment.checkToLink`) | 2316 | **23.9 %** |
+| `MyoLever.moveThing` | 1625 | **19.4 %** |
+| `MyoMotor.moveThing` | 1510 | **15.1 %** |
+| `Thing.end1AsPt3D` | 472 | 1.7 % |
+| `Thing.end2AsPt3D` | 237 | 0.6 % |
+| `FilSegment.moveThing` | 51 | 0.1 % |
+| `Thing.uVecAsPt3D` | 3 | 0.0 % |
+
+**Brownian / `Thing.calcRandomForces` does not appear at all** — its scratch
+Pt3Ds were pooled into `WorkerScratch` by 0a sub-(a), so the path holds zero
+per-step transient Pt3D allocation. The new transient-allocation wall is
+elsewhere:
+
+- ~73.6 % of per-step Pt3D bytes are the **one `new Pt3D()` scratch local
+  inside each of `MyoRod`/`MyoLever`/`MyoMotor`.moveThing()** — at 0.392 M
+  motors at 4×, each step makes 1.18 M `new Pt3D()` calls just to hold an
+  unrotated body-frame triple before pushing through `xToX`/`unitVec` into
+  `setUVec`/`setYVec`.
+- ~23.9 % is the **`new RetObj()` (6 Pt3D inside) inside
+  `FilSegment.checkToLink`** — the XLink phase walks filament pairs and
+  allocates a fresh `RetObj` per check. (The `retObj` field on the live
+  caller path already moved to `WorkerScratch` in 0a sub-(b); this is a
+  separate XLink-only call site that still does `new RetObj()`.)
+
+### Discovery-and-bail
+
+The CC prompt's discovery clause explicitly anticipated this: "still
+scalarize Brownian — the CPU-speed rationale is independent — but flag the
+finding prominently so the next increment targets the real allocator." We
+followed that. The scalar rewrite below ships for cache locality + dead
+WorkerScratch retirement, and the 16× ceiling does NOT move (verified
+below). The actionable roadmap landing out of task-1 is:
+
+1. **Scalarize `MyoRod.moveThing` / `MyoLever.moveThing` / `MyoMotor.moveThing`**
+   — inline the one `Pt3D scratch` into local doubles, with `xToX` /
+   `unitVec` rewritten to scalar form. Same pattern as Brownian below;
+   the projected drop is ~73 % of per-step Pt3D allocation. This is the
+   #1 next increment.
+2. **Move `FilSegment.checkToLink`'s `new RetObj()` into WorkerScratch**
+   (or into a method-local primitive return). Same shape as 0a sub-(b) but
+   for the XLink call site. Projected drop ~24 %.
+3. **`end1AsPt3D` / `end2AsPt3D` SoA-bridge accessors** allocate 1 Pt3D per
+   call. Together they're 2.3 % of per-step Pt3D bytes — minor, but
+   eliminating them is part of the Pt3D-storage migration's final cleanup
+   anyway (callers should read the SoA float[]s directly).
+
+### Mechanism — scalarization of `Thing.calcRandomForces`
+
+The Pt3D form of the body did per-component math via Pt3D-vs-Pt3D method
+calls on the WorkerScratch Pt3Ds:
+
+```
+ws.v1.setVals(xVals.v1, yVals.v1, zVals.v1);
+...
+ws.tempPt.mult(bTransDiff, ws.facterm);   // tempPt.x = bTransDiff.x*facterm.x
+ws.fac1.vecSqrt(ws.tempPt);                // fac1.x = sqrt(tempPt.x)
+ws.tempPt.mult(bRotDiff, ws.facterm);
+ws.fac2.vecSqrt(ws.tempPt);
+randForces.mult(invBDt, ws.v1, ws.fac1, bTransGam);
+randTorques.mult(invBDt, ws.v2, ws.fac2, bRotGam);
+```
+
+The Pt3D arithmetic primitives (`Pt3D.mult(sc, a, b, c)` etc.) are pure
+component-wise products, so each component is computable in scalar without
+crossing components. Inlined exactly:
+
+```
+final double fac1x = Math.sqrt(bTransDiff.x * xVals.facterm);
+final double fac1y = Math.sqrt(bTransDiff.y * yVals.facterm);
+final double fac1z = Math.sqrt(bTransDiff.z * zVals.facterm);
+final double fac2x = Math.sqrt(bRotDiff.x   * xVals.facterm);
+final double fac2y = Math.sqrt(bRotDiff.y   * yVals.facterm);
+final double fac2z = Math.sqrt(bRotDiff.z   * zVals.facterm);
+randForces.x  = invBDt * xVals.v1 * fac1x * bTransGam.x;
+randForces.y  = invBDt * yVals.v1 * fac1y * bTransGam.y;
+randForces.z  = invBDt * zVals.v1 * fac1z * bTransGam.z;
+randTorques.x = invBDt * xVals.v2 * fac2x * bRotGam.x;
+randTorques.y = invBDt * yVals.v2 * fac2y * bRotGam.y;
+randTorques.z = invBDt * zVals.v2 * fac2z * bRotGam.z;
+```
+
+Op order is preserved exactly — each `randForces.x` matches the previous
+`((invBDt * v1.x) * fac1.x) * bTransGam.x` Java left-to-right FP order
+literally. The previously-dead Pt3D `ws.rsq` write
+(`ws.rsq.setVals(xVals.rsq, ...)`) was never read; the scalar form drops it.
+
+`WorkerScratch` no longer holds the 7 Brownian Pt3Ds
+(`v1/v2/rsq/facterm/fac1/fac2/tempPt`); `rForce`/`tempTorq` stay (used by
+`incFrictionSum`, friction path, dormant in gliding). The `calcRandomForces`
+signature still takes `WorkerScratch` — kept for signature stability across
+`Bug`/`FilSegment` overrides, even though scalar form doesn't read it.
+
+### Validation — paired ensemble t-test (n=5 seeds, 1× CPU)
+
+Same bar as 0a: paired-ensemble statistical agreement, because
+`Thing.myPRNG` is per-construction seeded from `Math.random()`, so bit-
+identity between separate runs is impossible regardless of math. Both
+binaries built from the same source tree (only `Thing.java` differs).
+
+Configuration: `glidingAssay500_val` (runTime 0.1 s, 10000 steps),
+`-Xmx6G`, 1× CPU. Per-seed logs in
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/ens_{main_baseline,scalar}/seed{1..5}/stdout.txt`;
+summary in `ensemble_summary.txt`.
+
+| metric | baseline μ±σ (n=5) | scalar μ±σ (n=5) | shift | shift/σ_b | paired t (df=4) |
+|---|---|---|---:|---:|---:|
+| bindEvents       | 866.0 ± 130.4 | 890.6 ± 79.2 | +24.6 | +0.19 σ | 0.26 |
+| meanBoundMotors  | 7.329 ± 0.745 | 7.575 ± 0.536 | +0.247 | +0.33 σ | 0.48 |
+| glidingVelocity  | 7.454 ± 0.337 | 7.456 ± 0.619 | +0.002 | +0.01 σ | 0.006 |
+
+All paired t-values are < 0.5 — well inside the noise envelope. **PASS.**
+This is expected: the scalar form preserves Java left-to-right FP op order
+literally, so the only possible source of arithmetic shift would have been
+a transcription error.
+
+### Re-measurement — allocation profile (after)
+
+Same JFR setup against the scalar binary
+(`4x_cpu_after.jfr`, parsed to `4x_cpu_after_alloc.txt` and
+`4x_cpu_after_pt3d_callers.txt`):
+
+| caller | before pct | after pct |
+|---|---:|---:|
+| `MyoRod.moveThing` | 39.1 % | 10.9 % |
+| `Thing$RetObj.<init>` | 23.9 % | 25.1 % |
+| `MyoLever.moveThing` | 19.4 % | 30.3 % |
+| `MyoMotor.moveThing` | 15.1 % | 30.2 % |
+| `Thing.end1/end2/uVec*AsPt3D` | 2.3 % | 3.2 % |
+| `FilSegment.moveThing` | 0.1 % | 0.2 % |
+
+Total weighted bytes for `Pt3D` allocation: 33.0 GB before vs 33.9 GB after.
+**Brownian is absent in both — confirming the JFR diagnosis.** Within the
+captured per-step window the per-class proportions shifted between
+MyoRod/MyoLever/MyoMotor because JFR samples are noisy at the per-Thing
+granularity, but the gross picture is unchanged: Myo*.moveThing scratch +
+RetObj are still the top transient allocators.
+
+The scalar rewrite removes 7 retained Pt3Ds × `(accumThreadCt+1) = 17`
+WorkerScratch instances = 119 Pt3Ds saved from the retained heap
+(~4.8 KB). The retained-heap savings from this increment are negligible
+compared to 0a (~848 MB at 4×); the win is computation-locality, not heap.
+
+### CPU ms/step
+
+Phase-wall sums (400 steps, JFR profile included, same machine, sequential):
+
+| phase | before | after | δ | δ pct |
+|---|---:|---:|---:|---:|
+| ThingStep | 95.18 s | 94.74 s | −0.44 s | −0.5 % |
+| ThingBrownian | 39.36 s | 38.95 s | −0.41 s | −1.0 % |
+| Myosin | 26.13 s | 24.57 s | −1.57 s | −6.0 % |
+| Mesh + Ck* + MotorBindGrid3D | 38.40 s | 38.59 s | +0.19 s | +0.5 % |
+
+ThingBrownian is the only phase the rewrite touches directly. The 1 %
+saving in 400 steps is at the edge of single-run noise — the per-Thing
+calcRandomForces is microseconds out of a 100 ms phase wall that is
+dominated by the thread-pool barrier. So the win is real but small (the
+"40 % CPU per Table 1" figure quoted in the design doc was sampler hot-
+count, not phase-wall — the math is cheap, the dispatch is what costs).
+Myosin's 6 % drop is run-to-run noise (the scalar rewrite did not touch
+the Myosin phase). No regressions.
+
+### GPU sanity
+
+Short `-gpu` run (`glidingAssay500_val`-shaped 0.5× config, runTime 0.005 s
+= 500 steps, scalar binary) completes rc=0
+(`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/gpu_sanity_scalar.log`):
+
+- `gpuMoveThing exec = 43.578 s` for 601 calls
+- `ThingBrownian Threads took 3.052 s` (CPU-fallback Things; the scalar
+  path is exercised here)
+- No PTX errors, no validation faults
+
+GPU exec wall is determined by device-side kernels (Brownian generated
+inline on device via Wang hash); the CPU rewrite cannot move that wall —
+flat as expected.
+
+### 16× CPU ceiling probe — wall did NOT move
+
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/ceiling_16x_cpu_scalar.log`:
+
+- `Mesh.<init>` × 3 cleared (same as 0a)
+- `makeInitialThings` (1.568 M Things) completed
+- phase plan printed, per-step phase entered
+- `java.lang.OutOfMemoryError` thrown from a worker thread during per-step
+  transient allocation — same failure mode as 0a's re-probe
+
+This is the predicted outcome from task-1: the per-step transient-alloc
+wall is dominated by Myo*.moveThing scratch + RetObj, neither of which
+this increment touched. The scalar Brownian rewrite freed only
+~4.8 KB of retained Pt3Ds — far below the headroom needed to clear
+1.18 M-per-step `new Pt3D()` calls into the GC pressure path.
+
+**Honest status: the 16× transient-allocation ceiling is unchanged from
+0a.** Closing it requires the roadmap items above (Myo*.moveThing
+scalarization first, then RetObj de-retention in `checkToLink`).
+
+### Scalarization roadmap (in priority order)
+
+1. **`MyoRod.moveThing` + `MyoLever.moveThing` + `MyoMotor.moveThing`** —
+   each has one `Pt3D scratch = new Pt3D()` consumed by
+   `setVals → xToX(this) → unitVec → setUVec/setYVec`. Identical pattern
+   across the three classes (lines `MyoRod.java:119`, `MyoLever.java:116`,
+   `MyoMotor.java:321`). Projected drop: ~73 % of per-step Pt3D bytes at
+   4× → likely moves the 16× ceiling materially. Plus 4× MyoLever/MyoMotor/
+   MyoRod = 1.18 M × 400 steps = 470 M Pt3D allocations eliminated per run.
+2. **`FilSegment.checkToLink`** — `RetObj retO = new RetObj()` at
+   `FilSegment.java:2119`. Per-pair allocation in the XLink phase.
+   Convert to a per-worker pool slot (one RetObj per worker thread, same
+   pattern as 0a sub-(b)) or an out-parameter style. Projected drop: ~24 %.
+3. **`end1AsPt3D` / `end2AsPt3D` / `uVec*AsPt3D` bridge accessors** —
+   each returns `new Pt3D()`. Replace call sites with direct
+   `soaEnd1`/`soaEnd2` reads. Minor (~3 %), but part of the storage-SoA
+   migration's natural endpoint.
+
+The next increment should bundle (1) — it's the largest single win and a
+clean follow-on to this prompt's "computation-SoA" framing.

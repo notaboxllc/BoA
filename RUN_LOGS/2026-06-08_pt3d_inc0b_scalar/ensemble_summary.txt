@@ -1,0 +1,22 @@
+seed  metric            main_baseline         scalar
+   1  bindEvents            1044.0000       794.0000
+   1  meanBoundMotors          8.4560         7.2880
+   1  glidingVelocity          7.6389         6.7225
+   2  bindEvents             887.0000       886.0000
+   2  meanBoundMotors          7.5000         7.6190
+   2  glidingVelocity          7.7414         8.1881
+   3  bindEvents             881.0000       876.0000
+   3  meanBoundMotors          7.3630         7.0410
+   3  glidingVelocity          7.7101         7.0617
+   4  bindEvents             839.0000       882.0000
+   4  meanBoundMotors          6.7820         7.4760
+   4  glidingVelocity          7.1471         7.3161
+   5  bindEvents             679.0000      1015.0000
+   5  meanBoundMotors          6.5420         8.4530
+   5  glidingVelocity          7.0314         7.9905
+
+metric                     baseline μ±σ             scalar μ±σ      shift  shift/σ_b   paired t (n-1=4)
+--------------------------------------------------------------------------------------------------------------
+bindEvents          866.000±130.430    890.600± 79.239     24.600      0.189              0.264
+meanBoundMotors       7.329±  0.745      7.575±  0.536      0.247      0.331              0.479
+glidingVelocity       7.454±  0.337      7.456±  0.619      0.002      0.006              0.006
