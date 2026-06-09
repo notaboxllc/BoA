@@ -118,7 +118,9 @@ public class Thing extends Object {
 	static ThingBrownianThreads brownianThreads = new ThingBrownianThreads();
 	//RanMT myPRNG = new RanMT((long)(Long.MAX_VALUE*Math.random()));
 	MersenneTwisterFast myPRNG = new MersenneTwisterFast((long)(Long.MAX_VALUE*Math.random()));
-	CollisionEvent cE = new CollisionEvent();		// try to reuse when possible
+	// CollisionEvent scratch used to live here (3 Pt3D × Thing.thingCt — 3.53 M
+	// at 4×). Pt3D SoA migration increment 0a sub-item (c) moves it into
+	// WorkerScratch; collision-check methods cache currentScratch().cE locally.
 	
 	// averaging of forces for stability
 	//ValueTracker bForceTrack = new ValueTracker(Env.forcesToTrack,ValueTracker.PT3D_TYPE);
@@ -183,6 +185,10 @@ public class Thing extends Object {
 		// Line/point-intersect return-by-mutation. Reused across collision /
 		// xLink checks on the same worker; lifetime is the single test call.
 		final RetObj retObj = new RetObj();
+		// Bug/Chamber collision return-by-mutation. Same lifetime/ownership
+		// pattern as retObj — written by amICollidingOuter/Inner/FromOutside,
+		// read by the immediate next caller block.
+		final CollisionEvent cE = new CollisionEvent();
 	}
 
 	static final WorkerScratch[] workerScratch;
@@ -358,8 +364,8 @@ public class Thing extends Object {
 		bFricForceSum = null;
 		bFricTorqueSum = null;
 		myPRNG = null;
-		cE = null;
-		
+		// cE is no longer a per-Thing field (moved to WorkerScratch).
+
 		//bForceTrack = null;
 		//bTorqueTrack = null;
 

@@ -481,29 +481,32 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void checkOuterBugCollision () {
+		final CollisionEvent cE = currentScratch().cE;
 		theBox.amICollidingOuter(cE,coordAsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
 		}
 	}
-	
+
 	public void checkInnerBugCollision () {
+		final CollisionEvent cE = currentScratch().cE;
 		theBox.amICollidingInner(cE,coordAsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
 		}
 	}
-	
+
 	public void checkBugCollisionFromOutside() {
+		final CollisionEvent cE = currentScratch().cE;
 		lmBug.amICollidingFromOutside(cE,coordAsPt3D(),radius);
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec));
 		}
-		
-		
+
+
 	}
 	
 	public static void checkNodeCollision () {   // this method not called anymore with multi-threaded architecture

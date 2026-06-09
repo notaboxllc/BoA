@@ -1302,6 +1302,7 @@ public class FilSegment extends Thing {
 
 	public void checkBugCollisionFromInside() {
 		if (Env.useGPU) DIAG_BUG_INSIDE_FIRE_CT++;
+		final CollisionEvent cE = currentScratch().cE;
 		theBox.amICollidingOuter(cE,end1Pt,radius);
 		if (cE.delta != 0) { bugForcesFromInside(cE,end1Pt); }
 
@@ -1309,22 +1310,23 @@ public class FilSegment extends Thing {
 		theBox.amICollidingOuter(cE,end2Pt,radius);
 		if (cE.delta != 0) { bugForcesFromInside(cE,end2Pt); }
 	}
-	
+
 	public void checkBugCollisionFromOutside() {
+		final CollisionEvent cE = currentScratch().cE;
 		lmBug.amICollidingFromOutside(cE,end1Pt,radius);
-		if (cE.isColliding()) { 
+		if (cE.isColliding()) {
 			end1TipC = 0;
-			bugForcesFromOutside(cE,end1Pt); 
+			bugForcesFromOutside(cE,end1Pt);
 		} else {
 			end1TipC = cE.delta;
 		}
-		
-		
+
+
 		lmBug.amICollidingFromOutside(cE,end2Pt,radius);
 		Env.registerCloseTip(cE.delta);  // only registering barbed-ends close to the bug surface
-		if (cE.isColliding()) { 
+		if (cE.isColliding()) {
 			end2TipC = 0; // set tip clearance
-			bugForcesFromOutside(cE,end2Pt); 
+			bugForcesFromOutside(cE,end2Pt);
 			//talkln ("collision");
 			//ActA.checkFilamentBinding(this,cE.tmpPt1);
 			if (myPRNG.nextDouble() < Env.checkActABindingProb.getValue()) {	// only check for ActA binding rarely

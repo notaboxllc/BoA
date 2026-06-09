@@ -504,13 +504,14 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void checkOuterBugCollision () {
+		final CollisionEvent cE = currentScratch().cE;
 		double mag;
 		theBox.amICollidingOuter(cE,end1AsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
 			incForceSum(Pt3D.Scale(mag,cE.forceUVec),end1AsPt3D());
 		}
-		
+
 		theBox.amICollidingOuter(cE,end2AsPt3D(),getRadius());
 		if (cE.delta != 0) {
 			mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();

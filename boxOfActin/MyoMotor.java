@@ -190,6 +190,7 @@ public class MyoMotor extends Thing {
 	}
 	
 	public void checkOuterBugCollision () {
+		final CollisionEvent cE = currentScratch().cE;
 		theBox.amICollidingOuter(cE,end1AsPt3D(),radius);
 		if (cE.delta != 0) {
 			double mag = Env.nodeFracMove*1.0e-6*cE.delta*bTransGam.x/Env.collisionDeltaT.getValue();
