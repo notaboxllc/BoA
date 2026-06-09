@@ -1,0 +1,9 @@
+case                   calls      total       pack       exec   pack/total   pack_µs/call
+1x_baseline             2101    136.40s     37.66s     93.35s       27.61%      17922.42
+1x_inc2                 2101    124.75s     26.80s     92.55s       21.48%      12754.88
+4x_baseline             1701    339.36s    127.46s    193.45s       37.56%      74931.80
+4x_inc2                 1701    294.89s     85.84s    190.79s       29.11%      50463.84
+
+Pack-µs/step reductions:
+  1x: 17922.42 µs/call → 12754.88 µs/call  (-28.8%)
+  4x: 74931.80 µs/call → 50463.84 µs/call  (-32.7%)

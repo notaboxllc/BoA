@@ -101,6 +101,13 @@ public class Thing extends Object {
 	static float[] soaZVec      = new float[0];
 	static float[] soaTransXTox = new float[0];   // 9 floats per Thing: row-major 3×3 fixed→body
 	static float[] soaLength    = new float[0];   // 1 float per Thing
+	// Inc2 (2026-06-09) — body-fixed drag tensor SoA. Dual-written by
+	// calculateProperties() alongside the bTransGam/bRotGam Pt3D fields the
+	// ~30 CPU readers consume; GPUMoveThing.packRange()/packJointsRange() read
+	// from these arrays contiguously instead of pointer-chasing through Pt3D.
+	// Layout: 3 floats per Thing, indexed by myThingNumber*3+{0,1,2}.
+	static float[] soaBTransGam = new float[0];
+	static float[] soaBRotGam   = new float[0];
 	// Sparse gather bookkeeping: each worker thread records the indices it actually
 	// wrote to (deduped via dirtyFlags). gatherThreadAccumulators() walks only those
 	// entries instead of sweeping every Thing × every thread.
@@ -631,6 +638,8 @@ public class Thing extends Object {
 		float[] newZVec   = new float[newCap * 3];
 		float[] newTransXTox = new float[newCap * 9];
 		float[] newLength = new float[newCap];
+		float[] newBTransGam = new float[newCap * 3];
+		float[] newBRotGam   = new float[newCap * 3];
 		if (soaForceSum.length > 0) {
 			System.arraycopy(soaForceSum,  0, newForce,  0, soaForceSum.length);
 			System.arraycopy(soaTorqueSum, 0, newTorque, 0, soaTorqueSum.length);
@@ -651,6 +660,10 @@ public class Thing extends Object {
 		if (soaLength.length > 0) {
 			System.arraycopy(soaLength, 0, newLength, 0, soaLength.length);
 		}
+		if (soaBTransGam.length > 0) {
+			System.arraycopy(soaBTransGam, 0, newBTransGam, 0, soaBTransGam.length);
+			System.arraycopy(soaBRotGam,   0, newBRotGam,   0, soaBRotGam.length);
+		}
 		soaForceSum  = newForce;
 		soaTorqueSum = newTorque;
 		soaCoord     = newCoord;
@@ -661,6 +674,8 @@ public class Thing extends Object {
 		soaZVec      = newZVec;
 		soaTransXTox = newTransXTox;
 		soaLength    = newLength;
+		soaBTransGam = newBTransGam;
+		soaBRotGam   = newBRotGam;
 		taCapacity = newCap;
 	}
 
@@ -673,6 +688,21 @@ public class Thing extends Object {
 	public void pushUVecToSoa()  {}
 	public void pushYVecToSoa()  {}
 	public void pushPoseToSoa()  {}
+
+	// Inc2 — flush bTransGam/bRotGam Pt3D values into the SoA drag arrays.
+	// Called at the end of every calculateProperties() override that writes
+	// the drag tensors. Cheap (six float casts + six array stores); bypassed
+	// entirely if the Pt3D fields were nulled (cleanup tombstones).
+	public final void pushDragToSoa() {
+		if (bTransGam == null || bRotGam == null) return;
+		final int b = myThingNumber * 3;
+		soaBTransGam[b]     = (float) bTransGam.x;
+		soaBTransGam[b + 1] = (float) bTransGam.y;
+		soaBTransGam[b + 2] = (float) bTransGam.z;
+		soaBRotGam[b]       = (float) bRotGam.x;
+		soaBRotGam[b + 1]   = (float) bRotGam.y;
+		soaBRotGam[b + 2]   = (float) bRotGam.z;
+	}
 
 	// SoA pose accessors and mutators. After the Pt3D pose field removal,
 	// readers go through getCoordX/Y/Z, getUVecX/Y/Z, getYVecX/Y/Z; writers
@@ -1109,6 +1139,13 @@ public class Thing extends Object {
 			soaTransXTox[dst9+6] = soaTransXTox[src9+6];
 			soaTransXTox[dst9+7] = soaTransXTox[src9+7];
 			soaTransXTox[dst9+8] = soaTransXTox[src9+8];
+			// Inc2 — drag tensors follow the surviving Thing's myThingNumber.
+			soaBTransGam[dst]     = soaBTransGam[src];
+			soaBTransGam[dst + 1] = soaBTransGam[src + 1];
+			soaBTransGam[dst + 2] = soaBTransGam[src + 2];
+			soaBRotGam[dst]       = soaBRotGam[src];
+			soaBRotGam[dst + 1]   = soaBRotGam[src + 1];
+			soaBRotGam[dst + 2]   = soaBRotGam[src + 2];
 		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();

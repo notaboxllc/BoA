@@ -127,7 +127,7 @@ public class Bug extends Crucible {
 		// *************************
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
-		
+		pushDragToSoa();
 	}
 	
 	public void initialize () {
@@ -645,6 +645,7 @@ public class Bug extends Crucible {
 		bRotGam.scale(dScale,bRotGam_base);
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
+		pushDragToSoa();
 	}
 	
 	

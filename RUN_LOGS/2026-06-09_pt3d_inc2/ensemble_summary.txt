@@ -1,0 +1,3 @@
+bindEvents: n_baseline=0 n_inc2=0 skip
+meanBoundMotors: n_baseline=0 n_inc2=0 skip
+glidingVelocity: n_baseline=0 n_inc2=0 skip

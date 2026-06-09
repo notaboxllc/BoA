@@ -1,0 +1,15 @@
+case                               K1_s     K2_s    ms/step
+baseline_1x_cpu                   63.76   218.77     103.34
+baseline_1x_gpu                   68.55   221.74     102.13
+baseline_4x_cpu                  197.68   659.77     385.07
+baseline_4x_gpu                  175.07   586.15     342.57
+inc2_1x_cpu                       64.03   218.98     103.30
+inc2_1x_gpu                       65.04   208.50      95.64
+inc2_4x_cpu                      197.03   660.62     386.33
+inc2_4x_gpu                      166.32   535.64     307.77
+
+comparison                       baseline       inc2       Δ%    GPU÷CPU base    GPU÷CPU inc2
+1x CPU                             103.34     103.30    -0.04%
+1x GPU                             102.13      95.64    -6.35%           0.988           0.926
+4x CPU                             385.07     386.33    +0.32%
+4x GPU                             342.57     307.77   -10.16%           0.890           0.797

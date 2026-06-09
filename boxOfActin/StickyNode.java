@@ -180,6 +180,7 @@ public class StickyNode extends ProteinNode {
 			bRotGam.y = bRotGam.x;
 			bRotGam.z = bRotGam.x;
 			bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);		// Einstein's relation gamma=kT/D
+			pushDragToSoa();
 	}
 	
 	public void biochemStep () {

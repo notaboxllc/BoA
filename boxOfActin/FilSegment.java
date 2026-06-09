@@ -432,13 +432,14 @@ public class FilSegment extends Thing {
 		
 		bTransDiff.div(Env.Boltz*Env.tempK, bTransGam);	// Einstein's relation D=kT/gamma
 		bRotDiff.div(Env.Boltz*Env.tempK, bRotGam);
-		
+		pushDragToSoa();
+
 		/*if (!bTransGam.checkPt3D()) { talkln ("bTransGam is crazy for FilSegment"); }
 		if (!bRotGam.checkPt3D()) { talkln ("bRotGam is crazy for FilSegment"); }
 		if (!bTransDiff.checkPt3D()) { talkln ("bTransDiff is crazy for FilSegment"); }
 		if (!bRotDiff.checkPt3D()) { talkln ("bRotDiff is crazy for FilSegment"); }
 		*/
-	
+
 	}
 	
 	// Phase 4.5 diag (2026-06-05): count initialize() calls on the -gpu path.

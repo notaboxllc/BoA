@@ -4609,6 +4609,8 @@ public class GPUMoveThing {
         float[] soaUVecArr  = Thing.soaUVec;
         float[] soaYVecArr  = Thing.soaYVec;
         float[] soaLenArr   = Thing.soaLength;
+        float[] soaBTGam    = Thing.soaBTransGam;
+        float[] soaBRGam    = Thing.soaBRotGam;
         float   bTransCoef = sBTransCoeff;
         float   bRotCoef   = sBRotCoeff;
         float   xLnT       = sXLinkTAttn;
@@ -4682,12 +4684,19 @@ public class GPUMoveThing {
             jointTorqueSum.set(aX, 0f);
             jointTorqueSum.set(aY, 0f);
             jointTorqueSum.set(aZ, 0f);
-            bTransGam.set(aX, (float) t.bTransGam.x);
-            bTransGam.set(aY, (float) t.bTransGam.y);
-            bTransGam.set(aZ, (float) t.bTransGam.z);
-            bRotGam.set(aX, (float) t.bRotGam.x);
-            bRotGam.set(aY, (float) t.bRotGam.y);
-            bRotGam.set(aZ, (float) t.bRotGam.z);
+            // Inc2 (2026-06-09) — drag tensors packed contiguously from
+            // Thing.soaBTransGam / soaBRotGam (dual-written by every
+            // calculateProperties() override). Replaces the six per-slot
+            // Pt3D pointer-chasing gathers (t.bTransGam.{x,y,z} +
+            // t.bRotGam.{x,y,z}) — the deep-survey-identified pack-source
+            // hot loop. Contiguous SoA reads, no double→float cast at the
+            // hot site (already float in the SoA).
+            bTransGam.set(aX, soaBTGam[s3]);
+            bTransGam.set(aY, soaBTGam[s3 + 1]);
+            bTransGam.set(aZ, soaBTGam[s3 + 2]);
+            bRotGam.set(aX,   soaBRGam[s3]);
+            bRotGam.set(aY,   soaBRGam[s3 + 1]);
+            bRotGam.set(aZ,   soaBRGam[s3 + 2]);
 
             float tScale, rScale;
             if (rule == RULE_FIL) {
@@ -4826,31 +4835,47 @@ public class GPUMoveThing {
         Myosin[] myos = Myosin.theMyosins;
         int[] toMyo = jointSlotToMyoIdx;
         boolean cpuAnchor = DIAG_CPU_ANCHOR;
+        // Inc2 (2026-06-09) — pull rod/lever/motor drag + anchor coords from
+        // SoA float[] arrays instead of pointer-chasing through Pt3D. Same
+        // pattern as packRange's drag conversion above.
+        float[] soaBTGam = Thing.soaBTransGam;
+        float[] soaBRGam = Thing.soaBRotGam;
+        float[] soaAnchorPt = Myosin.soaMyFixedPt;
+        byte[]  soaAnchored = Myosin.soaMyAnchored;
         for (int mj = start; mj < end; mj++) {
             Myosin myo = myos[toMyo[mj]];
             MyoRod   rod   = myo.myoRod;
             MyoLever lever = myo.myoLever;
             MyoMotor motor = myo.myoMotor;
+            int rod3   = rod.myThingNumber   * 3;
+            int lever3 = lever.myThingNumber * 3;
+            int mot3   = motor.myThingNumber * 3;
             int d9 = mj * 9;
-            myoDrags.set(d9,     (float) rod.bTransGam.x);
-            myoDrags.set(d9 + 1, (float) rod.bTransGam.y);
-            myoDrags.set(d9 + 2, (float) rod.bRotGam.y);
-            myoDrags.set(d9 + 3, (float) lever.bTransGam.x);
-            myoDrags.set(d9 + 4, (float) lever.bTransGam.y);
-            myoDrags.set(d9 + 5, (float) lever.bRotGam.y);
-            myoDrags.set(d9 + 6, (float) motor.bTransGam.x);
-            myoDrags.set(d9 + 7, (float) motor.bTransGam.y);
-            myoDrags.set(d9 + 8, (float) motor.bRotGam.y);
+            // 9 floats per Myosin: {rod.bTGx, rod.bTGy, rod.bRGy, lever.{...},
+            // motor.{...}} — same layout the joints kernel reads.
+            myoDrags.set(d9,     soaBTGam[rod3]);
+            myoDrags.set(d9 + 1, soaBTGam[rod3 + 1]);
+            myoDrags.set(d9 + 2, soaBRGam[rod3 + 1]);
+            myoDrags.set(d9 + 3, soaBTGam[lever3]);
+            myoDrags.set(d9 + 4, soaBTGam[lever3 + 1]);
+            myoDrags.set(d9 + 5, soaBRGam[lever3 + 1]);
+            myoDrags.set(d9 + 6, soaBTGam[mot3]);
+            myoDrags.set(d9 + 7, soaBTGam[mot3 + 1]);
+            myoDrags.set(d9 + 8, soaBRGam[mot3 + 1]);
             cockedFlags.set(mj, motor.isCocked() ? 1 : 0);
             // Anchor data (Phase 1, A7.b). DIAG_CPU_ANCHOR forces the
             // kernel-side flag to 0 so the device contribution is skipped;
             // the CPU MyosinThreads dispatch then runs the anchor pass.
+            // Inc2 — anchorPts read from Myosin.soaMyFixedPt (populated by
+            // MyosinFixed constructor; swap-compacted in cleanupMyos).
+            // Eliminates the instanceof-cast + Pt3D-gather hot path.
             int a3 = mj * 3;
-            if (!cpuAnchor && myo instanceof MyosinFixed) {
-                MyosinFixed mf = (MyosinFixed) myo;
-                anchorPts.set(a3,     (float) mf.myFixedPt.x);
-                anchorPts.set(a3 + 1, (float) mf.myFixedPt.y);
-                anchorPts.set(a3 + 2, (float) mf.myFixedPt.z);
+            int myoIdx = myo.myMyoNumber;
+            if (!cpuAnchor && soaAnchored[myoIdx] != 0) {
+                int af3 = myoIdx * 3;
+                anchorPts.set(a3,     soaAnchorPt[af3]);
+                anchorPts.set(a3 + 1, soaAnchorPt[af3 + 1]);
+                anchorPts.set(a3 + 2, soaAnchorPt[af3 + 2]);
                 anchoredFlags.set(mj, 1);
             } else {
                 anchorPts.set(a3,     0f);
