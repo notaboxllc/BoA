@@ -1,8 +1,145 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (Pt3D SoA inc2 — pack-source SoA. Attacked the deep-survey's 33–48 % pack-dominated GPU per-step cost by retiring inc1-task-2's named Pt3D-gather pack sources. `Thing.bTransGam` / `bRotGam` (6 Pt3D field gathers per slot in `packRange` + 9 axis reads per Myosin in `packJointsRange`) and `MyosinFixed.myFixedPt` (3 gathers per fixed myo + `instanceof` cast) replaced with contiguous `float[]` SoA reads. **Discovery-and-bail call**: drag tensors get rewritten mid-step by `FilSegment.calculateProperties()` on biochem length-change, and `anchorPts` joint-slot indexing is remapped by `classifyThings()` without plan rebuild — both disqualified pure FIRST_EXECUTION residency. Went **contiguous-pack**: SoA dual-write in every `calculateProperties()` override, swap-compact-safe in `removeThing()`/`cleanupMyos()`, no transferMode changes, no scatter changes. Headline at 4×: GPU pack/total **37.6 % → 29.1 %** (−8.5 pp), pack µs/call **−32.7 %**, GPU ms/step **342.57 → 307.77 (−10.2 %)**, GPU÷CPU ratio **0.890 → 0.797** — lead widens with scale (1× margin grows from 1.2 % → 6.4 %). CPU unchanged (noise-band, +0.32 % at 4×) as expected — CPU readers untouched. Paired-ensemble n=10 validation all |t|<1.1 (df=9 critical 2.26); meanBoundMotors borderline n=5 (t=−1.49) collapsed to t=−0.53 at n=10, same small-sample-noise pattern as pwrng. Full writeup in PT3D_SOA_MIGRATION.md "Increment 2 — pack-source SoA".)
+Last updated: 2026-06-09 (Dynamic-biochem regression run — first post-migration exercise of the actin-biochem-ON path with minifilaments. Survey: `noMonomers`/`myosSteppingSwitch`/`myosinStepRate` are DEAD parameter labels in boa10-64Seg — `noMonomersSimd` inactive = monomers simulated; severing is cofilin-driven, no `kSevering`. Built `boa10-64Seg-dyn` (biochem ON, poly rates → Env inits, actinConc active, kRdmNuc on, minifils kept). **inc2 drag-pack survives active length-changes**: GPU nomini run rc=0, 3574 seg-inits, poseDelta overflow=0, segs 195→559; CPU full run rc=0, bindEvents=679, meanBoundMotors=0.338, segs 198→566 (CPU/GPU agree). The one real bug — `ClassCastException MyoMiniFilament→FilSegment` in `GPUMoveThing.packRange` on GPU minifil+removal configs — is **PRE-EXISTING (reproduces at pre-migration b15ff84), NOT a migration regression**; hard-bail cleared. Frames: `~/Code/threejs_output/boa_dyn_cpu_minifil` (101) + `boa_dyn_nomini_gpu` (101). Population net-grows ~2.9×/5000 steps at actinConc=20 (bounded). Full writeup below.)
+
+Prior update: 2026-06-09 (Pt3D SoA inc2 — pack-source SoA. Attacked the deep-survey's 33–48 % pack-dominated GPU per-step cost by retiring inc1-task-2's named Pt3D-gather pack sources. `Thing.bTransGam` / `bRotGam` (6 Pt3D field gathers per slot in `packRange` + 9 axis reads per Myosin in `packJointsRange`) and `MyosinFixed.myFixedPt` (3 gathers per fixed myo + `instanceof` cast) replaced with contiguous `float[]` SoA reads. **Discovery-and-bail call**: drag tensors get rewritten mid-step by `FilSegment.calculateProperties()` on biochem length-change, and `anchorPts` joint-slot indexing is remapped by `classifyThings()` without plan rebuild — both disqualified pure FIRST_EXECUTION residency. Went **contiguous-pack**: SoA dual-write in every `calculateProperties()` override, swap-compact-safe in `removeThing()`/`cleanupMyos()`, no transferMode changes, no scatter changes. Headline at 4×: GPU pack/total **37.6 % → 29.1 %** (−8.5 pp), pack µs/call **−32.7 %**, GPU ms/step **342.57 → 307.77 (−10.2 %)**, GPU÷CPU ratio **0.890 → 0.797** — lead widens with scale (1× margin grows from 1.2 % → 6.4 %). CPU unchanged (noise-band, +0.32 % at 4×) as expected — CPU readers untouched. Paired-ensemble n=10 validation all |t|<1.1 (df=9 critical 2.26); meanBoundMotors borderline n=5 (t=−1.49) collapsed to t=−0.53 at n=10, same small-sample-noise pattern as pwrng. Full writeup in PT3D_SOA_MIGRATION.md "Increment 2 — pack-source SoA".)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-09 — Dynamic-biochem regression run (minifilaments + active actin)
+
+First post-migration exercise of the biochem-dynamics path. The whole
+Pt3D→SoA migration (inc0a/0b/scalar, inc1, per-worker RNG, inc2) was
+validated **only against the gliding assay, which runs actin biochem
+OFF** (fixed-composition filaments). This run flips biochem ON to
+exercise the segment length-changes (poly/depoly/split) that inc2's
+drag-tensor contiguous-pack now rides on. Headline: **the migration's
+dynamic path runs clean; the inc2 drag-pack survives active
+length-changes; the one real bug found is a PRE-EXISTING GPU crash
+(confirmed pre-migration), not a migration regression.**
+
+### Survey findings (the config's biochem is misleadingly labeled)
+
+- **`noMonomers` is a DEAD parameter label.** There is no `Parameter`
+  named `noMonomers` — only `noMonomersSimd` / `noMonomersRendered`
+  (Env.java:579–580). `FileOps.loadParamLine` matches on exact
+  `label.equals`, so `boa10-64Seg`'s `noMonomers:true:0.0` matches
+  nothing ("No match found... you best check that out!") and is
+  ignored. `noMonomersSimd` therefore stays at its Java default =
+  **inactive**, and **inactive means monomers ARE simulated** (biochem
+  gates are `if (!Env.noMonomersSimd.isActive())` at
+  FilSegment.java:539, 853, 472, 3712). To enable monomer simulation:
+  `noMonomersSimd:false:0.0` (the simulate value; `isActive()` is the
+  gate, the 0/1 value is irrelevant). `boxSpaghetti`'s comment
+  ("Monomers ARE simulated and tracked" next to `noMonomers:true:0.0`)
+  already encodes this — the author knew the label is dead.
+  `myosSteppingSwitch` and `myosinStepRate` are **also dead labels** —
+  motor stepping is governed by the declared `myo*` params at their Env
+  defaults (same as the gliding configs, which don't list them).
+- **Biochem-ON reference config:** `boxSpaghetti` (named in CLAUDE.md).
+  It activates `actinConc` and simply **omits** the poly-rate lines so
+  they fall to their nonzero Env inits.
+- **Env init defaults restored** (boa10-64Seg zeroed them): end1
+  kATPOn1/Off1/ADPOff1 = 1.3 / 0.8 / 2.7; end2 kATPOn2/Off2/ADPOff2 =
+  11.6 / 1.4 / 7.2; actinConc_init = 15 µM; kHydro_init = 0.3 (file
+  overrides to 1.0); kRdmNuc_init = 0.0.
+- **Severing is cofilin-driven; there is NO `kSevering`.** A segment
+  dissolves in `checkCofilinDissolve()` when its cofilin-bound monomer
+  ratio exceeds `cofilinRatio` (FilSegment.java:3683). `boxSpaghetti`
+  confirms: `cofilinRate:0.0 // Disable cofilin severing`.
+- **New monomers add as ATP** (`Monomer.polymerize` → `new Monomer` →
+  `setStateATP()`) and age to ADP via `kHydrolysis`. Confirmed.
+
+### Parameter changes (`ParameterFiles/boa10-64Seg-dyn`)
+
+From `boa10-64Seg`: `noMonomersSimd:false:0.0` (correctly-labeled);
+`actinConc:true:20.0` (was `false:30.0`); poly/depoly rates restored to
+Env inits (were 0.0); cofilin severing kept on (0.4 / 3.0 / 1.1);
+`kRdmNuc:true:0.001` (was off); `kHydrolysis` aging stays on; minifils
+kept (100). `runTime:0.5` (5000 steps), `toFileInterval:50` (~100
+frames). Sibling `boa10-64Seg-dyn-nomini` = same but minifils removed
+(GPU-runnable, see below).
+
+### The one real bug — PRE-EXISTING GPU crash (NOT a migration regression)
+
+On the **GPU path** (`-gpu`), `boa10-64Seg`-shaped configs that contain
+**MyoMiniFilaments AND remove FilSegments** (cofilin dissolve / depoly)
+crash with `ClassCastException: MyoMiniFilament cannot be cast to
+FilSegment` at `GPUMoveThing.packRange` (worker thread dies → main
+hangs). Mechanism: a `removeThing` swap-compaction of `Thing.theThings[]`
+stales the GPU rule/slot map — `packRange` reads
+`theThings[gpuThingIndices[slot]]` while `brownianRule[slot]==RULE_FIL`
+and casts the swapped-in MyoMiniFilament to FilSegment.
+`classifyThings` only rebuilds the rule map on `topologyDirty ||
+thingCt != lastThingCt`; `buildDeltaSet` fixes swapped-slot *pose* but
+not the *rule* map. The gliding validation never hit this (gliding uses
+MyosinFixed, no MyoMiniFilaments, no FilSegment removal).
+
+**Hard-bail check → cleared.** The crash is in `packRange` (the inc2
+surface), so I tested the pre-migration commit `b15ff84` (last state
+before any Pt3D-SoA source change; cast site at line 4694, old Pt3D
+gather): **it crashes identically** (rc=124 hang, `cannot be cast`,
+`packRange`). The bug predates the entire migration → it is a
+pre-existing GPU + MyoMiniFilament + FilSegment-removal limitation, not
+traceable to inc2/RNG/Pt3D. The unmodified `boa10-64Seg` on current
+main also crashes the same way. Non-deterministic (depends on
+remove-timing × Thing ordering × seed) — the first dyn GPU probe
+happened to complete, but it is the same latent bug. **Fix is a
+separate task** (mark `topologyDirty` on `removeThing`, or rebuild the
+rule map in `buildDeltaSet`'s slot-change scan).
+
+### Migration-surface tests (run around the pre-existing bug)
+
+**(A) GPU drag-pack under length-changes — `boa10-64Seg-dyn-nomini`,
+5000 steps, `-gpu`.** Minifils removed to isolate inc2's pack from the
+cast bug. **rc=0, clean.** `filSegInitFireCt=3574` (heavy segment
+creation), `poseDelta avg=0.68 max=190 sum=3461 overflow=0` (length-change
+deltas captured/scattered, never overflowed POSE_DELTA_CAP=8192),
+`planRebuild=1` (init only), segments **195 → 559**, no NaN/Inf, no
+pack/index error. **The inc2 drag-tensor contiguous-pack survives active
+poly/depoly/sever/nucleate length-changes.**
+
+**(B) Full path with minifilaments — `boa10-64Seg-dyn`, 5000 steps,
+CPU** (CPU has no `packRange`, sidesteps the pre-existing bug). **rc=0,
+clean.** `bindEvents=679`, `meanBoundMotors=0.338` — **minifilaments
+genuinely bind and step**. Segments **198 → 566** — matches the GPU
+nomini run's 195→559, a clean CPU/GPU qualitative cross-check of the
+turnover. No NaN/Inf.
+
+### Pass conditions
+
+| condition | result |
+|---|---|
+| Completes, no crash/NaN/Inf | ✅ both migration-surface runs rc=0, zero NaN/Inf |
+| Drag-pack survives length-changes | ✅ GPU: 3574 seg-inits, poseDelta overflow=0, no pack error |
+| No filaments ejected | ✅ x,y in ±5 box. ⚠️ CPU minifil run: ~5 % of endpoints mildly exceed the thin ±0.25 µm z-slab (max ~0.96 µm), slowly growing — minifils pulling fils against quasi-2D walls + finite CPU boundary stiffness; GPU nomini (on-device boundary kernel) stays in-box. Bounded, no blow-up; orthogonal to the migration. |
+| Population steady | ⚠️ net-GROWS ~2.9×/5000 steps (poly > sever+depoly at actinConc=20). Bounded, no blow-up. Steady-state would need lower actinConc / higher cofilinRate — flagged, not gated (per discovery-and-bail "don't thrash on tuning"). |
+| Minifilaments engage | ✅ CPU bindEvents=679, meanBoundMotors=0.338 |
+| Recorded frames for scrubbing | ✅ see below |
+
+### Recorded JSON frames for jba
+
+- **`~/Code/threejs_output/boa_dyn_cpu_minifil/`** — 101 frames, CPU,
+  full config (100 minifils + biochem). **Primary artifact** — shows
+  minifilaments pulling + filaments polymerizing/turning over.
+- **`~/Code/threejs_output/boa_dyn_nomini_gpu/`** — 101 frames, GPU,
+  no minifils — the drag-pack-under-length-change run.
+- Serve with `python3 sim_server.py 8000` from `~/Code/threejs_output`,
+  open `sim_viewer_boa.html`.
+
+Run logs in `RUN_LOGS/2026-06-09_dynbio_*` (`nomini_gpu`,
+`cpu_minifil`, `baseProbe_gpu` = the pre-existing crash trace,
+`probe_gpu_filtered` = the first dyn GPU probe minus its 9.4 M benign
+"Crazy" lines). Note: the "Crazy torque result in MyoDimer" /
+"Crazy forceSum in MyoMiniFilament" warnings (millions on the GPU minifil
+probe) are mostly the benign parallel-lever degeneracy (`cross()≈0` →
+skip) — structural to bundled minifilaments, not a NaN.
+
+**Queued fast-follows (not part of this probe):** (1) fix the
+pre-existing GPU packRange slot-map staleness so minifilament configs
+run on GPU; (2) profile this workload (CPU/GPU per-step, pack fraction)
+under active biochem; (3) tune actinConc/cofilin for a steadier
+population if a true steady-state run is wanted.
 
 ## 2026-06-09 — Pt3D SoA inc2: pack-source SoA — GPU pack fraction down 8.5 pp at 4×, GPU÷CPU lead widens to 0.797
 
