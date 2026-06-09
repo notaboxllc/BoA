@@ -1,0 +1,12 @@
+# Pt3D allocations grouped by first non-Pt3D caller (Pt3D total bytes: 33,018,693,632)
+
+caller                                                                    samples   weighted_bytes     pct
+------------------------------------------------------------------------------------------------------------
+boxOfActin/MyoRod.moveThing                                                  1637   12,926,362,520   39.1%
+boxOfActin/Thing$RetObj.<init>                                               2316    7,906,445,144   23.9%
+boxOfActin/MyoLever.moveThing                                                1625    6,407,313,064   19.4%
+boxOfActin/MyoMotor.moveThing                                                1510    4,982,898,680   15.1%
+boxOfActin/Thing.end1AsPt3D                                                   472      561,916,920    1.7%
+boxOfActin/Thing.end2AsPt3D                                                   237      196,809,320    0.6%
+boxOfActin/FilSegment.moveThing                                                51       36,088,800    0.1%
+boxOfActin/Thing.uVecAsPt3D                                                     3          859,184    0.0%

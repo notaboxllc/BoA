@@ -1,0 +1,101 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /tmp/gpu_short.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.005
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 19.8
+     Parameter assigned: boxYDim set to 19.8
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 800
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 100; xBinWidth = 0.2 Âµm
+nYBins = 100; yBinWidth = 0.2 Âµm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 100 x 100 x 4 cells (0.2 Âµm each)
+[20:39] [phase-plan] inert-wave cull â ThreadSet activation snapshot:
+[20:39]   ON   ThingStep Threads
+[20:39]   ON   ThingBrownian Threads
+[20:39]   ON   Myosin Threads
+[20:39]   OFF  MyoDimer Threads
+[20:39]   OFF  Protein Node Threads
+[20:39]   OFF  MyoMiniFil Threads
+[20:39]   OFF  Chamber Myo Threads
+[20:39]   OFF  Chamber MyoDimer Threads
+[20:39]   ON   Mesh Threads
+[20:39]   ON   Ck Mesh Threads
+[20:39]   ON   Ck Mots Threads
+[20:39]   OFF  XLink Threads
+[20:39]   OFF  Arp23 Threads
+[20:39]   OFF  NodeLink Threads
+[20:39]   OFF  Membrane Node Threads
+[20:39]   OFF  ActA Threads
+[20:39]   ON   MotorBindGrid3D Fill
+[20:39] [phase-plan] 7 active, 10 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=800, peakModel=1602, safety=4x, floor=8192)
+GPUMoveThing: slotCap=1177724 myoCap=392040 moveBlock=64 jointBlock=64 runSeed=1621557888 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=2.1 cumMaxPerThread=4
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=2526
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=2956460
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=2526
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=219052
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=18331
+[STATS] motorInitFireCt=196020
+[STATS] meanBoundMotors=365.078
+[STATS] gpuMotorBinding total=0.275s calls=601 pack=0.083s gridPack=0.000s exec=0.000s unpack=0.275s
+[STATS] gpuMoveThing total=73.608s calls=601 slotPack=18.828s jointPack=7.392s exec=43.578s unpack=3.807s
+[STATS] gpuMoveThing demandSyncPose=0.110s(calls=1) demandSyncDerived=0.037s(calls=1) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=17530.00 max=1602 sum=17530 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=600 slotChange avg=14.61 max=801 pending avg=14.61 max=801 totalUpperMax=1602 slotCount=597626 slotCap=1177724
+[STATS] glidingVelocity=0.0000
+ThingStep Threads took 23.168000 seconds.
+ThingBrownian Threads took 3.052000 seconds.
+Myosin Threads took 0.534000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 5.589000 seconds.
+Ck Mesh Threads took 4.655000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.309000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!

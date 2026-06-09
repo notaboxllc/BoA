@@ -171,14 +171,9 @@ public class Thing extends Object {
 	// O(Things). Sub-item (a) of Pt3D SoA increment 0a holds the 9 Brownian /
 	// torque / friction Pt3Ds; (b) adds RetObj, (c) adds CollisionEvent.
 	public static final class WorkerScratch {
-		// Brownian RNG scratch — written/read inside calcRandomForces only.
-		final Pt3D v1      = new Pt3D();
-		final Pt3D v2      = new Pt3D();
-		final Pt3D rsq     = new Pt3D();
-		final Pt3D facterm = new Pt3D();
-		final Pt3D fac1    = new Pt3D();
-		final Pt3D fac2    = new Pt3D();
-		final Pt3D tempPt  = new Pt3D();
+		// Brownian RNG scratch (v1/v2/rsq/facterm/fac1/fac2/tempPt Pt3Ds) was
+		// removed when calcRandomForces was scalarized — the per-component math
+		// runs in stack-local doubles now.
 		// Torque/friction scratch — written/read inside incFrictionSum only.
 		final Pt3D rForce   = new Pt3D();
 		final Pt3D tempTorq = new Pt3D();
@@ -912,29 +907,36 @@ public class Thing extends Object {
 	public void divide() {}
 	
 	public void calcRandomForces (WorkerScratch ws) {
-		// this method takes uniform deviates and finds random numbers with a
-		// Gaussian distribution of mean=0, variance=2Dt, as applies for diffusive
-		// motion of a particle with diffusivity D.
-		// WorkerScratch carries the per-thread v1/v2/rsq/facterm/fac1/fac2/tempPt
-		// Pt3Ds — they used to be per-Thing fields (10.6 M Pt3D / 0.42 GB at 4×).
-		double bDt = Env.brownianDeltaT.getValue();
-		double invBDt = 1.0 / bDt;
-		// get fresh random value pairs in unit circle {v1,v2,rsq,facterm}
-		xVals.newValue(bDt,this);
-		yVals.newValue(bDt,this);
-		zVals.newValue(bDt,this);
-		// rearrange values into v1, v2, rsq, and facterm Pt3Ds
-		ws.v1.setVals(xVals.v1,yVals.v1,zVals.v1);
-		ws.v2.setVals(xVals.v2,yVals.v2,zVals.v2);
-		ws.rsq.setVals(xVals.rsq,yVals.rsq,zVals.rsq);
-		ws.facterm.setVals(xVals.facterm,yVals.facterm,zVals.facterm);
-		// this part actually depends on the objects diffusion and drag coefficients
-		ws.tempPt.mult(bTransDiff, ws.facterm);
-		ws.fac1.vecSqrt(ws.tempPt);
-		ws.tempPt.mult(bRotDiff, ws.facterm);
-		ws.fac2.vecSqrt(ws.tempPt);
-		randForces.mult(invBDt, ws.v1, ws.fac1, bTransGam);
-		randTorques.mult(invBDt, ws.v2, ws.fac2, bRotGam);
+		// Uniform deviates → Gaussian random forces/torques with variance 2Dt.
+		// Computation-SoA: the per-component math is independent across x/y/z, so
+		// the prior object-vector form (setVals → mult → vecSqrt → mult into
+		// randForces) is rewritten as scalar locals. Op order is preserved exactly
+		// (each component goes diff×facterm → sqrt → (invBDt*v*sqrt*gam) with
+		// left-to-right Java FP), so the result is bit-identical to the Pt3D form.
+		// ws is retained as a parameter for signature stability; the Brownian
+		// scratch Pt3Ds it used to hold (v1/v2/rsq/facterm/fac1/fac2/tempPt) are
+		// gone — see WorkerScratch.
+		final double bDt = Env.brownianDeltaT.getValue();
+		final double invBDt = 1.0 / bDt;
+		xVals.newValue(bDt, this);
+		yVals.newValue(bDt, this);
+		zVals.newValue(bDt, this);
+		// tempPt.mult(bTransDiff, facterm); fac1.vecSqrt(tempPt) — per component:
+		final double fac1x = Math.sqrt(bTransDiff.x * xVals.facterm);
+		final double fac1y = Math.sqrt(bTransDiff.y * yVals.facterm);
+		final double fac1z = Math.sqrt(bTransDiff.z * zVals.facterm);
+		// tempPt.mult(bRotDiff, facterm); fac2.vecSqrt(tempPt):
+		final double fac2x = Math.sqrt(bRotDiff.x * xVals.facterm);
+		final double fac2y = Math.sqrt(bRotDiff.y * yVals.facterm);
+		final double fac2z = Math.sqrt(bRotDiff.z * zVals.facterm);
+		// randForces.mult(invBDt, v1, fac1, bTransGam) — Pt3D body multiplies
+		// left-to-right: ((sc * v1.x) * fac1.x) * bTransGam.x. Match exactly.
+		randForces.x = invBDt * xVals.v1 * fac1x * bTransGam.x;
+		randForces.y = invBDt * yVals.v1 * fac1y * bTransGam.y;
+		randForces.z = invBDt * zVals.v1 * fac1z * bTransGam.z;
+		randTorques.x = invBDt * xVals.v2 * fac2x * bRotGam.x;
+		randTorques.y = invBDt * yVals.v2 * fac2y * bRotGam.y;
+		randTorques.z = invBDt * zVals.v2 * fac2z * bRotGam.z;
 	}
 
 	public static void brownianMotionForAll () {

@@ -1,8 +1,93 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-08 (Pt3D SoA increment 0a scratch de-retention landed — sub-(a) Brownian/torque + (b) RetObj + (c) CollisionEvent + (d) Crucible statics; per-Thing Pt3D dropped 18; 4× heap + ensemble + ceiling-probe results in PT3D_SOA_MIGRATION.md "Increment 0a — scratch de-retention (results)")
+Last updated: 2026-06-08 (Pt3D SoA increment — Brownian/Langevin scalarization landed. Discovery from JFR pre-profile: per-step transient Pt3D alloc is dominated by Myo*.moveThing scratch (73 %) + FilSegment.checkToLink RetObj (24 %); Brownian (pooled in 0a) is not a transient allocator. Scalar rewrite shipped for cache-locality + dead-WorkerScratch cleanup; 16× ceiling did NOT move as predicted. Roadmap: Myo*.moveThing scalarization is the next increment. Full results in PT3D_SOA_MIGRATION.md "Increment (scalarization) — Brownian/Langevin (results)")
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-08 — Pt3D SoA increment: Brownian/Langevin scalarization + transient-alloc profile
+
+The CC prompt scoped this as the first computation-SoA step after 0a's
+storage-SoA: scalarize the Brownian/Langevin per-Thing inner loop so it
+holds no per-step transient Pt3D allocation and trades pointer-chasing for
+cache-resident component math. Per task-1, we ran a JFR allocation profile
+FIRST. Headline of the increment is the diagnostic finding from that
+profile, not the math rewrite.
+
+**Per-step transient Pt3D allocation is NOT Brownian.** JFR
+`jdk.ObjectAllocationSample` at 4× CPU (skip startup via 200 s JFR delay;
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/4x_cpu_before.jfr`,
+`4x_cpu_before_pt3d_callers.txt`):
+
+| caller | pct of per-step Pt3D bytes |
+|---|---:|
+| `MyoRod.moveThing` | 39.1 % |
+| `Thing$RetObj.<init>` (from `FilSegment.checkToLink`) | 23.9 % |
+| `MyoLever.moveThing` | 19.4 % |
+| `MyoMotor.moveThing` | 15.1 % |
+| `Thing.end1AsPt3D` + `end2AsPt3D` + `uVec*AsPt3D` | 2.3 % |
+| `FilSegment.moveThing` | 0.1 % |
+
+Brownian doesn't appear — 0a sub-(a) pooled its scratch into WorkerScratch,
+so the Brownian path holds zero per-step Pt3D allocation already. The
+per-step wall is dominated by the **one `new Pt3D() scratch` local per
+Myo*.moveThing call** (1.18 M motors at 4× × 400 steps = 470 M Pt3D allocs
+per run) plus **`new RetObj()` (6 Pt3D inside) per `FilSegment.checkToLink`
+call** (the XLink phase). Both are mechanically convertible to scalars /
+per-worker pool with the same patterns 0a used.
+
+**Discovery-and-bail per the prompt.** The scalar Brownian rewrite still
+ships (CPU-speed rationale is independent of the wall question), but the
+16× transient-alloc wall will NOT move from this increment — and didn't
+(see below). The honest finding goes into the roadmap as the next
+increment's target.
+
+**Scalar rewrite (`Thing.calcRandomForces`).** Replaced the seven WorkerScratch
+Pt3Ds (`v1, v2, rsq, facterm, fac1, fac2, tempPt`) with `double` locals;
+op order preserved verbatim (Pt3D component-wise `mult`/`vecSqrt` are
+trivially decomposable). The `rsq` write was dead and was dropped. The
+removed 7 Pt3Ds × 17 WorkerScratch instances = ~5 KB heap savings —
+negligible vs 0a. CPU-locality is the only benefit; the JFR finding is
+the main result. `WorkerScratch.{rForce, tempTorq}` retained for
+`incFrictionSum` (friction, dormant in gliding).
+
+**Validation — paired ensemble (n=5, 1× CPU, glidingAssay500_val).** Same
+bar as 0a (`Thing.myPRNG` is per-construction seeded from `Math.random()`,
+so bit-identity across runs is impossible). Logs in
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/ens_{main_baseline,scalar}/seed{1..5}/stdout.txt`;
+analysis in `PT3D_SOA_MIGRATION.md` and `ensemble_summary.txt`.
+
+| metric | baseline μ±σ | scalar μ±σ | shift/σ_b | paired t (df=4) |
+|---|---|---|---:|---:|
+| bindEvents       | 866.0 ± 130 | 890.6 ± 79 | +0.19 | 0.26 |
+| meanBoundMotors  | 7.33 ± 0.75 | 7.58 ± 0.54 | +0.33 | 0.48 |
+| glidingVelocity  | 7.45 ± 0.34 | 7.46 ± 0.62 | +0.006 | 0.006 |
+
+All t < 0.5 — well inside noise. **PASS.** The arithmetic is unchanged by
+construction; the test confirms it.
+
+**CPU ms/step (400-step profile run with JFR overhead, sequential).**
+ThingBrownian phase wall: 39.36 s → 38.95 s (−1 %). Other phases flat
+within noise. The 1 % is microsecond-level math improvement dwarfed by
+thread-pool dispatch — the "40 % CPU Brownian" figure from the design doc
+was sampler count, not phase wall, and the dispatch dominates the wall.
+
+**GPU sanity — flat.** Short `-gpu` run (`gpu_sanity_scalar.log`) completes
+rc=0. `gpuMoveThing exec=43.578 s/601 calls`, normal. GPU Brownian runs
+inline in the move kernel; CPU rewrite doesn't touch it.
+
+**16× CPU ceiling probe — wall did NOT move.**
+`RUN_LOGS/2026-06-08_pt3d_inc0b_scalar/ceiling_16x_cpu_scalar.log`: Mesh
+× 3 cleared, makeInitialThings completed (1.568 M Things), phase plan
+printed, per-step phase entered, worker thread OOMs on transient
+allocation. Same failure mode as 0a's re-probe. The 5 KB freed by the
+scalar rewrite is far below the headroom needed.
+
+**Roadmap captured in `PT3D_SOA_MIGRATION.md`** ("Scalarization roadmap"):
+(1) Myo*.moveThing scalarization — same pattern as Brownian but on the
+real transient allocators (projected ~73 % drop); (2) checkToLink RetObj
+de-retention — same pattern as 0a sub-(b) but on the XLink call site
+(~24 %); (3) end1/end2/uVec*AsPt3D bridge accessors (~3 %, follows
+storage-SoA endgame).
 
 ## 2026-06-08 — Pt3D SoA increment 0a: scratch de-retention
 
