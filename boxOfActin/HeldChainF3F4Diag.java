@@ -108,7 +108,7 @@ public class HeldChainF3F4Diag {
 
     // ----------------------------------------------------------
     // CPU side: mirror FilSegment.addLinkForces (end2 block).
-    // Owner = me. Pair partner = nbr. e2Side: 0 if ptAtEnd2 == nbr.end1Pt.
+    // Owner = me. Pair partner = nbr. e2Side: 0 if my end2 attaches to nbr's end1.
     // Returns {F_me, T_me, F_nbr, T_nbr} as 12 doubles (owner applies BOTH).
     // ----------------------------------------------------------
     static double[] cpuF3End2(Seg me, Seg nbr, int e2Side, boolean dump) {
@@ -169,7 +169,7 @@ public class HeldChainF3F4Diag {
 
         if (dump) {
             System.out.printf("    [CPU.F3.end2]   linkPt    = (%.6e, %.6e, %.6e)%n", lpx, lpy, lpz);
-            System.out.printf("    [CPU.F3.end2]   ptAtEnd2  = (%.6e, %.6e, %.6e)%n", pax, pay, paz);
+            System.out.printf("    [CPU.F3.end2]   nbrEndPt  = (%.6e, %.6e, %.6e)%n", pax, pay, paz);
             System.out.printf("    [CPU.F3.end2]   strainDist= %.6e µm%n", strainDist);
             System.out.printf("    [CPU.F3.end2]   linkUVec  = (%.6e, %.6e, %.6e)%n", luX, luY, luZ);
             System.out.printf("    [CPU.F3.end2]   cosB(self)= %.6e  moveC(self) = %.6e%n", cosB1, moveC1);
@@ -502,7 +502,7 @@ public class HeldChainF3F4Diag {
             System.out.println();
             System.out.println("  --- BENT JOINT (seg0.end2 <-> seg1.end1) ---");
             System.out.println();
-            System.out.println("  CPU FORMULA (owner = seg0, seg0.end2Side=0 because ptAtEnd2 == seg1.end1Pt):");
+            System.out.println("  CPU FORMULA (owner = seg0, seg0.end2NbrSide=0 because seg0.end2 → seg1.end1):");
         }
         double[] cpuF3 = cpuF3End2(s0, s1, /*e2Side=*/0, dumpVerbose);
         double[] cpuF4 = cpuF4End2(s0, s1, /*e2Side=*/0, dumpVerbose);

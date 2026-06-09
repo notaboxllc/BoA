@@ -158,13 +158,23 @@ public class FilSegment extends Thing {
 	FilSegment end1Fil = null;
 	FilSegment end2Fil = null;
 	// Live per-FilSegment Pt3D snapshots of end1/end2 positions. Refreshed by
-	// initialize() each step from SoA. Kept as stable Pt3D references so the
-	// ptAtEnd1/ptAtEnd2 reference-identity checks below ("is our end attached
-	// to neighbor's end1 or end2?") still work after the Pt3D pose-field removal.
+	// initialize() each step from SoA. These are auxiliary Pt3D handles used by
+	// CPU value-readers in collision/link/biochem/output paths; the SoA arrays
+	// remain canonical.
 	Pt3D end1Pt = new Pt3D();
 	Pt3D end2Pt = new Pt3D();
-	Pt3D ptAtEnd1;
-	Pt3D ptAtEnd2;
+	// Inc 1 (2026-06-09): A1 conversion. Neighbour endpoint identity used to be
+	// encoded by the reference-identity check `ptAtEnd? == endNFil.end?Pt`, with
+	// ptAtEnd? aliased to the neighbour's stable end1Pt/end2Pt Pt3D. That was
+	// brittle (any mistaken-=, default-Pt3D, or accidental copy silently corrupted
+	// orientation). Replaced by a stored byte: end1NbrSide / end2NbrSide.
+	//   side = 0 → my endN attaches to neighbour's end1
+	//   side = 1 → my endN attaches to neighbour's end2
+	// Meaningful only when the corresponding filAtEnd? flag is true. Set in
+	// setEnd1Links / setEnd2Links / cleanup join-event. Promoted from the
+	// derive-each-step pattern already present at GPUMoveThing.java:4001/4011.
+	byte end1NbrSide = 0;
+	byte end2NbrSide = 0;
 	boolean end1LinkCkd = false;
 	boolean end2LinkCkd = false;
 	boolean end1TorqCkd = false;
@@ -305,7 +315,7 @@ public class FilSegment extends Thing {
 			initialize();
 			setEnd1Links(splitFromFil, true);
 			if (splitFromFil.filAtEnd2) {
-				if (splitFromFil.ptAtEnd2 == splitFromFil.end2Fil.end1Pt) { // same orientation
+				if (splitFromFil.end2NbrSide == 0) { // same orientation: my end2 → neighbour's end1
 					setEnd2Links(splitFromFil.end2Fil, true);
 					splitFromFil.end2Fil.setEnd1Links(this, true);
 				} else {
@@ -337,9 +347,7 @@ public class FilSegment extends Thing {
 		
 		end1Fil = null;
 		end2Fil = null;
-		ptAtEnd1 = null;
-		ptAtEnd2 = null;
-		
+
 		linkUVec = null;
 		linkUVecR = null;
 		linkPt = null;
@@ -448,8 +456,9 @@ public class FilSegment extends Thing {
 		length = (monomerCt+1)*Env.actinMonoRadius;
 		pushLengthToSoa(length);
 		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
-		// Refresh stable end1Pt/end2Pt Pt3D references so neighbouring fils'
-		// ptAtEnd1/ptAtEnd2 reference-identity checks see live positions.
+		// Refresh stable end1Pt/end2Pt Pt3D references — auxiliary handles read
+		// by CPU value-readers (collision, links, biochem, output). Identity is
+		// no longer encoded here; see end1NbrSide / end2NbrSide.
 		end1Pt.x = getEnd1X(); end1Pt.y = getEnd1Y(); end1Pt.z = getEnd1Z();
 		end2Pt.x = getEnd2X(); end2Pt.y = getEnd2Y(); end2Pt.z = getEnd2Z();
 		// for collision detection
@@ -684,15 +693,15 @@ public class FilSegment extends Thing {
 		}
 		if (chooseEnd1Fil) {
 			joinTo = end1Fil;
-			if (ptAtEnd1 == end1Fil.end2Pt) { 	// normal alignment
+			if (end1NbrSide == 1) { 	// normal alignment: my end1 → neighbour's end2
 				joinSegs21(end1Fil,this);
-				
+
 			} else {
 				joinSegs11(end1Fil,this);
 			}
 		} else {	// must be filAtEnd2
 			joinTo = end2Fil;
-			if (ptAtEnd2 == end2Fil.end1Pt) { 	// normal alignment
+			if (end2NbrSide == 0) { 	// normal alignment: my end2 → neighbour's end1
 				joinSegs12(end2Fil,this);
 			} else {
 				joinSegs22(end2Fil,this);
@@ -1341,72 +1350,66 @@ public class FilSegment extends Thing {
 	}
 	
 	public void validateEnd2Link() {
-		// check state of link between end2Pt  and end2Fil.. dissolve if problem found
-		if (end2Fil == null | ptAtEnd2 == null) { 
-			// no handle to the linked segment, or don't know which end linked on other seg... can only nullify this segments objects
-			ptAtEnd2 = null;
+		// check state of link between my end2 and end2Fil — dissolve if problem found
+		if (end2Fil == null) {
+			// no handle to the linked segment, nullify my end2 link
 			filAtEnd2 = false;
 			return;
 		}
 		// if we've gotten here then check pointers of other segment
-		if (ptAtEnd2 == end2Fil.end1Pt) {
+		if (end2NbrSide == 0) {		// my end2 attaches to neighbour's end1
 			boolean breakLink = false;
 			if (!breakLink & !end2Fil.filAtEnd1) { breakLink = true; }
-			if (!breakLink & end2Fil.ptAtEnd1 == null) { breakLink = true; }
 			if (!breakLink & end2Fil.end1Fil == null) { breakLink = true; }
 			if (!breakLink & end2Fil.end1Fil != this) { breakLink = true; }
-			if (breakLink) { 
+			if (breakLink) {
 				end2Fil.removeEnd1Links();
 				removeEnd2Links();
 			}
-		} else {
+		} else {					// my end2 attaches to neighbour's end2
 			boolean breakLink = false;
 			if (!breakLink & !end2Fil.filAtEnd2) { breakLink = true; }
-			if (!breakLink & end2Fil.ptAtEnd2 == null) { breakLink = true; }
 			if (!breakLink & end2Fil.end2Fil == null) { breakLink = true; }
 			if (!breakLink & end2Fil.end2Fil != this) { breakLink = true; }
-			if (breakLink) { 
+			if (breakLink) {
 				end2Fil.removeEnd2Links();
 				removeEnd2Links();
 			}
 		}
 	}
-	
+
 	public void validateEnd1Link() {
-		// check state of link between end1Pt  and end1Fil.. dissolve if problem found
-		if (end1Fil == null | ptAtEnd1 == null) { 
-			// no handle to the linked segment, or don't know which end linked on other seg... can only nullify this segments objects
-			ptAtEnd1 = null;
+		// check state of link between my end1 and end1Fil — dissolve if problem found
+		if (end1Fil == null) {
+			// no handle to the linked segment, nullify my end1 link
 			filAtEnd1 = false;
 			return;
 		}
 		// if we've gotten here then check pointers of other segment
-		if (ptAtEnd1 == end1Fil.end1Pt) {
+		if (end1NbrSide == 0) {		// my end1 attaches to neighbour's end1
 			boolean breakLink = false;
 			if (!breakLink & !end1Fil.filAtEnd1) { breakLink = true; }
-			if (!breakLink & end1Fil.ptAtEnd1 == null) { breakLink = true; }
 			if (!breakLink & end1Fil.end1Fil == null) { breakLink = true; }
 			if (!breakLink & end1Fil.end1Fil != this) { breakLink = true; }
-			if (breakLink) { 
+			if (breakLink) {
 				end1Fil.removeEnd1Links();
 				removeEnd1Links();
 			}
-		} else {
+		} else {					// my end1 attaches to neighbour's end2
 			boolean breakLink = false;
 			if (!breakLink & !end1Fil.filAtEnd2) { breakLink = true; }
-			if (!breakLink & end1Fil.ptAtEnd2 == null) { breakLink = true; }
 			if (!breakLink & end1Fil.end2Fil == null) { breakLink = true; }
 			if (!breakLink & end1Fil.end2Fil != this) { breakLink = true; }
-			if (breakLink) { 
+			if (breakLink) {
 				end1Fil.removeEnd2Links();
 				removeEnd1Links();
 			}
 		}
 	}
-	
+
 	public void breakAtEnd2() {
 		if (filAtEnd2) {
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {		// my end2 → neighbour's end1
 				end2Fil.removeEnd1Links();
 			} else {
 				end2Fil.removeEnd2Links();
@@ -1414,10 +1417,10 @@ public class FilSegment extends Thing {
 		}
 		removeEnd2Links();
 	}
-	
+
 	public void breakAtEnd1() {
 		if (filAtEnd1) {
-			if (ptAtEnd1 == end1Fil.end2Pt) {
+			if (end1NbrSide == 1) {		// my end1 → neighbour's end2
 				end1Fil.removeEnd2Links();
 			} else {
 				end1Fil.removeEnd1Links();
@@ -1484,7 +1487,7 @@ public class FilSegment extends Thing {
 	public void addLinkForces () {
 		// version1.2 of soft lagrange multipliers; constraining forces translational and rotational.
 		// this filament takes care of both end links, if not already visited, then marks as visited on this and linked fils
-		// this method doesn't care if ptAtEnd2 is end2Fil.end1Pt or end2Fil.end2Pt
+		// this method doesn't care which end of end2Fil my end2 is linked to (the end2NbrSide branches handle either)
 		if (Env.useGPU) DIAG_ADDLINK_FIRE_CT++;
 
 		double dt = Env.deltaT.getValue();
@@ -1499,8 +1502,9 @@ public class FilSegment extends Thing {
 		validateEnd1Link();
 
 		if (filAtEnd2 & !end2LinkCkd) {
-			linkPt.add(end2Pt,Env.actinMonoRadius,uVecRAsPt3D());		// link point is half a monomer back from end2Pt tip
-			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd2);
+			Pt3D nbrEnd2 = (end2NbrSide == 0) ? end2Fil.end1Pt : end2Fil.end2Pt;
+			linkPt.add(end2Pt,Env.actinMonoRadius,uVecRAsPt3D());		// link point is half a monomer back from end2 tip
+			double strainDist = Pt3D.ptDist(linkPt,nbrEnd2);
 
 			// check distance if fils can break apart
 			end2SegDist.registerValue(strainDist);
@@ -1510,12 +1514,12 @@ public class FilSegment extends Thing {
 				return;
 			}
 
-			linkUVec.unitVec(strainDist,ptAtEnd2,linkPt);
+			linkUVec.unitVec(strainDist,nbrEnd2,linkPt);
 			linkUVecR.scale(-1,linkUVec);
 
 			double moveCoeff1 = moveCoeff(2,linkUVec);
 			double moveCoeff2;
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				moveCoeff2 = end2Fil.moveCoeff(1, linkUVecR);
 			} else {
 				moveCoeff2 = end2Fil.moveCoeff(2, linkUVecR);
@@ -1535,7 +1539,7 @@ public class FilSegment extends Thing {
 
 			Fopp.scale(-1,F);
 			end2Fil.incForceSum(Fopp);
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				R.scale(0.5e-6*end2Fil.length*fracR,end2Fil.uVecRAsPt3D());
 				end2Fil.end1LinkCkd = true;
 			} else {
@@ -1547,7 +1551,7 @@ public class FilSegment extends Thing {
 
 			// add these link forces to the axial loads on each segment
 			incEnd2AxialForce(Pt3D.Dot(uVecAsPt3D(),F)); // axial force contribution
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				end2Fil.incEnd1AxialForce(Pt3D.Dot(end2Fil.uVecRAsPt3D(),Fopp)); // axial force contribution
 			} else {
 				end2Fil.incEnd2AxialForce(Pt3D.Dot(end2Fil.uVecAsPt3D(),Fopp)); // axial force contribution
@@ -1559,10 +1563,11 @@ public class FilSegment extends Thing {
 			}
 		}
 
-		// take care of link at end1Pt
+		// take care of link at end1
 		if (filAtEnd1 & !end1LinkCkd) {
-			linkPt.add(end1Pt,Env.actinMonoRadius,uVecAsPt3D());		// link point is half a monomer back from end2Pt tip
-			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd1);
+			Pt3D nbrEnd1 = (end1NbrSide == 0) ? end1Fil.end1Pt : end1Fil.end2Pt;
+			linkPt.add(end1Pt,Env.actinMonoRadius,uVecAsPt3D());		// link point is half a monomer back from end1 tip
+			double strainDist = Pt3D.ptDist(linkPt,nbrEnd1);
 
 			// check distance if fils can break apart
 			end1SegDist.registerValue(strainDist);
@@ -1572,12 +1577,12 @@ public class FilSegment extends Thing {
 				return;
 			}
 
-			linkUVec.unitVec(strainDist,ptAtEnd1,linkPt);
+			linkUVec.unitVec(strainDist,nbrEnd1,linkPt);
 			linkUVecR.scale(-1,linkUVec);
 
 			double moveCoeff1 = moveCoeff(1,linkUVec);
 			double moveCoeff2;
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				moveCoeff2 = end1Fil.moveCoeff(1, linkUVecR);
 			} else {
 				moveCoeff2 = end1Fil.moveCoeff(2, linkUVecR);
@@ -1598,7 +1603,7 @@ public class FilSegment extends Thing {
 
 			Fopp.scale(-1,F);
 			end1Fil.incForceSum(Fopp);
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				R.scale(0.5e-6*end1Fil.length*fracR,end1Fil.uVecRAsPt3D());
 				end1Fil.end1LinkCkd = true;
 			} else {
@@ -1611,7 +1616,7 @@ public class FilSegment extends Thing {
 
 			// add these link forces to the axial loads on each segment
 			incEnd1AxialForce(Pt3D.Dot(uVecRAsPt3D(),F)); // axial force contribution
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				end1Fil.incEnd1AxialForce(Pt3D.Dot(end1Fil.uVecRAsPt3D(),Fopp)); // axial force contribution
 			} else {
 				end1Fil.incEnd2AxialForce(Pt3D.Dot(end1Fil.uVecAsPt3D(),Fopp)); // axial force contribution
@@ -1627,7 +1632,7 @@ public class FilSegment extends Thing {
 	public void addLinkForcesOld () {
 		// version1.2 of soft lagrange multipliers; constraining forces translational and rotational.
 		// this filament takes care of both end links, if not already visited, then marks as visited on this and linked fils
-		// this method doesn't care if ptAtEnd2 is end2Fil.end1Pt or end2Fil.end2Pt
+		// this method doesn't care which end of end2Fil my end2 is linked to (the end2NbrSide branches handle either)
 		
 		// first double-check validity of links
 		// non-existence of attached filament
@@ -1635,9 +1640,10 @@ public class FilSegment extends Thing {
 		validateEnd1Link();
 		
 		if (filAtEnd2 & !end2LinkCkd) {
-			linkPt.add(end2Pt,Env.actinMonoRadius,uVecRAsPt3D());		// link point is half a monomer back from end2Pt tip
-			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd2);
-			
+			Pt3D nbrEnd2 = (end2NbrSide == 0) ? end2Fil.end1Pt : end2Fil.end2Pt;
+			linkPt.add(end2Pt,Env.actinMonoRadius,uVecRAsPt3D());		// link point is half a monomer back from end2 tip
+			double strainDist = Pt3D.ptDist(linkPt,nbrEnd2);
+
 			// check distance if fils can break apart
 			end2SegDist.registerValue(strainDist);
 			if (Env.maxSegDist.isActive() & end2SegDist.averageVal() > Env.maxSegDist.getValue()) {
@@ -1645,13 +1651,13 @@ public class FilSegment extends Thing {
 				talkln ("broke because dist too large between linked segments");
 				return;
 			}
-				
-			linkUVec.unitVec(strainDist,ptAtEnd2,linkPt);
+
+			linkUVec.unitVec(strainDist,nbrEnd2,linkPt);
 			linkUVecR.scale(-1,linkUVec);
 			// define cosines of angles between filament uVecs and line between endpoints
 			double cosAngTween1 = Pt3D.CrossMag(uVecAsPt3D(),linkUVec);  // use magnitude of cross product (which is Sin(theta)) 'cause we want Cos(90-theta)=Sin(theta)
 			double cosAngTween2;
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end2Fil.uVecAsPt3D());
 			} else {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end2Fil.uVecRAsPt3D());
@@ -1675,7 +1681,7 @@ public class FilSegment extends Thing {
 			
 			Fopp.scale(-1,F);
 			end2Fil.incForceSum(Fopp);
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				R.scale(0.5e-6*end2Fil.length,end2Fil.uVecRAsPt3D());
 				end2Fil.end1LinkCkd = true;
 			} else {
@@ -1687,7 +1693,7 @@ public class FilSegment extends Thing {
 			
 			// add these link forces to the axial loads on each segment
 			incEnd2AxialForce(Pt3D.Dot(uVecAsPt3D(),F)); // axial force contribution
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				end2Fil.incEnd1AxialForce(Pt3D.Dot(end2Fil.uVecRAsPt3D(),Fopp)); // axial force contribution
 			} else {
 				end2Fil.incEnd2AxialForce(Pt3D.Dot(end2Fil.uVecAsPt3D(),Fopp)); // axial force contribution
@@ -1699,11 +1705,12 @@ public class FilSegment extends Thing {
 			}
 		}
 		
-		// take care of link at end1Pt
+		// take care of link at end1
 		if (filAtEnd1 & !end1LinkCkd) {
-			linkPt.add(end1Pt,Env.actinMonoRadius,uVecAsPt3D());		// link point is half a monomer back from end2Pt tip
-			double strainDist = Pt3D.ptDist(linkPt,ptAtEnd1);
-			
+			Pt3D nbrEnd1 = (end1NbrSide == 0) ? end1Fil.end1Pt : end1Fil.end2Pt;
+			linkPt.add(end1Pt,Env.actinMonoRadius,uVecAsPt3D());		// link point is half a monomer back from end1 tip
+			double strainDist = Pt3D.ptDist(linkPt,nbrEnd1);
+
 			// check distance if fils can break apart
 			end1SegDist.registerValue(strainDist);
 			if (Env.maxSegDist.isActive() & end1SegDist.averageVal() > Env.maxSegDist.getValue()) {
@@ -1711,13 +1718,13 @@ public class FilSegment extends Thing {
 				talkln ("broke because dist too large between linked segments");
 				return;
 			}
-			
-			linkUVec.unitVec(strainDist,ptAtEnd1,linkPt);
+
+			linkUVec.unitVec(strainDist,nbrEnd1,linkPt);
 			linkUVecR.scale(-1,linkUVec);
 			// define cosines of angles between filament uVecs and line between endpoints
 			double cosAngTween1 = Pt3D.CrossMag(uVecRAsPt3D(),linkUVec);  // use magnitude of cross product (which is Sin(theta)) 'cause we want Cos(90-theta)=Sin(theta)
 			double cosAngTween2;
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end1Fil.uVecAsPt3D());
 			} else {
 				cosAngTween2 = Pt3D.CrossMag(linkUVecR,end1Fil.uVecRAsPt3D());
@@ -1742,7 +1749,7 @@ public class FilSegment extends Thing {
 			
 			Fopp.scale(-1,F);
 			end1Fil.incForceSum(Fopp);
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				R.scale(0.5e-6*end1Fil.length,end1Fil.uVecRAsPt3D());
 				end1Fil.end1LinkCkd = true;
 			} else {
@@ -1755,7 +1762,7 @@ public class FilSegment extends Thing {
 			
 			// add these link forces to the axial loads on each segment
 			incEnd1AxialForce(Pt3D.Dot(uVecRAsPt3D(),F)); // axial force contribution
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				end1Fil.incEnd1AxialForce(Pt3D.Dot(end1Fil.uVecRAsPt3D(),Fopp)); // axial force contribution
 			} else {
 				end1Fil.incEnd2AxialForce(Pt3D.Dot(end1Fil.uVecAsPt3D(),Fopp)); // axial force contribution
@@ -1773,7 +1780,7 @@ public class FilSegment extends Thing {
 	public void addTorsionSpringForces () {
 		// rotational spring which works to straighten out the filament
 		// this filament takes care of spring at both ends, if not visited, then marks as visited for involved fils
-		// this method doesn't care if ptAtEnd2 is end2Fil.end1Pt or end2Fil.end2Pt
+		// this method doesn't care which end of end2Fil my end2 is linked to (the end2NbrSide branches handle either)
 		if (Env.useGPU) DIAG_ADDTORSION_FIRE_CT++;
 
 		double dt = Env.deltaT.getValue();
@@ -1786,7 +1793,7 @@ public class FilSegment extends Thing {
 		if (filAtEnd2 & !end2TorqCkd) {
 			end2TorqCkd = true;
 			double dotVecs;
-			if (ptAtEnd2 == end2Fil.end1Pt) {
+			if (end2NbrSide == 0) {
 				end2Fil.end1TorqCkd = true;
 				torsionVec.cross(uVecAsPt3D(),end2Fil.uVecAsPt3D());
 				torsionVec.unitVec();
@@ -1811,7 +1818,7 @@ public class FilSegment extends Thing {
 			if (maxSegAngActive & end2SegAng.averageVal() > maxSegAng) {
 				angTween = 0;
 				talkln ("broke because angle too large between linked segments");
-				filAtEnd2 = false; ptAtEnd2 = null;
+				filAtEnd2 = false;
 			}
 
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
@@ -1840,7 +1847,7 @@ public class FilSegment extends Thing {
 		if (filAtEnd1 & !end1TorqCkd) {
 			end1TorqCkd = true;
 			double dotVecs;
-			if (ptAtEnd1 == end1Fil.end1Pt) {
+			if (end1NbrSide == 0) {
 				end1Fil.end1TorqCkd = true;
 				torsionVec.cross(uVecRAsPt3D(),end1Fil.uVecAsPt3D());
 				torsionVec.unitVec();
@@ -1865,7 +1872,7 @@ public class FilSegment extends Thing {
 			if (maxSegAngActive & end1SegAng.averageVal() > maxSegAng) {
 				angTween = 0;
 				talkln ("broke because angle too large between linked segments");
-				filAtEnd1 = false; ptAtEnd1 = null;
+				filAtEnd1 = false;
 			}
 
 			//talkln ("DotVecs is " + dotVecs + " and angTween is " + angTween);
@@ -2769,25 +2776,27 @@ public class FilSegment extends Thing {
 	public void setEnd1Links (FilSegment at1, boolean normOrientation) {
 		filAtEnd1 = true;
 		end1Fil = at1;
-		if (normOrientation) { ptAtEnd1 = at1.end2Pt; } else { ptAtEnd1 = at1.end1Pt; }
+		// normOrientation: my end1 attaches to neighbour's end2 → side = 1
+		// !normOrientation: my end1 attaches to neighbour's end1 → side = 0
+		end1NbrSide = (byte)(normOrientation ? 1 : 0);
 	}
-	
+
 	public void setEnd2Links (FilSegment at2, boolean normOrientation) {
 		filAtEnd2 = true;
 		end2Fil = at2;
-		if (normOrientation) { ptAtEnd2 = at2.end1Pt; } else { ptAtEnd2 = at2.end2Pt; }
+		// normOrientation: my end2 attaches to neighbour's end1 → side = 0
+		// !normOrientation: my end2 attaches to neighbour's end2 → side = 1
+		end2NbrSide = (byte)(normOrientation ? 0 : 1);
 	}
-	
+
 	public void removeEnd1Links() {
 		filAtEnd1 = false;
 		end1Fil = null;
-		ptAtEnd1 = null;
 	}
-	
+
 	public void removeEnd2Links() {
 		filAtEnd2 = false;
 		end2Fil = null;
-		ptAtEnd2 = null;
 	}
 	
 	public static void transferEnd1Plasmid (FilSegment givesP, FilSegment getsP) {
@@ -2833,35 +2842,39 @@ public class FilSegment extends Thing {
 			}	
 			
 			// majorly messy code for a joining event... swapping links around for four possible arrangements
-			if (!isACut && cleanF.filAtEnd1 && cleanF.filAtEnd2) {		// joining event.. 
+			if (!isACut && cleanF.filAtEnd1 && cleanF.filAtEnd2) {		// joining event..
 				//talkln ("joining event.. setting links");
-				if (cleanF.ptAtEnd1 == cleanF.end1Fil.end2Pt) {
+				// Original identity scheme: cleanF.ptAtEnd1 pointed at either
+				// cleanF.end1Fil.end1Pt (cleanF.end1NbrSide == 0) or .end2Pt (side == 1).
+				// We hand cleanF's end2 link to cleanF.end1Fil, replacing the slot
+				// (end1 vs end2) on end1Fil that previously linked to cleanF. The
+				// new side flag on end1Fil's new neighbour is cleanF.end2NbrSide
+				// (whichever end of cleanF.end2Fil cleanF's end2 was attached to).
+				if (cleanF.end1NbrSide == 1) {			// cleanF's end1 was attached to end1Fil's end2
 					cleanF.end1Fil.filAtEnd2 = true;
 					cleanF.end1Fil.end2Fil = cleanF.end2Fil;
-					cleanF.end1Fil.ptAtEnd2 = cleanF.ptAtEnd2;
-				} else {
+					cleanF.end1Fil.end2NbrSide = cleanF.end2NbrSide;
+				} else {								// cleanF's end1 was attached to end1Fil's end1
 					cleanF.end1Fil.filAtEnd1 = true;
 					cleanF.end1Fil.end1Fil = cleanF.end2Fil;
-					cleanF.end1Fil.ptAtEnd1 = cleanF.ptAtEnd2;
+					cleanF.end1Fil.end1NbrSide = cleanF.end2NbrSide;
 				}
-				
-				if (cleanF.ptAtEnd2 == cleanF.end2Fil.end1Pt) {
+
+				if (cleanF.end2NbrSide == 0) {			// cleanF's end2 was attached to end2Fil's end1
 					cleanF.end2Fil.filAtEnd1 = true;
 					cleanF.end2Fil.end1Fil = cleanF.end1Fil;
-					cleanF.end2Fil.ptAtEnd1 = cleanF.ptAtEnd1;
-				} else {
+					cleanF.end2Fil.end1NbrSide = cleanF.end1NbrSide;
+				} else {								// cleanF's end2 was attached to end2Fil's end2
 					cleanF.end2Fil.filAtEnd2 = true;
 					cleanF.end2Fil.end2Fil = cleanF.end1Fil;
-					cleanF.end2Fil.ptAtEnd2 = cleanF.ptAtEnd1;
+					cleanF.end2Fil.end2NbrSide = cleanF.end1NbrSide;
 				}
-					
+
 				// remove cleanF links
 				cleanF.filAtEnd1 = false;
 				cleanF.end1Fil = null;
-				cleanF.ptAtEnd1 = null;
 				cleanF.filAtEnd2 = false;
 				cleanF.end2Fil = null;
-				cleanF.ptAtEnd2 = null;
 			}
 			
 			cleanF.breakAtEnd1();
