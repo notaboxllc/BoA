@@ -17,13 +17,13 @@ public class Crucible extends Thing {
 	MyosinDimer [] myodimers = new MyosinDimer[Env.numChamberFixedMyoDimers.getIntValue()];
 	Pt3D [] myoDimerPtsInX = new Pt3D[Env.numChamberFixedMyoDimers.getIntValue()];
 	
-	// re-used in force calcs
-	static Pt3D F = new Pt3D();
-	static Pt3D R = new Pt3D();
-	static Pt3D RcrossF = new Pt3D();
-	static Pt3D torsionVec = new Pt3D();
-	static Pt3D linkUVec1 = new Pt3D(); 
-	static Pt3D linkUVec2 = new Pt3D();
+	// keepMyosin*OnSurface used to read from six static Pt3D scratch fields
+	// (F, R, RcrossF, torsionVec, linkUVec1, linkUVec2). Four of them are dead
+	// code; the live ones (F, linkUVec1) are now method-local allocations to
+	// remove the latent multi-thread race in the `Chamber Myo Threads` /
+	// `Chamber MyoDimer Threads` dispatch (Crucible.java:65, 102). Dormant in
+	// gliding (numChamberFixedMyos == 0), so the per-call allocation overhead
+	// is negligible whenever this code actually fires.
 	
 	static boolean appearanceChanged = false;
 
@@ -117,15 +117,13 @@ public class Crucible extends Thing {
 		MyoRod curRod = curMyo.myoRod;
 		Pt3D curAttPt = Thing.theBox.myoPtsInX[i];
 		double strainDist = Pt3D.ptDist(curRod.end1AsPt3D(), curAttPt);
+		final Pt3D linkUVec1 = new Pt3D();
 		linkUVec1.unitVec(curAttPt,curRod.end1AsPt3D());
-		//linkUVec2.scale(-1,linkUVec1);
 		double forceMag = (Env.myoDimerFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curRod.bTransGam.y));
 
+		final Pt3D F = new Pt3D();
 		F.scale(forceMag,linkUVec1);
 		curRod.incForceSum(F);
-		
-		//F.scale(-1,F);
-		//incForceSum(F);
 	}
 	
 	public static void keepMyosinDimersOnSurface () {
@@ -139,15 +137,13 @@ public class Crucible extends Thing {
 		MyoRod curRod = curMyoD.myo1.myoRod;
 		Pt3D curAttPt = Thing.theBox.myoDimerPtsInX[i];
 		double strainDist = Pt3D.ptDist(curRod.end1AsPt3D(), curAttPt);
+		final Pt3D linkUVec1 = new Pt3D();
 		linkUVec1.unitVec(curAttPt,curRod.end1AsPt3D());
-		//linkUVec2.scale(-1,linkUVec1);
 		double forceMag = (Env.myoDimerFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curRod.bTransGam.y));
 
+		final Pt3D F = new Pt3D();
 		F.scale(forceMag,linkUVec1);
 		curRod.incForceSum(F);
-		
-		//F.scale(-1,F);
-		//incForceSum(F);
 	}
 	
 	
