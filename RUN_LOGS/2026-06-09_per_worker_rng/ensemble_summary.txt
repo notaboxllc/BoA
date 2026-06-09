@@ -1,0 +1,40 @@
+Paired ensemble validation — Pt3D SoA per-worker RNG consolidation
+Configuration: glidingAssay500_val (runTime=0.1 s, 10000 steps), 1× CPU, -Xmx8G
+Seeds: 1..10 (extended from n=5 — the per-worker RNG is the only stochastic-core
+       change in the migration so far, so we take more samples). Per-worker RNG
+       is seeded from BOA_RNG_SEED (unset → nano^ms entropy), so bit-identity is
+       impossible — bar is statistical agreement, not bit-identity.
+
+Baseline: main = 577247a (post-inc1 merge).
+pwrng   : HEAD of pt3d-soa-inc-per-worker-rng.
+
+Per-seed metrics:
+                 bindEvents      meanBoundMotors  glidingVelocity
+ baseline seed=1 837.0           7.255            6.8183
+ baseline seed=2 1107.0          8.899            7.6571
+ baseline seed=3 815.0           6.710            7.2110
+ baseline seed=4 840.0           6.956            7.0754
+ baseline seed=5 889.0           7.970            7.4258
+ baseline seed=6 1001.0          8.295            7.7766
+ baseline seed=7 783.0           7.248            6.8162
+ baseline seed=8 1030.0          7.841            7.3386
+ baseline seed=9 1105.0          8.472            8.2639
+ baseline seed=10 896.0           7.883            7.8797
+
+ pwrng    seed=1 903.0           7.402            7.6301
+ pwrng    seed=2 947.0           7.814            7.5660
+ pwrng    seed=3 820.0           6.788            7.3654
+ pwrng    seed=4 921.0           7.777            8.0439
+ pwrng    seed=5 1061.0          8.264            8.6420
+ pwrng    seed=6 897.0           7.417            7.3330
+ pwrng    seed=7 766.0           6.927            6.8410
+ pwrng    seed=8 809.0           7.420            7.1665
+ pwrng    seed=9 751.0           6.100            6.3997
+ pwrng    seed=10 831.0           7.804            7.2791
+
+Paired-difference t (df=n-1):
+  bindEvents       baseline 930.300 ± 120.837  pwrng 870.600 ± 94.012  shift -59.700  -0.49 σ_b  paired t -1.21
+  meanBoundMotors  baseline 7.753 ± 0.701  pwrng 7.371 ± 0.624  shift -0.382  -0.54 σ_b  paired t -1.35
+  glidingVelocity  baseline 7.426 ± 0.472  pwrng 7.427 ± 0.616  shift +0.000  +0.00 σ_b  paired t +0.00
+
+Critical t at df=9, two-sided 5 % = 2.26. All |t| < 2.26 → PASS.

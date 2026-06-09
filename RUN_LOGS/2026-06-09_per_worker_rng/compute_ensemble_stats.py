@@ -44,7 +44,7 @@ def paired_t(baseline_vals, pwrng_vals):
 
 
 def main():
-    seeds = list(range(1, 6))
+    seeds = list(range(1, 11))
     out_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "ensemble_summary.txt")
     baseline = collect("main_baseline", seeds)
     pwrng = collect("pwrng", seeds)
@@ -52,8 +52,10 @@ def main():
     lines = []
     lines.append("Paired ensemble validation — Pt3D SoA per-worker RNG consolidation")
     lines.append("Configuration: glidingAssay500_val (runTime=0.1 s, 10000 steps), 1× CPU, -Xmx8G")
-    lines.append("Seeds: 1..5. Per-worker RNG is seeded from BOA_RNG_SEED (unset → nano^ms")
-    lines.append("       entropy), so bit-identity is impossible — bar is statistical agreement.")
+    lines.append("Seeds: 1..10 (extended from n=5 — the per-worker RNG is the only stochastic-core")
+    lines.append("       change in the migration so far, so we take more samples). Per-worker RNG")
+    lines.append("       is seeded from BOA_RNG_SEED (unset → nano^ms entropy), so bit-identity is")
+    lines.append("       impossible — bar is statistical agreement, not bit-identity.")
     lines.append("")
     lines.append("Baseline: main = 577247a (post-inc1 merge).")
     lines.append("pwrng   : HEAD of pt3d-soa-inc-per-worker-rng.")
@@ -85,7 +87,7 @@ def main():
             f"shift {mean_diff:+.3f}  {shift_sigma:+.2f} σ_b  paired t {t:+.2f}"
         )
     lines.append("")
-    lines.append("Critical t at df=4, two-sided 5 % = 2.78. All |t| < 2.78 → PASS.")
+    lines.append("Critical t at df=9, two-sided 5 % = 2.26. All |t| < 2.26 → PASS.")
 
     out_path.write_text("\n".join(lines))
     print("\n".join(lines))

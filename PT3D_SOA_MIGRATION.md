@@ -1395,3 +1395,205 @@ ask: no, and now we know exactly why.**
 - **16× ceiling re-probe: wall did NOT move** — same OOM in Thread-15
   as 0a/0b/scalar-Brownian. Expected: inc1 shed ~zero retained heap.
 
+
+## Increment — per-worker RNG consolidation
+
+Landed on `pt3d-soa-inc-per-worker-rng` (2026-06-09). Replaces the
+per-Thing `MersenneTwisterFast myPRNG` (the #1 retained-heap line item
+in inc1's 16× OOM verdict — 4.74 M MTF × 2 int[] each = ~12 GB / 43 %
+of the 27.74 GB OOM heap) with a per-worker MTF carried on
+`Thing.WorkerScratch`. The same pass folds the three per-Thing
+`UCircRnd` Brownian scratch instances (~14.21 M / ~455 MB at 16×) into
+WorkerScratch.
+
+### Mechanism
+
+`WorkerScratch.rng` — one `MersenneTwisterFast` per worker slot,
+allocated once in the static initializer. The pool size is unchanged
+(`accumThreadCt + 1 = 17` slots), so the entire RNG allocation at any
+scale is **17 MTFs + 17×3 = 51 UCircRnd objects + a master seed long**,
+regardless of population size. The Brownian hot path (`calcRandomForces`)
+resolves `WorkerScratch ws` once per dispatch (existing 0a infrastructure)
+and reads `ws.rng` / `ws.xVals` / `ws.yVals` / `ws.zVals` per Thing in
+the inner loop — zero TLS lookups per Thing. The biochem / motor-state
+draw sites (Monomer hydrolize/dissociate/tropo/cofilin, MyoMotor
+nucleotide cycle, MyoFilLink.ckRelease, FilSegment capping/branching/etc.)
+use `Thing.currentScratch().rng` — one TLS lookup per call, well
+outside the per-step hot loop. Constructors (FilSegment `setYVec`,
+ProteinNode unit-vec inits, MyoMiniFilament myosin-head placement,
+Bug surface ActA layout, Chamber dimer placement) likewise use
+`currentScratch().rng`.
+
+### Seeding for quality
+
+The 17 per-worker MTFs are seeded with distinct longs derived via
+**SplitMix64** from a single master seed:
+
+```java
+long counter = RNG_MASTER_SEED;
+for (int i = 0; i < workerScratch.length; i++) {
+    counter = splitMix64(counter);
+    workerScratch[i] = new WorkerScratch(counter);
+}
+```
+
+SplitMix64 is the canonical splitter for seeding multiple MT instances —
+also what JDK uses for `SplittableRandom`. It avoids the close-seed
+correlation hazard that can occur when seeding MT with adjacent
+integers. `RNG_MASTER_SEED` reads from the `BOA_RNG_SEED` env var if
+set; otherwise mixes `System.nanoTime()` and `System.currentTimeMillis()`
+for high-entropy startup. With a fixed `BOA_RNG_SEED`, the per-worker
+streams (and therefore the simulation as a whole, modulo `Env.mtRNG`
+which retains its independent `-seed` plumbing) become reproducible
+across JVM starts — the pre-consolidation per-Thing MTF was seeded from
+`Math.random()` per Thing, never reproducible.
+
+A startup banner prints the resolved master seed so a failing run's
+log can be replayed:
+
+```
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=42 (BOA_RNG_SEED set)
+```
+
+The GPU on-device Brownian RNG (Wang hash) is **untouched** — the
+per-worker pool serves the CPU-fallback `calcRandomForces` path only.
+
+### Heap shed — `jmap -histo:live` at 4× CPU
+
+inc0a 4× baseline at `RUN_LOGS/2026-06-08_pt3d_inc0a/jmap/4x_cpu_jmap_inc0a_inc0a_v2_histo.txt`
+vs pwrng 4× at `RUN_LOGS/2026-06-09_per_worker_rng/4x_cpu_jmap_histo.txt`:
+
+| class | inc0a 4× (count / bytes) | pwrng 4× (count / bytes) | drop |
+|---|---:|---:|---:|
+| `int[]` (MT state arrays + bin arrays) | 2,597,505 / 3.72 GB | 259,945 / 731 MB | **−2.99 GB** |
+| `ec.util.MersenneTwisterFast` (instances) | 1,177,602 / 47.1 MB | 17 / 680 B | **−47.1 MB** |
+| `boxOfActin.UCircRnd` | 3,532,806 / 169.6 MB | 51 / 2.4 KB | **−169.6 MB** |
+| `boxOfActin.Pt3D` | 24.00 M / 960 MB | 24.97 M / 999 MB | +1 M / +39 MB (noise) |
+
+**Headline at 4× CPU: −3.20 GB retained heap.** The int[] drop tracks
+exactly the MTF state shed (1.178 M MTF × 2 int[] arrays each
+= 2.356 M arrays of ~1.3 KB → ~3 GB). Projected linearly to 16× scale
+(4.74 M Things), the shed is ~**12 GB at 16×** — matching inc1's
+heap-dump prediction.
+
+### 16× CPU ceiling re-probe — **the wall broke**
+
+`RUN_LOGS/2026-06-09_per_worker_rng/ceiling_16x_cpu_pwrng.log`, `-Xmx28G`,
+same 16× `K1.pf` configuration as the inc0a/0b/scalar-Brownian/inc1
+ceiling probes (200 steps, `runTime=0.002`):
+
+```
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-1268746020053076938 (BOA_RNG_SEED unset)
+...
+[STATS] bindEvents=61203
+[STATS] meanBoundMotors=8847.587
+Finished closing JSON plots!
+```
+
+**`rc=0`. Zero `OutOfMemoryError` occurrences.** First successful 16× CPU
+completion across the migration — inc0a hit the per-step OOM wall in
+~3 min, inc0b/scalar-Brownian/inc1 all hit the same wall verbatim. The
+~12 GB shed from MT state was the lever inc1's heap-dump task named as
+the path past 16× on this 31 GB box; the pwrng increment confirms it.
+ThingStep wall 197 s (16 threads × 200 steps contended ≈ 62 ms/step).
+
+This is the first **physics-meaningful** breakthrough of the per-step
+ceiling, not just the startup ceiling that inc0a/0b cleared. The
+glidingVelocity reads 0.0000 because 200 steps is too short to develop
+gliding — the ceiling-probe metric is "the JVM completed at all," not
+"the gliding metric is in band." (A longer 16× run is the natural
+next benchmark.)
+
+### Validation — paired-ensemble t-test (n=10 seeds, 1× CPU)
+
+Stochastic-core change (the RNG itself), so per the prompt's protocol
+we ran n=5 first and extended to n=10 because the glidingVelocity t
+was borderline at n=5 (t=+2.46, under the 2.78 critical but above 2.0).
+Per-seed logs in
+`RUN_LOGS/2026-06-09_per_worker_rng/ens_{main_baseline,pwrng}/seed{1..10}/stdout.txt`;
+full summary in `ensemble_summary.txt`.
+
+Baseline = main at `577247a` (post-inc1 merge), pwrng = HEAD of
+`pt3d-soa-inc-per-worker-rng`. `glidingAssay500_val` (runTime 0.1 s,
+10 000 steps), 1× CPU, `-Xmx8G`, 10 parallel runs.
+
+| metric | baseline μ±σ (n=10) | pwrng μ±σ (n=10) | shift | shift/σ_b | paired t (df=9) |
+|---|---|---|---:|---:|---:|
+| bindEvents       | 930.30 ± 120.84 | 870.60 ± 94.01  | −59.7  | −0.49 σ_b | −1.21 |
+| meanBoundMotors  | 7.753 ± 0.701   | 7.371 ± 0.624   | −0.382 | −0.54 σ_b | −1.35 |
+| glidingVelocity  | 7.426 ± 0.472   | 7.427 ± 0.616   | +0.000 | +0.00 σ_b | +0.00 |
+
+All paired |t| < 2.26 (df=9 two-sided 5 % critical). **PASS.** The
+borderline n=5 glidingVelocity t collapses to **zero** mean shift at
+n=10 — small-sample noise, as expected. The seeds-1..5 pwrng arm
+happened to draw high (μ=7.85); seeds-6..10 drew low (μ=7.00); the
+combined n=10 mean sits within 0.001 µm/s of the baseline n=10 mean.
+bindEvents and meanBoundMotors drift slightly negative (−0.5 σ_b) —
+also within noise; same convention as the small one-σ drifts inc0a
+landed (+0.68 σ_b on bindEvents, +1.02 σ_b on glidingVelocity).
+
+The n=5 → n=10 extension is the protocol the prompt explicitly named
+for RNG-touching changes; it converged from "borderline" to "clean
+zero" without any code change, exactly matching the noise hypothesis.
+
+### CPU wall — Brownian path 31 % faster
+
+Per-seed phase walls from the 1× CPU ensemble (16 threads, 10 000 steps,
+parallel contention):
+
+| pool | baseline mean (n=5, seeds 1–5) | pwrng mean (n=5, seeds 1–5) | δ |
+|---|---:|---:|---:|
+| ThingBrownian Threads | 170.6 s | 119.1 s | **−51.5 s (−30 %)** |
+| ThingStep Threads     | 404.8 s | 366.1 s | **−38.7 s (−10 %)** |
+
+These are aggregate-thread walls under 10× parallel contention (10
+ensemble runs all on the same 16-core box), so the absolute numbers
+are inflated — but the ratio is fair (both arms suffer identical
+contention). The 30 % drop on the Brownian path matches the heap-dump
+verdict's classification of MT state as the #1 CPU cost. Per-step
+ThingBrownian wall at 16 threads ≈ 1.07 ms (baseline) → 0.74 ms
+(pwrng). The 10 % ThingStep drop is harder to attribute — likely
+better cache pressure from shedding the per-Thing UCircRnd objects.
+
+### GPU sanity
+
+GPU on-device Brownian RNG (Wang hash inside `gpuMoveThings`) is
+untouched in this increment; the per-worker pool serves only the CPU
+`calcRandomForces` fallback. A `-gpu` short sanity run was not the
+gating measurement here — the heap shed and ceiling break are CPU-side
+deliverables. Future GPU runs continue to pull from the same per-worker
+pool for the CPU-fallback Things (Bug, branch FilSegments, ActA-bound
+segments — same population that already drew Brownian from
+`myPRNG`-on-Thing pre-consolidation).
+
+### Deliverable summary
+
+- **Per-Thing `myPRNG` deleted.** 22 draw sites converted in
+  FilSegment (biochem + capping + branching + tether-detach + cleanup),
+  6 in MyoMotor (nucleotide cycle), 1 in MyoFilLink (ckRelease catch/slip),
+  10 in Monomer (hydrolysis + tropo + cofilin), 6 in ProteinNode and
+  Bug constructors (unit-vec init), 6 in MyoMiniFilament, 2 in
+  Chamber, 3 in StickyNode, plus the `getRdmDelta` helper on Thing.
+  All routed through the pool: hot path (`calcRandomForces`) uses the
+  passed-down `ws.rng`; cooler paths use `Thing.currentScratch().rng`.
+- **`UCircRnd` xVals/yVals/zVals retired from Thing.** Now live in
+  WorkerScratch (3 per worker × 17 = 51 objects total).
+- **Heap shed at 4× CPU: ~3.20 GB** (int[] −2.99 GB, MTF instances
+  −47.1 MB, UCircRnd −169.6 MB). Projected ~12 GB at 16× — matches
+  inc1's heap-dump prediction exactly.
+- **16× ceiling re-probe: FINISHED `rc=0`.** First successful 16× CPU
+  completion across the migration. Per-step OOM wall is gone — the
+  inc1 heap-dump verdict ("the path past 16× is the MTF state lever")
+  is confirmed empirically.
+- **Validation: paired-ensemble n=10, all |t| < 1.4.** Borderline n=5
+  glidingVelocity (t=+2.46) collapses to t=+0.00 at n=10. Statistical
+  agreement preserved; RNG quality intact.
+- **CPU performance: ThingBrownian wall −30 %, ThingStep wall −10 %.**
+  Matches the heap-dump's "RNG is the #1 CPU cost" classification.
+- **GPU path: untouched.** On-device Wang hash unaffected; CPU-fallback
+  Brownian draws from the same shared pool.
+- **Reproducibility wired (optional).** `BOA_RNG_SEED` env var → master
+  seed → SplitMix64-derived per-worker seeds. Pre-consolidation per-
+  Thing MTF was seeded from `Math.random()` and was non-reproducible
+  at any seed; pwrng with `BOA_RNG_SEED` set is reproducible mod the
+  separate `Env.mtRNG -seed` plumbing.

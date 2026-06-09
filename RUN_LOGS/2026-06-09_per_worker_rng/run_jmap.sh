@@ -20,7 +20,7 @@ LOGF="$OUT/${TAG}.log"
 HISTOF="$OUT/${LABEL}_cpu_jmap_histo.txt"
 
 case "$LABEL" in
-  4x)  K=2100; JMAP_AFTER=1050; HEAP="28G" ;;
+  4x)  K=12000; JMAP_AFTER=600; HEAP="28G" ;;
   16x) K=2100; JMAP_AFTER=2100; HEAP="28G" ;;
   *) echo "unknown label: $LABEL" >&2; exit 1 ;;
 esac

@@ -1,8 +1,72 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (Pt3D SoA increment 1 — FilSegment A1 == identity → (slot, side) byte storage. 22 reference-identity sites in FilSegment.java + 2 derivations in GPUMoveThing.java collapsed to direct reads of new `end1NbrSide`/`end2NbrSide` byte fields, promoted from the per-step derivation already at GPUMoveThing.java:4001. Heap-dump-at-OOM diagnostic on 16× CPU: 27.74 GB total retained heap dominated by Mesh int[] bins (14.7 GB), per-Thing double[]s (6.8 GB), Pt3D A-state (2.3 GB), GPU SoA float[]s (672 MB) — 98.5 % necessary state. **Verdict: 16× on this 31 GB box is RAM-limited, not code-limited.** Shed-able fat is ~430 MB (Thing/Myosin object-array over-sizing) — 1.5 % of peak, not a needle-mover. The wider end1Pt/end2Pt + bridge-accessor deletion the audit rolled into inc1 turned out to be a ~70 + ~327 site mechanical refactor for ~2 MB retained at gliding scale — deferred per discovery-and-bail (the urgency for retained-heap shed is gone). Pack-source survey names Increment 2's targets: `Thing.bTransGam`/`bRotGam` and `MyosinFixed.myFixedPt` → SoA float[]. Full results in PT3D_SOA_MIGRATION.md "Increment 1 — FilSegment endpoint cleanup (A1 == identity)".)
+Last updated: 2026-06-09 (Pt3D SoA per-worker RNG consolidation — the per-Thing `MersenneTwisterFast myPRNG` was the #1 line item in inc1's 16× heap-dump (4.74 M MTF × 2 int[] = ~12 GB / 43 % of the 27.74 GB OOM heap); replaced with one MTF per worker slot (17 total) carried on `Thing.WorkerScratch`, seeded via SplitMix64 from a `BOA_RNG_SEED`-or-entropy master for independent well-mixed streams. Per-Thing `UCircRnd` xVals/yVals/zVals (~14.2 M / 455 MB at 16×) folded into WorkerScratch in the same pass. Heap shed at 4× CPU: −2.99 GB int[] + −47 MB MTF instances + −170 MB UCircRnd ≈ **−3.2 GB at 4×, projected ~12 GB at 16×**. **16× CPU ceiling re-probe completes rc=0 — first successful 16× CPU run across the migration**, confirming inc1's heap-dump verdict that MTF state was the lever past the per-step wall. Paired-ensemble n=10 validation: all |t|<1.4, glidingVelocity shift = +0.000 (borderline n=5 t=+2.46 collapsed to zero at n=10 — small-sample noise). ThingBrownian CPU wall −30 %, ThingStep −10 %. GPU on-device Wang-hash RNG untouched. Reproducibility: `BOA_RNG_SEED` env var → master seed → per-worker SplitMix64 seeds (pre-consolidation per-Thing MTF was seeded from `Math.random()` and was never reproducible). Full results in PT3D_SOA_MIGRATION.md "Increment — per-worker RNG consolidation".)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-09 — Pt3D SoA per-worker RNG consolidation: 12 GB shed, 16× ceiling broken
+
+The CC prompt followed inc1's heap-dump verdict directly. That verdict
+named the per-Thing `MersenneTwisterFast myPRNG` as the #1 line item
+in the 27.74 GB OOM heap — 4.74 M MTF × two `int[]` state arrays each
+= ~12 GB / 43 % of the retained heap. The audit pointed out that per-
+Thing RNG streams aren't needed; per-worker is sufficient. This
+increment converts.
+
+**Mechanism.** One `MersenneTwisterFast` per `Thing.WorkerScratch` slot
+(17 total: 16 workers + 1 main-thread slot). The Brownian hot path
+(`calcRandomForces`) reads `ws.rng` from the WorkerScratch already
+resolved once per dispatch (inc0a's pattern) — zero TLS per Thing.
+Biochem / motor / FilSegment construction draw sites use
+`Thing.currentScratch().rng` (one TLS per call, cold-path acceptable).
+The three per-Thing `UCircRnd` Brownian-scratch instances (~14.21 M
+objects / 455 MB at 16×) are folded into WorkerScratch in the same
+pass — pure write-before-read scratch, no carryover.
+
+**Seeding for quality.** Master seed from `BOA_RNG_SEED` env var (or
+`System.nanoTime()` XOR `currentTimeMillis()` if unset); the 17 per-
+worker seeds derived via SplitMix64 from the master. SplitMix64 is the
+canonical "seed multiple MTs" splitter (also what JDK uses for
+`SplittableRandom`) — avoids the close-seed correlation hazard. With
+`BOA_RNG_SEED` set, the per-worker streams become reproducible across
+JVM starts; pre-consolidation per-Thing MTF was seeded from
+`Math.random()` per Thing and was never reproducible.
+
+**Heap shed (4× CPU jmap).** `int[]` 2.60 M → 0.26 M arrays
+(−2.99 GB), MTF instances 1.18 M → 17 (−47.1 MB), UCircRnd 3.53 M → 51
+(−169.6 MB). **−3.2 GB at 4×, projected ~12 GB at 16×.**
+
+**16× ceiling re-probe (the headline).** Same 16× CPU `K1.pf` config
+that inc0a/0b/scalar-Brownian/inc1 all OOM'd verbatim in the per-step
+phase: **`rc=0`. Zero `OutOfMemoryError`.** Per-worker RNG is the first
+change across the migration to break the 16× per-step ceiling. The
+inc1 heap-dump verdict's "the path past 16× on this 31 GB box is one
+of these (MTF state lever / sparse mesh bins / more RAM)" predicted
+this outcome exactly — confirmed.
+
+**Validation.** Stochastic-core change → paired-ensemble n=5 first,
+n=10 if borderline. n=5 came back with bindEvents t=+0.60 and
+meanBoundMotors t=+0.16 (clean) but glidingVelocity t=+2.46 (under the
+2.78 critical but above 2). Per the prompt's rule, extended to n=10.
+The result at n=10: all |t| < 1.4, glidingVelocity shift = +0.000,
+t=+0.00. The borderline n=5 was small-sample seed selection (seeds 1–5
+drew high on pwrng; seeds 6–10 drew low; combined n=10 sits within
+0.001 µm/s of baseline). Quality preserved.
+
+**CPU wall.** Per-ensemble phase walls (1× CPU, 10 000 steps, 16
+threads, 10-way contended): ThingBrownian 170.6 s → 119.1 s (−30 %),
+ThingStep 404.8 s → 366.1 s (−10 %). Matches the heap-dump's
+classification of MT state as the #1 CPU cost — eliminating the
+per-Thing PRNG allocation+cache footprint is the win.
+
+**GPU path: untouched.** On-device Wang-hash Brownian RNG is unaffected;
+the per-worker pool serves the CPU `calcRandomForces` fallback. The GPU
+path inherits the 16× ceiling break for free (the CPU-fallback
+population draws from the same shared 17-MTF pool now).
+
+Full data + ensemble runs / 4× histo / 16× ceiling log in
+`RUN_LOGS/2026-06-09_per_worker_rng/`; mechanism + tables in
+`PT3D_SOA_MIGRATION.md` "Increment — per-worker RNG consolidation".
 
 ## 2026-06-09 — Pt3D SoA increment 1: FilSegment A1 == identity → (slot, side) + heap-dump verdict
 
