@@ -1597,6 +1597,12 @@ public class BoxOfActin {
 				// output to screen and/or files
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
 
+				// Close the output-render episode: restore the physics-owned host
+				// derived arrays / Pt3D mirrors that the frame writers' recompute
+				// mutated, so emitting a frame leaves simulation state unchanged.
+				// No-op when no frame was written this step (snapshot inactive).
+				if (Env.useGPU) { GPUMoveThing.endOutputRender(); }
+
 				//**** Clean Up ****
 				cleanupTimer1.start();
 				// large-scale removal of stuff at prescribed rates

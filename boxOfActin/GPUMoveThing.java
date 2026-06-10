@@ -3573,10 +3573,132 @@ public class GPUMoveThing {
      * intra-step shortcut used by future device kernels, not by CPU
      * readers.
      */
+    // -------------------------------------------------------------------------
+    // Output-sync read-only guard (2026-06-10).
+    //
+    // refreshHostMirrorsForOutput() recomputes the host-side derived-field
+    // arrays (soaYVec re-orthonormalised, soaZVec/End1/End2/TransXTox) plus the
+    // FilSegment/MyoMotor Pt3D mirrors so the output frame reflects this step's
+    // integrated pose. For GPU-resident minifilament dimers those SAME host
+    // arrays are read the NEXT step by the CPU dimer/body coupling
+    // (MyosinDimer.alignUVecLeversTorque, MyoMiniFilament.constrainEnd*Dimers,
+    // applyRodCoupling* via end1/end2). The host recompute (float32, host
+    // orthonormalisation) differs slightly from the device-integrated frame the
+    // no-output path leaves resident; the stiff alignment torque amplifies the
+    // difference into a NaN cascade — the observed "-3js blow-apart"
+    // (JOURNAL 2026-06-09 / 2026-06-10).
+    //
+    // Principle: emitting an output frame must not change the simulation. So we
+    // snapshot the physics-owned host arrays BEFORE the output recompute and
+    // restore them bit-identically AFTER the frame is emitted (endOutputRender,
+    // called once at the safe point). The writers see fresh derived fields; the
+    // next physics step sees exactly the state it would have without output.
+    // Gated on the same !noMonomersSimd predicate as the per-step pose pull:
+    // gliding (noMonomersSimd) has no CPU minifilament coupling reading these
+    // arrays and already emits frames stably, so it keeps its current path.
+    // -------------------------------------------------------------------------
+    private static boolean renderSnapshotActive = false;
+    private static int snapTc, snapFilCt, snapMotorCt;
+    private static float[]  snapYVec, snapZVec, snapEnd1, snapEnd2, snapTransXTox;
+    private static double[] snapFilMirror;     // 9 per fil: xR,yR,zR, e1{xyz}, e2{xyz}
+    private static double[] snapMotorBindTip;  // 3 per motor: bindTip {xyz}
+
+    private static float[]  ensureSnapF(float[] a,  int n) { return (a == null || a.length < n) ? new float[n]  : a; }
+    private static double[] ensureSnapD(double[] a, int n) { return (a == null || a.length < n) ? new double[n] : a; }
+
+    // Snapshot the physics-owned derived host arrays + Pt3D mirrors before the
+    // output recompute overwrites them. Idempotent within one output episode
+    // (a logAndDraw/remoteLog may invoke several writers, each calling
+    // refreshHostMirrorsForOutput; only the first snapshots). No Things are
+    // created/removed between here and endOutputRender — cleanup runs after
+    // output — so theFilSegments/theMotors indices are stable for the restore.
+    private static void beginOutputSnapshot() {
+        if (renderSnapshotActive) return;
+        int tc = Thing.thingCt;
+        snapTc = tc;
+        if (tc > 0) {
+            snapYVec      = ensureSnapF(snapYVec,      tc * 3);
+            snapZVec      = ensureSnapF(snapZVec,      tc * 3);
+            snapEnd1      = ensureSnapF(snapEnd1,      tc * 3);
+            snapEnd2      = ensureSnapF(snapEnd2,      tc * 3);
+            snapTransXTox = ensureSnapF(snapTransXTox, tc * 9);
+            System.arraycopy(Thing.soaYVec,      0, snapYVec,      0, tc * 3);
+            System.arraycopy(Thing.soaZVec,      0, snapZVec,      0, tc * 3);
+            System.arraycopy(Thing.soaEnd1,      0, snapEnd1,      0, tc * 3);
+            System.arraycopy(Thing.soaEnd2,      0, snapEnd2,      0, tc * 3);
+            System.arraycopy(Thing.soaTransXTox, 0, snapTransXTox, 0, tc * 9);
+        }
+        int filCt = FilSegment.filSegmentCt;
+        snapFilCt = filCt;
+        snapFilMirror = ensureSnapD(snapFilMirror, filCt * 9);
+        FilSegment[] fils = FilSegment.theFilSegments;
+        for (int i = 0; i < filCt; i++) {
+            FilSegment fs = fils[i];
+            if (fs == null) continue;
+            int b = i * 9;
+            snapFilMirror[b]   = fs.xRange;   snapFilMirror[b+1] = fs.yRange;   snapFilMirror[b+2] = fs.zRange;
+            snapFilMirror[b+3] = fs.end1Pt.x; snapFilMirror[b+4] = fs.end1Pt.y; snapFilMirror[b+5] = fs.end1Pt.z;
+            snapFilMirror[b+6] = fs.end2Pt.x; snapFilMirror[b+7] = fs.end2Pt.y; snapFilMirror[b+8] = fs.end2Pt.z;
+        }
+        int motorCt = MyoMotor.motorCt;
+        snapMotorCt = motorCt;
+        snapMotorBindTip = ensureSnapD(snapMotorBindTip, motorCt * 3);
+        MyoMotor[] motors = MyoMotor.theMotors;
+        for (int i = 0; i < motorCt; i++) {
+            MyoMotor m = motors[i];
+            if (m == null || m.bindTip == null) continue;
+            int b = i * 3;
+            snapMotorBindTip[b] = m.bindTip.x; snapMotorBindTip[b+1] = m.bindTip.y; snapMotorBindTip[b+2] = m.bindTip.z;
+        }
+        renderSnapshotActive = true;
+    }
+
+    /**
+     * Close the output-render episode opened by refreshHostMirrorsForOutput():
+     * restore every host array / Pt3D mirror the output recompute mutated to its
+     * pre-output (physics-owned) value, so the frame leaves simulation state
+     * bit-identical. Idempotent — a no-op when no snapshot is active (non-output
+     * steps, gliding/noMonomersSimd, CPU path). Call once after the safe-point
+     * output + inspect drains complete, before the next physics step.
+     */
+    public static void endOutputRender() {
+        if (!renderSnapshotActive) return;
+        int tc = snapTc;
+        if (tc > 0) {
+            System.arraycopy(snapYVec,      0, Thing.soaYVec,      0, tc * 3);
+            System.arraycopy(snapZVec,      0, Thing.soaZVec,      0, tc * 3);
+            System.arraycopy(snapEnd1,      0, Thing.soaEnd1,      0, tc * 3);
+            System.arraycopy(snapEnd2,      0, Thing.soaEnd2,      0, tc * 3);
+            System.arraycopy(snapTransXTox, 0, Thing.soaTransXTox, 0, tc * 9);
+        }
+        FilSegment[] fils = FilSegment.theFilSegments;
+        for (int i = 0; i < snapFilCt; i++) {
+            FilSegment fs = fils[i];
+            if (fs == null) continue;
+            int b = i * 9;
+            fs.xRange   = snapFilMirror[b];   fs.yRange   = snapFilMirror[b+1]; fs.zRange   = snapFilMirror[b+2];
+            fs.end1Pt.x = snapFilMirror[b+3]; fs.end1Pt.y = snapFilMirror[b+4]; fs.end1Pt.z = snapFilMirror[b+5];
+            fs.end2Pt.x = snapFilMirror[b+6]; fs.end2Pt.y = snapFilMirror[b+7]; fs.end2Pt.z = snapFilMirror[b+8];
+        }
+        MyoMotor[] motors = MyoMotor.theMotors;
+        for (int i = 0; i < snapMotorCt; i++) {
+            MyoMotor m = motors[i];
+            if (m == null || m.bindTip == null) continue;
+            int b = i * 3;
+            m.bindTip.x = snapMotorBindTip[b]; m.bindTip.y = snapMotorBindTip[b+1]; m.bindTip.z = snapMotorBindTip[b+2];
+        }
+        renderSnapshotActive = false;
+    }
+
     public static void refreshHostMirrorsForOutput() {
         // First make sure pose is fresh (output may be called without a
         // prior demandSyncPoseToHost in the same step — be defensive).
         demandSyncPoseToHost();
+        // Read-only output guard: snapshot the physics-owned derived arrays the
+        // recompute below mutates, so emitting a frame cannot perturb the next
+        // step's CPU minifilament coupling. Restored bit-identically by
+        // endOutputRender() at the safe point. See the block comment above.
+        if (!Env.noMonomersSimd.isActive()) { beginOutputSnapshot(); }
         long t0 = System.nanoTime();
         int tc = Thing.thingCt;
         if (tc > 0) {

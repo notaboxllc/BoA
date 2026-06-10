@@ -1,0 +1,27 @@
+GPU minifilament blow-apart investigation (branch gpu-minifil-cohesion-fix, NOT merged)
+aorus, Java 21 + TornadoVM PTX, -Xmx8G. Span = max myosin-endpoint spatial extent per frame.
+=============================================================================
+
+## Step 1 isolation matrix (GPU, 300 steps) — single minifil holds => cohesion NOT dropped
+  1 minifil no actin            : span 0.31 -> 0.33  HOLDS
+  3 minifil + 30 fixed actin    : span ~9.0          HOLDS
+  3 minifil + 30 actin+turnover : span ~9.6          HOLDS
+  100 minifil no actin          : span 10.06         HOLDS
+  100 minifil + 100 fixed actin : span 10.13         HOLDS
+  FULL (100+100+turnover) -3js  : -> NaN by frame 5  BLOWS UP
+
+## Trigger isolation: -3js output path (boa10-64Seg-dyn-short, 500 steps)
+  WITHOUT -3js: 5/5 seeds crazy=0 (stable)
+  WITH    -3js: 3/3 seeds crazy~1.16M -> NaN
+  NaN origin tally (blown-up run): 7.6M MyoDimer.alignUVecLeversTorque + 7.6M MyoMiniFilament.constrainEnd*Dimers + ~0.9M MyoMiniFilament forceSum/torqueSum
+
+## Partial fix (changes 1+2): minifilament myosins -> cpuFallback
+  -3js trigger 500-step 3 seeds POST-FIX: crazy=0 (was ~1.16M); span ~10.1->10.6 bounded
+  full dyn 5000-step GPU -3js POST-FIX  : rc=0 crazy=0; span 10.2->12.4 holds; slotCount 10153->513
+  bindEvents/meanBoundMotors POST-FIX   : 0 / 0.000  <-- REGRESSION (was 279/0.056 stable; CPU ref ~710/0.34)
+  gliding val POST-FIX                  : glidingVelocity=7.3468 (in band)
+  dyn-nomini POST-FIX                   : rc=0 crazy=0 (packRange crash-fix holds)
+
+## Conclusion: blow-apart fixed but binding regressed to 0; completing the CPU-hybrid
+## needs un-gating the CPU binding pipeline (fillSoaArrays + MotorBindGrid3D for the
+## cpuFallback subset) — beyond the scoped flag-flip. PAUSED for a scoping decision.

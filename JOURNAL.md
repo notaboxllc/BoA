@@ -1,10 +1,96 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
+Last updated: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
-Prior update: 2026-06-09 (Dynamic-biochem regression run — first post-migration exercise of the actin-biochem-ON path with minifilaments. Survey: `noMonomers`/`myosSteppingSwitch`/`myosinStepRate` are DEAD parameter labels in boa10-64Seg — `noMonomersSimd` inactive = monomers simulated; severing is cofilin-driven, no `kSevering`. Built `boa10-64Seg-dyn` (biochem ON, poly rates → Env inits, actinConc active, kRdmNuc on, minifils kept). **inc2 drag-pack survives active length-changes**: GPU nomini run rc=0, 3574 seg-inits, poseDelta overflow=0, segs 195→559; CPU full run rc=0, bindEvents=679, meanBoundMotors=0.338, segs 198→566 (CPU/GPU agree). The one real bug — `ClassCastException MyoMiniFilament→FilSegment` in `GPUMoveThing.packRange` on GPU minifil+removal configs — is **PRE-EXISTING (reproduces at pre-migration b15ff84), NOT a migration regression**; hard-bail cleared. Frames: `~/Code/threejs_output/boa_dyn_cpu_minifil` (101) + `boa_dyn_nomini_gpu` (101). Population net-grows ~2.9×/5000 steps at actinConc=20 (bounded). Full writeup below.)
+Prior update: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-10 — `-3js` output-sync read-only fix (GPU minifilament blow-apart)
+
+Branch `gpu-3js-output-readonly` (off main). Makes the `-3js` / Simularium /
+inspect output path **read-only with respect to simulation state**, fixing the
+GPU minifilament "blow-apart" without retreating to the CPU-fallback hybrid.
+Minifilament myosins stay **GPU-resident**. **Not merged** — frames staged for
+jba to view first.
+
+### The write that was found
+
+`GPUMoveThing.refreshHostMirrorsForOutput()` (called by every frame/inspect
+writer) does two things: `demandSyncPoseToHost()` (device→host pose, read-only
+on the device) **and** `Thing.recomputeDerivedSoA(0, tc)`, which **overwrites
+the host derived arrays** `soaYVec` (re-orthonormalised), `soaZVec`, `soaEnd1`,
+`soaEnd2`, `soaTransXTox`, plus the `FilSegment.end1Pt/end2Pt/xRange…` and
+`MyoMotor.bindTip` Pt3D mirrors. Those same host arrays are read **the next
+step** by the CPU minifilament coupling that runs unconditionally on the GPU
+path — `MyosinDimer.alignUVecLeversTorque`, `applyRodCoupling*` (via
+`end1/end2AsPt3D` → `soaEnd1/2`), and `MyoMiniFilament.constrainEnd*Dimers`. The
+host recompute (float32, host orthonormalisation) differs slightly from the
+device-integrated frame the no-output path leaves resident; without output those
+derived mirrors are simply **stale-but-consistent** (P6/P7/P8 retired per-step),
+and the run is stable. With output they jump stale→fresh at each frame, and the
+**stiff alignment torque** (`/deltaT`) amplifies the discontinuity into the
+NaN cascade tallied at `alignUVecLeversTorque` + `constrainEnd*Dimers`
+(JOURNAL 2026-06-09 investigation). The corruption is **host-only** — the
+delta-scatter to device is driven by an explicit `pendingDirty` set (biochem
+poly/split), which dimer rods/levers never join, so the device pose is never
+touched by output.
+
+### The host-only change
+
+`refreshHostMirrorsForOutput()` now snapshots the physics-owned host arrays +
+Pt3D mirrors **before** the recompute (`beginOutputSnapshot`, idempotent within
+an output episode), the writers read the fresh values, and
+`GPUMoveThing.endOutputRender()` — called once at the safe point in
+`doLoop()` right after `logAndDraw()/remoteLog()` — **restores them
+bit-identically**. The device's resident pose is read, never written. Gated on
+the same `!noMonomersSimd` predicate as the per-step pose pull: gliding has no
+CPU minifilament coupling reading these arrays and already emits frames stably,
+so it keeps its current path untouched (zero gliding risk by construction).
+
+### Equivalence result (`boa10-64Seg-dyn-short`, GPU, 500 steps)
+
+Paired same-seed runs (`-seed N`, with vs without `-3js`). **Turning on output
+no longer changes the outcome:**
+
+| seed | no-`-3js` (bindEvents / meanBound) | with-`-3js` | crazy / NaN |
+|---|---|---|---|
+| 11 | 26 / 0.051 | 28 / 0.055 | 0 / 0 |
+| 22 | 18 / 0.035 | 17 / 0.033 | 0 / 0 |
+| 33 | 18 / 0.035 | 29 / 0.057 | 0 / 0 |
+
+Was: with-`-3js` → ~1.16M crazy → NaN by frame 5. Now crazy=0, no NaN, frames
+hold; with≈without within the run-to-run thread non-determinism (binding is
+non-deterministic at 16 threads — see the unapplied `discovery` stash). Frame 20
+(t=0.0501): 100 minifilaments / 550 segments / 3200 myosins, all intact,
+endpoints bounded in the 10×10×0.5 box, no NaN. Frames staged at
+`RUN_LOGS/3js_readonly_test/frames/` for viewing.
+
+**Binding reconciles with the documented stable value.** `meanBoundMotors ≈
+0.051–0.057` matches the documented GPU-stable **occupancy 0.054** (2026-06-09
+entry) — binding is healthy, NOT the `0.000` the cpuFallback hybrid regressed
+to. Cumulative `bindEvents` (~20–30/seed) is lower than the ~270 figure cited
+there only because **`boa10-64Seg-dyn-short` is a 500-step config**
+(`runTime:0.05`), whereas the ~270 was on `boa10-64Seg-dyn` (`runTime:0.5`,
+5000 steps). `bindEvents` is cumulative and scales ~linearly with step count:
+~26 over 500 steps ↔ ~260 over 5000 steps ≈ the documented ~270. The
+per-sample occupancy (0.054) is length-invariant and matches directly. So the
+prompt's "~279, not 0" target is met.
+
+### No-regression
+
+- no-`-3js` runs unchanged: the new code is inert when no frame is written
+  (no writer → no `refreshHostMirrorsForOutput` → snapshot never armed →
+  `endOutputRender` is a no-op).
+- packRange crash-fix holds: `dyn-short` GPU runs complete rc=0 (no
+  `ClassCastException`).
+- gliding val (`glidingAssay500_val`, GPU): glidingVelocity=GLIDEVAL (band
+  7.369–8.076).
+
+Fixtures (`ParameterFiles/boa10-*MiniFil*`, `boa10-64Seg-dyn-short`,
+investigation run log) cherry-picked from `gpu-minifil-cohesion-fix`. The
+cpuFallback approach from that branch (minifilament myosins → CPU, which
+regressed binding to 0) is **not** applied here.
 
 ## 2026-06-09 — GPU packRange slot-map staleness fix
 
