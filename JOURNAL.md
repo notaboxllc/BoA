@@ -1,10 +1,114 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
+Last updated: 2026-06-10 (**Cross-pool `taForce` race fix — serialize multi-pool force phases.** Confirmed root cause of the CPU dimer/minifilament dissolution: `incForceSum` accumulates into a per-thread row `taForce[tid]` where `tid` is each worker's **local** index within its own ThreadSet, and `taForce` has only `allThreadCt`(=16) rows — the design assumes one pool writes forces at a time. But waves releasing 2+ force-writing pools concurrently (`spawn()` is non-blocking) make worker-0 of each pool race on `taForce[0]`/`dirtyCounts[0]`/`dirtyIndices[0]` → dropped `+=` updates and corrupted dirty-bookkeeping → restoring forces silently lost → progressive, non-diffusive dissolution. **Not** cross-step accumulation (forces *are* cleared each step). SoA-inc migration regression. Ladder that exposed it: single myosin (1 pool) holds → dimer (Myosin+MyosinDimer) one myosin dissolves → minifilament (+MyoMiniFilament) falls apart → gliding (1 pool) works. **Methodological note: single-pool tests are blind to this bug class** — the earlier "forces applied, no regression" verdict came from a single-myosin test. **Fix** (BoxOfActin.java only): `runForceWave()` serializes the *pools* of a wave against each other (within-pool 16-worker parallelism preserved); applied to the 3 audited multi-pool force waves. **Default behavior**; `BOA_CONCURRENT_FORCES=1` restores the racy legacy dispatch for A/B. **Completeness audit** (every `startAllThreadSets` site): serialized **xLink(6: FilLink+Arp23+ActA — ActA aliases onto xLinkStart=6), myoJoints1(7: Myosin+MyosinDimer), myoJoints2(8: ProteinNode+MyoMiniFilament+ChamberMyo+ChamberMyoD)**. Corrections to the brief: **membrane is NOT a race** (NodeLink wave 14 vs StickyNode wave 15 — different waves, one pool each); myoJoints2 is a **4-pool** collision. **Validation** (all pass): dimer worst joint gap 0.0021µm fix vs 0.172µm racy (82×); minifilament holds low + normal thermal (span stable, gaps ≤0.06µm); gliding velocity unaffected (cross-mode median Δ0.04µm/s ≪ run-to-run noise Δ0.92µm/s — sim is nondeterministic, gliding is single-pool so serialization is a no-op there); step-time 7s vs 7s on 100 minifilaments (3200 myosins) with no -3js — no regression, worst joint gap 0.078µm (holds). `RUN_LOGS/2026-06-10_taforce_race_fix.txt`. **Not merged — hold for jba's visual confirmation of dimer + minifilament.** Full writeup below.)
+
+Prior update: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
 
 Prior update: 2026-06-09 (Dynamic-biochem regression run — first post-migration exercise of the actin-biochem-ON path with minifilaments. Survey: `noMonomers`/`myosSteppingSwitch`/`myosinStepRate` are DEAD parameter labels in boa10-64Seg — `noMonomersSimd` inactive = monomers simulated; severing is cofilin-driven, no `kSevering`. Built `boa10-64Seg-dyn` (biochem ON, poly rates → Env inits, actinConc active, kRdmNuc on, minifils kept). **inc2 drag-pack survives active length-changes**: GPU nomini run rc=0, 3574 seg-inits, poseDelta overflow=0, segs 195→559; CPU full run rc=0, bindEvents=679, meanBoundMotors=0.338, segs 198→566 (CPU/GPU agree). The one real bug — `ClassCastException MyoMiniFilament→FilSegment` in `GPUMoveThing.packRange` on GPU minifil+removal configs — is **PRE-EXISTING (reproduces at pre-migration b15ff84), NOT a migration regression**; hard-bail cleared. Frames: `~/Code/threejs_output/boa_dyn_cpu_minifil` (101) + `boa_dyn_nomini_gpu` (101). Population net-grows ~2.9×/5000 steps at actinConc=20 (bounded). Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-10 — Cross-pool taForce race fix (serialize multi-pool force phases)
+
+Branch `cpu-taforce-race-fix` (off `main`). Full data + reproduce lines:
+`RUN_LOGS/2026-06-10_taforce_race_fix.txt`. **Not merged — hold for jba's visual
+confirmation of the dimer + minifilament.**
+
+### Root cause (confirmed via same-seed serialize A/B)
+
+`incForceSum` accumulates into a per-thread row `taForce[tid]` (plus
+`dirtyCounts[tid]`/`dirtyIndices[tid]`), where `tid` is each worker's **local**
+index within its own ThreadSet (`ThreadSpawn(i)` sets `tlsThreadId=i` once at
+startup), and `taForce` has only `allThreadCt`(=16) rows — the design assumes one
+pool writes forces at a time. But `startAllThreadSets` releases every pool for a
+wave via the **non-blocking** `spawn()`, so a wave with 2+ force-writing pools runs
+them concurrently → worker-0 of each pool both mutate `taForce[0]`/`dirtyCounts[0]`/
+`dirtyIndices[0]` → lost `+=` updates and corrupted dirty bookkeeping → some
+restoring forces never reach `soaForceSum`. The lost fraction makes displacement
+ratchet out instead of being corrected → **progressive, directional, non-diffusive
+dissolution** (the head/neck stretch jba observed). Forces *are* cleared every step
+(`clearSoaForcesTorques`), so it is **not** cross-step accumulation. SoA-inc
+migration regression (pre-migration `incForceSum` wrote the shared sum under
+synchronization; the per-thread accumulator that replaced it assumed unique tids).
+
+The config ladder, and the **methodological lesson**:
+
+| config | force pools in joint phase | result |
+|---|---|---|
+| single myosin | 1 (Myosin) | holds ✅ |
+| dimer | 2 (Myosin + MyosinDimer) | one myosin dissolves |
+| minifilament | 3+ (+ MyoMiniFilament …) | falls apart |
+| gliding | 1 | works ✅ |
+
+**Single-pool tests are blind to this bug class.** My earlier "forces are applied,
+no regression" verdict (the `cpu-constraint-force-application-verify` branch) was
+measured on a *single myosin* — exactly the config that can't expose a cross-pool
+race. The plumbing trace was correct; the concurrency was the gap.
+
+### Completeness audit (every dispatch site; force-writing pools per wave value)
+
+Wave-constant aliasing found: `actAStart == xLinkStart == 6`.
+
+| wave (value) | force-writing pools | #pools | action |
+|---|---|---|---|
+| xLink/actA (6) | FilLink + Arp23 + ActA | 3 | **serialize** |
+| myoJoints1 (7) | Myosin + MyosinDimer | 2 | **serialize** |
+| myoJoints2 (8) | ProteinNode + MyoMiniFilament + ChamberMyo + ChamberMyoD | 4 | **serialize** |
+| membraneLinks (14) | NodeLink | 1 | none |
+| membraneMove (15) | StickyNode | 1 | none |
+| meshColl (3) / motColl (4) | ckMesh / ckMots | 1 each | none |
+| bForces (5), mesh-binning, bind (16), step/move/gather/biochem/resetCt | single pool | 1/0 | none |
+
+**Corrections to the brief's tentative list:** (1) membrane is **not** a race —
+`NodeLink` (wave 14) and `StickyNode` (wave 15) are on *different* waves, one pool
+each; (2) `myoJoints2` is a **4-pool** collision (the two Crucible chamber-myo pools
+join ProteinNode + MyoMiniFilament), not 3; (3) `ActA` has its own wave constant
+that **aliases** onto `xLinkStart`, so the xLink dispatch does release all three.
+Single-pool waves are race-free (a pool's own workers have distinct tids 0..15);
+collision force writes (`FilSegment.incForceSum` from ckMesh/ckMots) are single-pool
+per wave → unaffected.
+
+### The fix (BoxOfActin.java only)
+
+`runForceWave(start,stop)` — default path serializes the wave's pools via
+`startAndWaitEachThreadSet` (`divideAndConquer`+`regroup` per active pool, in order),
+so two pools never write `taForce` at once. **Within-pool parallelism is kept** —
+each pool still fans out its 16 workers; only the cross-pool overlap is removed.
+The xLink / myoJoints1 / myoJoints2 dispatch pairs now call `runForceWave`.
+`BOA_CONCURRENT_FORCES=1` restores the legacy concurrent dispatch (A/B + rollback).
+On the per-machine cost argument (16 logical threads): 2–4 concurrent force pools =
+32–64 workers oversubscribing 16 HW threads is contention, not parallelism, so
+sequential 16-worker passes do the same work with better cache/scheduling — the
+"lost overlap" is mostly illusory, confirmed by the step-time check. Also added
+`BOA_SINGLE_DIMER=1` (builds a single free `MyosinDimer`) as the 2-pool fixture.
+No physics/param/strength/GPU changes.
+
+### Validation (all CPU; viewer dirs under `~/Code/threejs_output`)
+
+1. **Dimer** (seed 1, 1/10 thermal): worst joint gap over run **0.0021 µm fix
+   (serialized, default) vs 0.1724 µm racy** — 82×. `cpu_dimer_FIX_default` vs
+   `cpu_dimer_FIX_concurrent`. Fix holds; escape hatch reproduces the bug.
+2. **Minifilament low thermal** (`myoBrownianAttn=0.1`): worst gap 0.011 µm, span
+   0.254→0.245 µm (stable). `cpu_minifil_FIX_lowthermal`.
+3. **Minifilament normal thermal**: worst gap 0.061 µm, span 0.267→0.248 µm
+   (coheres). `cpu_minifil_FIX_normal`.
+4. **Gliding** (full val, 10k steps): steady-half filament XY speed — default median
+   7.94, default#2 median 8.86 (run-to-run noise floor), concurrent median 7.90.
+   Cross-mode Δ = 0.04 µm/s vs same-mode run-to-run Δ = 0.92 µm/s → velocity/
+   throughput **unaffected**. Sim is inherently nondeterministic (multi-thread FP
+   gather order: default-vs-default frames differ), and gliding is single-pool in
+   all force waves so serialization is a literal no-op there. `glide_full_*`.
+5. **Step-time / no-regression**: 100 minifilaments (3200 myosins), 2000 steps, no
+   -3js — **7s vs 7s** (fix vs concurrent). Holding: worst joint gap 0.078 µm over
+   403 frames (bounded, no dissolution). `mf100_FIX_default`.
+
+### Open / notes
+
+- Residual minifilament jitter under normal thermal (~26–78 nm) is the genuine
+  cohesion-strength-vs-thermal balance (jba's tuning call), separate from this race.
+- The earlier `cpu-constraint-force-application-verify` branch (FE force-vs-effect
+  instrumentation, free-myosin gate) stays as investigation history; this branch is
+  the clean fix off main.
 
 ## 2026-06-09 — GPU packRange slot-map staleness fix
 

@@ -188,6 +188,16 @@ public class BoxOfActin {
 		JointDiag.initFromEnv();
 		SingleMyoDiag.initFromEnv();
 		SingleFilDiag.initFromEnv();
+		// BOA_CONCURRENT_FORCES=1 → restore the legacy concurrent dispatch of the
+		// multi-pool force waves (xLink/myoJoints1/myoJoints2), re-exposing the
+		// taForce[tid] cross-pool race. For A/B comparison and rollback only;
+		// default is the serialized (correct) dispatch. See runForceWave().
+		String concForcesEnv = System.getenv("BOA_CONCURRENT_FORCES");
+		if (concForcesEnv != null && !concForcesEnv.isEmpty()
+		    && !concForcesEnv.equals("0") && !concForcesEnv.equalsIgnoreCase("false")) {
+			CONCURRENT_FORCES = true;
+			System.err.println("[FORCES] LEGACY concurrent multi-pool dispatch (taForce race ACTIVE) via BOA_CONCURRENT_FORCES");
+		}
 		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
 		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
 		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
@@ -959,6 +969,44 @@ public class BoxOfActin {
 		}
 	}
 	
+	// Cross-pool taForce race fix. incForceSum accumulates into a per-thread row
+	// taForce[tid], where tid is each worker's LOCAL index within its own
+	// ThreadSet, and taForce has only allThreadCt (=16) rows — the design assumes
+	// one pool writes forces at a time. But waves that release 2+ force-writing
+	// pools concurrently (xLink: FilLink+Arp23+ActA; myoJoints1: Myosin+MyosinDimer;
+	// myoJoints2: ProteinNode+MyoMiniFilament+ChamberMyo+ChamberMyoD) make worker-0
+	// of each pool race on taForce[0]/dirtyCounts[0]/dirtyIndices[0], dropping
+	// restoring forces. runForceWave() serializes the POOLS against each other for
+	// such a wave (each pool still runs its 16 workers in parallel — only the
+	// cross-pool overlap is removed). This is the default. Single-pool waves
+	// (step, brownian, mesh, membrane, bind, collisions) are unaffected.
+	// BOA_CONCURRENT_FORCES=1 restores the legacy concurrent dispatch for A/B and
+	// rollback.
+	static boolean CONCURRENT_FORCES = false;
+
+	private static void runForceWave (int startWave, int stopWave) {
+		if (CONCURRENT_FORCES) {
+			startAllThreadSets(startWave);
+			waitOnAllThreadSets(stopWave);
+		} else {
+			startAndWaitEachThreadSet(startWave, stopWave);
+		}
+	}
+
+	// Dispatch each active ThreadSet for this wave and wait for it before starting
+	// the next — serializes what startAllThreadSets/waitOnAllThreadSets would run
+	// concurrently. Within-pool worker parallelism is preserved (spawn() still
+	// fans out the pool's own 16 workers); only the overlap BETWEEN pools is
+	// removed, so the per-thread taForce[tid] rows are never written by two pools
+	// at once.
+	private static void startAndWaitEachThreadSet (int startWave, int stopWave) {
+		for (int i=0; i < tSets.length; i++) {
+			if (!tSetActive[i]) continue;
+			tSets[i].divideAndConquer(startWave);
+			tSets[i].regroup(stopWave);
+		}
+	}
+
 	private static void startAllThreadSets (int waveNum) {
 		for (int i=0; i < tSets.length; i++) {
 			if (!tSetActive[i]) continue;
@@ -1096,11 +1144,12 @@ public class BoxOfActin {
 					brownianTimer.stopInc();
 				}
 
-				// Crosslinkers and Arp2/3 branches and ActAs
+				// Crosslinkers and Arp2/3 branches and ActAs. xLinkStart (==actAStart)
+				// releases FilLink + Arp23 + ActA — 3 force-writing pools — so serialize
+				// them against each other (taForce race fix; see runForceWave).
 				xLinkTimer.start();
 				FilSegment.zeroAllLinkCts();
-				startAllThreadSets(Env.xLinkStart);
-				waitOnAllThreadSets(Env.xLinkStop);
+				runForceWave(Env.xLinkStart, Env.xLinkStop);
 				xLinkTimer.stopInc();
 
 				// Membrane links
@@ -1116,12 +1165,13 @@ public class BoxOfActin {
 				// short-circuits when useGPU is set, and MyosinDimer
 				// (cross-Myosin coupling) keeps its CPU dispatch in the
 				// myoJoints1 wave.
-				startAllThreadSets(Env.myoJoints1Start);
-				waitOnAllThreadSets(Env.myoJoints1Stop);
+				// myoJoints1: Myosin (internal joints) + MyosinDimer (rod coupling +
+				// lever alignment) — 2 force-writing pools → serialize (taForce race fix).
+				runForceWave(Env.myoJoints1Start, Env.myoJoints1Stop);
 
-				// connections to other things
-				startAllThreadSets(Env.myoJoints2Start);
-				waitOnAllThreadSets(Env.myoJoints2Stop);
+				// connections to other things. myoJoints2: ProteinNode + MyoMiniFilament
+				// + ChamberMyo + ChamberMyoD — 4 force-writing pools → serialize.
+				runForceWave(Env.myoJoints2Start, Env.myoJoints2Stop);
 
 				// Thing.step() calls
 				stepTimer.start();
@@ -2559,7 +2609,19 @@ public class BoxOfActin {
 			// 2026-05-31: single-myosin thermal characterization mode (no filaments,
 			// no other populations). Mutually exclusive with the gliding assay setup.
 			if (Env.singleMyoDiag.isActive()) {
-				MyosinFixed.setUpSingleMyosinDiag();
+				// BOA_SINGLE_DIMER=1 → build a single free MyosinDimer (two coupled
+				// myosins) instead of a single myosin — the 2-pool validation fixture
+				// for the taForce race fix (Myosin internal joints + MyosinDimer
+				// coupling run concurrently pre-fix). No body, no anchor.
+				String dimerEnv = System.getenv("BOA_SINGLE_DIMER");
+				boolean singleDimer = dimerEnv != null && !dimerEnv.isEmpty()
+				    && !dimerEnv.equals("0") && !dimerEnv.equalsIgnoreCase("false");
+				if (singleDimer) {
+					new MyosinDimer(new Pt3D(0, 0, Env.fixedMyosinZValue.getValue()), new Pt3D(0, 0, 1));
+					System.err.println("[SINGLE_DIMER] single free MyosinDimer via BOA_SINGLE_DIMER");
+				} else {
+					MyosinFixed.setUpSingleMyosinDiag();
+				}
 				return;
 			}
 

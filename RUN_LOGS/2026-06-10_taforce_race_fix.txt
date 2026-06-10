@@ -1,0 +1,113 @@
+Cross-pool taForce race fix — audit + validation
+aorus1, branch cpu-taforce-race-fix (off main). 2026-06-10.
+================================================================================
+
+ROOT CAUSE (confirmed earlier; see JOURNAL race-confirmation entry)
+  incForceSum accumulates into a per-thread row taForce[tid] (+ dirtyCounts[tid],
+  dirtyIndices[tid]); tid is each worker's LOCAL index within its own ThreadSet,
+  and taForce has only allThreadCt(=16) rows — the design assumes ONE pool writes
+  forces at a time. Waves that release 2+ force-writing pools concurrently make
+  worker-0 of each pool race on taForce[0] → dropped += updates / corrupted dirty
+  bookkeeping → restoring forces silently lost → progressive non-diffusive
+  dissolution. SoA-inc migration regression (pre-migration incForceSum wrote the
+  shared sum under synchronization).
+
+  Ladder: single myosin (1 pool) holds; dimer (Myosin+MyosinDimer) one myosin
+  dissolves; minifilament (+MyoMiniFilament) falls apart; gliding (1 pool) works.
+  Methodological note: single-pool tests are BLIND to this class of bug — the
+  earlier "forces applied, no regression" verdict came from a single-myosin test.
+
+--------------------------------------------------------------------------------
+COMPLETENESS AUDIT — every startAllThreadSets dispatch site in doLoop, the
+force-writing pools per wave VALUE (accounting for aliasing), and the action taken
+--------------------------------------------------------------------------------
+tSets: 0 stepThreads,1 brownian,2 Myosin,3 MyosinDimer,4 ProteinNode,
+5 MyoMiniFilament,6 ChamberMyo,7 ChamberMyoD,8 mesh,9 ckMesh,10 ckMots,
+11 FilLink,12 Arp23,13 NodeLink,14 StickyNode(membraneNode),15 ActA,16 bindFill.
+
+Wave-constant aliasing found: actAStart == xLinkStart == 6; actAStop==xLinkStop==6.
+
+| wave (value)            | force-writing pools active            | #pools | action     |
+|-------------------------|---------------------------------------|--------|------------|
+| xLink/actA (6)          | FilLink + Arp23 + ActA                | 3      | SERIALIZE  |
+| myoJoints1 (7)          | Myosin + MyosinDimer                  | 2      | SERIALIZE  |
+| myoJoints2 (8)          | ProteinNode + MyoMiniFilament +       | 4      | SERIALIZE  |
+|                         |   ChamberMyo + ChamberMyoD            |        |            |
+| membraneLinks (14)      | NodeLink only                         | 1      | none       |
+| membraneMove (15)       | StickyNode only                       | 1      | none       |
+| meshColl (3)            | ckMesh only                           | 1      | none       |
+| motColl (4)             | ckMots only                           | 1      | none       |
+| bForces (5)             | brownian only                         | 1      | none       |
+| meshFils/Nodes/Motors   | mesh only (binning, no forces)        | 1/0    | none       |
+| motorBindGrid3D (16)    | bindFill (binding decision, no force) | 0      | none       |
+| step/move/gather/biochem/resetCt | stepThreads only             | 1      | none       |
+
+CORRECTIONS to the prompt's tentative list:
+  - membrane is NOT a race: NodeLink (wave 14) and StickyNode (wave 15) are on
+    DIFFERENT waves, one pool each. Not serialized.
+  - myoJoints2 is a 4-pool collision (ProteinNode + MyoMiniFilament + ChamberMyo
+    + ChamberMyoD via Crucible.keepMyosin*OnSurface), not the 3 assumed.
+  - ActA is on its OWN wave constant that ALIASES onto xLinkStart (both = 6), so
+    the xLink dispatch does release all 3.
+
+Single-pool waves are race-free (a pool's own 16 workers have distinct tids
+0..15). The collision/mesh force writes (FilSegment.incForceSum from ckMesh/ckMots)
+are single-pool per wave → unaffected.
+
+FINAL SERIALIZED SET: waves 6 (xLink), 7 (myoJoints1), 8 (myoJoints2). Three
+dispatch sites, routed through runForceWave().
+
+--------------------------------------------------------------------------------
+THE FIX (BoxOfActin.java only)
+--------------------------------------------------------------------------------
+- runForceWave(start,stop): default serializes the wave's pools via
+  startAndWaitEachThreadSet (divideAndConquer+regroup per pool, in order) so two
+  pools never write taForce concurrently. Within-pool parallelism preserved (each
+  pool still fans out its 16 workers). BOA_CONCURRENT_FORCES=1 restores the legacy
+  concurrent dispatch (A/B + rollback). Default = serialized.
+- xLink, myoJoints1, myoJoints2 dispatch pairs replaced with runForceWave().
+- (validation fixture) BOA_SINGLE_DIMER=1 builds a single free MyosinDimer.
+No physics/param/strength/GPU changes.
+
+--------------------------------------------------------------------------------
+VALIDATION (all CPU; viewer dirs under ~/Code/threejs_output)
+--------------------------------------------------------------------------------
+1. DIMER (seed 1, 1/10 thermal, BOA_SINGLE_DIMER):
+   worst rod-lev/lev-mot joint gap over run —
+     FIX default (serialized):  0.0021 um  (cpu_dimer_FIX_default)     RIGID
+     CONCURRENT (racy):         0.1724 um  (cpu_dimer_FIX_concurrent)  dissolves
+   82x. Fix holds; escape hatch reproduces the bug.
+
+2. MINIFILAMENT low thermal (myoBrownianAttn=0.1, seed 7):
+   worst joint gap 0.0111 um; bundle span 0.2545 -> 0.2449 um (stable).
+   (cpu_minifil_FIX_lowthermal)  HOLDS
+
+3. MINIFILAMENT normal thermal (seed 7):
+   worst joint gap 0.0613 um; bundle span 0.2671 -> 0.2483 um (coheres).
+   (cpu_minifil_FIX_normal)  COHERES
+
+4. GLIDING (full val, 10k steps, seed 1) — steady-half filament XY speed:
+     default     mean 8.578  median 7.936   (glide_full_default)
+     default#2   mean 9.224  median 8.855   (glide_full_default2)   <- noise floor
+     concurrent  mean 8.485  median 7.896   (glide_full_concurrent)
+   Sim is nondeterministic run-to-run (multi-thread FP gather order: default vs
+   default frames differ). Cross-mode median diff = 0.04 um/s; same-mode run-to-run
+   diff = 0.92 um/s. The dispatch change moves gliding velocity 20x LESS than
+   inherent chaos → velocity/throughput UNAFFECTED. (Gliding is single-pool in all
+   force waves, so serialization is a literal no-op there.)
+
+5. STEP-TIME — 100 minifilaments (3200 myosins), 2000 steps, NO -3js (fair):
+     default (fix):  7s, 7s
+     concurrent:     7s, 6s
+   No regression. Holding (fix default, -3js, 3200 myosins, 403 frames): worst
+   joint gap 0.0778 um — bounded, no dissolution. (mf100_FIX_default)
+
+Reproduce:
+  CP=".../tornado-api-4.0.1-dev.jar:libs/*:."
+  # dimer A/B:
+  BOA_SINGLE_DIMER=1 java --enable-preview -Xmx6G -cp "$CP" BoxOfActin -r \
+    -pf ParameterFiles/singleDimer_view -3js DIR -seed 1            # fix (default)
+  BOA_SINGLE_DIMER=1 BOA_CONCURRENT_FORCES=1 java ... (same)        # racy A/B
+  # minifilament: -pf ParameterFiles/boa10-singleMiniFil[_long_weakMyo]
+  # gliding:      -pf ParameterFiles/glidingAssay500_val
+  # step-time:    -pf ParameterFiles/boa10-100MiniFil-noactin (no -3js)
