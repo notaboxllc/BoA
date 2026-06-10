@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-10 (Path B Phase 2a — fresh-geometry cohesion (kill the spin). The GPU minifilament "strange directed motion" is a coherent spurious **spin**: the CPU cohesion forces (`MyoMiniFilament.constrainEnd*Dimers` C, `MyosinDimer.applyRodCoupling*` D) pulled rod tips toward attach points using **frozen** `soaEnd1/End2` (derived fields refreshed only at output cadence on GPU) while the rods moved on-device every step. **Fix**: derive rod ends on-the-fly from the **fresh, demand-synced** `coord/uVec` (`Thing.freshEnd1/2AsPt3D()` = `coord ∓ ½·length·uVec`) — same formula as `recomputeDerivedSoA`, no new transfer, no per-step derived-SoA recompute, CPU-identical (`freshEnd==end1AsPt3D` on CPU). **Result: spin substantially reduced but NOT eliminated** — matched-seed cloud coherence 0.66→0.27 (s7) / 0.66→0.46 (s11), vs CPU's diffusive 0.03–0.07. The residual is a **rotational integrator-split / float32 seam** (C applies +F/+τ to the float32 device-integrated rod, −F/−τ to the float64 CPU-integrated minifil body — they don't cancel in rotation), **NOT** stale geometry (geometry now as fresh as CPU; the avoided recompute would compute the *same* ends) and **NOT** COM drift (GPU bundle-COM net <13 nm, *tighter* than CPU's 32–45 nm). **θ_LM divergence did NOT resolve** (GPU ~32° vs CPU ~67°, unchanged pre→post) — refuting the Phase-1 hypothesis that it was cohesion-stale-geometry sensitive; it's a separate internal lever-motor/float32 seam. Both residual seams **flagged for jba, not fixed** (out of Phase 2a scope). **Not merged** — jba views frames first. `RUN_LOGS/2026-06-10_phaseB2a_fresh_cohesion_spin.txt`; frames `~/Code/threejs_output/phaseB2a/{pre,post}_gpu_s{7,11}` + `post_cpu_s{7,11}`. Full writeup below.)
+Last updated: 2026-06-10 (Path B Phase 2a — fresh-geometry cohesion (kill the spin). The GPU minifilament "strange directed motion" is a coherent spurious **spin**: the CPU cohesion forces (`MyoMiniFilament.constrainEnd*Dimers` C, `MyosinDimer.applyRodCoupling*` D) pulled rod tips toward attach points using **frozen** `soaEnd1/End2` (derived fields refreshed only at output cadence on GPU) while the rods moved on-device every step. **Fix**: derive rod ends on-the-fly from the **fresh, demand-synced** `coord/uVec` (`Thing.freshEnd1/2AsPt3D()` = `coord ∓ ½·length·uVec`) — same formula as `recomputeDerivedSoA`, no new transfer, no per-step derived-SoA recompute, CPU-identical (`freshEnd==end1AsPt3D` on CPU). **Result: spin substantially reduced but NOT eliminated** — matched-seed cloud coherence 0.66→0.27 (s7) / 0.66→0.46 (s11), vs CPU's diffusive 0.03–0.07. The residual is a **rotational integrator-split / float32 seam** (C applies +F/+τ to the float32 device-integrated rod, −F/−τ to the float64 CPU-integrated minifil body — they don't cancel in rotation), **NOT** stale geometry (geometry now as fresh as CPU; the avoided recompute would compute the *same* ends) and **NOT** COM drift (GPU bundle-COM net <13 nm, *tighter* than CPU's 32–45 nm). **θ_LM divergence did NOT resolve** (GPU ~32° vs CPU ~67°, unchanged pre→post) — refuting the Phase-1 hypothesis that it was cohesion-stale-geometry sensitive; it's a separate internal lever-motor/float32 seam. Both residual seams **flagged for jba, not fixed** (out of Phase 2a scope). **Follow-on**: new `BOA_MINIFIL_BROWNIAN_OFF=1` gate (suppresses only the rigid body's own thermal forcing) shows the residual spin is **body-thermal-EXCITED** — body-off drops spin coherence to CPU levels (0.27/0.46→0.026/0.079) and stops the body flopping (axis wander ~12–40× less); the body tumbles on the CPU integrator while the GPU-resident rods chase it (two-integrator seam). **Not merged** — jba views frames first. `RUN_LOGS/2026-06-10_phaseB2a_fresh_cohesion_spin.txt`; frames `~/Code/threejs_output/phaseB2a/{pre,post}_gpu_s{7,11}` + `post_cpu_s{7,11}`. Full writeup below.)
 
 Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joints on-device: **the premise is refuted, no code change made.** The scoped task assumed the device joints kernel is MyosinFixed-only, so non-MyosinFixed (minifilament) myosins' internal rod→lever→motor joints are applied by nobody. In fact there is **no MyosinFixed gate on the internal joints**: `classifyThings` GPU-handles all MyoMotor/MyoRod/MyoLever, the joint-list build admits every all-GPU-handled myosin, and `jointsKernel` computes all four internal apply* for every myosin in the list (only the anchor spring + motor cross-bridge are MyosinFixed-gated). Confirmed empirically: on minifilament myosins **θ_RL (rod-lever) matches CPU ~90°** and internal gaps stay tight/bounded — the joints ARE computed and integrated on-device. **Step 2 would be a no-op.** Residual finding: **θ_LM (lever-motor) diverges** (GPU ~16° vs CPU ~68°) even on a compact single minifilament (not a bundle-density artifact); formula/params/clamp/cocked-flags are all faithful, so it is a downstream sensitivity — Phase 2a now shows it is **not** the cohesion stale geometry. Frames `~/Code/threejs_output/boa_phaseB1_{gpu,cpu}_{singleMiniFil,dyn}`. Full writeup below.)
 
@@ -84,6 +84,34 @@ float32 seam (force A on-device + motor-head state). **Flagged, separate from Ph
   0.03–0.07); (2) θ_LM internal seam; (3) cohesion *strength* — CPU disperses even with zero
   actin (jba's tuning/model call, untouched here).
 - **Not merged — hold for jba's visual confirmation** of the frames.
+
+### Follow-on — body thermal noise off: the residual spin is body-thermal-EXCITED
+
+jba's read of the frames: "GPU minifilament doesn't look bad except the body flopping
+around." The minifilament body is its own rigid `Thing` (cpuFallback on the GPU path) and
+receives its OWN Brownian forces/torques in `MyoMiniFilament.moveThing()` unless
+`Env.myoMiniFilBrownianMotionOff`. Added env-var gate **`BOA_MINIFIL_BROWNIAN_OFF=1`** (in
+`begin()`) that suppresses ONLY the body's thermal forcing — rods/levers/motors keep their
+GPU-kernel Brownian. GPU singleMiniFil, seeds 7/11:
+
+| metric | GPU body-ON | GPU body-**OFF** | CPU (body-on) |
+|---|---|---|---|
+| spin cloud coherence s7 | 0.273 | **0.026** | 0.031 |
+| spin cloud coherence s11 | 0.455 | **0.079** | 0.069 |
+| body-axis total turn s7 | 555° | **46°** | 536° |
+| body-axis total turn s11 | 567° | **14°** | 543° |
+| body-COM path s7 | 631 nm | **109 nm** | 690 nm |
+
+Turning off the body's thermal noise (a) stops the body flopping (axis wander ~12–40×
+less) AND (b) collapses the residual rod spin to CPU levels. So **the residual coherent
+spin is body-thermal-EXCITED, not a constant float bias**: the body tumbles on the CPU
+integrator (float64), the GPU-resident rods chase its moving attach points on the device
+integrator (float32), and the chase carries a small directional bias that accumulates into
+coherent rotation *only when there are large body excursions to chase*. Refines the residual
+diagnosis from "rotational integrator-split/float32 seam" to "**body-thermal-excited
+integrator-split coupling**" — same two-integrator seam, now with a clean off-switch.
+This is a DIAGNOSTIC suppression (a real body should feel thermal forces), not a physics
+fix. Frames `~/Code/threejs_output/phaseB2a/post_gpu_nobody_s{7,11}`.
 
 ## 2026-06-10 — Path B Phase 1 — internal myosin joints on-device (premise refuted; no code change)
 

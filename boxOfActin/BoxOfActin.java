@@ -188,6 +188,17 @@ public class BoxOfActin {
 		JointDiag.initFromEnv();
 		SingleMyoDiag.initFromEnv();
 		SingleFilDiag.initFromEnv();
+		// BOA_MINIFIL_BROWNIAN_OFF=1 → suppress the minifilament BODY's own
+		// thermal (Brownian) forces/torques in MyoMiniFilament.moveThing(). The
+		// myosin rods/levers/motors keep their Brownian (GPU kernel); only the
+		// rigid minifilament body the tails attach to stops flopping. Diagnostic
+		// for isolating body-thermal-noise from the cohesion behaviour.
+		String minifilBrownEnv = System.getenv("BOA_MINIFIL_BROWNIAN_OFF");
+		if (minifilBrownEnv != null && !minifilBrownEnv.isEmpty()
+		    && !minifilBrownEnv.equals("0") && !minifilBrownEnv.equalsIgnoreCase("false")) {
+			Env.myoMiniFilBrownianMotionOff = true;
+			System.err.println("[MINIFIL] body Brownian motion suppressed via BOA_MINIFIL_BROWNIAN_OFF");
+		}
 		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
 		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
 		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
