@@ -1,10 +1,89 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-10 (Path B Phase 1 investigation — internal myosin joints on-device: **the premise is refuted, no code change made.** The scoped task assumed the device joints kernel is MyosinFixed-only, so non-MyosinFixed (minifilament) myosins' internal rod→lever→motor joints are applied by nobody. In fact there is **no MyosinFixed gate on the internal joints**: `classifyThings` GPU-handles all MyoMotor/MyoRod/MyoLever, the joint-list build admits every all-GPU-handled myosin, and `jointsKernel` computes all four internal apply* for every myosin in the list (only the anchor spring + motor cross-bridge are MyosinFixed-gated). Confirmed empirically: on minifilament myosins **θ_RL (rod-lever) matches CPU ~90°** and internal gaps stay tight/bounded — the joints ARE computed and integrated on-device. **Step 2 would be a no-op.** Residual finding: **θ_LM (lever-motor) diverges** (GPU ~16° vs CPU ~68°) even on a compact single minifilament (not a bundle-density artifact); formula/params/clamp/cocked-flags are all faithful, so it is a downstream sensitivity — most likely the Phase-2 CPU cohesion forces reading per-step-stale host geometry perturbing the soft motor. Pause-and-document; recommend proceeding to Phase 2. Frames `~/Code/threejs_output/boa_phaseB1_{gpu,cpu}_{singleMiniFil,dyn}`. Full writeup below.)
+Last updated: 2026-06-10 (Path B Phase 2a — fresh-geometry cohesion (kill the spin). The GPU minifilament "strange directed motion" is a coherent spurious **spin**: the CPU cohesion forces (`MyoMiniFilament.constrainEnd*Dimers` C, `MyosinDimer.applyRodCoupling*` D) pulled rod tips toward attach points using **frozen** `soaEnd1/End2` (derived fields refreshed only at output cadence on GPU) while the rods moved on-device every step. **Fix**: derive rod ends on-the-fly from the **fresh, demand-synced** `coord/uVec` (`Thing.freshEnd1/2AsPt3D()` = `coord ∓ ½·length·uVec`) — same formula as `recomputeDerivedSoA`, no new transfer, no per-step derived-SoA recompute, CPU-identical (`freshEnd==end1AsPt3D` on CPU). **Result: spin substantially reduced but NOT eliminated** — matched-seed cloud coherence 0.66→0.27 (s7) / 0.66→0.46 (s11), vs CPU's diffusive 0.03–0.07. The residual is a **rotational integrator-split / float32 seam** (C applies +F/+τ to the float32 device-integrated rod, −F/−τ to the float64 CPU-integrated minifil body — they don't cancel in rotation), **NOT** stale geometry (geometry now as fresh as CPU; the avoided recompute would compute the *same* ends) and **NOT** COM drift (GPU bundle-COM net <13 nm, *tighter* than CPU's 32–45 nm). **θ_LM divergence did NOT resolve** (GPU ~32° vs CPU ~67°, unchanged pre→post) — refuting the Phase-1 hypothesis that it was cohesion-stale-geometry sensitive; it's a separate internal lever-motor/float32 seam. Both residual seams **flagged for jba, not fixed** (out of Phase 2a scope). **Not merged** — jba views frames first. `RUN_LOGS/2026-06-10_phaseB2a_fresh_cohesion_spin.txt`; frames `~/Code/threejs_output/phaseB2a/{pre,post}_gpu_s{7,11}` + `post_cpu_s{7,11}`. Full writeup below.)
+
+Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joints on-device: **the premise is refuted, no code change made.** The scoped task assumed the device joints kernel is MyosinFixed-only, so non-MyosinFixed (minifilament) myosins' internal rod→lever→motor joints are applied by nobody. In fact there is **no MyosinFixed gate on the internal joints**: `classifyThings` GPU-handles all MyoMotor/MyoRod/MyoLever, the joint-list build admits every all-GPU-handled myosin, and `jointsKernel` computes all four internal apply* for every myosin in the list (only the anchor spring + motor cross-bridge are MyosinFixed-gated). Confirmed empirically: on minifilament myosins **θ_RL (rod-lever) matches CPU ~90°** and internal gaps stay tight/bounded — the joints ARE computed and integrated on-device. **Step 2 would be a no-op.** Residual finding: **θ_LM (lever-motor) diverges** (GPU ~16° vs CPU ~68°) even on a compact single minifilament (not a bundle-density artifact); formula/params/clamp/cocked-flags are all faithful, so it is a downstream sensitivity — Phase 2a now shows it is **not** the cohesion stale geometry. Frames `~/Code/threejs_output/boa_phaseB1_{gpu,cpu}_{singleMiniFil,dyn}`. Full writeup below.)
 
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-10 — Path B Phase 2a — fresh-geometry cohesion (kill the spin)
+
+Branch `gpu-phaseB2a-fresh-cohesion` (off `gpu-phaseB1-internal-joints`, which carries
+the `-3js` readonly + packRange fixes Phase 1 needs but that aren't yet on main). Full
+data: `RUN_LOGS/2026-06-10_phaseB2a_fresh_cohesion_spin.txt`.
+
+### The fix (in-scope, correct)
+
+Forces **C** (`MyoMiniFilament.constrainEnd1/2Dimers`) and **D** (`MyosinDimer.applyRod-
+Coupling*`) read `myoRod.end1/end2AsPt3D()` == `soaEnd1/End2`. On the GPU path those
+derived fields are refreshed only at output cadence (and the `-3js` readonly fix restores
+them to pre-output values) → **frozen per-step**, while `soaCoord/soaUVec` are demand-
+synced fresh every step (`demandSyncPoseToHost`, gated `!noMonomersSimd`). Replaced with
+ends derived on-the-fly from fresh pose: `Thing.freshEnd1/2AsPt3D()` = `coord ∓ ½·length·
+uVec` — the same formula `recomputeDerivedSoA`/`fillSoaArrays` use. **No new transfer, no
+per-step derived-SoA recompute** (the residency retreat we avoided). On CPU `coord/uVec`
+are fresh and `soaEnd1 == coord−half·uVec`, so `freshEnd == end1AsPt3D` bit-for-bit — zero
+CPU behavioral change. (Force **B** `keepMyosinsOnSurface` also switched, but inactive here:
+`numMyosinHeads==0`; the 32 myosins are dimer-organised → only C and D apply. **E**
+`alignUVecLeversTorque` already read fresh uVec.)
+
+Confirmed before coding: loop order is myoJoints1/2 (cohesion) → gatherForces → GPU
+pack+integrate, so the rod's +F **is** packed to device before integration — both halves
+of each action/reaction pair are applied (no mistimed-pack bug).
+
+### Result — spin reduced, NOT eliminated
+
+Spin metric (`scripts/spin_metric.py`): signed rotation of each myosin's rod center about
+the minifilament axis, frame-to-frame; cloud coherence = |Σ mean Δθ|/Σ|mean Δθ| (1 =
+ballistic spin, 0 = diffusive). 63 frames (~300 steps), seeds 7 & 11. Pre-fix built from
+parent in-tree via `git stash` for matched before/after.
+
+| config | net rotation | cloud coherence |
+|---|---|---|
+| PRE-FIX GPU s7 | +148.8° | **0.662** |
+| POST-FIX GPU s7 | +90.7° | **0.273** |
+| CPU s7 | +7.5° | 0.031 |
+| PRE-FIX GPU s11 | +95.5° | **0.670** |
+| POST-FIX GPU s11 | −61.8° | **0.455** |
+| CPU s11 | −20.5° | 0.069 |
+
+(On-disk survey frame `_s7` scores 0.675 with this metric ≈ survey's reported 0.65 →
+calibrated.) The fresh-geometry fix removes ~40–60% of the per-frame rotational bias but
+leaves a residual coherent rotation (~1.5°/frame) well above CPU's diffusive floor.
+
+### Why the residual is a separate seam (flagged, not fixed)
+
+- **Not stale geometry.** Post-fix GPU geometry at the cohesion phase is now as fresh as
+  CPU (both read end-of-previous-step pose). The per-step derived-SoA recompute would
+  produce the *same* `coord±½·length·uVec` ends `freshEnd` already computes → it cannot
+  reduce the residual. So no hard-bail: the recompute is not the answer.
+- **Not COM drift.** Bundle-COM net <13 nm on GPU (s7 5.6, s11 12.7), *tighter* than CPU
+  (44.8 / 31.8 nm). The C-force action/reaction split (+F device rod, −F CPU minifil body)
+  does **not** produce significant translational drift here.
+- **It is rotational integrator-split / float32.** The +force/+torque on the float32
+  device-integrated rod and the −force/−torque on the float64 CPU-integrated minifil body
+  don't cancel exactly in rotation → small systematic tangential bias → slow coherent spin.
+  A rotational generalisation of the two-integrator seam (survey clue 2). **Flagged for jba.**
+
+### θ_LM check — Phase-1 hypothesis refuted
+
+θ_RL (rod-lever) matches CPU (~85° vs 88–90°). θ_LM (lever-motor) does **not**: GPU ~32°
+vs CPU ~67°, and the fix did **not** move it (pre 32.6° → post 31.9°). So θ_LM divergence
+is **not** stale-end sensitive — refuting the Phase-1 conjecture that the cohesion's
+per-step-stale geometry perturbs the soft motor. It's an independent internal lever-motor /
+float32 seam (force A on-device + motor-head state). **Flagged, separate from Phase 2a.**
+
+### No regression / open
+
+- Gliding has no minifilaments (`noMonomersSimd:true`, `initialMyoMiniFils:false`) → the
+  cohesion functions never run → provably unaffected. [gliding band check appended to RUN_LOG]
+- Internal joints (Phase 1) hold; packRange + `-3js` readonly fixes hold (carried on parent).
+- **Open / for jba**: (1) residual rotational integrator-split spin (0.27–0.46 vs CPU
+  0.03–0.07); (2) θ_LM internal seam; (3) cohesion *strength* — CPU disperses even with zero
+  actin (jba's tuning/model call, untouched here).
+- **Not merged — hold for jba's visual confirmation** of the frames.
 
 ## 2026-06-10 — Path B Phase 1 — internal myosin joints on-device (premise refuted; no code change)
 

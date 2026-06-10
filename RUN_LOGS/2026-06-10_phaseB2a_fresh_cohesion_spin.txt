@@ -1,0 +1,120 @@
+Path B Phase 2a — fresh-geometry cohesion (kill the spin). Validation log.
+aorus, branch gpu-phaseB2a-fresh-cohesion (off gpu-phaseB1-internal-joints). 2026-06-10.
+================================================================================
+
+THE FIX
+-------
+Forces C (MyoMiniFilament.constrainEnd1/2Dimers) and D (MyosinDimer.applyRodCoupling*)
+read myoRod.end1AsPt3D()/end2AsPt3D() == soaEnd1/End2. On the GPU path those derived
+fields are refreshed only at output cadence (and the -3js readonly fix restores them to
+pre-output values), so per-step they are FROZEN while soaCoord/soaUVec are demand-synced
+fresh every step (biochem configs, !noMonomersSimd). Replaced those reads with rod ends
+DERIVED on-the-fly from fresh pose: end1 = coord - 0.5*length*uVec, end2 = coord +
+0.5*length*uVec, via new Thing.freshEnd1AsPt3D()/freshEnd2AsPt3D(). Same formula
+recomputeDerivedSoA / fillSoaArrays use; no new transfer, no per-step derived-SoA
+recompute. On the CPU path coord/uVec are also fresh and soaEnd1 == coord-half*uVec, so
+freshEnd == end1AsPt3D bit-for-bit — no CPU behavioral change.
+
+Force B (keepMyosinsOnSurface) was ALSO switched to freshEnd for safety, but is inactive
+in this fixture (numMyosinHeads==0; the 32 myosins are dimer-organised, so only C and D
+apply). E (alignUVecLeversTorque) already read fresh uVec — left as-is.
+
+CONFIRMED before coding: demandSyncPoseToHost() runs every step when !noMonomersSimd
+(GPUMoveThing.java:5363), pulling device coord/uVec -> host soaCoord/soaUVec; soaEnd1/End2
+are NOT in that pull. boa10-singleMiniFil is noMonomersSimd:false -> coord/uVec fresh.
+Loop order (BoxOfActin.doLoop): myoJoints1/2 (cohesion) -> gatherForces -> GPU pack+integrate.
+So the rod's +F cohesion force IS gathered and packed to device before integration; both
+halves of each action/reaction pair are applied. No mistimed-pack bug.
+
+SPIN METRIC  (scripts/spin_metric.py)
+-------------------------------------
+Per myosin, signed rotation of its rod center about the minifilament (bundle) axis,
+frame to frame: dtheta = atan2((p_f x p_{f+1}).ahat, p_f . p_{f+1}), p = perp component
+of (rodCenter - bundleCenter). cloud coherence = |sum mean_dtheta| / sum |mean_dtheta|
+(1 = ballistic/coherent spin, 0 = diffusive). 63 frames (~300 steps), seeds 7 & 11.
+Matched before/after (pre-fix built from parent 00f324b in-tree via git stash).
+
+  config              net rotation (deg)   cloud coherence   per-myo mean coherence
+  PRE-FIX GPU s7          +148.8               0.662              0.245
+  POST-FIX GPU s7          +90.7               0.273              0.169
+  CPU s7 (post-fix)         +7.5               0.031              0.138
+  PRE-FIX GPU s11          +95.5               0.670              0.290
+  POST-FIX GPU s11         -61.8               0.455              0.111
+  CPU s11 (post-fix)       -20.5               0.069              0.097
+
+(On-disk pre-fix survey frame _s7 scored cloud coherence 0.675 with this metric, matching
+the survey's reported 0.65 for seed 7 — metric calibrated. The survey's headline 0.98 was
+seed 11 under a slightly different definition; our matched-seed pre-fix s11 is 0.670 here.)
+
+VERDICT: the fresh-geometry fix REDUCES the coherent spin substantially (0.66 -> 0.27/0.46;
+~40-60% of the per-frame rotational bias removed) but does NOT bring it to CPU's diffusive
+0.03-0.07. A residual coherent rotation (~1.5 deg/frame consistent bias) remains.
+
+WHY THE RESIDUAL IS NOT STALE GEOMETRY
+--------------------------------------
+Post-fix GPU geometry at the cohesion phase is now as fresh as CPU (both read end-of-
+previous-step pose). The per-step derived-SoA recompute (the residency retreat we avoided)
+would produce the SAME coord+/-half*uVec ends freshEnd already computes -> it cannot reduce
+the residual further. So the residual is NOT a stale-geometry effect and does NOT warrant
+the recompute (no hard bail).
+
+BUNDLE-COM DRIFT  (survey clue 2 check — action/reaction split conserves COM?)
+-----------------------------------------------------------------------------
+  config            body-COM net   bundle-COM net   bundle-COM path
+  PRE-FIX GPU s7      17.7 nm          7.4 nm           74 nm
+  POST-FIX GPU s7     18.1 nm          5.6 nm           77 nm
+  CPU s7              58.1 nm         44.8 nm          210 nm
+  PRE-FIX GPU s11     10.7 nm          2.3 nm           76 nm
+  POST-FIX GPU s11    17.2 nm         12.7 nm           75 nm
+  CPU s11             32.7 nm         31.8 nm          190 nm
+
+COM is conserved: GPU whole-bundle COM net < 13 nm (0.013 um), TIGHTER than CPU (32-45 nm).
+So the C-force action/reaction split (+F on device-resident rod, -F on CPU-resident minifil
+body) does NOT produce significant translational COM drift here. The residual is PURELY
+ROTATIONAL: the +force/+torque on the float32 device-integrated rod and the -force/-torque
+on the float64 CPU-integrated minifil body do not cancel exactly in rotation, leaving a small
+systematic tangential bias. This is a rotational generalisation of survey clue 2 (the
+two-integrator seam) -- a further seam, FLAGGED for jba, NOT fixed in Phase 2a.
+
+theta_LM CHECK (Phase-1 divergence — prompt expected it to resolve)
+-------------------------------------------------------------------
+  config           theta_RL mean/sd     theta_LM mean/sd
+  PRE-FIX GPU s7     85.2 / 35.4          32.6 / 24.2
+  POST-FIX GPU s7    85.3 / 33.0          31.9 / 24.3
+  CPU s7             88.3 / 40.9          68.6 / 35.0
+  POST-FIX GPU s11   84.9 / 36.8          33.8 / 24.7
+  CPU s11            90.0 / 41.9          67.1 / 34.8
+
+theta_RL (rod-lever) matches CPU well (85 vs 88-90). theta_LM (lever-motor) does NOT: GPU
+~32 deg vs CPU ~67 deg, and the fix did NOT change it (pre 32.6 -> post 31.9). So the
+theta_LM divergence is NOT stale-end sensitive -- the prompt's hypothesis is REFUTED. It is
+an internal lever-motor / float32 seam (force A on-device + motor-head state), independent
+of the cohesion geometry. Flagged, separate from Phase 2a.
+
+FRAMES (for jba's visual confirmation)
+--------------------------------------
+~/Code/threejs_output/phaseB2a/{pre,post}_gpu_s7, {pre,post}_gpu_s11, post_cpu_s{7,11}
+63 frames each (toFileInterval=5, ~300 steps). View pre_gpu vs post_gpu to see the spin
+reduced (not eliminated); post_cpu is the diffusive reference.
+
+SUMMARY
+-------
+- Phase 2a fresh-geometry fix: DONE, correct, in-scope. Removes the stale-geometry
+  contribution to the spin (coherence 0.66 -> 0.27/0.46).
+- Residual coherent rotation remains (0.27-0.46 vs CPU 0.03-0.07): a rotational
+  integrator-split / float32 seam, NOT stale geometry, NOT COM drift. FLAGGED for jba.
+- theta_LM divergence (GPU 32 vs CPU 67): separate internal seam, NOT resolved by the fix;
+  prompt hypothesis refuted. FLAGGED.
+- COM conserved (GPU bundle tighter than CPU). Cohesion STRENGTH (CPU disperses) untouched
+  -- jba's tuning call.
+
+GLIDING NO-REGRESSION
+---------------------
+glidingAssay500_val (GPU, runTime 0.1s/1000 steps) ran to completion exit 0, active binding
+(validateSegFireCt=66546), no NaN/crash. Final longWindowSpeedXY=7.302 (gliding_assay.dat).
+Gliding instantiates MyosinFixed (extends Myosin, anchored singles via jointConstraints) and
+NO MyoMiniFilament/MyosinDimer (initialMyoMiniFils:false) -- so the changed cohesion methods
+(constrainEnd*Dimers / applyRodCoupling* / keepMyosinsOnSurface) and freshEnd*AsPt3D() are
+never reached. The Phase 2a change is therefore PROVABLY INERT in gliding; 7.302 is the
+unchanged pre-fix value (marginally below the 7.369-8.076 band edge, a property of this short
+0.1s config -- the band was established on the longer 0.5s run -- not a Phase 2a regression).
