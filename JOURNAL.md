@@ -106,6 +106,31 @@ first measurement. Minifilaments **do** engage (nonzero binds, seg
 growth, zero NaN/Inf). Flagged as a follow-on (port `MyoMiniFilament`
 joints/binding to GPU), not gated here.
 
+**Visual frame analysis sharpens this (added after a `-3js` GPU run,
+`boa_dyn_minifil_gpu_fixed`, 101 frames).** The reduction is not a uniform
+lower binding *rate* — it is **front-loaded and decays to near-zero**.
+Counting `onFil:true` motors per frame: the GPU run has a bound motor in
+only **2 of 101 frames** (frames 0 and 1 — the first ~50 steps), then
+**zero bound motors for the entire rest of the run**; the CPU reference
+(`boa_dyn_cpu_minifil`) has one in **16 of 101 frames**, sporadic
+throughout. Both are sparse binders (these minifilament motors are
+inherently transient), but the GPU path is ~8× sparser *and* qualitatively
+different — binding **dies out** once the filaments start moving on the
+device rather than sustaining. This is the fingerprint of the host-mirror
+seam: the CPU-fallback minifilament motors run collision/binding detection
+against the **host mirror** of filament pose, which is fresh at t≈0 (just
+built) so motors bind, but goes stale relative to the device-resident
+authoritative pose once integration proceeds — so binding detection misses
+thereafter. It also explains the wide `bindEvents` spread across GPU runs
+(279 → 261 → 59): the total is dominated by the brief early window and is
+therefore sensitive to seed-dependent initial geometry. **Filament
+turnover, by contrast, is faithful on GPU** — segments 197 → 563 (≈ CPU
+198 → 566). **Concrete next step for the follow-on:** the real fix is the
+filament pose the CPU-fallback minifilament motors read during collision
+detection (host mirror) — either feed them device-synced pose at
+collision cadence, or port minifilament binding/collision on-device. Not a
+slot-map issue.
+
 ### Files
 
 - `boxOfActin/Thing.java` — `removeThing()` signals `markTopologyDirty()`
@@ -114,6 +139,9 @@ joints/binding to GPU), not gated here.
   minifil+turnover probe), `boa10-64Seg-baseProbe` (crash-repro),
   `boa10-64Seg-dyn-cpuprobe` (CPU reference).
 - Run logs: `RUN_LOGS/2026-06-09_gpu_packrange_slotmap_fix.txt`.
+- Visual frames: `~/Code/threejs_output/boa_dyn_minifil_gpu_fixed/` (101
+  frames, GPU, the now-working config — pair with CPU
+  `boa_dyn_cpu_minifil` for the binding-seam comparison above).
 
 ## 2026-06-09 — Dynamic-biochem regression run (minifilaments + active actin)
 
