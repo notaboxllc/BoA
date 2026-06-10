@@ -146,8 +146,10 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end1AsPt3D(), myoRod2.end1AsPt3D());
-		linkUVec1.unitVec(myoRod2.end1AsPt3D(),myoRod1.end1AsPt3D());
+		Pt3D rod1End1 = myoRod1.freshEnd1AsPt3D();  // fresh coord±half·uVec, not stale soaEnd1 (Phase 2a)
+		Pt3D rod2End1 = myoRod2.freshEnd1AsPt3D();
+		strainDist = Pt3D.ptDist(rod1End1, rod2End1);
+		linkUVec1.unitVec(rod2End1,rod1End1);
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(1,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(1,linkUVec2);
@@ -158,22 +160,24 @@ public class MyosinDimer {
 		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod1.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod1.incTorqueSum(RcrossF);
-		
+
 		F.scale(-1,F);
 		myoRod2.incForceSum(F);
 		R.scale(0.5e-6*Env.myoRodLength.getValue(),myoRod2.uVecRAsPt3D());
 		RcrossF.cross(R,F);
 		myoRod2.incTorqueSum(RcrossF);
 	}
-	
+
 	public void applyRodCouplingEnd2 () {
 		double strainDist,moveC1,moveC2,forceMag;
 		MyoRod myoRod1 = myo1.myoRod;
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part II
-		strainDist = Pt3D.ptDist(myoRod1.end2AsPt3D(), myoRod2.end2AsPt3D());
-		linkUVec1.unitVec(myoRod2.end2AsPt3D(),myoRod1.end2AsPt3D());
+		Pt3D rod1End2 = myoRod1.freshEnd2AsPt3D();  // fresh, not stale soaEnd2 (Phase 2a)
+		Pt3D rod2End2 = myoRod2.freshEnd2AsPt3D();
+		strainDist = Pt3D.ptDist(rod1End2, rod2End2);
+		linkUVec1.unitVec(rod2End2,rod1End2);
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(2,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(2,linkUVec2);
@@ -198,8 +202,10 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end1AsPt3D(), myoRod2.end2AsPt3D());
-		linkUVec1.unitVec(myoRod2.end2AsPt3D(),myoRod1.end1AsPt3D());
+		Pt3D rod1End1 = myoRod1.freshEnd1AsPt3D();  // fresh, not stale soaEnd1/End2 (Phase 2a)
+		Pt3D rod2End2 = myoRod2.freshEnd2AsPt3D();
+		strainDist = Pt3D.ptDist(rod1End1, rod2End2);
+		linkUVec1.unitVec(rod2End2,rod1End1);
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(1,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(2,linkUVec2);
@@ -224,8 +230,10 @@ public class MyosinDimer {
 		MyoRod myoRod2 = myo2.myoRod;
 		
 		// forces applied between myosin rods, part I
-		strainDist = Pt3D.ptDist(myoRod1.end2AsPt3D(), myoRod2.end1AsPt3D());
-		linkUVec1.unitVec(myoRod2.end1AsPt3D(),myoRod1.end2AsPt3D());
+		Pt3D rod1End2 = myoRod1.freshEnd2AsPt3D();  // fresh, not stale soaEnd1/End2 (Phase 2a)
+		Pt3D rod2End1 = myoRod2.freshEnd1AsPt3D();
+		strainDist = Pt3D.ptDist(rod1End2, rod2End1);
+		linkUVec1.unitVec(rod2End1,rod1End2);
 		linkUVec2.scale(-1,linkUVec1);
 		moveC1 = myoRod1.moveCoeff(2,linkUVec1);
 		moveC2 = myoRod2.moveCoeff(1,linkUVec2);

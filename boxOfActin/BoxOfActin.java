@@ -198,6 +198,17 @@ public class BoxOfActin {
 			CONCURRENT_FORCES = true;
 			System.err.println("[FORCES] LEGACY concurrent multi-pool dispatch (taForce race ACTIVE) via BOA_CONCURRENT_FORCES");
 		}
+		// BOA_MINIFIL_BROWNIAN_OFF=1 → suppress the minifilament BODY's own
+		// thermal (Brownian) forces/torques in MyoMiniFilament.moveThing(). The
+		// myosin rods/levers/motors keep their Brownian (GPU kernel); only the
+		// rigid minifilament body the tails attach to stops flopping. Diagnostic
+		// for isolating body-thermal-noise from the cohesion behaviour.
+		String minifilBrownEnv = System.getenv("BOA_MINIFIL_BROWNIAN_OFF");
+		if (minifilBrownEnv != null && !minifilBrownEnv.isEmpty()
+		    && !minifilBrownEnv.equals("0") && !minifilBrownEnv.equalsIgnoreCase("false")) {
+			Env.myoMiniFilBrownianMotionOff = true;
+			System.err.println("[MINIFIL] body Brownian motion suppressed via BOA_MINIFIL_BROWNIAN_OFF");
+		}
 		String cpuJointsEnv = System.getenv("BOA_DIAG_CPU_JOINTS");
 		if (cpuJointsEnv != null && !cpuJointsEnv.isEmpty()
 		    && !cpuJointsEnv.equals("0") && !cpuJointsEnv.equalsIgnoreCase("false")) {
@@ -1646,6 +1657,12 @@ public class BoxOfActin {
 
 				// output to screen and/or files
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
+
+				// Close the output-render episode: restore the physics-owned host
+				// derived arrays / Pt3D mirrors that the frame writers' recompute
+				// mutated, so emitting a frame leaves simulation state unchanged.
+				// No-op when no frame was written this step (snapshot inactive).
+				if (Env.useGPU) { GPUMoveThing.endOutputRender(); }
 
 				//**** Clean Up ****
 				cleanupTimer1.start();

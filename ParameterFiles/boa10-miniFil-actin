@@ -1,0 +1,113 @@
+<BOA> Few-minifil + actin, NO turnover (cofilin off, actinConc off): isolate motor-binding trigger for the GPU blow-apart. 3 minifils, 30 fixed fils, 300 steps.
+// RUN ON CPU (omit -gpu). The GPU path crashes on configs that contain MyoMiniFilaments AND remove FilSegments
+// (cofilin dissolve / depoly): GPUMoveThing.packRange casts a swap-compacted MyoMiniFilament to FilSegment.
+// CONFIRMED PRE-EXISTING (reproduces at pre-migration commit b15ff84) — NOT an SoA-migration regression.
+// For a GPU drag-pack stress under length-changes, use boa10-64Seg-dyn-nomini (minifilaments removed).
+// NOTE: at actinConc=20 the population NET-GROWS (~2.9x segs over 5000 steps; poly > sever+depoly); bounded, no blow-up.
+//       For longer runs lower actinConc or raise cofilinRate to hold a steadier count.
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;                // Time Step For Biochemical Events
+collisionDeltaT:true:1.0E-5;            // Time Step For Collison Detection
+brownianDeltaT:true:1.0E-5;             // Time Step at which to apply Brownian forces
+runTime:true:0.03;                       // 5000 steps @ 1e-4 — validated; ~3x segment growth, bounded. (Longer needs lower actinConc.)
+fracMove:true:0.4;                      // Coeff. for PALM movement
+fracR:true:0.134;                       // Coeff. torque arm for PALM movement
+fracMoveTorq:true:0.013685;             // Coeff. for PALM torque movement
+drawInterval:true:100.0;                // Drawing Interval
+toFileInterval:true:5.0;               // 5000 steps -> ~100 JSON frames for scrubbing
+toQKFileInterval:true:100.0;            // QK Interval
+jpegQuality:true:1.0;                   // JPEG Quality
+remoteWriteInterval:true:100000.0;      // Remote Reporting Interval
+frameWidth:true:800.0;                  // Frame Width
+frameHeight:true:800.0;                 // Frame Height
+bugOff:true:1.0;                       // Bug Off
+simOutsideBug:false:0.0;         	// Sim Outside Bug
+initialFilaments:true:30.0;           // Initial Actin Filaments
+initialMyoMiniFils:true:3.0;          // Initial Myosin Minifilaments
+minFilLength:true:0.2;                  // Min. Filament Length
+maxFilLength:true:1.5;                  // Max. Filament Length
+stdDevActinDist:true:0.5;               // Std Dev Actin Distribution
+boxXDim:true:10.0;                      // Box X-dimension
+boxYDim:true:10.0;                      // Box Y-dimension
+boxZDim:true:0.5;                       // Box Z-dimension
+actinConc:false:0.0;                    // Hydrolyzable actin pool ACTIVE (was false:30.0). Moderate — feeds poly without explosive growth. Tune vs filament count.
+actinConcNonHydro:true:15.0;            // Non-hydrolyzable Actin Concentration
+aeta:true:1.0;                          // Viscosity in Bug
+capConc:true:2.0;                       // Cap Concentration
+nodeZone:true:0.9;                      // Node Dist. Zone
+nodeRadius:true:0.025;                  // Node Radius
+forminsPerNode:true:0.0;                // Formins per node
+myosPerNode:true:4.0;                   // Myosins per node
+nodeTransDiff:false:1.0E-16;            // Protein Node Translation Diffusivity
+nodeRotDiff:false:0.0010;               // Protein Node Rotational Diffusivity
+actinSeed:true:3.0;                     // Monomers to seed filament
+actinOnCortex:true:0.0;                 // Actin constrained to cortex
+filSegLength:true:64.0;                 // Std. segment length
+filTorqSpring:false:1.0E-20;            // Filament Torsional Spring
+BTransCoeff:true:1.0;                   // Brownian Translational Coefficient
+BRotCoeff:true:0.5;                     // Brownian Rotational Coefficient
+maxSegAngle:false:22.5;                 // Max. Angle Between Segments
+maxSegDist:false:0.0108;                // Max. Dist. Between Segment EndPts
+nodeTorqSpring:true:1.0E-20;            // Node-Filament Torsional Spring
+maxNodeTetherStrainDist:false:0.0108;   // Max. Strain Distance in Node Tether
+nodeTetherDetachRate:false:0.0010;      // Node Tether Detachment Rate
+forminMoves:false:0.0;                  // Mobile Attachment Point of formin to node
+forminRelease:true:1.0;                 // Random formin release rate
+noMonomersSimd:false:0.0;               // Monomers ARE simulated (poly/depoly/aging). Correctly-labeled; boa10-64Seg's 'noMonomers' line was a dead label.
+filamentsAnneal:false:0.0;              // Do filaments end-to-end anneal?
+annealDist:true:0.054;                  // Tip distance for annealing
+annealAngleCosine:true:0.9;             // Cosine of max. angle for annealing
+maxLinksOnSeg:true:10.0;                // Max. Cross-Links per Segment
+sideBonds:true:0.0;                     // Side bonds?
+sideBondsRelax:false:0.0;               // Do side bonds relax, allowing translation of bound fils?
+sideBondsStabilize:false:1.0;           // Do side bonds stabilize depolymerization like nodes
+bundleStableFactor:false:2.0;           // Bundled filament resist cofilin binding (x each bound fil)
+filLinkSpring:true:1.0E-9;              // Link Spring Between Filaments
+filLinkTorqSpring:true:1.0E-19;         // Torque Spring Between Filaments
+xLinkTransAttn:true:1.0;                // Trans. Attn. Factor per link for Cross-linked Segments
+xLinkRotAttn:true:1.0;                  // Rot. Attn. Factor per link for Cross-linked Segments
+maxFilLinkDist:true:0.02;               // Max. Stretch Distance for Filament Links
+linkDissolveRate:true:1.0;              // Spontaneous Link Dissolution Rate
+kATPOn1:true:1.3;                       // ATP Actin On Rate (end1) — restored to Env init (was 0.0)
+kATPOff1:true:0.8;                      // ATP Actin Off Rate (end1) — Env init
+kADPOff1:true:2.7;                      // ADP Actin Off Rate (end1) — Env init
+kATPOn1NonHydro:true:0.0;               // ATP Actin On Rate - Non-hydrolyzable Actin
+kATPOff1NonHydro:true:0.0;              // ATP Actin Off Rate - Non-hydrolyzable Actin
+kATPOn2:true:11.6;                      // ATP Actin On Rate (end2/barbed) — restored to Env init (was 0.0)
+kATPOff2:true:1.4;                      // ATP Actin Off Rate (end2) — Env init
+kADPOff2:true:7.2;                      // ADP Actin Off Rate (end2) — Env init
+kATPOn2WithFormin:true:0.0;             // ATP Actin On Rate If Attached To Formin
+kATPOff2WithFormin:true:0.0;            // ATP Actin Off Rate If Attached To Formin
+kADPOff2WithFormin:true:0.0;            // ADP Actin Off Rate If Attached To Formin
+kATPOn2NonHydro:true:0.0;               // ATP Actin On Rate - Non-hydrolyzable Actin
+kATPOff2NonHydro:true:0.0;              // ATP Actin Off Rate - Non-hydrolyzable Actin
+kATPOn2NonHydroWithFormin:true:0.0;     // ATP Actin On Rate - No-hydro/node attached
+kATPOff2NonHydroWithFormin:true:0.0;    // ATP Actin Off Rate - No-hydro/node attached
+capRate:true:3.0;                       // Cap rate by cap protein
+cofilinRate:false:0.0;                   // Cofilin Binding Rate (severing driver — kept ON)
+cofilinConc:true:3.0;                   // Cofilin Concentration
+cofilinRatio:true:1.1;                  // Cofilin Dissolve Ratio (segment dissolves when cofilin-bound ratio exceeds this)
+myosinStallForce:true:2.0;              // Single-head Myosin Stall Force
+myosinReleaseRate:true:10.0;            // Myosin Release Rate
+myoFBRBase:true:0.1;                    // Myosin Force-Based-Release Base Coeff.
+myoFBRExp:true:0.4;                     // Myosin Force-Based-Release Exp. Coeff.
+capNumEnd1:false:3.0;                   // Cap at End1
+capNumEnd2:false:3.0;                   // Cap at End2
+capNumEnd1WithNode:false:3.0;           // Cap at End1 with node
+capNumEnd2WithNode:false:3.0;           // Cap at End2 with node
+polyCompressionCutoff:true:0.0;         // Compressive force that stops poly.
+kRdmNuc:false:0.0;                     // Random Actin Nucleation Rate ON (was false:0.0). Starting estimate — prob/step = kRdmNuc*monomerConc^seed*deltaT. Tune vs filament count.
+kNodeNuc:true:10.0;                     // On Node Actin Nucleation By Formin
+kHydrolysis:true:1.0;                   // Monomer Hydrolysis Rate (ATP->ADP aging — ON)
+kDissociation:true:1.0;                 // Monomer Dissociation Rate
+showTime:true:0.0;                      // Show Time
+showConc:true:0.0;                      // Show Actin Conc
+showNonHydroConc:false:0.0;             // Show Non-Hydro Actin Conc
+showFilCt:true:0.0;                     // Show Filament Count
+showFilLinkCt:true:0.0;                 // Show FilSegment Link Count
+showFilSegCt:false:0.0;                 // Show FilSegment Count
+showMonCt:true:0.0;                     // Show Monomer Count
+fixedHistScale:false:100.0;             // Fixed Vertical Scale
+showHistBox:true:0.0;                   // Show Box
+showYHistTics:true:0.0;                 // Show Verical Scale
+flatTops:true:0.0;                      // Flat Tops on Bins

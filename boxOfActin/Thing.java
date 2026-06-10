@@ -817,6 +817,33 @@ public class Thing extends Object {
 	public Pt3D end2AsPt3D()  { return new Pt3D(getEnd2X(),  getEnd2Y(),  getEnd2Z());  }
 	public Pt3D uVecRAsPt3D() { return new Pt3D(-getUVecX(), -getUVecY(), -getUVecZ()); }
 
+	// Fresh end1/end2 derived on-the-fly from the canonical coord+uVec+length
+	// pose instead of the soaEnd1/End2 derived-field mirror. On the GPU path
+	// soaEnd1/End2 are recomputed only at output cadence (and then restored to
+	// their pre-output values by the -3js readonly guard), so per-step they are
+	// FROZEN; meanwhile soaCoord/soaUVec are demand-synced fresh every step in
+	// biochem configs (!noMonomersSimd). The CPU minifilament cohesion
+	// (MyoMiniFilament.keepMyosinsOnSurface / constrainEnd*Dimers, MyosinDimer.
+	// applyRodCoupling*) couples GPU-resident myosin rods and MUST read fresh
+	// rod ends — reading the frozen soaEnd1/End2 makes the springs pull toward
+	// stale, velocity-correlated geometry, producing a coherent spurious spin
+	// (Path B Phase 2a). Deriving from coord/uVec adds no transfer (already
+	// synced) and no per-step derived-SoA recompute. On the CPU path coord/uVec
+	// are also fresh and soaEnd1 == coord - half*uVec, so the result is
+	// bit-equivalent to end1AsPt3D() — no CPU behavioral change.
+	public Pt3D freshEnd1AsPt3D() {
+		final float half = 0.5f * getLengthSoa();
+		return new Pt3D(getCoordX() - half*getUVecX(),
+		                getCoordY() - half*getUVecY(),
+		                getCoordZ() - half*getUVecZ());
+	}
+	public Pt3D freshEnd2AsPt3D() {
+		final float half = 0.5f * getLengthSoa();
+		return new Pt3D(getCoordX() + half*getUVecX(),
+		                getCoordY() + half*getUVecY(),
+		                getCoordZ() + half*getUVecZ());
+	}
+
 	// Push the per-Thing length into the SoA length array. Called from
 	// subclass constructors after the natural length is known and any time
 	// the length changes (FilSegment poly/depoly/split). Other Things with

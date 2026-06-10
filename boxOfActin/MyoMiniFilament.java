@@ -347,8 +347,9 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyosinHeads;i++) {
 			curMyo = myosins[i];
 			curAttPt = myoPtsInX[i];
-			double strainDist = Pt3D.ptDist(curMyo.myoRod.end1AsPt3D(), curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyo.myoRod.end1AsPt3D());
+			Pt3D curRodEnd1 = curMyo.myoRod.freshEnd1AsPt3D();  // fresh coord±half·uVec, not stale soaEnd1 (Phase 2a)
+			double strainDist = Pt3D.ptDist(curRodEnd1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curRodEnd1);
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyo.myoRod.bTransGam.y + 1/bTransGam.y));
 
@@ -410,8 +411,9 @@ public class MyoMiniFilament extends Thing {
 			curMyoD = myoDimersEnd1[i];
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd1InX[i];
-			double strainDist = Pt3D.ptDist(curMyoRod.end1AsPt3D(), curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyoRod.end1AsPt3D());
+			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a)
+			double strainDist = Pt3D.ptDist(curRodEnd1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curRodEnd1);
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
 
@@ -454,8 +456,9 @@ public class MyoMiniFilament extends Thing {
 			curMyoD = myoDimersEnd2[i];
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd2InX[i];
-			double strainDist = Pt3D.ptDist(curMyoRod.end1AsPt3D(), curAttPt);
-			linkUVec1.unitVec(curAttPt,curMyoRod.end1AsPt3D());
+			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a; end1 by design here)
+			double strainDist = Pt3D.ptDist(curRodEnd1, curAttPt);
+			linkUVec1.unitVec(curAttPt,curRodEnd1);
 			linkUVec2.scale(-1,linkUVec1);
 			double forceMag = (Env.myoMiniFilFracMove.getValue()*1.0e-6*strainDist)/(Env.deltaT.getValue()*(1/curMyoRod.bTransGam.y + 1/bTransGam.y));
 
