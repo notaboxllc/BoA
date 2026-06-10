@@ -1,0 +1,110 @@
+Minifilament cohesion — force survey (CPU vs GPU paths), for the planner
+aorus, branch gpu-phaseB1-internal-joints (off the -3js readonly fix). 2026-06-10.
+================================================================================
+
+jba's visuals: CPU path — nothing holds (myosin parts AND the minifilament fall
+apart). GPU path — individual myosin internal joints hold, but the inter-myosin
+("hold the minifilament together") cohesion causes STRANGE DIRECTED MOTION.
+
+This survey maps every force that holds a myosin together and holds the
+minifilament together, where each runs, and what geometry it reads.
+
+--------------------------------------------------------------------------------
+FORCE MAP  (FRESH = updated per-step on GPU path; STALE = derived field refreshed
+only at output cadence, NOT per-step on the GPU path)
+--------------------------------------------------------------------------------
+A. Single-myosin internal joints (rod<->lever<->motor)
+   - GPU path: DEVICE jointsKernel, reads device-resident pose (FRESH). Integrated
+     in the move kernel. Applies to rod/lever/motor (all GPU). [Phase-1 finding:
+     works; theta_RL matches CPU.]
+   - CPU path: Myosin.jointConstraints() on CPU, reads soa* (FRESH on CPU).
+
+B. Myosin head -> minifilament body  (MyoMiniFilament.keepMyosinsOnSurface)
+   - Runs on CPU on BOTH paths (MyoMiniFilThreads, myoJoints2 phase, NOT gated by
+     useGPU).
+   - Reads: curMyo.myoRod.end1AsPt3D() == soaEnd1  [STALE on GPU] ;
+            attachPt myoPtsInX (from minifil CPU frame, coordAsPt3D+xToX) [FRESH].
+   - Applies: +F to myoRod (GPU-resident), -F to minifil body (CPU-resident).
+     => action/reaction SPLIT across two integrators (GPU move vs CPU move).
+
+C. End dimer -> minifilament end  (MyoMiniFilament.constrainEnd1/2Dimers)
+   - CPU on BOTH paths (myoJoints2).
+   - Reads: curMyoRod.end1AsPt3D() == soaEnd1 [STALE]; uVecR/uVec [FRESH];
+            attachPt myoDimerPtsEnd*InX (minifil CPU frame) [FRESH].
+   - Applies: +F+torque to myoRod (GPU), -F-torque to minifil body (CPU). SPLIT.
+
+D. Within-dimer rod<->rod coupling  (MyosinDimer.applyRodCoupling*)
+   - CPU on BOTH paths (MyoDimerThreads, myoJoints1).
+   - Reads: myoRod1/2.end1AsPt3D()/end2AsPt3D() == soaEnd1/End2 [STALE on GPU].
+   - Applies: equal/opposite to rod1 and rod2 (both GPU). Balanced pair, both on
+     the GPU integrator.
+
+E. Within-dimer lever<->lever alignment  (MyosinDimer.alignUVecLeversTorque)
+   - CPU on BOTH paths (myoJoints1).
+   - Reads: lever.uVecAsPt3D() == soaUVec [FRESH]. Applies torque to both levers
+     (both GPU). Balanced, both GPU. NOT affected by the stale-end issue.
+
+Minifilament body itself: cpuFallback (CPU-resident). Its CPU moveThing runs each
+step and ends with initialize() => its coord + transXTox + attachment points are
+FRESH every step. So the attachment TARGETS are fresh; the GPU ROD ENDS the springs
+pull toward them from are STALE.
+
+--------------------------------------------------------------------------------
+THE STALE READ (root of the GPU directed motion)
+--------------------------------------------------------------------------------
+soaEnd1/soaEnd2 are DERIVED fields (= coord -/+ halfLen*uVec), produced by
+Thing.recomputeDerivedSoA. On the GPU path that recompute runs ONLY at output
+cadence (refreshHostMirrorsForOutput), and the 2026-06-10 -3js readonly fix now
+RESTORES them to their pre-output values afterward — so for the physics-visible
+host path the GPU rods' soaEnd1/End2 are effectively FROZEN. Meanwhile soaCoord/
+soaUVec ARE demand-synced per step (biochem configs). So the cohesion springs
+(B,C,D) read frozen rod-end positions while the rods actually move on-device.
+
+Effect: a spring k*(freshAttachPt - frozenRodEnd) carries a systematic, velocity-
+correlated error (the rod has moved since soaEnd1 was frozen). On a bundle with any
+rotation this acts as a tangential, negative-rotational-damping term -> a coherent
+spurious SPIN. Quantified (myosin rotation about the bundle center):
+
+  config (seed 11)        net coherent rotation / coherence (1=ballistic,0=diffuse)
+  GPU single minifilament   +32.2 deg  over 300 steps   coherence 0.98
+  CPU single minifilament    -0.5 deg                    coherence 0.01
+(GPU seed 7 single: -43 deg, coherence 0.65. Whole-bundle COM stays diffusive
+ net<0.02um — the directed motion is INTERNAL rotation, not translation.)
+
+So "strange directed motion" == per-minifilament coherent rotation driven by the
+CPU cohesion forces reading frozen GPU-rod end geometry. The internal joints (A)
+are unaffected because they run on-device against fresh pose -> myosins stay intact
+while the bundle spins.
+
+--------------------------------------------------------------------------------
+CPU "nothing holds"
+--------------------------------------------------------------------------------
+On CPU the same cohesion (B-E) reads FRESH geometry (CPU initialize per step), so
+no spin (coherence 0.01) — but it still disperses: single-minifil span 0.37->0.50,
+gaps 0.012->0.032; 100mf-noactin gaps 0.012->0.083. With default cohesion params
+(config overrides none) and aeta=1.0, the cohesion is too weak to hold against
+Brownian in these dynamic-biochem fixtures — even with ZERO actin/binding. This is
+a strength/tuning question (or a real CPU-cohesion weakness), SEPARATE from the GPU
+stale-geometry spin. A force-magnitude probe (cohesion spring vs Brownian per step)
+would confirm; not yet run.
+
+--------------------------------------------------------------------------------
+CLUES FOR THE PLANNER
+--------------------------------------------------------------------------------
+1. GPU spin is a stale-geometry bug, NOT a force-formula bug: forces B-D read the
+   GPU rods' frozen soaEnd1/End2. Fix candidate = refresh derived ends per-step for
+   the GPU-resident myosin rods (at least the minifilament subset) BEFORE the
+   myoJoints1/2 phases, so the CPU cohesion reads current positions. (This is the
+   Phase-2 "per-step host derived geometry" work; it would also resolve the
+   Phase-1 theta_LM divergence, which is the same soft-motor sensitivity.)
+   Cheaper variants: have the cohesion read coordAsPt3D()+uVec (FRESH) to derive
+   the end on the fly instead of soaEnd1; or device-side the cohesion entirely.
+2. The action/reaction split (B,C: +F on GPU rod, -F on CPU minifil body) is a
+   second structural seam — even with fresh geometry the pair is integrated by two
+   different integrators in the same step. Worth confirming COM conservation.
+3. CPU dispersal is a separate, pre-existing cohesion-strength issue in these
+   fixtures (weak even with no actin). Decide whether the fixtures need stronger
+   cohesion params or whether the CPU minifilament model itself is under-strength.
+
+Frames: ~/Code/threejs_output/boa_phaseB1_gpu_singleMiniFil_s7 (clear of walls),
+        boa_phaseB1_{gpu,cpu}_singleMiniFil, boa_phaseB1_{gpu,cpu}_dyn.
