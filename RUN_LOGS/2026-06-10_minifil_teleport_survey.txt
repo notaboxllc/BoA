@@ -1,0 +1,79 @@
+Minifilament "teleporting" survey — turnover / swap-artifact / position bug?
+aorus1, 2026-06-10. Survey only (instrumentation on throwaway branch, reverted).
+
+VERDICT: **INTENTIONAL TURNOVER (candidate #1).** jba's hypothesis is correct —
+it's a built-in minifilament lifetime/turnover. NOT a swap-compaction rendering
+artifact (#2) and NOT a position bug (#3).
+
+================================================================================
+THE FORK — are minifilaments being removed in this config?  YES.
+================================================================================
+Instrumented MyoMiniFilament.biochemStep (removal) + makeRandomMyoMiniFil
+(creation), teleport-diag on. Config: boa10-miniFil-staticActin, 50 minifilaments,
+10000 steps, seed 7.
+  MF_REMOVE events  = 8
+  MF_CREATE events  = 58  (= 50 initial at start + 8 re-nucleations)
+Removals occur and are matched 1:1 by re-nucleations -> turnover/swap path, not a
+pure position bug.
+
+================================================================================
+Q1 — Removals: yes. 8 over 10k steps with 50 minifilaments.
+Q2 — Turnover mechanism: YES, intentional, and ON in this config.
+================================================================================
+- MyoMiniFilament.biochemStep():
+      if (mtRNG.nextDouble() < deltaT/myoMiniLifetime) removeMe = true;
+  Each minifilament spontaneously disassembles at rate 1/myoMiniLifetime.
+- Env.myoMiniLifetime default = 10.0 s. NOT overridden in boa10-singleMiniFil or
+  boa10-miniFil-staticActin -> turnover is ON at the 10 s default.
+- Re-nucleation: BoxOfActin.doLoop (every step) calls
+  MyoMiniFilament.equilibrateMyoMiniNumber(), which when myoMiniFilCt <
+  initialMyoMiniFils calls makeRandomMyoMiniFil():
+      randomLoc  = theBox.rdmPtInside();          // RANDOM point in the box
+      randomUVec = Pt3D.RandomUnitVec(...);        // RANDOM orientation
+      new MyoMiniFilament(randomLoc, randomUVec);  // NEW thingInstanceId
+  So a disassembled minifilament is replaced by a brand-new one (new id) at a
+  random location/orientation. Population held at initialMyoMiniFils.
+  => one vanishes here, a new one appears at a random spot = "teleport".
+
+================================================================================
+Q3 — Viewer id-vs-slot: stable id + per-frame snap. NOT a swap-artifact.
+================================================================================
+- ThreeJSWriter.buildFrameJson emits minifilaments with a STABLE id
+  (mf.thingInstanceId), iterating myoMiniFils[] in array order but tagging each
+  with its stable id.
+- Viewer (sim_viewer_boa.html) SNAPS to each frame (applyFrameData; no lerp/tween
+  interpolation) and fully rebuilds the instanced minifilament mesh every frame.
+  The id->slot map is rebuilt per frame (for click-to-inspect only).
+=> swap-compaction reordering myoMiniFils[] does NOT cause a rendering teleport:
+   the SET of positions is drawn correctly each frame regardless of array order.
+   Candidate #2 is not a contributor.
+
+================================================================================
+Q4 — At a teleport: DIFFERENT id at a new random location (turnover), NOT the
+     same id jumping (no position bug).
+================================================================================
+- The re-nucleated minifilament carries a NEW thingInstanceId at a random loc.
+- The built-in TELEPORT_DIAG (per-minifilament single-step displacement > 0.1um)
+  fired 11 EVENTS total (7 at step 0, 4 mid-run). ALL are one-time Z-boundary
+  snaps of NEWLY-PLACED minifilaments settling into the thin (boxZDim=0.5um) box:
+    e.g. minifil#49 step193: coord (1.750,4.611,0.246)->(1.785,4.566,-0.050)
+         — x,y barely move; z snaps 0.246->-0.050 under a z-boundary forceSum
+           (forceSum=(~0,~0,-1.4e-9)).
+  The step-0 ones are the initial 50 settling z; the mid-run ones are freshly
+  re-nucleated minifilaments (they land at array index 49, where new ones append)
+  settling z on their first integration step. NO surviving minifilament makes a
+  discontinuous jump. (Note: my MF_REMOVE/MF_CREATE step labels all read 0 because
+  GPUMoveThing.getStepCounter() is not advanced on the CPU path; the built-in
+  TELEPORT_DIAG carries the real step. Counts are unaffected.)
+
+================================================================================
+CONCLUSION
+================================================================================
+The teleporting is the intended minifilament turnover: lifetime-based disassembly
+(myoMiniLifetime, default 10 s) + re-nucleation at a random box location with a new
+id (equilibrateMyoMiniNumber/makeRandomMyoMiniFil). Expected behavior, not a bug.
+
+If jba wants to suppress/slow it for cleaner visuals: raise myoMiniLifetime (param,
+no code change) — e.g. a large value makes minifilaments effectively persistent.
+No rendering fix is needed (#2 ruled out) and there is no position bug (#3 ruled
+out). No source changes were committed for this survey.
