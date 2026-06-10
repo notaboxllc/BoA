@@ -1,10 +1,119 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-09 (Dynamic-biochem regression run — first post-migration exercise of the actin-biochem-ON path with minifilaments. Survey: `noMonomers`/`myosSteppingSwitch`/`myosinStepRate` are DEAD parameter labels in boa10-64Seg — `noMonomersSimd` inactive = monomers simulated; severing is cofilin-driven, no `kSevering`. Built `boa10-64Seg-dyn` (biochem ON, poly rates → Env inits, actinConc active, kRdmNuc on, minifils kept). **inc2 drag-pack survives active length-changes**: GPU nomini run rc=0, 3574 seg-inits, poseDelta overflow=0, segs 195→559; CPU full run rc=0, bindEvents=679, meanBoundMotors=0.338, segs 198→566 (CPU/GPU agree). The one real bug — `ClassCastException MyoMiniFilament→FilSegment` in `GPUMoveThing.packRange` on GPU minifil+removal configs — is **PRE-EXISTING (reproduces at pre-migration b15ff84), NOT a migration regression**; hard-bail cleared. Frames: `~/Code/threejs_output/boa_dyn_cpu_minifil` (101) + `boa_dyn_nomini_gpu` (101). Population net-grows ~2.9×/5000 steps at actinConc=20 (bounded). Full writeup below.)
+Last updated: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
 
-Prior update: 2026-06-09 (Pt3D SoA inc2 — pack-source SoA. Attacked the deep-survey's 33–48 % pack-dominated GPU per-step cost by retiring inc1-task-2's named Pt3D-gather pack sources. `Thing.bTransGam` / `bRotGam` (6 Pt3D field gathers per slot in `packRange` + 9 axis reads per Myosin in `packJointsRange`) and `MyosinFixed.myFixedPt` (3 gathers per fixed myo + `instanceof` cast) replaced with contiguous `float[]` SoA reads. **Discovery-and-bail call**: drag tensors get rewritten mid-step by `FilSegment.calculateProperties()` on biochem length-change, and `anchorPts` joint-slot indexing is remapped by `classifyThings()` without plan rebuild — both disqualified pure FIRST_EXECUTION residency. Went **contiguous-pack**: SoA dual-write in every `calculateProperties()` override, swap-compact-safe in `removeThing()`/`cleanupMyos()`, no transferMode changes, no scatter changes. Headline at 4×: GPU pack/total **37.6 % → 29.1 %** (−8.5 pp), pack µs/call **−32.7 %**, GPU ms/step **342.57 → 307.77 (−10.2 %)**, GPU÷CPU ratio **0.890 → 0.797** — lead widens with scale (1× margin grows from 1.2 % → 6.4 %). CPU unchanged (noise-band, +0.32 % at 4×) as expected — CPU readers untouched. Paired-ensemble n=10 validation all |t|<1.1 (df=9 critical 2.26); meanBoundMotors borderline n=5 (t=−1.49) collapsed to t=−0.53 at n=10, same small-sample-noise pattern as pwrng. Full writeup in PT3D_SOA_MIGRATION.md "Increment 2 — pack-source SoA".)
+Prior update: 2026-06-09 (Dynamic-biochem regression run — first post-migration exercise of the actin-biochem-ON path with minifilaments. Survey: `noMonomers`/`myosSteppingSwitch`/`myosinStepRate` are DEAD parameter labels in boa10-64Seg — `noMonomersSimd` inactive = monomers simulated; severing is cofilin-driven, no `kSevering`. Built `boa10-64Seg-dyn` (biochem ON, poly rates → Env inits, actinConc active, kRdmNuc on, minifils kept). **inc2 drag-pack survives active length-changes**: GPU nomini run rc=0, 3574 seg-inits, poseDelta overflow=0, segs 195→559; CPU full run rc=0, bindEvents=679, meanBoundMotors=0.338, segs 198→566 (CPU/GPU agree). The one real bug — `ClassCastException MyoMiniFilament→FilSegment` in `GPUMoveThing.packRange` on GPU minifil+removal configs — is **PRE-EXISTING (reproduces at pre-migration b15ff84), NOT a migration regression**; hard-bail cleared. Frames: `~/Code/threejs_output/boa_dyn_cpu_minifil` (101) + `boa_dyn_nomini_gpu` (101). Population net-grows ~2.9×/5000 steps at actinConc=20 (bounded). Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-09 — GPU packRange slot-map staleness fix
+
+Fixed the pre-existing GPU crash (`ClassCastException: MyoMiniFilament →
+FilSegment` at `GPUMoveThing.packRange`) that blocked the dynamic
+contractile-network workload (minifilaments + active turnover) on the
+GPU — confirmed pre-migration at `b15ff84` in the prior entry, not a
+SoA/RNG/inc2 regression. The workload now runs to completion on GPU.
+
+### Root-cause mechanism
+
+`classifyThings()` (GPUMoveThing.java:3832) builds **four cached,
+slot-indexed maps** in one atomic pass: `gpuThingIndices[slot]` →
+`theThings[]` index, `brownianRule[slot]` → RULE_FIL/MYO/LEVER (the cast
+driver), `thingNumberToMoveSlot[myThingNumber]` → slot, and the Myosin
+joint slot lists (`rodSlots`/`leverSlots`/`motorSlots`). These are
+**cached** and only rebuilt when `topologyDirty || thingCt != lastThingCt`
+(GPUMoveThing.java:4112).
+
+`Thing.removeThing()` (Thing.java:1092) swap-compacts
+`theThings[swapId] = theThings[lastId]` — **changing which Thing occupies
+a slot** — but never signalled the GPU layer (no `markTopologyDirty()`).
+The `thingCt != lastThingCt` guard is a *count* proxy, not an *identity*
+check. A pure removal drops the count and does rebuild (safe), but this
+workload runs heavy biochem: when an **add and a remove balance in one
+step** (kRdmNuc nucleation / new-FilSegment creation alongside a cofilin
+dissolve), `thingCt == lastThingCt`, and if no poly/split fired
+`markTopologyDirty` that step, `classifyThings` is **skipped**. The
+swapped-in last Thing — often a CPU-fallback `MyoMiniFilament` — then sits
+at a slot whose `brownianRule == RULE_FIL`, and `packRange` casts it to
+`FilSegment` → crash. Non-deterministic: depends on the add/remove balance
+× Thing ordering × seed (the only `theThings[]` identity-changing write in
+the codebase is this swap; the `addThing` append never restructures
+existing slots).
+
+### Which slot-indexed state was stale — rule map, or more?
+
+**The whole classifyThings map-set, but it is one cohesive cached
+structure.** The four maps are rebuilt together by `classifyThings`. The
+rule map crashes *loudly* (the cast); the index/thingNumber/joint maps go
+silently stale the same way (an even-type swap corrupts the moved Thing's
+*old* slot's pose). Everything else GPU-resident — pose
+(`coord/uVec/yVec/soaLengthArr`), drag tensors (`soaBTransGam` etc.,
+already swap-compacted in `removeThing`), joint forces — is **re-packed
+each step** by `packRange` from the live (already-compacted) Thing array,
+and `buildDeltaSet`'s slot-change scan scatters fresh pose on identity
+change. **So the packed/resident buffers self-correct once the maps are
+right; the classifyThings maps are the only cached slot-keyed state that
+goes stale.** A single signal therefore covers all of it.
+
+### The fix + cost rationale
+
+`removeThing()` now sets `topologyDirty` (via
+`GPUMoveThing.markTopologyDirty()`) when a swap actually moves a Thing
+(`Env.useGPU && swapId != lastId`) — exactly mirroring how poly/split
+already signal it (FilSegment.java:562/578). Chose the **dirty-flag**
+over a localized O(1) slot-patch because the latter isn't actually O(1):
+it would require compacting the GPU *slot* array and joint maps across 4
+cases (removed/moved × GPU-handled/not), error-prone, for a path that
+already rebuilds most steps.
+
+**Cost:** `topologyDirty` triggers **only `classifyThings()`** — an
+in-place O(thingCt) slot-map refresh — **never a plan rebuild**
+(`closePlan`+`allocateAndBuildPlan`+FIRST_EXECUTION re-upload is gated
+solely on `plan==null` or capacity-grow, GPUMoveThing.java:4085–4099).
+It is a single idempotent boolean → **one** batched `classifyThings` at
+the next `onStepStart` regardless of how many segments dissolved that
+step. In this biochem-active workload poly/split already set
+`topologyDirty` most steps, so `classifyThings` already runs most steps —
+the fix only *adds* a rebuild on the rare balanced-count steps that were
+buggily skipping it. **No per-removal rebuild-cost regression** — the
+removal-heavy nomini run below logs `planRebuild=1` (init only). This
+respects the POSE_DELTA_CAP lesson (the thing that work fought was the
+*plan* rebuild, which this never touches).
+
+### Validation (all on aorus, Java 21 + TornadoVM PTX, `-Xmx8G`)
+
+| Run | Result |
+|---|---|
+| **baseProbe GPU** (crash-repro, `slotCap=19602`) | rc=0, 0 NaN/Inf — ran past the `call=1000`/`packRange:4703` crash point to clean shutdown. **Crash gone.** |
+| **dyn GPU** seed1 (the config that crashed) | rc=0, 0 NaN/Inf, `bindEvents=279`, `meanBoundMotors=0.056`, `slotChange max=6112` (removal churn caught by the dirty-set scan) |
+| **dyn GPU** seed2 | rc=0, `261 / 0.052` — **stable across seeds** |
+| **dyn CPU control** (fix present, `Env.useGPU=false`) | `743 / 0.380` ≈ prior committed ref `679 / 0.338` (RNG variance) — **fix is CPU-neutral, reference reproduces** |
+| **dyn-nomini GPU** (no-regression removal path) | rc=0, 0 NaN/Inf, `slotCount=554` (≈ prior 559), `poseDelta overflow=0`, **`planRebuild=1`** |
+| **gliding val GPU** (physics-neutrality) | rc=0, `glidingVelocity=7.3683` — within the validated baseline band (7.369–8.076) |
+
+**Note — GPU minifilament binding fidelity (separate, pre-existing
+issue, NOT this fix).** GPU dyn binds systematically lower than CPU
+(~270/0.054 vs ~710/0.36, stable across seeds). The CPU-control match
+(743/0.380 ≈ ref) localizes the gap entirely to the **GPU path**, and it
+traces to the known architectural seam that `MyoMiniFilament` is
+**CPU-fallback** (`cpuFallback[]`; `MyosinDimer.jointConstraints` is
+CPU-only, never ported — the binding kernel was scoped to gliding
+`MyosinFixed`, JOURNAL refs ~4158/6003). On `-gpu`, minifilament motors
+integrate on CPU while the filaments they bind are GPU-resident — a
+lower-fidelity seam, orthogonal to slot-map staleness. There was no prior
+GPU minifil completion to regress *from* (it always crashed); this is the
+first measurement. Minifilaments **do** engage (nonzero binds, seg
+growth, zero NaN/Inf). Flagged as a follow-on (port `MyoMiniFilament`
+joints/binding to GPU), not gated here.
+
+### Files
+
+- `boxOfActin/Thing.java` — `removeThing()` signals `markTopologyDirty()`
+  on a real swap when `Env.useGPU`.
+- Fixtures merged onto the fix branch: `boa10-64Seg-dyn-probe` (3000-step
+  minifil+turnover probe), `boa10-64Seg-baseProbe` (crash-repro),
+  `boa10-64Seg-dyn-cpuprobe` (CPU reference).
+- Run logs: `RUN_LOGS/2026-06-09_gpu_packrange_slotmap_fix.txt`.
 
 ## 2026-06-09 — Dynamic-biochem regression run (minifilaments + active actin)
 

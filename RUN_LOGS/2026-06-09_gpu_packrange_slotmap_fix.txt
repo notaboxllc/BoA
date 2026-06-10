@@ -1,0 +1,42 @@
+GPU packRange slot-map staleness fix — validation runs (aorus, Java 21 + TornadoVM PTX, -Xmx8G)
+Fix: Thing.removeThing() sets GPUMoveThing.markTopologyDirty() on real swap when Env.useGPU.
+=============================================================================
+
+### baseProbe GPU (crash-repro, slotCap=19602) — was: ClassCastException at packRange:4703, rc=124 hang
+GPUMoveThing: slotCap=19602 myoCap=6400 moveBlock=64 jointBlock=64 runSeed=1544839509 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=3298.7 cumMaxPerThread=420
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=3298.7 cumMaxPerThread=421
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=3298.7 cumMaxPerThread=421
+[STATS] gpuMoveThing trueDirty calls=3010 slotChange avg=2.34 max=5255 pending avg=0.15 max=99 totalUpperMax=5255 slotCount=10155 slotCap=19602
+Finished closing JSON plots!
+  error signatures: 0
+
+### dyn GPU seed1 (the config that crashed)
+GPUMoveThing: slotCap=19602 myoCap=6400 moveBlock=64 jointBlock=64 runSeed=-329655220 nWorkers=16
+[STATS] bindEvents=279
+[STATS] meanBoundMotors=0.056
+[STATS] gpuMoveThing trueDirty calls=5010 slotChange avg=1.47 max=6112 pending avg=0.69 max=97 totalUpperMax=6113 slotCount=10153 slotCap=19602
+Finished closing JSON plots!
+  error signatures: 0
+
+### dyn GPU seed2 (cross-seed stability)
+[STATS] bindEvents=261
+[STATS] meanBoundMotors=0.052
+Finished closing JSON plots!
+
+### dyn CPU control (fix present, Env.useGPU=false) — expect ~ref 679/0.338
+[STATS] bindEvents=743
+[STATS] meanBoundMotors=0.380
+Finished closing JSON plots!
+
+### dyn-nomini GPU (no-regression removal path; planRebuild must be 1)
+[STATS] gpuMoveThing demandSyncPose=4.670s(calls=5011) demandSyncDerived=0.000s(calls=0) planRebuild=1
+[STATS] gpuMoveThing poseDelta avg=0.72 max=195 sum=3630 fresh=1 overflow=0 cap=8192
+[STATS] gpuMoveThing trueDirty calls=5010 slotChange avg=0.09 max=98 pending avg=0.63 max=98 totalUpperMax=196 slotCount=554 slotCap=1024
+Finished closing JSON plots!
+  error signatures: 0
+
+### gliding val GPU (physics-neutrality; baseline band 7.369-8.076)
+[STATS] bindEvents=900
+[STATS] glidingVelocity=7.3683
+Finished closing JSON plots!

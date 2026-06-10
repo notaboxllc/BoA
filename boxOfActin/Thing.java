@@ -1147,6 +1147,26 @@ public class Thing extends Object {
 			soaBRotGam[dst + 1]   = soaBRotGam[src + 1];
 			soaBRotGam[dst + 2]   = soaBRotGam[src + 2];
 		}
+		// GPU slot-map staleness fix: the swap above changed which Thing
+		// occupies theThings[swapId] (the surviving last Thing moved in, its
+		// myThingNumber rewritten). The GPU rule/slot maps built by
+		// GPUMoveThing.classifyThings() — gpuThingIndices[slot],
+		// brownianRule[slot], thingNumberToMoveSlot[], and the Myosin joint
+		// slot lists — are cached and only rebuilt on topologyDirty ||
+		// thingCt != lastThingCt. The count proxy is unreliable: when an add
+		// and a remove balance in one step (kRdmNuc nucleation / new-FilSegment
+		// creation alongside a cofilin dissolve), thingCt is unchanged, the
+		// rebuild is skipped, and packRange casts the swapped-in Thing (often a
+		// CPU-fallback MyoMiniFilament) under the dead slot's stale RULE_FIL →
+		// ClassCastException. Signal topology-dirty here, exactly as poly/split
+		// already do (FilSegment.biochemStep). This forces a single in-place
+		// classifyThings() refresh at the next onStepStart (NOT a plan rebuild
+		// — topologyDirty never triggers allocateAndBuildPlan), idempotent
+		// across all removals in a step. Only meaningful when a swap actually
+		// moved a Thing (swapId != lastId).
+		if (Env.useGPU && swapId != lastId) {
+			GPUMoveThing.markTopologyDirty();
+		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();
 		thingCt--;
