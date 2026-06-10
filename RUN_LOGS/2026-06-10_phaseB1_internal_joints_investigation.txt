@@ -1,0 +1,66 @@
+Path B Phase 1 — internal myosin joints on-device: investigation
+aorus, Java 21 + TornadoVM PTX, -Xmx8G. Branch gpu-phaseB1-internal-joints (off the -3js readonly fix).
+================================================================================
+
+GOAL (as scoped): make the device joints kernel apply the internal rod->lever->motor
+joints for non-MyosinFixed (minifilament) myosins, on the premise that they are applied
+by NEITHER the device kernel (assumed MyosinFixed-only) NOR the CPU (short-circuited on
+the GPU path), so each minifilament myosin's own parts drift apart.
+
+FINDING: the premise is FALSE. The internal joints are ALREADY on-device for non-
+MyosinFixed myosins. No MyosinFixed gate exists on the internal-joint path:
+  - classifyThings (GPUMoveThing 3985-3996): ALL MyoMotor/MyoRod/MyoLever are GPU-handled
+    regardless of owner subclass (only gate is Env.myosinsOff).
+  - joint-list build (4032-4061): admits EVERY Myosin whose 3 sub-parts are GPU-handled;
+    no `instanceof MyosinFixed` check.
+  - jointsKernel (854-1190): computes all four internal apply* methods
+    (LeverMotor F/T, RodLever F/T) for every m in [0, myoJointCt). Only the anchor spring
+    (anchoredFlags gate) and the motor cross-bridge force (packMotorBinding 4534) are
+    MyosinFixed-only.
+  - The all-minifilament dyn run reports jointPack=0.117s over 510 calls => myoJointCt>0
+    => the 3200 minifilament myosins ARE in the joint list and processed.
+"Extend the kernel to non-MyosinFixed" (Step 2) would therefore be a NO-OP.
+
+VALIDATION — GPU vs CPU internal conformation (seed 11, -3js frames).
+theta_RL = angle(rod.uVec, lever.uVec); theta_LM = angle(lever.uVec, motor.uVec).
+gaps = |rod.end2 - lever.end1|, |lever.end2 - motor.end1| (microns).
+
+boa10-64Seg-dyn-short (100 minifil + 100 actin + turnover, 500 steps):
+  meanBoundMotors: GPU 0.055 vs CPU 0.751 (known GPU-low-binding seam — confounds dynamics)
+  GPU rodLever gap: 0.0043 -> 0.0098 (tight)     CPU: 0.0125 -> 0.112 (loose, crowded bundle)
+  => GPU myosins stay MORE intact than CPU here, but binding confound makes it non-clean.
+
+boa10-100MiniFil-noactin (100 minifil, ZERO actin => zero binding, 300 steps):
+  GPU  theta_RL: 23.5 -> 84.7   theta_LM: 25.4 -> 19.2   gaps tight (~0.009)
+  CPU  theta_RL: 27.1 -> 86.8   theta_LM: 41.7 -> 81.8   gaps grow (~0.083)
+  nucleotide states MATCH (both ~3045 ADPPi / ~155 ATP at end).
+
+boa10-singleMiniFil (1 minifil = 32 myosins, compact on BOTH paths, 300 steps):
+  bundle span:  GPU 0.36 -> 0.46     CPU 0.37 -> 0.50   (matched compactness, no dispersal)
+  GPU  theta_RL: 22.9 -> 89.9   theta_LM: 26.0 -> 16.2   gapRL/LM ~0.008
+  CPU  theta_RL: 26.0 -> 98.7   theta_LM: 38.0 -> 68.4   gapRL/LM ~0.03
+
+CONCLUSIONS:
+1. Internal joints ARE integrated on-device for non-MyosinFixed (theta_RL matches CPU ~90 deg;
+   gaps bounded; myosins do not fly apart). If the kernel skipped them, theta_RL would NOT
+   match and free rod/lever/motor would disperse under Brownian. They don't.
+2. theta_LM (lever-motor) DIVERGES (GPU ~16, CPU ~68) even on a compact single minifilament
+   (so NOT a bundle-density artifact). isCocked()==!isADPPi(): at ~95% ADPPi the rest angle is
+   uncockedAng=0 deg; GPU relaxes toward 0 (16 deg), CPU sits ~68. Same nucleotide states.
+   The lever-motor kernel formula, params (jointParams 0-12), maxMag clamp (motorLen==getDim==
+   0.020), and cockedFlags (packed from isCocked) are all faithful to CPU. So this is NOT a
+   missing/mis-scoped internal joint — it is a downstream sensitivity. Most likely the Phase-2
+   cohesion forces (MyoMiniFilament.constrainEnd*Dimers / MyosinDimer.alignUVecLeversTorque),
+   which run on CPU reading host-side derived geometry that is NOT refreshed per-step on the
+   GPU path, perturb the soft motor head differently than on CPU. theta_RL (stiff, constant 96
+   deg rest) is robust to this; theta_LM (soft motor) is not.
+
+OUTCOME: Pause-and-document. Step 2 is a no-op (premise wrong). The residual theta_LM
+divergence is a separate correctness item whose root cause needs the deterministic
+single-myosin instrument (SingleMyoDiag dumping the actual lever/motor torque vs CPU on a
+frozen pose) and likely belongs with Phase 2 (cohesion / per-step host derived geometry),
+since theta_RL proves the internal-joint kernel itself is faithful for non-MyosinFixed.
+
+Frames for jba (GPU vs CPU side-by-side):
+  ~/Code/threejs_output/boa_phaseB1_gpu_singleMiniFil  (63)  /  ..._cpu_singleMiniFil (63)
+  ~/Code/threejs_output/boa_phaseB1_gpu_dyn            (21)  /  ..._cpu_dyn           (21)
