@@ -748,6 +748,16 @@ minifilMesh.count = 0;
 minifilMesh.frustumCulled = false;
 scene.add(minifilMesh);
 
+// Protein nodes — grey, semi-transparent spheres the node-attached myosins sit on.
+const MAX_NODES = 2000;
+const nodeMesh = new THREE.InstancedMesh(sphGeo,
+  new THREE.MeshPhongMaterial({ color: 0x888888, transparent: true, opacity: 0.35,
+    depthWrite: false }), MAX_NODES);
+nodeMesh.count = 0;
+nodeMesh.frustumCulled = false;
+nodeMesh.renderOrder = 2;   // draw after opaque geometry so transparency blends correctly
+scene.add(nodeMesh);
+
 const motorColors = {
   'NONE':  new THREE.Color(0x4444ff),
   'ATP':   new THREE.Color(0xffff00),
@@ -1142,7 +1152,7 @@ function applyFrameData(data) {
   segMesh.count = count;
   segMesh.instanceMatrix.needsUpdate = true;
 
-  updateMyosinData(data.myosins, data.minifilaments);
+  updateMyosinData(data.myosins, data.minifilaments, data.nodes);
   updateAxisLines(data.segments);
   updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
@@ -1152,7 +1162,8 @@ function applyFrameData(data) {
     `t = ${data.t.toFixed(5)} s<br>` +
     `segments: ${count}` +
     (data.myosins      ? `<br>myosins: ${data.myosins.length}`           : '') +
-    (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '');
+    (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '') +
+    (data.nodes && data.nodes.length ? `<br>nodes: ${data.nodes.length}`     : '');
 }
 
 function updateAxisLines(segments) {
@@ -1233,7 +1244,7 @@ function updateBenchmarkScene(data) {
   }
 }
 
-function updateMyosinData(myosins, minifilaments) {
+function updateMyosinData(myosins, minifilaments, nodes) {
   // Myosins — identity-keyed by m.id (= MyoRod.thingInstanceId, the composite's stable key).
   // Rod, lever, motor have separate slot counters because rod can be invisible.
   // myoIdToSlot/myoSlotToId track the lever slot; motor uses the same slot (lever is never skipped).
@@ -1302,14 +1313,30 @@ function updateMyosinData(myosins, minifilaments) {
     }
   }
 
+  // Protein nodes — grey transparent spheres at {center, r}.
+  let nodeCt = 0;
+  if (nodes) {
+    for (const nd of nodes) {
+      if (nodeCt >= MAX_NODES) break;
+      dummy.position.set(nd.center[0], nd.center[1], nd.center[2]);
+      dummy.quaternion.identity();
+      dummy.scale.set(nd.r, nd.r, nd.r);
+      dummy.updateMatrix();
+      nodeMesh.setMatrixAt(nodeCt, dummy.matrix);
+      nodeCt++;
+    }
+  }
+
   rodMesh.count = rodCt;
   leverMesh.count = leverCt;
   motorMesh.count = motorCt;
   minifilMesh.count = minifilCt;
+  nodeMesh.count = nodeCt;
   rodMesh.instanceMatrix.needsUpdate = true;
   leverMesh.instanceMatrix.needsUpdate = true;
   motorMesh.instanceMatrix.needsUpdate = true;
   minifilMesh.instanceMatrix.needsUpdate = true;
+  nodeMesh.instanceMatrix.needsUpdate = true;
   if (motorMesh.instanceColor) motorMesh.instanceColor.needsUpdate = true;
 }
 

@@ -1,0 +1,42 @@
+<BOA> Single spherical protein node with myosins attached to its surface. For visual:
+// do the node-bound myosins stay on the sphere (keepMyosinsOnSurface) with their internal
+// rod->lever->motor joints intact, under the taForce race fix. CPU (omit -gpu).
+// No actin, no minifilaments. dt=1e-5 (production-faithful); myosin thermal dialed to 1/10.
+deltaT:true:1.0E-5;
+biochemDeltaT:true:0.01;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:1.0;                       // 100k steps @ 1e-5
+toFileInterval:true:1000.0;             // ~100 frames
+remoteWriteInterval:true:1000000.0;
+fracMove:true:0.4;
+fracR:true:0.134;
+fracMoveTorq:true:0.013685;
+bugOff:true:1.0;
+simOutsideBug:false:0.0;
+boxXDim:true:1.0;
+boxYDim:true:1.0;
+boxZDim:true:0.5;
+initialFilaments:true:0.0;
+initialMyoMiniFils:true:0.0;
+initialNodes:true:1.0;                  // ONE protein node
+numNodeMyos:true:8.0;                   // 8 myosin singlets on the node surface
+numNodeMyoDimers:true:4.0;              // 4 myosin dimers on the node (keepMyosinDimersOnSurface — purely mechanical)
+nodeRadius:true:0.1;                     // sphere radius (um) — larger than 0.05 default for visibility
+noMonomersSimd:true:1.0;
+aeta:true:1.0;
+myoBrownianAttn:true:0.1;               // myosin part thermal dialed to 1/10 (avoid twirl)
+BTransCoeff:true:1.0;
+BRotCoeff:true:0.5;
+// no actin pool / turnover
+actinConc:false:0.0;
+actinConcNonHydro:false:0.0;
+kATPOn1:false:0.0;
+kATPOn2:false:0.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+kHydrolysis:false:0.0;
+cofilinRate:false:0.0;
+capRate:false:0.0;
+myosinStallForce:true:2.0;
+myosinReleaseRate:true:10.0;

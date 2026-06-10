@@ -197,6 +197,23 @@ public class ThreeJSWriter {
         }
         sb.append("]");
 
+        // Protein nodes — spherical bodies that carry myosin singlets/dimers on
+        // their surface. Emitted as {id, center, r} so the viewer can draw the
+        // sphere the node-attached myosins sit on.
+        sb.append(",\"nodes\":[");
+        boolean firstNode = true;
+        for (int i = 0; i < ProteinNode.nodeCt; i++) {
+            ProteinNode pn = ProteinNode.theNodes[i];
+            if (pn == null || pn.removeMe) continue;
+            if (!firstNode) sb.append(",");
+            sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+                    pn.thingInstanceId,
+                    pn.getCoordX(), pn.getCoordY(), pn.getCoordZ(),
+                    pn.getRadius()));
+            firstNode = false;
+        }
+        sb.append("]");
+
         // Benchmark overlay: pinned endpoint anchors and force arrows (absent in non-benchmark frames).
         if (Env.benchmarkFilament) {
             sb.append(",\"pinnedEndpoints\":");
