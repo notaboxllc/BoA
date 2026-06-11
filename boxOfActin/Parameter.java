@@ -23,6 +23,10 @@ public class Parameter {
 	Parameter dependsOn;
 	Object syncO = new Object();
 	private boolean mutableAtRuntime = false;  // C4: safe to change via setParam mid-run
+	private String description = null;          // optional rich "what it does + likely impact" text,
+	                                            // authored next to the parameter and surfaced to tooling
+	                                            // (the live param panels' info popovers, docs, etc.).
+	                                            // Single source of truth — keep it accurate to the code.
 
 
 	// C4: builder-style setter; returns this so callers can chain in field init
@@ -33,6 +37,18 @@ public class Parameter {
 
 	public boolean isMutableAtRuntime() {
 		return mutableAtRuntime;
+	}
+
+	// Builder-style setter for the rich description; chains after setMutableAtRuntime().
+	// Convention: plain prose (no markup), state the default and the direction of impact,
+	// and note any caveat (e.g. "on -gpu, applies on restart"). Surfaced verbatim to the UI.
+	public Parameter setDescription(String d) {
+		this.description = d;
+		return this;
+	}
+
+	public String getDescription() {
+		return description;
 	}
 
 	/** C4: Returns all Parameters that have been marked mutableAtRuntime. */

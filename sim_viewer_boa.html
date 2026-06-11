@@ -1253,67 +1253,25 @@ const contractilityHud = document.getElementById('contractilityHud');
 const ctHudRows        = document.getElementById('ctHudRows');
 // Curated, grouped tuning knobs for the contractility apparatus. Each maps to an
 // Env Parameter made .setMutableAtRuntime(); applied via the standard setParam action.
+// Grouping + short labels are viewer presentation; the detailed descriptions come
+// from the server (Parameter.setDescription in Env.java) via the paramList payload,
+// so they stay in lockstep with the code.
 const CT_KNOB_GROUPS = [
   { group: 'Bind', items: [
-    { name: 'myoColTol', label: 'capture radius (µm)', info:
-      `Bind capture radius. A myosin head binds a filament when its tip falls within this
-       perpendicular distance of the filament axis (and the alignment gate passes).
-       <span class="cp-default">Default 0.006 µm (6 nm).</span>
-       Larger → heads capture from farther away → faster, more frequent binding; smaller → near-contact required.
-       <span class="cp-restart">On –gpu this is baked at first execution → applies on restart.</span>` },
-    { name: 'myoMotorAlignWithFilTolerance', label: 'align gate (cos)', info:
-      `Bind orientation gate: cos of the angle between the head axis and the filament axis. A head can bind
-       only if their dot product ≥ this value.
-       <span class="cp-default">Default −0.4 (allows up to ~114° misalignment — permissive).</span>
-       Toward +1 → stricter co-alignment required → fewer binds; toward −1 → almost any orientation binds.
-       <span class="cp-restart">On –gpu, applies on restart.</span>` },
+    { name: 'myoColTol',                     label: 'capture radius (µm)' },
+    { name: 'myoMotorAlignWithFilTolerance', label: 'align gate (cos)' },
   ]},
   { group: 'Cross-bridge', items: [
-    { name: 'myoSpring', label: 'stiffness (N/µm)', info:
-      `Cross-bridge stiffness. A bound head is a Hookean spring between its tip and its attachment point on
-       actin: force = strain × myoSpring.
-       <span class="cp-default">Default 1e-9 N/µm.</span>
-       Higher → more force per nm of strain, but it reaches the break-force threshold at smaller strain, so
-       heads snap off sooner — raising this <i>without</i> raising break force can <b>reduce</b> net tension.` },
-    { name: 'myosinStallForce', label: 'stall force (pN)', info:
-      `Caps the per-head lever→motor joint torque on the GPU path (max torque ∝ stall force × motor length).
-       <span class="cp-default">Default 6 pN.</span>
-       Limits how forcefully the cocked lever can swing the head into alignment.
-       (Not used by the CPU release path — primarily a GPU joint clamp.)` },
-    { name: 'myosinBreakForce', label: 'break force (pN)', info:
-      `Hard detachment threshold: if the cross-bridge force exceeds this, the head releases immediately —
-       a stiffness safety valve, independent of the catch-slip roll.
-       <span class="cp-default">Default 12 pN.</span>
-       Lower → heads break off under modest load (caps peak tension); higher → heads hold larger forces.` },
+    { name: 'myoSpring',         label: 'stiffness (N/µm)' },
+    { name: 'myosinStallForce',  label: 'stall force (pN)' },
+    { name: 'myosinBreakForce',  label: 'break force (pN)' },
   ]},
   { group: 'Detachment (catch-slip)', items: [
-    { name: 'kOff', label: 'kOff (s⁻¹)', info:
-      `Base detachment rate for the load-dependent Guo–Guilford catch-slip release. Per-step release
-       probability = kOff·dt·[ αcatch·exp(−F∥·xCatch/kT) + αslip·exp(+F∥·xSlip/kT) ], where F∥ is the force
-       component along the filament.
-       <span class="cp-default">Default 100 s⁻¹.</span>
-       Higher → heads detach faster overall → shorter attachment lifetime, lower duty ratio / processivity,
-       less sustained tension.` },
-    { name: 'xCatch', label: 'xCatch (m)', info:
-      `Force-sensitivity distance of the <i>catch</i> (load-stabilized) term, which scales as exp(−F∥·xCatch/kT)
-       and shrinks as F∥ grows.
-       <span class="cp-default">Default 2.5e-9 m.</span>
-       Larger → stronger load-stabilization → longer attachment in the stabilizing-force regime.
-       (Guo &amp; Guilford 2006; Stam et al 2015.)` },
-    { name: 'xSlip', label: 'xSlip (m)', info:
-      `Force-sensitivity distance of the <i>slip</i> (load-accelerated) term, which scales as exp(+F∥·xSlip/kT)
-       and grows with F∥.
-       <span class="cp-default">Default 0.4e-9 m.</span>
-       Larger → load pulls heads off faster. With xCatch and kOff this sets the biphasic, load-dependent
-       attachment lifetime.` },
-    { name: 'alphaCatch', label: 'alphaCatch', info:
-      `Relative weight of the catch (load-stabilized) pathway in the release sum.
-       <span class="cp-default">Default 0.92 — catch-dominated.</span>
-       Higher → detachment more load-resistant (heads live longer under stabilizing load).` },
-    { name: 'alphaSlip', label: 'alphaSlip', info:
-      `Relative weight of the slip (load-accelerated) pathway in the release sum.
-       <span class="cp-default">Default 0.08.</span>
-       Higher → heads are more readily pulled off by load.` },
+    { name: 'kOff',       label: 'kOff (s⁻¹)' },
+    { name: 'xCatch',     label: 'xCatch (m)' },
+    { name: 'xSlip',      label: 'xSlip (m)' },
+    { name: 'alphaCatch', label: 'alphaCatch' },
+    { name: 'alphaSlip',  label: 'alphaSlip' },
   ]},
 ];
 const contractilityParams = document.getElementById('contractilityParams');
@@ -1369,7 +1327,9 @@ function renderContractilityParams(params) {
       // Collapsible detail box under the row.
       const detail = document.createElement('div');
       detail.className = 'cp-detail';
-      detail.innerHTML = (it.info || p.displayName || p.name).replace(/\s+/g, ' ').trim();
+      // Authoritative text comes from the server (Env.java Parameter.setDescription);
+      // textContent keeps it safe + plain. Falls back to displayName/name.
+      detail.textContent = (p.description || p.displayName || p.name).replace(/\s+/g, ' ').trim();
       ctParamRows.appendChild(detail);
       infoEl.addEventListener('click', () => {
         const open = detail.classList.toggle('open');
