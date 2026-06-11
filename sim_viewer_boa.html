@@ -434,10 +434,25 @@
     #contractilityParams .cp-title { color: #9cf; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; font-size: 12px; }
     #contractilityParams .cp-group { color: #7a9; margin: 6px 0 2px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
     #contractilityParams .cp-row { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
+    #contractilityParams .cp-info {
+      flex: 0 0 auto; width: 13px; height: 13px; line-height: 13px; text-align: center;
+      border: 1px solid #567; border-radius: 50%; color: #9cf; font-size: 10px; font-style: italic;
+      cursor: pointer; user-select: none;
+    }
+    #contractilityParams .cp-info:hover { background: #234; border-color: #9cf; }
+    #contractilityParams .cp-info.open { background: #9cf; color: #012; }
     #contractilityParams .cp-name { flex: 1 1 auto; color: #bbb; cursor: help; }
     #contractilityParams .cp-input { width: 78px; background: #1a1a1a; border: 1px solid #555; color: #eee; font: 11px monospace; padding: 1px 3px; }
     #contractilityParams .cp-input:focus { border-color: #9cf; outline: none; }
     #contractilityParams .cp-msg { width: 14px; text-align: center; }
+    #contractilityParams .cp-detail {
+      display: none; margin: 0 0 4px 17px; padding: 4px 6px;
+      background: rgba(40,55,70,0.6); border-left: 2px solid #9cf; border-radius: 0 3px 3px 0;
+      color: #cde; font-size: 10px; line-height: 1.45;
+    }
+    #contractilityParams .cp-detail.open { display: block; }
+    #contractilityParams .cp-detail .cp-default { color: #9c9; }
+    #contractilityParams .cp-detail .cp-restart { color: #c84; }
     #contractilityParams .cp-note { color: #888; font-size: 10px; margin-top: 6px; border-top: 1px solid #333; padding-top: 4px; }
 
     /* ── LP benchmark panel ──────────────────────────────────────────────────── */
@@ -1240,20 +1255,65 @@ const ctHudRows        = document.getElementById('ctHudRows');
 // Env Parameter made .setMutableAtRuntime(); applied via the standard setParam action.
 const CT_KNOB_GROUPS = [
   { group: 'Bind', items: [
-    { name: 'myoColTol',                    label: 'capture radius (µm)' },
-    { name: 'myoMotorAlignWithFilTolerance', label: 'align gate (cos)' },
+    { name: 'myoColTol', label: 'capture radius (µm)', info:
+      `Bind capture radius. A myosin head binds a filament when its tip falls within this
+       perpendicular distance of the filament axis (and the alignment gate passes).
+       <span class="cp-default">Default 0.006 µm (6 nm).</span>
+       Larger → heads capture from farther away → faster, more frequent binding; smaller → near-contact required.
+       <span class="cp-restart">On –gpu this is baked at first execution → applies on restart.</span>` },
+    { name: 'myoMotorAlignWithFilTolerance', label: 'align gate (cos)', info:
+      `Bind orientation gate: cos of the angle between the head axis and the filament axis. A head can bind
+       only if their dot product ≥ this value.
+       <span class="cp-default">Default −0.4 (allows up to ~114° misalignment — permissive).</span>
+       Toward +1 → stricter co-alignment required → fewer binds; toward −1 → almost any orientation binds.
+       <span class="cp-restart">On –gpu, applies on restart.</span>` },
   ]},
   { group: 'Cross-bridge', items: [
-    { name: 'myoSpring',         label: 'stiffness (N/µm)' },
-    { name: 'myosinStallForce',  label: 'stall force (pN)' },
-    { name: 'myosinBreakForce',  label: 'break force (pN)' },
+    { name: 'myoSpring', label: 'stiffness (N/µm)', info:
+      `Cross-bridge stiffness. A bound head is a Hookean spring between its tip and its attachment point on
+       actin: force = strain × myoSpring.
+       <span class="cp-default">Default 1e-9 N/µm.</span>
+       Higher → more force per nm of strain, but it reaches the break-force threshold at smaller strain, so
+       heads snap off sooner — raising this <i>without</i> raising break force can <b>reduce</b> net tension.` },
+    { name: 'myosinStallForce', label: 'stall force (pN)', info:
+      `Caps the per-head lever→motor joint torque on the GPU path (max torque ∝ stall force × motor length).
+       <span class="cp-default">Default 6 pN.</span>
+       Limits how forcefully the cocked lever can swing the head into alignment.
+       (Not used by the CPU release path — primarily a GPU joint clamp.)` },
+    { name: 'myosinBreakForce', label: 'break force (pN)', info:
+      `Hard detachment threshold: if the cross-bridge force exceeds this, the head releases immediately —
+       a stiffness safety valve, independent of the catch-slip roll.
+       <span class="cp-default">Default 12 pN.</span>
+       Lower → heads break off under modest load (caps peak tension); higher → heads hold larger forces.` },
   ]},
   { group: 'Detachment (catch-slip)', items: [
-    { name: 'kOff',       label: 'kOff' },
-    { name: 'xCatch',     label: 'xCatch (m)' },
-    { name: 'xSlip',      label: 'xSlip (m)' },
-    { name: 'alphaCatch', label: 'alphaCatch' },
-    { name: 'alphaSlip',  label: 'alphaSlip' },
+    { name: 'kOff', label: 'kOff (s⁻¹)', info:
+      `Base detachment rate for the load-dependent Guo–Guilford catch-slip release. Per-step release
+       probability = kOff·dt·[ αcatch·exp(−F∥·xCatch/kT) + αslip·exp(+F∥·xSlip/kT) ], where F∥ is the force
+       component along the filament.
+       <span class="cp-default">Default 100 s⁻¹.</span>
+       Higher → heads detach faster overall → shorter attachment lifetime, lower duty ratio / processivity,
+       less sustained tension.` },
+    { name: 'xCatch', label: 'xCatch (m)', info:
+      `Force-sensitivity distance of the <i>catch</i> (load-stabilized) term, which scales as exp(−F∥·xCatch/kT)
+       and shrinks as F∥ grows.
+       <span class="cp-default">Default 2.5e-9 m.</span>
+       Larger → stronger load-stabilization → longer attachment in the stabilizing-force regime.
+       (Guo &amp; Guilford 2006; Stam et al 2015.)` },
+    { name: 'xSlip', label: 'xSlip (m)', info:
+      `Force-sensitivity distance of the <i>slip</i> (load-accelerated) term, which scales as exp(+F∥·xSlip/kT)
+       and grows with F∥.
+       <span class="cp-default">Default 0.4e-9 m.</span>
+       Larger → load pulls heads off faster. With xCatch and kOff this sets the biphasic, load-dependent
+       attachment lifetime.` },
+    { name: 'alphaCatch', label: 'alphaCatch', info:
+      `Relative weight of the catch (load-stabilized) pathway in the release sum.
+       <span class="cp-default">Default 0.92 — catch-dominated.</span>
+       Higher → detachment more load-resistant (heads live longer under stabilizing load).` },
+    { name: 'alphaSlip', label: 'alphaSlip', info:
+      `Relative weight of the slip (load-accelerated) pathway in the release sum.
+       <span class="cp-default">Default 0.08.</span>
+       Higher → heads are more readily pulled off by load.` },
   ]},
 ];
 const contractilityParams = document.getElementById('contractilityParams');
@@ -1279,6 +1339,11 @@ function renderContractilityParams(params) {
       const p = byName.get(it.name);
       const row = document.createElement('div');
       row.className = 'cp-row';
+      // Clickable "i" that toggles a per-knob description (authored in CT_KNOB_GROUPS).
+      const infoEl = document.createElement('span');
+      infoEl.className = 'cp-info';
+      infoEl.textContent = 'i';
+      infoEl.title = 'what does this do?';
       const nameEl = document.createElement('span');
       nameEl.className = 'cp-name';
       nameEl.title = p.name + ' — ' + p.displayName + ' [' + p.type + ']';
@@ -1299,8 +1364,18 @@ function renderContractilityParams(params) {
       };
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
       inp.addEventListener('blur', apply);
-      row.appendChild(nameEl); row.appendChild(inp); row.appendChild(msg);
+      row.appendChild(infoEl); row.appendChild(nameEl); row.appendChild(inp); row.appendChild(msg);
       ctParamRows.appendChild(row);
+      // Collapsible detail box under the row.
+      const detail = document.createElement('div');
+      detail.className = 'cp-detail';
+      detail.innerHTML = (it.info || p.displayName || p.name).replace(/\s+/g, ' ').trim();
+      ctParamRows.appendChild(detail);
+      infoEl.addEventListener('click', () => {
+        const open = detail.classList.toggle('open');
+        infoEl.classList.toggle('open', open);
+      });
+      nameEl.addEventListener('click', () => infoEl.click());
     }
   }
   ctParamsBuilt = true;
