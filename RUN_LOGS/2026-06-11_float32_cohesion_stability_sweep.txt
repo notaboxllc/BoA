@@ -1,0 +1,78 @@
+Part 1 — Float32 verdict for the minifilament cohesion BODY reaction
+====================================================================
+Date 2026-06-11. Branch float32-stability-diag. Config boa10-singleMiniFil
+(single bipolar minifilament, N dimers/end, NO actin), 300 steps, 60 frames.
+Metric: analyze_minifil.py (span / body-axis cumulative wander / COM jitter)
++ "crazy"/NaN guard count. Divergence = crazy>0 OR wander>300 deg.
+
+Schemes (all SET on the body slot -> NO RMW confound):
+  lag  = -gpu default        : float32, 1-step device-resident lag (PRODUCTION)
+  sync = -gpu BOA_COH_SYNC=1 : float32, SYNCHRONOUS SET (no lag)
+  cpu  = no -gpu             : float64, synchronous SET (full-CPU oracle)
+PRODUCTION OPERATING POINT: fm(myoMiniFilFracMove)=0.07, N(numMyoDimersEachEnd)=8 -> fm*N=0.56.
+
+VERDICT: MISATTRIBUTION of the production-fix rationale + a narrow genuine f32 effect.
+ 1. At production (fm=0.07): sync float32 STABLE (22.7) ~= oracle (20.4). The journal's
+    "190deg synchronous divergence" was the cross-step RMW confound, not float32. Lag NOT
+    load-bearing at production.
+ 2. Threshold tracks the fm*N stiff-coupling product (stiff explicit-integration instability):
+      float32-sync diverges ~product 1.5 (N8 fm~0.19 ; N16 fm~0.09)
+      float64-sync diverges ~product 1.9 (N8 fm~0.23 ; N16 fm~0.12)
+      float32-LAG  stable to fm=4.0 (product 32) -- never broke
+    => the lag extends the margin >20x: a SCHEME effect (would help float64 too), not precision.
+ 3. Genuine but NARROW float32 margin-narrowing (~20%, product 1.5 vs 1.9) at fm=0.20 N=8
+    (float32-sync DIVERGED, float64-sync STABLE), seed-marginal (s2 held), 2.5-4x above the
+    production point. CAVEAT: device also differs in Brownian RNG/integration, so ~20% is an
+    UPPER BOUND on pure precision.
+ V2: keep a deliberate lag (or semi-implicit / softer fracMove) for the stiff cohesion term as a
+ STIFF-STABILITY measure; f64 on that term is unnecessary and would not remove the lag's need at
+ high stiffness. >2.5x margin at production even for plain synchronous float32.
+
+RAW SWEEP (label / verdict / crazy / span,wander,jitter)
+========================================================
+BASELINE TRIO N=8 fm=0.07 dt=1e-4 15:42:41
+lag_N8_fm0.07_dt1.0E-4_s1                crazy=0      n= 63 span=180.0±0.02nm [180.0,180.1] wander=22.6° jitter=1.71nm comDrift=4.8nm
+sync_N8_fm0.07_dt1.0E-4_s1               crazy=0     n= 63 span=180.0±0.04nm [179.9,180.1] wander=22.7° jitter=1.38nm comDrift=4.8nm
+cpu_N8_fm0.07_dt1.0E-4_s1                crazy=0      n= 63 span=180.0±0.04nm [179.9,180.1] wander=20.4° jitter=1.43nm comDrift=15.1nm
+=== fracMove sweep (N=8 dt=1e-4) 15:44:05 ===
+sync_N8_fm0.28_dt1.0E-4_s1                 crazy=0     n= 63 span=180.0±0.11nm [179.4,180.6] wander=5124.1° jitter=10146.31nm comDrift=14424.6nm
+cpu_N8_fm0.28_dt1.0E-4_s1                  crazy=4482 
+sync_N8_fm0.7_dt1.0E-4_s1                  crazy=0   
+cpu_N8_fm0.7_dt1.0E-4_s1                   crazy=4860 
+sync_N8_fm1.4_dt1.0E-4_s1                  crazy=0   
+cpu_N8_fm1.4_dt1.0E-4_s1                   crazy=4968 
+sync_N8_fm2.8_dt1.0E-4_s1                  crazy=0   
+cpu_N8_fm2.8_dt1.0E-4_s1                   crazy=5058 
+=== fine fracMove threshold (N=8 dt=1e-4) 15:45:44 ===
+sync_N8_fm0.10_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.04nm [179.9,180.1] wander=22.3° jitter=1.55nm comDrift=4.9nm
+cpu_N8_fm0.10_dt1.0E-4_s1                STABLE    crazy=0       n= 63 span=180.0±0.04nm [179.9,180.1] wander=19.2° jitter=1.77nm comDrift=8.6nm
+sync_N8_fm0.13_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.04nm [179.9,180.1] wander=22.2° jitter=1.67nm comDrift=3.1nm
+cpu_N8_fm0.13_dt1.0E-4_s1                STABLE    crazy=0       n= 63 span=180.0±0.04nm [179.9,180.1] wander=19.6° jitter=1.88nm comDrift=6.7nm
+sync_N8_fm0.16_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.04nm [179.9,180.1] wander=22.2° jitter=1.77nm comDrift=3.6nm
+cpu_N8_fm0.16_dt1.0E-4_s1                STABLE    crazy=0       n= 63 span=180.0±0.00nm [180.0,180.0] wander=21.0° jitter=1.91nm comDrift=7.6nm
+sync_N8_fm0.20_dt1.0E-4_s1               DIVERGED  crazy=0      n= 63 span=180.0±0.03nm [179.9,180.1] wander=10222.8° jitter=10.00nm comDrift=542.8nm
+cpu_N8_fm0.20_dt1.0E-4_s1                STABLE    crazy=0       n= 63 span=180.0±0.03nm [179.9,180.1] wander=21.4° jitter=2.37nm comDrift=5.8nm
+=== float32 threshold refine + float64 refine 15:47:32 ===
+sync_N8_fm0.17_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.03nm [179.9,180.1] wander=22.1° jitter=1.80nm comDrift=4.6nm
+sync_N8_fm0.18_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.03nm [179.9,180.1] wander=22.2° jitter=1.85nm comDrift=4.0nm
+cpu_N8_fm0.22_dt1.0E-4_s1                STABLE    crazy=0       n= 63 span=180.0±0.02nm [179.9,180.1] wander=20.1° jitter=2.65nm comDrift=10.2nm
+cpu_N8_fm0.24_dt1.0E-4_s1                DIVERGED  crazy=2736 
+cpu_N8_fm0.26_dt1.0E-4_s1                DIVERGED  crazy=4176 
+=== LAG control where sync diverges (does lag extend margin?) ===
+lag_N8_fm0.20_dt1.0E-4_s1                STABLE    crazy=0    
+lag_N8_fm0.28_dt1.0E-4_s1                STABLE    crazy=0    
+lag_N8_fm0.5_dt1.0E-4_s1                 STABLE    crazy=0    
+=== seed replication of sync divergence at fm=0.20 ===
+sync_N8_fm0.20_dt1.0E-4_s2               STABLE    crazy=0      n= 63 span=180.0±0.01nm [180.0,180.0] wander=19.8° jitter=2.10nm comDrift=15.6nm
+sync_N8_fm0.20_dt1.0E-4_s3               DIVERGED  crazy=0      n= 63 span=180.0±0.02nm [179.9,180.1] wander=4721.7° jitter=6.80nm comDrift=271.1nm
+=== N-scaling: threshold should track fm*N product 15:50:03 ===
+-- N=16 sync (expect boundary near fm~0.095-0.10, half of N8) --
+sync_N16_fm0.08_dt1.0E-4_s1              DIVERGED  crazy=0     n= 63 span=180.0±0.04nm [179.9,180.1] wander=465.1° jitter=25.94nm comDrift=1584.4nm
+sync_N16_fm0.10_dt1.0E-4_s1              STABLE    crazy=0     n= 63 span=180.0±0.02nm [179.9,180.0] wander=24.2° jitter=1.53nm comDrift=8.0nm
+sync_N16_fm0.12_dt1.0E-4_s1              STABLE    crazy=0     n= 63 span=180.0±0.03nm [179.9,180.1] wander=24.2° jitter=2.24nm comDrift=8.2nm
+cpu_N16_fm0.11_dt1.0E-4_s1               STABLE    crazy=0      n= 63 span=180.0±0.04nm [179.9,180.1] wander=22.3° jitter=1.73nm comDrift=6.5nm
+cpu_N16_fm0.13_dt1.0E-4_s1               DIVERGED  crazy=3366 
+-- lag limit search (where does the lag finally break?) --
+lag_N8_fm1.0_dt1.0E-4_s1                 STABLE    crazy=0    
+lag_N8_fm2.0_dt1.0E-4_s1                 STABLE    crazy=0    
+lag_N8_fm4.0_dt1.0E-4_s1                 STABLE    crazy=0    

@@ -600,9 +600,15 @@ public class GPUMoveThing {
                                               // round-trip). Synchronous application is float32-unstable
                                               // (collective body↔N-dimer feedback); the lag stabilizes,
                                               // matching the full-CPU oracle. See dimerCohesionKernel.
-    private static FloatArray cohParams;      // 8: dt, rodLen, leverAngle, fracMD, fracLT, fracMF, alignMF, (spare)
+    private static FloatArray cohParams;      // 8: dt, rodLen, leverAngle, fracMD, fracLT, fracMF, alignMF, cohSyncFlag
     private static IntArray   cohCounts;      // 3: dimerCohCt, slotCount, bodyCohCt
     private static int        dimerCohCt = 0; // packed parallel GPU-handled dimers this step
+    // BOA_COH_SYNC=1 (DIAGNOSTIC, Part-1 float32 isolation): apply the body reaction
+    // SYNCHRONOUSLY (this step's accB*, SET) instead of the production 1-step device-resident
+    // lag. SET (not RMW) — sole body writer — so this is a clean float32-synchronous-SET
+    // datapoint with NO RMW confound, directly comparable to the CPU float64-synchronous-SET
+    // oracle. Used only to map the stiff-stability vs float32 question; OFF by default.
+    public static boolean COH_SYNC = false;
     // Cohesion forces computed on-device this run unless gated off via
     // BOA_MINIFIL_COHESION_CPU=1 (the A/B control), mirroring DIAG_CPU_MOTOR. Set in
     // BoxOfActin.begin() from the env var.
@@ -2563,12 +2569,24 @@ public class GPUMoveThing {
             // react[N-1]+react[N-2]+… → divergence). Overwriting with the lagged value is
             // exact and self-zeroing.
             int rb = b * 6;
-            jointForceSum.set(b3,     cohBodyReact.get(rb));
-            jointForceSum.set(b3 + 1, cohBodyReact.get(rb + 1));
-            jointForceSum.set(b3 + 2, cohBodyReact.get(rb + 2));
-            jointTorqueSum.set(b3,     cohBodyReact.get(rb + 3));
-            jointTorqueSum.set(b3 + 1, cohBodyReact.get(rb + 4));
-            jointTorqueSum.set(b3 + 2, cohBodyReact.get(rb + 5));
+            if (cohParams.get(7) > 0.5f) {
+                // DIAGNOSTIC (Part-1): synchronous body reaction — apply THIS step's accB*
+                // directly (SET). float32-synchronous-SET, no lag, no RMW. Directly comparable
+                // to the CPU float64-synchronous-SET oracle for the precision-isolation test.
+                jointForceSum.set(b3,     (float) accBFx);
+                jointForceSum.set(b3 + 1, (float) accBFy);
+                jointForceSum.set(b3 + 2, (float) accBFz);
+                jointTorqueSum.set(b3,     (float) accBTx);
+                jointTorqueSum.set(b3 + 1, (float) accBTy);
+                jointTorqueSum.set(b3 + 2, (float) accBTz);
+            } else {
+                jointForceSum.set(b3,     cohBodyReact.get(rb));
+                jointForceSum.set(b3 + 1, cohBodyReact.get(rb + 1));
+                jointForceSum.set(b3 + 2, cohBodyReact.get(rb + 2));
+                jointTorqueSum.set(b3,     cohBodyReact.get(rb + 3));
+                jointTorqueSum.set(b3 + 1, cohBodyReact.get(rb + 4));
+                jointTorqueSum.set(b3 + 2, cohBodyReact.get(rb + 5));
+            }
             cohBodyReact.set(rb,     (float) accBFx);
             cohBodyReact.set(rb + 1, (float) accBFy);
             cohBodyReact.set(rb + 2, (float) accBFz);
@@ -5813,7 +5831,7 @@ public class GPUMoveThing {
         cohParams.set(4, (float) Env.myoDimerLeverFracMoveTorq.getValue());
         cohParams.set(5, (float) Env.myoMiniFilFracMove.getValue());
         cohParams.set(6, (float) Env.myoMiniFilAlign.getValue());
-        cohParams.set(7, 0.0f);
+        cohParams.set(7, COH_SYNC ? 1.0f : 0.0f);   // diagnostic synchronous body reaction (Part-1)
         packCohesion();
 
         counts.set(0, slotCount);

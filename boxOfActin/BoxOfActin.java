@@ -381,6 +381,15 @@ public class BoxOfActin {
 			GPUMoveThing.DIAG_COHESION_CPU = true;
 			System.err.println("[COHESION_DIAG] DIAG_COHESION_CPU ON via env var (CPU cohesion runs; device kernel skipped)");
 		}
+		// BOA_COH_SYNC=1 (DIAGNOSTIC, Part-1 float32 isolation) — apply the device cohesion
+		// body reaction SYNCHRONOUSLY (this step's accB*, SET) instead of the production
+		// 1-step device-resident lag. Maps the stiff-stability vs float32 boundary. Default off.
+		String cohSyncEnv = System.getenv("BOA_COH_SYNC");
+		if (cohSyncEnv != null && !cohSyncEnv.isEmpty()
+		    && !cohSyncEnv.equals("0") && !cohSyncEnv.equalsIgnoreCase("false")) {
+			GPUMoveThing.COH_SYNC = true;
+			System.err.println("[COH_SYNC] Synchronous (no-lag) device body reaction ON via env var (DIAGNOSTIC)");
+		}
 		// BOA_DIAG_RELEASE_LAG — induce a 1-step lag in the CPU release path so
 		// ckRelease and forceDotFilTrack see last step's forceDotFil rather than
 		// this step's. Default off (CPU release reads fresh same-step value).
