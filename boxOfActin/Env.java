@@ -736,32 +736,47 @@ public class Env {
 	static final Parameter myoLeverLength = new Parameter("myoLeverLength"," Myosin lever length", 0.008, distUnits);
 	static final Parameter myoMotorLength = new Parameter("myoMotorLength"," Myosin motor length", 0.020, distUnits);
 	
-	static final Parameter myoMotorAlignWithFilTolerance = new Parameter("myoMotorAlignWithFilTolerance"," Myosin motor alignment with filament tolerance for binding", -0.4, "cos(radians)");
+	// Bind-orientation gate (cos). Runtime-mutable: CPU bind reads getValue() each
+	// step; on -gpu it is baked into gridParams at FIRST_EXECUTION, so a mid-run
+	// change takes effect on restart (the contractility tuning apparatus runs CPU,
+	// where it is fully live).
+	static final Parameter myoMotorAlignWithFilTolerance = new Parameter("myoMotorAlignWithFilTolerance"," Myosin motor alignment with filament tolerance for binding", -0.4, "cos(radians)").setMutableAtRuntime();
+
+	// Cross-bridge spring stiffness (force per unit head–attachment strain). Was a
+	// hardcoded constant in MyoFilLink (1e-9 N/µm); promoted to a tunable so the
+	// ensemble tension scale can be dialed. Read fresh CPU-side and packed into the
+	// device motorForceParams EVERY_EXECUTION -> live on both paths.
+	static private final double myoSpring_init = 1.0e-9; // N/µm
+	static final Parameter myoSpring = new Parameter("myoSpring"," Myosin cross-bridge spring stiffness", myoSpring_init, "N/µm").setMutableAtRuntime();
 
 	static private final double myosinStallForce_init = 6.0; // pN
-	static final Parameter myosinStallForce = new Parameter("myosinStallForce"," Single-head Myosin Stall Force", myosinStallForce_init, "pN");
+	static final Parameter myosinStallForce = new Parameter("myosinStallForce"," Single-head Myosin Stall Force", myosinStallForce_init, "pN").setMutableAtRuntime();
 
 	static private final double myosinBreakForce_init = 12.0; // pN			// use this to prevent stiffness?
-	static final Parameter myosinBreakForce = new Parameter("myosinBreakForce"," Single-head Myosin Break Force", myosinBreakForce_init, "pN");
-	
+	static final Parameter myosinBreakForce = new Parameter("myosinBreakForce"," Single-head Myosin Break Force", myosinBreakForce_init, "pN").setMutableAtRuntime();
+
 	// values for Guo&Guilford catch/slip probability calculations (see Stam et al 2015)
-	static private final double alphaCatch_init = 0.92; 			
-	static final Parameter alphaCatch = new Parameter("alphaCatch"," Alpha_Catch for force-based myosin release", alphaCatch_init, " ");
-		
-	static private final double alphaSlip_init = 0.08; 			
-	static final Parameter alphaSlip = new Parameter("alphaSlip"," Alpha_Slip for force-based myosin release", alphaSlip_init, " ");
-	
-	static private final double xCatch_init = 2.5e-9; 			
-	static final Parameter xCatch = new Parameter("xCatch"," X_Catch for force-based myosin release", xCatch_init, "m");
-	
-	static private final double xSlip_init = 0.4e-9; 			
-	static final Parameter xSlip = new Parameter("xSlip"," X_Slip for force-based myosin release", xSlip_init, "m");
-	
-	static private final double kOff_init = 100; 			
-	static final Parameter kOff = new Parameter("kOff"," kOff for force-based myosin release", kOff_init, "  ");
+	// All read fresh in MyoFilLink.ckRelease() each step (release runs CPU-side on
+	// both paths), so they are cleanly runtime-mutable.
+	static private final double alphaCatch_init = 0.92;
+	static final Parameter alphaCatch = new Parameter("alphaCatch"," Alpha_Catch for force-based myosin release", alphaCatch_init, " ").setMutableAtRuntime();
+
+	static private final double alphaSlip_init = 0.08;
+	static final Parameter alphaSlip = new Parameter("alphaSlip"," Alpha_Slip for force-based myosin release", alphaSlip_init, " ").setMutableAtRuntime();
+
+	static private final double xCatch_init = 2.5e-9;
+	static final Parameter xCatch = new Parameter("xCatch"," X_Catch for force-based myosin release", xCatch_init, "m").setMutableAtRuntime();
+
+	static private final double xSlip_init = 0.4e-9;
+	static final Parameter xSlip = new Parameter("xSlip"," X_Slip for force-based myosin release", xSlip_init, "m").setMutableAtRuntime();
+
+	static private final double kOff_init = 100;
+	static final Parameter kOff = new Parameter("kOff"," kOff for force-based myosin release", kOff_init, "  ").setMutableAtRuntime();
 
 	static private final double myoColTol_init = 0.006; //µm
-	static final Parameter myoColTol = new Parameter("myoColTol"," Myosin motor collision tolerance", myoColTol_init, distUnits);
+	// Bind capture radius. Runtime-mutable (CPU live each step; -gpu baked at
+	// FIRST_EXECUTION -> takes effect on restart).
+	static final Parameter myoColTol = new Parameter("myoColTol"," Myosin motor collision tolerance", myoColTol_init, distUnits).setMutableAtRuntime();
 
 	static private final double myoRebindTime_init = 1e-5; // s
 	static final Parameter myoRebindTime = new Parameter("myoRebindTime"," Myosin motor rebind time", myoRebindTime_init, "s");

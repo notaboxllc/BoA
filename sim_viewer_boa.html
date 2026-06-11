@@ -413,6 +413,33 @@
     #contractilityHud .ct-divider { border-top: 1px solid #444; margin: 4px 0; }
     #contractilityHud .ct-note { color: #c84; margin-top: 3px; font-size: 11px; }
 
+    /* ── contractility tuning panel (right side) ───────────────────────────────── */
+    #contractilityParams {
+      position: absolute;
+      top: 72px;
+      right: 12px;
+      width: 250px;
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+      background: rgba(0,0,0,0.78);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 8px;
+      z-index: 11;
+      display: none;
+      font: 11px/1.5 monospace;
+      color: #ddd;
+    }
+    #contractilityParams.active { display: block; }
+    #contractilityParams .cp-title { color: #9cf; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; font-size: 12px; }
+    #contractilityParams .cp-group { color: #7a9; margin: 6px 0 2px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+    #contractilityParams .cp-row { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
+    #contractilityParams .cp-name { flex: 1 1 auto; color: #bbb; cursor: help; }
+    #contractilityParams .cp-input { width: 78px; background: #1a1a1a; border: 1px solid #555; color: #eee; font: 11px monospace; padding: 1px 3px; }
+    #contractilityParams .cp-input:focus { border-color: #9cf; outline: none; }
+    #contractilityParams .cp-msg { width: 14px; text-align: center; }
+    #contractilityParams .cp-note { color: #888; font-size: 10px; margin-top: 6px; border-top: 1px solid #333; padding-top: 4px; }
+
     /* ── LP benchmark panel ──────────────────────────────────────────────────── */
     #lpPanel {
       position: absolute;
@@ -591,6 +618,12 @@
 <div id="contractilityHud">
   <div class="ct-title">— Contractility Assay —</div>
   <div id="ctHudRows"></div>
+</div>
+
+<div id="contractilityParams">
+  <div class="cp-title">— Tuning Knobs —</div>
+  <div id="ctParamRows"></div>
+  <div class="cp-note">Live each step on CPU runs. On <b>-gpu</b>, force/release/stiffness are live; <b>bind</b> (myoColTol/align) takes effect on restart.</div>
 </div>
 
 <div id="benchmarkHud">
@@ -1203,9 +1236,84 @@ function applyFrameData(data) {
 // reads the frame payload. Hidden when the frame carries no contractility block.
 const contractilityHud = document.getElementById('contractilityHud');
 const ctHudRows        = document.getElementById('ctHudRows');
+// Curated, grouped tuning knobs for the contractility apparatus. Each maps to an
+// Env Parameter made .setMutableAtRuntime(); applied via the standard setParam action.
+const CT_KNOB_GROUPS = [
+  { group: 'Bind', items: [
+    { name: 'myoColTol',                    label: 'capture radius (µm)' },
+    { name: 'myoMotorAlignWithFilTolerance', label: 'align gate (cos)' },
+  ]},
+  { group: 'Cross-bridge', items: [
+    { name: 'myoSpring',         label: 'stiffness (N/µm)' },
+    { name: 'myosinStallForce',  label: 'stall force (pN)' },
+    { name: 'myosinBreakForce',  label: 'break force (pN)' },
+  ]},
+  { group: 'Detachment (catch-slip)', items: [
+    { name: 'kOff',       label: 'kOff' },
+    { name: 'xCatch',     label: 'xCatch (m)' },
+    { name: 'xSlip',      label: 'xSlip (m)' },
+    { name: 'alphaCatch', label: 'alphaCatch' },
+    { name: 'alphaSlip',  label: 'alphaSlip' },
+  ]},
+];
+const contractilityParams = document.getElementById('contractilityParams');
+const ctParamRows         = document.getElementById('ctParamRows');
+let ctParamsBuilt = false;
+function renderContractilityParams(params) {
+  const byName = new Map(params.map(p => [p.name, p]));
+  // Only build if at least one knob is present (i.e. this run exposes them).
+  const present = CT_KNOB_GROUPS.some(g => g.items.some(it => byName.has(it.name)));
+  if (!present) { ctParamsBuilt = false; ctParamRows.innerHTML = ''; return; }
+  // Preserve any in-progress edits across re-renders.
+  const pending = new Map();
+  ctParamRows.querySelectorAll('.cp-input').forEach(inp => pending.set(inp.dataset.name, inp.value));
+  ctParamRows.innerHTML = '';
+  for (const g of CT_KNOB_GROUPS) {
+    const rows = g.items.filter(it => byName.has(it.name));
+    if (!rows.length) continue;
+    const gh = document.createElement('div');
+    gh.className = 'cp-group';
+    gh.textContent = g.group;
+    ctParamRows.appendChild(gh);
+    for (const it of rows) {
+      const p = byName.get(it.name);
+      const row = document.createElement('div');
+      row.className = 'cp-row';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'cp-name';
+      nameEl.title = p.name + ' — ' + p.displayName + ' [' + p.type + ']';
+      nameEl.textContent = it.label;
+      const inp = document.createElement('input');
+      inp.className = 'cp-input';
+      inp.type = 'text';
+      inp.dataset.name = p.name;
+      inp.value = pending.has(p.name) ? pending.get(p.name) : String(p.value);
+      const msg = document.createElement('span');
+      msg.className = 'cp-msg';
+      msg.id = 'ct-msg-' + p.name;   // distinct from the main panel's pp-msg-*
+      const apply = () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'setParam', name: p.name, value: inp.value }));
+          msg.style.color = '#888'; msg.textContent = '…';
+        }
+      };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
+      inp.addEventListener('blur', apply);
+      row.appendChild(nameEl); row.appendChild(inp); row.appendChild(msg);
+      ctParamRows.appendChild(row);
+    }
+  }
+  ctParamsBuilt = true;
+}
+
 function updateContractilityHud(c) {
-  if (!c) { contractilityHud.classList.remove('active'); return; }
+  if (!c) {
+    contractilityHud.classList.remove('active');
+    contractilityParams.classList.remove('active');
+    return;
+  }
   contractilityHud.classList.add('active');
+  if (ctParamsBuilt) contractilityParams.classList.add('active');
   const s = c.stats || {};
   const row = (lbl, val, strong) =>
     `<div class="ct-row${strong ? ' ct-strong' : ''}"><span class="ct-lbl">${lbl}</span>` +
@@ -1925,6 +2033,7 @@ if (LIVE_MODE) {
         }
       } else if (env.topic === 'paramList') {
         buildParamPanel(env.payload);
+        renderContractilityParams(env.payload);
       } else if (env.topic === 'paramAck') {
         handleParamAck(env.payload);
       } else if (env.topic === 'benchmark') {
@@ -2051,6 +2160,19 @@ if (LIVE_MODE) {
     if (ack.success && ack.name === 'lpActive') {
       lpActiveState = ack.newValue !== 0;
       syncLpActiveUI();
+    }
+    // Mirror the ack to the contractility tuning panel (distinct ct-msg-/ct-input).
+    const ctMsg = document.getElementById('ct-msg-' + ack.name);
+    const ctInp = ctParamRows ? ctParamRows.querySelector('.cp-input[data-name="' + ack.name + '"]') : null;
+    if (ctMsg) {
+      if (ack.success) {
+        if (ctInp && document.activeElement !== ctInp) ctInp.value = String(ack.newValue);
+        ctMsg.style.color = '#4f4'; ctMsg.textContent = '✓';
+        setTimeout(() => { if (ctMsg) ctMsg.textContent = ''; }, 2000);
+      } else {
+        ctMsg.style.color = '#f84'; ctMsg.textContent = '✗'; ctMsg.title = ack.error || 'error';
+        setTimeout(() => { if (ctMsg) { ctMsg.textContent = ''; ctMsg.title = ''; } }, 4000);
+      }
     }
     const msgEl = document.getElementById('pp-msg-' + ack.name);
     if (ack.success) {

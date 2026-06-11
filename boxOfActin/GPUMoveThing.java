@@ -5331,7 +5331,7 @@ public class GPUMoveThing {
         // N/µm); if it ever moves to a Parameter, pick it up here.
         motorForceParams.set(0, (float) Env.deltaT.getValue());
         motorForceParams.set(1, (float) Env.myoMotorLength.getValue());
-        motorForceParams.set(2, (float) MyoFilLink.myoSpring);
+        motorForceParams.set(2, (float) Env.myoSpring.getValue());
         motorForceParams.set(3, (float) Env.myoJ1FracMoveTorq.getValue());
         motorForceParams.set(4, (float) Myosin.uncockedMotor_ActinAngle);
         motorForceParams.set(5, (float) Myosin.cockedMotor_ActinAngle);

@@ -18,8 +18,9 @@ public class MyoFilLink {
 	static int myoBreakForceRelease = 0;
 	static int normalRelease = 0;
 	
-	static double stepSize = Env.actinMonoRadius;	// the step-size for myosin
-	static double myoSpring = 1e-9;  // N/�m
+	// (Removed dead `stepSize` field — it had no consumers; the working stroke is
+	// emergent from the cross-bridge spring + rebind geometry, not an explicit step.)
+	// Cross-bridge stiffness is now Env.myoSpring (runtime-mutable); read via getValue().
 	
 	MyoMotor myMotor = null;
 	FilSegment mySeg = null;
@@ -183,7 +184,7 @@ public class MyoFilLink {
 		                      myMotor.getCoordZ() + halfMot*myMotor.getUVecZ());
 		double dist = Pt3D.ptDist(freshMotorTip, attachPt);
 		if (dist < 0) { dist = 0; }
-		forceMag = dist*myoSpring;
+		forceMag = dist*Env.myoSpring.getValue();
 		F.unitVec(attachPt,freshMotorTip);
 		F.scale(forceMag);
 		myMotor.incForceSum(F,freshMotorTip);
