@@ -399,6 +399,7 @@ public class MyoMiniFilament extends Thing {
 			myoDimerPtsEnd1InX[i].xToX(this,myoDimerPtsEnd1Inx[i]);
 			myoDimerPtsEnd1InX[i].inc(coordAsPt3D());
 			myoDimersEnd1[i] = new MyosinDimer(myoDimerPtsEnd1InX[i],uVecRAsPt3D());
+			myoDimersEnd1[i].ownerMiniFil = this;   // cohesion-on-device gate
 			//myosins[i].rodInvisible = true;
 		}
 		
@@ -413,6 +414,7 @@ public class MyoMiniFilament extends Thing {
 			myoDimerPtsEnd2InX[i].xToX(this,myoDimerPtsEnd2Inx[i]);
 			myoDimerPtsEnd2InX[i].inc(coordAsPt3D());
 			myoDimersEnd2[i] = new MyosinDimer(myoDimerPtsEnd2InX[i],uVecAsPt3D());
+			myoDimersEnd2[i].ownerMiniFil = this;   // cohesion-on-device gate
 			//myosins[i].rodInvisible = true;
 		}
 	}
@@ -434,6 +436,7 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			// force to keep two points together
 			curMyoD = myoDimersEnd1[i];
+			if (curMyoD != null && curMyoD.cohesionOnDevice()) continue; // device handles body↔rod
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd1InX[i];
 			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a)
@@ -479,6 +482,7 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			// force to keep two points together
 			curMyoD = myoDimersEnd2[i];
+			if (curMyoD != null && curMyoD.cohesionOnDevice()) continue; // device handles body↔rod
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd2InX[i];
 			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a; end1 by design here)

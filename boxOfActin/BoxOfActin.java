@@ -373,6 +373,14 @@ public class BoxOfActin {
 				System.err.println("[MOTOR_DIAG] DIAG_CPU_MOTOR forced ON via env var (CPU pair runs)");
 			}
 		}
+		// BOA_MINIFIL_COHESION_CPU=1 — keep minifilament cohesion (rod↔rod, lever, body↔rod)
+		// on the CPU even on -gpu (the A/B control for the cohesion-onto-device port).
+		String cohCpuEnv = System.getenv("BOA_MINIFIL_COHESION_CPU");
+		if (cohCpuEnv != null && !cohCpuEnv.isEmpty()
+		    && !cohCpuEnv.equals("0") && !cohCpuEnv.equalsIgnoreCase("false")) {
+			GPUMoveThing.DIAG_COHESION_CPU = true;
+			System.err.println("[COHESION_DIAG] DIAG_COHESION_CPU ON via env var (CPU cohesion runs; device kernel skipped)");
+		}
 		// BOA_DIAG_RELEASE_LAG — induce a 1-step lag in the CPU release path so
 		// ckRelease and forceDotFilTrack see last step's forceDotFil rather than
 		// this step's. Default off (CPU release reads fresh same-step value).

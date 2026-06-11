@@ -1,0 +1,79 @@
+Step 0 — minifilament cohesion dispatch + force-coverage survey (no code change)
+Branch minifil-cohesion-device (off main a2956e9).
+
+=== DISPATCH ===
+Two CPU force waves on the -gpu path (run after demandSyncPoseToHost; Phase A kept cohesion on CPU):
+- myoJoints1 (MyoDimerThreads): MyosinDimer.jointConstraints() per dimer.
+- myoJoints2 (MyoMiniFilThreads): MyoMiniFilament.updateMyosins() per minifilament.
+
+jointConstraints():
+  if (myo1.removeMe || myo2.removeMe) -> mark removeMe, NO force.
+  else if (parallel) enforceParallel(); else enforceAntiParallel();
+
+  *** parallel == true ALWAYS *** (field default true, never assigned elsewhere). enforceAntiParallel
+  is DEAD for current configs. (Kernel still packs the flag + implements both for faithfulness.)
+
+  enforceParallel():
+    if (!myo1.myoMotor.onFil || !myo2.myoMotor.onFil) alignUVecLeversTorque();   // STATE-DEPENDENT (onFil)
+    // alignYVecLeversTorque();  <-- COMMENTED OUT -> DEAD in the active path
+    applyRodCouplingEnd1(); applyRodCouplingEnd2();
+  enforceAntiParallel(): applyRodCouplingEnd1End2(); applyRodCouplingEnd2End1();   // dead (parallel always)
+
+updateMyosins():
+  updateMyosinPositions(); keepMyosinsOnSurface();   // numMyosinHeads==0 -> BOTH NO-OP (only dimers exist)
+  updateMyosinDimerPositions();                       // recompute world attach pts from body pose
+  constrainEnd1Dimers(); constrainEnd2Dimers();
+
+ATTACHMENT POINT (the body-frame transform the kernel must do):
+  myoDimerPtsEnd{1,2}Inx[i] has y==0, z==0 (the getRadius lines are commented out), x = +-(len/2 - rng*headZone).
+  So updateMyosinDimerPositions: attachPt = xToX(body, Inx) + body.coord = body.coord + Inx.x * body.uVec.
+  ==> PURELY AXIAL. Kernel needs only body.coord, body.uVec, and the scalar Inx.x per dimer.
+  NO yVec/zVec rebuild, NO resident transXTox needed. (De-risks the prompt's "rebuild body frame" concern.)
+
+State dependence is all packable as flags read at PACK time (host-side, biochem/construction state — NOT pose):
+  parallel flag, per-head onFil flags, end1-vs-end2 flag. checkPt3D degenerate guard is computed in-kernel.
+  ==> expressible as a per-(dimer) kernel with packed flags, NO host-side pose-reading branch. NO BAIL.
+
+=== FORCE-COVERAGE TABLE (every force/torque, source, target slot, sign) ===
+Per dimer d: R1=myo1.myoRod, R2=myo2.myoRod, L1=myo1.myoLever, L2=myo2.myoLever, B=body(minifilament).
+Constants: dt, rodLen=myoRodLength (getDim), leverAngle=160, fracMD=myoDimerFracMove,
+fracLT=myoDimerLeverFracMoveTorq, fracMF=myoMiniFilFracMove, alignMF=myoMiniFilAlign.
+freshEnd1 = coord - 0.5*soaLen*uVec ; freshEnd2 = coord + 0.5*soaLen*uVec ; uVecR = -uVec.
+moveCoeff(end,u): cb=Dot(end==2? uVec : -uVec, u) clamp; b=acos(cb); ca=sin(b); lSq=1e-12*rodLen^2;
+                  return cb*cb/bTransGam.x + ca*ca/bTransGam.y + lSq*ca*ca/(4*bRotGam.y).
+
+ # | source (parallel path)        | quantity                                   | target | sign
+---+-------------------------------+--------------------------------------------+--------+------
+ 1 | applyRodCouplingEnd1          | F1=Fmag*u (u=unit(R2e1->R1e1)); Fmag=fracMD*1e-6*d/(dt*(mc1+mc2)), mc=moveCoeff(1) | R1 force | +F1
+ 2 | applyRodCouplingEnd1          | R×F1, R=0.5e-6*rodLen*R1.uVecR             | R1 torq | +
+ 3 | applyRodCouplingEnd1          | -F1                                        | R2 force | -F1
+ 4 | applyRodCouplingEnd1          | R×(-F1), R=0.5e-6*rodLen*R2.uVecR          | R2 torq | +
+ 5 | applyRodCouplingEnd2          | F2 (freshEnd2, moveCoeff(2))               | R1 force | +F2
+ 6 | applyRodCouplingEnd2          | R×F2, R=0.5e-6*rodLen*R1.uVec              | R1 torq | +
+ 7 | applyRodCouplingEnd2          | -F2                                        | R2 force | -F2
+ 8 | applyRodCouplingEnd2          | R×(-F2), R=0.5e-6*rodLen*R2.uVec           | R2 torq | +
+ 9 | alignUVecLeversTorque [gate: !(onFil1&&onFil2)] | τL=tv*τmag; tv=unit(L1.uVec×L2.uVec); angD=acos(Dot(L1u,L2u))*180/pi-160; τmag=fracLT*(pi/180)*angD/((1/L1.bRotGam.y+1/L2.bRotGam.y)*dt) | L1 torq | +τL  [checkPt3D else skip]
+10 | alignUVecLeversTorque         | -τL                                        | L2 torq | -τL
+11 | constrainEnd1Dimers (end1 d)  | F=Fmag*u, u=unit(attach->R1e1), attach=B.coord+offX*B.uVec; Fmag=fracMF*1e-6*d/(dt*(1/R1.bTransGam.y+1/B.bTransGam.y)) | R1 force | +F  (center, NO arm)
+12 | constrainEnd1Dimers           | -F                                          | B force | -F   (center)
+13 | constrainEnd1Dimers           | τ=tv*τmag; tv=unit(R1.uVec×B.uVecR); τmag=alignMF*(pi/180)*acos(Dot(R1u,B.uVecR))*180/pi/((1/R1.bRotGam.y+1/B.bRotGam.y)*dt) | R1 torq | +τ  [checkPt3D else skip]
+14 | constrainEnd1Dimers           | -τ                                          | B torq | -τ
+15 | constrainEnd2Dimers (end2 d)  | F (same as 11 but attach uses end2 offX)    | R1 force | +F  (center)
+16 | constrainEnd2Dimers           | -F                                          | B force | -F
+17 | constrainEnd2Dimers           | τ, tv=unit(R1.uVec×B.uVec) [B.uVec not uVecR]| R1 torq | +τ  [checkPt3D else skip]
+18 | constrainEnd2Dimers           | -τ                                          | B torq | -τ
+
+Notes:
+- Rows 11-18: constrainEnd*Dimers touches ONLY myo1.myoRod (R1) + body. myo2 follows via the rod-rod coupling.
+- BODY slot is RMW'd by ALL of a body's dimers (rows 12/14/16/18) -> multi-writer. Mirror the
+  motorForce/segMotorForce pattern: a per-dimer kernel writes the unique rod/lever slots (rows 1-10) +
+  the dimer's body contribution to a per-dimer scratch (rows 12/14/16/18 as -F,-τ); a per-body kernel
+  gathers those into the body slot (CSR body->dimers). Declaration order == execution order (pinned).
+- Rod/lever slots (R1,R2,L1,L2) are UNIQUE per dimer -> race-free per-dimer writes.
+- alignYVecLeversTorque, enforceAntiParallel, keepMyosinsOnSurface: all dead for this config (note,
+  not implemented unless flags say otherwise).
+- All pose read fresh from resident coord/uVec/soaLen (freshEnd formula); body needs only coord+uVec.
+- Completeness: nothing else RMWs a rod/lever/body slot in the cohesion phase (myoJoints1+2). Confirmed
+  by reading MyosinDimer (all apply*/align*) and MyoMiniFilament.updateMyosins (the only myoJoints2 work).
+
+VERDICT: survey complete, no state dependence that needs a pose-reading host branch -> proceed to Step 1.

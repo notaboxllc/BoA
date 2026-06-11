@@ -9,6 +9,22 @@ public class MyosinDimer {
 	Myosin myo1,myo2;
 	boolean parallel = true;
 	boolean removeMe = false; // flag for taking this myosin out of the simulation
+	MyoMiniFilament ownerMiniFil = null; // set when this dimer belongs to a minifilament (cohesion-on-device gate)
+
+	// True iff this dimer's cohesion (rod↔rod + lever torque + body↔rod) is computed
+	// on-device this step. Must EXACTLY match GPUMoveThing.packCohesion's pack condition:
+	// -gpu on, not the BOA_MINIFIL_COHESION_CPU control, parallel, owned by a GPU-handled
+	// minifilament body, and all four rod/lever sub-Things GPU-handled. When true the CPU
+	// cohesion (jointConstraints + constrainEnd*Dimers) is skipped so forces apply once.
+	boolean cohesionOnDevice () {
+		if (!Env.useGPU || GPUMoveThing.DIAG_COHESION_CPU) return false;
+		if (!parallel) return false;
+		boolean ownerOk = (ownerMiniFil != null && !ownerMiniFil.removeMe && ownerMiniFil.gpuHandled);
+		boolean myosOk = (myo1 != null && myo2 != null && !myo1.removeMe && !myo2.removeMe);
+		boolean slotsOk = myosOk && myo1.myoRod.gpuHandled && myo2.myoRod.gpuHandled
+		    && myo1.myoLever.gpuHandled && myo2.myoLever.gpuHandled;
+		return ownerOk && slotsOk;
+	}
 	
 	// for multithreading
 	static MyoDimerThreads myoDimerThreads = new MyoDimerThreads();
@@ -278,6 +294,8 @@ public class MyosinDimer {
 			myo1.removeMe = true;
 			myo2.removeMe = true;
 			removeMe = true; 
+		} else if (cohesionOnDevice()) {
+			// device dimerCohesionKernel handles rod↔rod + lever torque this step
 		} else {
 			if (parallel) {
 				enforceParallel();

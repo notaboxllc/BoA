@@ -575,6 +575,32 @@ public class GPUMoveThing {
     private static FloatArray motorWriteback;   // myoCap * 2
     private static FloatArray motorForceParams; // 6 floats: dt, motorLen, myoSpring, j1FracMoveTorq, uncockedAng, cockedAng
 
+    // ----- Minifilament cohesion onto device (2026-06-11) -----
+    // Per-dimer cohesion record (only PARALLEL, fully-GPU-handled dimers are packed;
+    // antiparallel / partially-handled dimers stay on the CPU cohesion path). The
+    // dimerCohesionKernel reproduces MyosinDimer.enforceParallel (rod↔rod End1/End2 +
+    // conditional lever torque) AND MyoMiniFilament.constrainEnd{1,2}Dimers (body↔rod,
+    // myo1.rod only). Rod/lever slots are unique per dimer → race-free RMW. The
+    // body-side reaction (−F/−τ) is written to a per-dimer scratch and gathered into the
+    // body slot by bodyCohesionKernel (CSR body→dimers), mirroring segMotorForceKernel.
+    // Pose read fresh from resident coord/uVec/soaLen; drags read from resident
+    // bTransGam/bRotGam by move-slot. Body attachment is PURELY AXIAL (offset y=z=0), so
+    // attachPt = body.coord + offsetX·body.uVec — no transXTox/yVec rebuild needed.
+    // cohSlots: 5 move-slots per dimer record, strided dj*5 + {0:rod1, 1:rod2, 2:lever1,
+    // 3:lever2, 4:body}. (Folded into one array to stay within TornadoVM's 15-arg task cap.)
+    private static IntArray   cohSlots;       // dimerCap*5
+    private static IntArray   cohFlags;       // dimerCap — bit0: end2 (else end1); bit1: bothOnFil (skip lever torque)
+    private static FloatArray cohOffsetX;     // dimerCap — body-frame axial attach offset (µm)
+    private static FloatArray cohBodyForce;   // dimerCap*3 — device-only scratch: per-dimer body −F
+    private static FloatArray cohBodyTorque;  // dimerCap*3 — device-only scratch: per-dimer body −τ
+    private static FloatArray cohParams;      // 8: dt, rodLen, leverAngle, fracMD, fracLT, fracMF, alignMF, (spare)
+    private static IntArray   cohCounts;      // 2: dimerCohCt, slotCount
+    private static int        dimerCohCt = 0; // packed parallel GPU-handled dimers this step
+    // Cohesion forces computed on-device this run unless gated off via
+    // BOA_MINIFIL_COHESION_CPU=1 (the A/B control), mirroring DIAG_CPU_MOTOR. Set in
+    // BoxOfActin.begin() from the env var.
+    public static boolean DIAG_COHESION_CPU = false;
+
     // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
     // boundaryActive[i] = 1 when slot i holds a GPU-handled FilSegment, the
     // container is a Chamber (Survey Option A — separate kernels per shape;
@@ -2230,6 +2256,225 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Minifilament cohesion — device port (2026-06-11).
+    //   dimerCohesionKernel — one thread per packed PARALLEL GPU-handled dimer.
+    //     Reproduces MyosinDimer.enforceParallel (applyRodCouplingEnd1/End2 +
+    //     conditional alignUVecLeversTorque) AND MyoMiniFilament.constrainEnd{1,2}Dimers
+    //     (body↔rod on myo1.rod only). RMW the UNIQUE rod1/rod2/lever1/lever2 slots
+    //     (race-free); write the body-side −F/−τ to per-dimer scratch
+    //     (cohBodyForce/cohBodyTorque).
+    //   Body-side reaction is gathered HOST-SIDE (packCohesion, via a 1-step bridge),
+    //     NOT a second device kernel: a separate per-body gather task did not execute
+    //     reliably in the chained graph (its writes to jointForceSum never landed —
+    //     verified with sentinels), so the host sums cohBodyForce/cohBodyTorque (read back
+    //     EVERY_EXECUTION) into the body's jointForce/Torque slot for the next step.
+    // Slot disjointness preserved: rod/lever slots disjoint from FilSeg slots
+    // (chain/boundary) and motor slots (motorForce); body slots are RULE_MINIFIL slots,
+    // distinct from all rod/lever/motor/seg slots.
+    // -------------------------------------------------------------------------
+
+    // moveCoeff(end, linkUVec) — MyoRod.moveCoeff replicated for the kernel. cosBeta uses
+    // +uVec for end2, −uVec for end1. lSq = 1e-12·rodLen² (passed precomputed).
+    private static double moveCoeffDev(boolean end2,
+            double rux, double ruy, double ruz,
+            double lux, double luy, double luz,
+            double bTx, double bTy, double bRy, double lSq) {
+        double cb = rux*lux + ruy*luy + ruz*luz;
+        if (!end2) cb = -cb;
+        if (cb > 1.0) cb = 1.0;
+        if (cb < -1.0) cb = -1.0;
+        double beta = accurateAcos(cb);
+        double ca = Math.sin(beta);
+        double Cx     = cb*cb / bTx;
+        double Cperp  = ca*ca / bTy;
+        double Ctheta = lSq*ca*ca / (4.0*bRy);
+        return Cx + Cperp + Ctheta;
+    }
+
+    private static void dimerCohesionKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray soaLengthArr,
+            IntArray   cohSlots,
+            IntArray   cohFlags,
+            FloatArray cohOffsetX,
+            FloatArray bTransGam,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray cohBodyForce,
+            FloatArray cohBodyTorque,
+            FloatArray cohParams,
+            IntArray   cohCounts) {
+
+        int M = cohCounts.get(0);
+        double dt       = (double) cohParams.get(0);
+        double rodLen   = (double) cohParams.get(1);
+        double leverAng = (double) cohParams.get(2);
+        double fracMD   = (double) cohParams.get(3);
+        double fracLT   = (double) cohParams.get(4);
+        double fracMF   = (double) cohParams.get(5);
+        double alignMF  = (double) cohParams.get(6);
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
+        double lSq = 1.0e-12 * rodLen * rodLen;
+        double halfArm = 0.5e-6 * rodLen;
+
+        for (@Parallel int dj = 0; dj < cohSlots.getSize() / 5; dj++) {
+            int d3 = dj * 3;
+            // sentinel-zero the body scratch so the gather is well-defined for unused records
+            cohBodyForce.set(d3, 0.0f);  cohBodyForce.set(d3 + 1, 0.0f);  cohBodyForce.set(d3 + 2, 0.0f);
+            cohBodyTorque.set(d3, 0.0f); cohBodyTorque.set(d3 + 1, 0.0f); cohBodyTorque.set(d3 + 2, 0.0f);
+            if (dj >= M) { return; }
+
+            int d5 = dj * 5;
+            int r1 = cohSlots.get(d5);
+            int r2 = cohSlots.get(d5 + 1);
+            int bs = cohSlots.get(d5 + 4);
+            int flags = cohFlags.get(dj);
+            boolean end2 = (flags & 1) != 0;
+            boolean bothOnFil = (flags & 2) != 0;
+            double offX = (double) cohOffsetX.get(dj);
+
+            int r1_3 = r1 * 3, r2_3 = r2 * 3;
+            double r1cx = coord.get(r1_3), r1cy = coord.get(r1_3 + 1), r1cz = coord.get(r1_3 + 2);
+            double r1ux = uVec.get(r1_3),  r1uy = uVec.get(r1_3 + 1),  r1uz = uVec.get(r1_3 + 2);
+            double r2cx = coord.get(r2_3), r2cy = coord.get(r2_3 + 1), r2cz = coord.get(r2_3 + 2);
+            double r2ux = uVec.get(r2_3),  r2uy = uVec.get(r2_3 + 1),  r2uz = uVec.get(r2_3 + 2);
+            double half1 = 0.5 * (double) soaLengthArr.get(r1);
+            double half2 = 0.5 * (double) soaLengthArr.get(r2);
+
+            double r1BTx = (double) bTransGam.get(r1_3), r1BTy = (double) bTransGam.get(r1_3 + 1);
+            double r1BRy = (double) bRotGam.get(r1_3 + 1);
+            double r2BTx = (double) bTransGam.get(r2_3), r2BTy = (double) bTransGam.get(r2_3 + 1);
+            double r2BRy = (double) bRotGam.get(r2_3 + 1);
+
+            double f1x = 0, f1y = 0, f1z = 0, t1x = 0, t1y = 0, t1z = 0;
+            double f2x = 0, f2y = 0, f2z = 0, t2x = 0, t2y = 0, t2z = 0;
+
+            // ===== applyRodCouplingEnd1 (rod1.end1 <-> rod2.end1; arm = −uVec) =====
+            {
+                double p1x = r1cx - half1*r1ux, p1y = r1cy - half1*r1uy, p1z = r1cz - half1*r1uz;
+                double p2x = r2cx - half2*r2ux, p2y = r2cy - half2*r2uy, p2z = r2cz - half2*r2uz;
+                double dx = p1x - p2x, dy = p1y - p2y, dz = p1z - p2z;
+                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                double ux = -dx*inv, uy = -dy*inv, uz = -dz*inv;  // unitVec(a,b)=(a-b)/|.|: CPU dir is second→first
+                double mc1 = moveCoeffDev(false, r1ux,r1uy,r1uz, ux,uy,uz, r1BTx,r1BTy,r1BRy, lSq);
+                double mc2 = moveCoeffDev(false, r2ux,r2uy,r2uz, -ux,-uy,-uz, r2BTx,r2BTy,r2BRy, lSq);
+                double fmag = (fracMD*1.0e-6*dist) / (dt*(mc1 + mc2));
+                double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                f1x += Fx; f1y += Fy; f1z += Fz;
+                double R1x = -halfArm*r1ux, R1y = -halfArm*r1uy, R1z = -halfArm*r1uz;
+                t1x += R1y*Fz - R1z*Fy; t1y += R1z*Fx - R1x*Fz; t1z += R1x*Fy - R1y*Fx;
+                f2x -= Fx; f2y -= Fy; f2z -= Fz;
+                double R2x = -halfArm*r2ux, R2y = -halfArm*r2uy, R2z = -halfArm*r2uz;
+                double nFx = -Fx, nFy = -Fy, nFz = -Fz;
+                t2x += R2y*nFz - R2z*nFy; t2y += R2z*nFx - R2x*nFz; t2z += R2x*nFy - R2y*nFx;
+            }
+            // ===== applyRodCouplingEnd2 (rod1.end2 <-> rod2.end2; arm = +uVec) =====
+            {
+                double p1x = r1cx + half1*r1ux, p1y = r1cy + half1*r1uy, p1z = r1cz + half1*r1uz;
+                double p2x = r2cx + half2*r2ux, p2y = r2cy + half2*r2uy, p2z = r2cz + half2*r2uz;
+                double dx = p1x - p2x, dy = p1y - p2y, dz = p1z - p2z;
+                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                double ux = -dx*inv, uy = -dy*inv, uz = -dz*inv;  // unitVec(a,b)=(a-b)/|.|: CPU dir is second→first
+                double mc1 = moveCoeffDev(true, r1ux,r1uy,r1uz, ux,uy,uz, r1BTx,r1BTy,r1BRy, lSq);
+                double mc2 = moveCoeffDev(true, r2ux,r2uy,r2uz, -ux,-uy,-uz, r2BTx,r2BTy,r2BRy, lSq);
+                double fmag = (fracMD*1.0e-6*dist) / (dt*(mc1 + mc2));
+                double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                f1x += Fx; f1y += Fy; f1z += Fz;
+                double R1x = halfArm*r1ux, R1y = halfArm*r1uy, R1z = halfArm*r1uz;
+                t1x += R1y*Fz - R1z*Fy; t1y += R1z*Fx - R1x*Fz; t1z += R1x*Fy - R1y*Fx;
+                f2x -= Fx; f2y -= Fy; f2z -= Fz;
+                double R2x = halfArm*r2ux, R2y = halfArm*r2uy, R2z = halfArm*r2uz;
+                double nFx = -Fx, nFy = -Fy, nFz = -Fz;
+                t2x += R2y*nFz - R2z*nFy; t2y += R2z*nFx - R2x*nFz; t2z += R2x*nFy - R2y*nFx;
+            }
+            // ===== constrainEnd{1,2}Dimers (body <-> rod1; force at center, + alignment torque) =====
+            {
+                int b3 = bs * 3;
+                double bcx = coord.get(b3), bcy = coord.get(b3 + 1), bcz = coord.get(b3 + 2);
+                double bux = uVec.get(b3),  buy = uVec.get(b3 + 1),  buz = uVec.get(b3 + 2);
+                double bBTy = (double) bTransGam.get(b3 + 1);
+                double bBRy = (double) bRotGam.get(b3 + 1);
+                // attach = body.coord + offX·body.uVec (purely axial offset)
+                double ax = bcx + offX*bux, ay = bcy + offX*buy, az = bcz + offX*buz;
+                // rod1.end1 = r1.coord − half1·r1.uVec
+                double e1x = r1cx - half1*r1ux, e1y = r1cy - half1*r1uy, e1z = r1cz - half1*r1uz;
+                double dx = e1x - ax, dy = e1y - ay, dz = e1z - az;
+                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                double ux = -dx*inv, uy = -dy*inv, uz = -dz*inv;  // unitVec(a,b)=(a-b)/|.|: CPU dir is second→first
+                double fmag = (fracMF*1.0e-6*dist) / (dt*(1.0/r1BTy + 1.0/bBTy));
+                double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                f1x += Fx; f1y += Fy; f1z += Fz;                    // rod1 += F (center, no arm)
+                cohBodyForce.set(d3, (float)(-Fx)); cohBodyForce.set(d3 + 1, (float)(-Fy)); cohBodyForce.set(d3 + 2, (float)(-Fz));
+                // alignment torque: target = end2 ? body.uVec : −body.uVec
+                double tgx = end2 ? bux : -bux, tgy = end2 ? buy : -buy, tgz = end2 ? buz : -buz;
+                double tvx = r1uy*tgz - r1uz*tgy;
+                double tvy = r1uz*tgx - r1ux*tgz;
+                double tvz = r1ux*tgy - r1uy*tgx;
+                double tvm2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                if (tvm2 > 0.0) {
+                    double invm = 1.0 / Math.sqrt(tvm2);
+                    tvx *= invm; tvy *= invm; tvz *= invm;
+                    double dot = r1ux*tgx + r1uy*tgy + r1uz*tgz;
+                    if (dot > 1.0) dot = 1.0;
+                    if (dot < -1.0) dot = -1.0;
+                    double ang = accurateAcos(dot) * RAD2DEG;
+                    double tmag = alignMF * DEG2RAD * ang / ((1.0/r1BRy + 1.0/bBRy) * dt);
+                    t1x += tvx*tmag; t1y += tvy*tmag; t1z += tvz*tmag;
+                    cohBodyTorque.set(d3, (float)(-tvx*tmag)); cohBodyTorque.set(d3 + 1, (float)(-tvy*tmag)); cohBodyTorque.set(d3 + 2, (float)(-tvz*tmag));
+                }
+            }
+
+            // RMW rod1 / rod2 (unique slots — race-free)
+            jointForceSum.set(r1_3,     (float)((double) jointForceSum.get(r1_3)     + f1x));
+            jointForceSum.set(r1_3 + 1, (float)((double) jointForceSum.get(r1_3 + 1) + f1y));
+            jointForceSum.set(r1_3 + 2, (float)((double) jointForceSum.get(r1_3 + 2) + f1z));
+            jointTorqueSum.set(r1_3,     (float)((double) jointTorqueSum.get(r1_3)     + t1x));
+            jointTorqueSum.set(r1_3 + 1, (float)((double) jointTorqueSum.get(r1_3 + 1) + t1y));
+            jointTorqueSum.set(r1_3 + 2, (float)((double) jointTorqueSum.get(r1_3 + 2) + t1z));
+            jointForceSum.set(r2_3,     (float)((double) jointForceSum.get(r2_3)     + f2x));
+            jointForceSum.set(r2_3 + 1, (float)((double) jointForceSum.get(r2_3 + 1) + f2y));
+            jointForceSum.set(r2_3 + 2, (float)((double) jointForceSum.get(r2_3 + 2) + f2z));
+            jointTorqueSum.set(r2_3,     (float)((double) jointTorqueSum.get(r2_3)     + t2x));
+            jointTorqueSum.set(r2_3 + 1, (float)((double) jointTorqueSum.get(r2_3 + 1) + t2y));
+            jointTorqueSum.set(r2_3 + 2, (float)((double) jointTorqueSum.get(r2_3 + 2) + t2z));
+
+            // ===== alignUVecLeversTorque (only if NOT both heads on filament) =====
+            if (!bothOnFil) {
+                int l1 = cohSlots.get(d5 + 2), l2 = cohSlots.get(d5 + 3);
+                int l1_3 = l1 * 3, l2_3 = l2 * 3;
+                double l1ux = uVec.get(l1_3), l1uy = uVec.get(l1_3 + 1), l1uz = uVec.get(l1_3 + 2);
+                double l2ux = uVec.get(l2_3), l2uy = uVec.get(l2_3 + 1), l2uz = uVec.get(l2_3 + 2);
+                double l1BRy = (double) bRotGam.get(l1_3 + 1), l2BRy = (double) bRotGam.get(l2_3 + 1);
+                double tvx = l1uy*l2uz - l1uz*l2uy;
+                double tvy = l1uz*l2ux - l1ux*l2uz;
+                double tvz = l1ux*l2uy - l1uy*l2ux;
+                double tvm2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                if (tvm2 > 0.0) {
+                    double invm = 1.0 / Math.sqrt(tvm2);
+                    tvx *= invm; tvy *= invm; tvz *= invm;
+                    double dot = l1ux*l2ux + l1uy*l2uy + l1uz*l2uz;
+                    if (dot > 1.0) dot = 1.0;
+                    if (dot < -1.0) dot = -1.0;
+                    double angD = accurateAcos(dot)*RAD2DEG - leverAng;
+                    double tmag = fracLT * DEG2RAD * angD / ((1.0/l1BRy + 1.0/l2BRy) * dt);
+                    jointTorqueSum.set(l1_3,     (float)((double) jointTorqueSum.get(l1_3)     + tvx*tmag));
+                    jointTorqueSum.set(l1_3 + 1, (float)((double) jointTorqueSum.get(l1_3 + 1) + tvy*tmag));
+                    jointTorqueSum.set(l1_3 + 2, (float)((double) jointTorqueSum.get(l1_3 + 2) + tvz*tmag));
+                    jointTorqueSum.set(l2_3,     (float)((double) jointTorqueSum.get(l2_3)     - tvx*tmag));
+                    jointTorqueSum.set(l2_3 + 1, (float)((double) jointTorqueSum.get(l2_3 + 1) - tvy*tmag));
+                    jointTorqueSum.set(l2_3 + 2, (float)((double) jointTorqueSum.get(l2_3 + 2) - tvz*tmag));
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Move kernel — sums the CPU-contributed forceSum and the device-side
     // joint-delta buffer to get the complete per-Thing force/torque, then
     // generates Brownian inline via Wang hash and integrates pose.
@@ -2838,6 +3083,16 @@ public class GPUMoveThing {
         motorWriteback   = ensureFloatArray(motorWriteback, myoCap * 2);
         motorForceParams = ensureFloatArray(motorForceParams, 6);
 
+        // Minifilament cohesion — per-dimer records (dimerCap = myoCap; ≥ #dimers since
+        // each dimer is 2 myosins) + per-body CSR (slotCap+1).
+        cohSlots         = ensureIntArray(cohSlots,      myoCap * 5);
+        cohFlags         = ensureIntArray(cohFlags,      myoCap);
+        cohOffsetX       = ensureFloatArray(cohOffsetX,  myoCap);
+        cohBodyForce     = ensureFloatArray(cohBodyForce,  myoCap * 3);
+        cohBodyTorque    = ensureFloatArray(cohBodyTorque, myoCap * 3);
+        cohParams        = ensureFloatArray(cohParams, 8);
+        cohCounts        = ensureIntArray(cohCounts, 2);
+
         params      = ensureFloatArray(params, 2);
         jointParams = ensureFloatArray(jointParams, 13);
         chainParams = ensureFloatArray(chainParams, 7);
@@ -2983,6 +3238,8 @@ public class GPUMoveThing {
                               boundSegSlot, posOnSegArr,
                               segMotorOffsets, segMotorMyo,
                               motorWriteback, motorForceParams,
+                              cohSlots, cohFlags, cohOffsetX,
+                              cohBodyForce, cohBodyTorque, cohParams, cohCounts,
                               derivedEnd1, derivedEnd2, derivedZVec,
                               derivedYVecOrtho, derivedTransXTox,
                               jointParams, chainParams, params, counts);
@@ -3118,6 +3375,25 @@ public class GPUMoveThing {
               jointForceSum, jointTorqueSum,
               motorForceParams, counts);
 
+        // Minifilament cohesion (2026-06-11): rod↔rod (End1/End2) + conditional lever
+        // torque + body↔rod, from resident pose. AFTER motorForce (motor-slot writes
+        // visible), BEFORE move (rod/lever/body-slot writes land before integration).
+        // No-op when dimerCohCt==0 (DIAG_COHESION_CPU or no GPU-handled minifilaments).
+        tg = tg.task("dimerCohesion",
+                  GPUMoveThing::dimerCohesionKernel,
+                  coord, uVec, soaLengthArr,
+                  cohSlots, cohFlags, cohOffsetX,
+                  bTransGam, bRotGam,
+                  jointForceSum, jointTorqueSum,
+                  cohBodyForce, cohBodyTorque,
+                  cohParams, cohCounts);
+        // NOTE: the body-side reaction is gathered HOST-SIDE (bridgeCohesionBody, below)
+        // rather than by a second device kernel — the separate per-body gather task did not
+        // execute reliably in the chained graph (its writes to jointForceSum never landed).
+        // The dimer kernel writes per-dimer −F/−τ to cohBodyForce/cohBodyTorque (transferred
+        // to host EVERY_EXECUTION); the host bridge sums them into the body's jointForce/Torque
+        // slot for the NEXT execute (1-step lagged; negligible for the quasi-static body).
+
         tg = tg.task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
                            : GPUMoveThing::moveThingKernel,
@@ -3200,6 +3476,8 @@ public class GPUMoveThing {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        motorWriteback);
             }
+            // Host bridge reads the device-computed per-dimer body reaction each step.
+            tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION, cohBodyForce, cohBodyTorque);
             // Contractility tension readout: the pinned anchor segment's reaction
             // is the device chain force (F3/F4) accumulated into jointForceSum,
             // which is otherwise never gathered to host (the host soaForceSum the
@@ -4658,6 +4936,88 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Pack minifilament cohesion records (2026-06-11). One record per PARALLEL,
+    // fully-GPU-handled dimer (rod1/rod2/lever1/lever2/body all have valid move-slots).
+    // Antiparallel or partially-handled dimers are left to the CPU cohesion path; the
+    // CPU gate (MyosinDimer/MyoMiniFilament) skips exactly the dimers packed here, so
+    // each cohesion force is applied exactly once. Builds the per-body CSR for the
+    // body-side reaction gather. No-op (dimerCohCt=0) when DIAG_COHESION_CPU.
+    // -------------------------------------------------------------------------
+    private static void packCohesion() {
+        int N = slotCount;
+        int dj = 0;
+        int cap = cohSlots.getSize() / 5;
+        if (!DIAG_COHESION_CPU) {
+            MyoMiniFilament[] mfs = MyoMiniFilament.myoMiniFils;
+            int mfCt = MyoMiniFilament.myoMiniFilCt;
+            for (int m = 0; m < mfCt && dj < cap; m++) {
+                MyoMiniFilament body = mfs[m];
+                if (body == null || body.removeMe) continue;
+                int bIdx = body.myThingNumber;
+                if (bIdx < 0 || bIdx >= thingNumberToMoveSlot.length) continue;
+                int bs = thingNumberToMoveSlot[bIdx];
+                if (bs < 0 || bs >= N) continue;   // body not GPU-handled this step
+                int nd = body.numMyoDimersEachEnd;
+                for (int end = 1; end <= 2 && dj < cap; end++) {
+                    MyosinDimer[] dimers = (end == 1) ? body.myoDimersEnd1 : body.myoDimersEnd2;
+                    Pt3D[] offs          = (end == 1) ? body.myoDimerPtsEnd1Inx : body.myoDimerPtsEnd2Inx;
+                    for (int i = 0; i < nd && dj < cap; i++) {
+                        MyosinDimer dimer = dimers[i];
+                        if (dimer == null || dimer.removeMe || !dimer.parallel) continue;
+                        Myosin myo1 = dimer.myo1, myo2 = dimer.myo2;
+                        if (myo1 == null || myo2 == null || myo1.removeMe || myo2.removeMe) continue;
+                        int r1s = cohSlotOf(myo1.myoRod);
+                        int r2s = cohSlotOf(myo2.myoRod);
+                        int l1s = cohSlotOf(myo1.myoLever);
+                        int l2s = cohSlotOf(myo2.myoLever);
+                        if (r1s < 0 || r2s < 0 || l1s < 0 || l2s < 0) continue;  // not fully GPU-handled
+                        int d5 = dj * 5;
+                        cohSlots.set(d5, r1s); cohSlots.set(d5 + 1, r2s);
+                        cohSlots.set(d5 + 2, l1s); cohSlots.set(d5 + 3, l2s);
+                        cohSlots.set(d5 + 4, bs);
+                        int flags = (end == 2) ? 1 : 0;
+                        if (myo1.myoMotor.onFil && myo2.myoMotor.onFil) flags |= 2;
+                        cohFlags.set(dj, flags);
+                        cohOffsetX.set(dj, (float) offs[i].x);
+                        dj++;
+                    }
+                }
+            }
+        }
+        dimerCohCt = dj;
+        // Host bridge: gather the device-computed per-dimer body reaction (cohBodyForce/
+        // cohBodyTorque, transferred to host from the PREVIOUS execute) into each body's
+        // jointForce/Torque slot for THIS execute's move. 1-step lagged; negligible for the
+        // quasi-static body. Zero the body slots first (RULE_MINIFIL body isn't zeroed by
+        // packRange, and this is an accumulation). Record order is stable for a static
+        // minifilament, so record d maps to the same dimer across steps.
+        for (int d = 0; d < dimerCohCt; d++) {
+            int bs3 = cohSlots.get(d * 5 + 4) * 3;
+            jointForceSum.set(bs3, 0f); jointForceSum.set(bs3 + 1, 0f); jointForceSum.set(bs3 + 2, 0f);
+            jointTorqueSum.set(bs3, 0f); jointTorqueSum.set(bs3 + 1, 0f); jointTorqueSum.set(bs3 + 2, 0f);
+        }
+        for (int d = 0; d < dimerCohCt; d++) {
+            int bs3 = cohSlots.get(d * 5 + 4) * 3;
+            int d3 = d * 3;
+            jointForceSum.set(bs3,     jointForceSum.get(bs3)     + cohBodyForce.get(d3));
+            jointForceSum.set(bs3 + 1, jointForceSum.get(bs3 + 1) + cohBodyForce.get(d3 + 1));
+            jointForceSum.set(bs3 + 2, jointForceSum.get(bs3 + 2) + cohBodyForce.get(d3 + 2));
+            jointTorqueSum.set(bs3,     jointTorqueSum.get(bs3)     + cohBodyTorque.get(d3));
+            jointTorqueSum.set(bs3 + 1, jointTorqueSum.get(bs3 + 1) + cohBodyTorque.get(d3 + 1));
+            jointTorqueSum.set(bs3 + 2, jointTorqueSum.get(bs3 + 2) + cohBodyTorque.get(d3 + 2));
+        }
+        cohCounts.set(0, dimerCohCt);
+        cohCounts.set(1, slotCount);
+    }
+
+    private static int cohSlotOf(Thing t) {
+        if (t == null) return -1;
+        int idx = t.myThingNumber;
+        if (idx < 0 || idx >= thingNumberToMoveSlot.length) return -1;
+        return thingNumberToMoveSlot[idx];
+    }
+
+    // -------------------------------------------------------------------------
     // Motor-force writeback bridge (Phase 2 F8/F9/F10, 2026-06-03).
     //
     // Drains motorWriteback (per-Myosin forceMag, forceDotFil) into the
@@ -5344,6 +5704,18 @@ public class GPUMoveThing {
         if (myoJointCt > 0) {
             packMotorBinding();
         }
+
+        // Minifilament cohesion params + per-dimer pack (no-op when DIAG_COHESION_CPU
+        // or no GPU-handled minifilaments).
+        cohParams.set(0, (float) Env.deltaT.getValue());
+        cohParams.set(1, (float) Env.myoRodLength.getValue());
+        cohParams.set(2, (float) MyosinDimer.leverAngle);
+        cohParams.set(3, (float) Env.myoDimerFracMove.getValue());
+        cohParams.set(4, (float) Env.myoDimerLeverFracMoveTorq.getValue());
+        cohParams.set(5, (float) Env.myoMiniFilFracMove.getValue());
+        cohParams.set(6, (float) Env.myoMiniFilAlign.getValue());
+        cohParams.set(7, 0.0f);
+        packCohesion();
 
         counts.set(0, slotCount);
         counts.set(1, stepCounter);

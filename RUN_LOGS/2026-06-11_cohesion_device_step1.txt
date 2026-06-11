@@ -1,0 +1,46 @@
+Step 1 — minifilament cohesion onto device (behavior-neutral). Branch minifil-cohesion-device.
+Driver scripts/run_cohesion_ab.sh; analyzer RUN_LOGS/_cohesion/analyze_minifil.py.
+GPU runs need -Dtornado.tvm.maxbytecodesize=16384 (the cohesion tasks push the chained graph
+past the 4096-default bytecode buffer).
+
+WHAT MOVED TO DEVICE (dimerCohesionKernel, one thread per parallel GPU-handled dimer):
+  - applyRodCouplingEnd1/End2 (rod↔rod F + R×F torque), conditional alignUVecLeversTorque
+    (gated on !bothOnFil), and constrainEnd{1,2}Dimers body↔rod force + alignment torque on
+    myo1.rod. Reads resident pose (freshEnd = coord ∓ ½·len·uVec), drags from resident
+    bTransGam/bRotGam, body attach = body.coord + offsetX·body.uVec (purely axial; no frame rebuild).
+  - CPU cohesion (MyosinDimer.jointConstraints + MyoMiniFilament.constrainEnd*Dimers) gated off
+    in lockstep via MyosinDimer.cohesionOnDevice() (matches packCohesion exactly). cpuCohesionApplyCt=0
+    on devcoh confirms no double-apply. BOA_MINIFIL_COHESION_CPU=1 = the A/B control.
+
+TWO BUGS FOUND + FIXED during validation:
+  1. linkUVec SIGN FLIP: Pt3D.unitVec(a,b) = (a−b)/|.|, so CPU's unitVec(rod2End,rod1End) points
+     rod1→rod2 (attractive). The kernel computed (p1−p2)/dist = the OPPOSITE → repulsive springs →
+     runaway NaN by frame ~9. Fixed (negated u in all 3 force blocks). Span then locks 180.
+  2. BODY-REACTION GATHER won't run as a 2nd device kernel: a per-body gather task (sum the 16
+     dimers' −F/−τ into the body slot) never executed in the chained graph — its writes to
+     jointForceSum[bodySlot] never landed (verified: unconditional top-of-kernel sentinel absent;
+     bs=0, N/CSR all valid host-side). Per-dimer −F/−τ ARE correct (match CPU exactly). Worked around
+     with a HOST BRIDGE: dimerCohesionKernel writes per-dimer −F/−τ to cohBodyForce/cohBodyTorque,
+     transferred to host EVERY_EXECUTION; packCohesion sums them into the body's jointForce/Torque
+     slot for the NEXT execute (1-step lagged; negligible for the quasi-static body).
+
+NEUTRAL A/B (devcoh = device, cpucoh = BOA_MINIFIL_COHESION_CPU=1, oracle = full CPU):
+  boa10-singleMiniFil (span / body-axis wander / COM jitter), seeds 1-3:
+                 span(nm)      wander(deg)   jitter(nm)
+    devcoh       180.0±0.03    16–18         0.42–0.44
+    cpucoh       180.0±0.03    20–22         1.4–1.5
+    oracle       180.0±0.03    18–21         1.5–1.6
+  -> span locks; wander matches oracle within noise; NO NaN, NO "Crazy torque". Body translational
+     jitter is LOWER on device (the 1-step bridge lag low-passes the body's thermal motion) — sub-nm,
+     and the rotational wander (the cohesion-held DOF) matches.
+
+  contractilityAssay_gpu_short (mean tension / boundMotors), seeds 1-2:
+    devcoh   meanTension 1.58   boundMotors 5.67
+    cpucoh   meanTension 1.75   boundMotors 5.35
+    oracle   meanTension 1.85   boundMotors 6.08
+  -> within the documented ~1.8x run-to-run tension noise; boundMotors match. No NaN.
+
+VERDICT: behavior-neutral on the science observables (span, rotational wander, contractility
+tension, boundMotors). The body translational jitter is mildly over-damped by the host-bridge
+1-step lag (sub-nm). Cohesion now computes on-device from resident pose; the only residual host
+op is the body-reaction force READBACK (cohBodyForce/Torque) — a force, not a pose (relevant to Step 2).
