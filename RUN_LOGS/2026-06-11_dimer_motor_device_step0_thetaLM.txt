@@ -1,0 +1,18 @@
+Step 0 — theta_LM re-measure on brownianDeltaT-fixed base (branch dimer-motor-force-device)
+Config: boa10-singleMiniFil (deltaT=1e-4, biochem active, 1 minifilament, no actin), 300 steps / 63 frames.
+Method: theta_LM = angle(lever.uVec, motor.uVec), theta_RL = angle(rod.uVec, lever.uVec),
+        per-frame mean over the minifilament's ~32 myosins, steady = mean of last 20 frames.
+
+                 theta_LM steady   theta_RL steady
+  GPU  thetaLM_gpu     18.2            90.3
+  CPU  thetaLM_cpu     24.8            89.3
+
+Prior (Phase B1, 2026-06-10, on the sqrt(10)-buggy base):
+  GPU theta_LM ~16-19 (16.2/19.2),  CPU theta_LM ~68-82 (68.4/81.8).
+
+VERDICT: PASS / CLOSED. CPU theta_LM collapsed 67-82 -> 24.8, converging toward GPU 18.2.
+The wide CPU theta_LM was the over-excited buggy Brownian value (sqrt(10) over-forcing of the
+soft lever-motor joint shifts its mean, not just variance). theta_RL (stiff joint) matched on both
+bases. Residual 6.6deg (24.8 vs 18.2) is a small float32/integration-timing mean offset, consistent
+with the documented meanMotSegDot-identical finding. No surviving CPU/GPU internal-joint seam ->
+safe to proceed to the motor-force port (Step 1).

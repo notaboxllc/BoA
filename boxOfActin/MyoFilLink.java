@@ -145,16 +145,22 @@ public class MyoFilLink {
 
 	// Returns true if the device motor-force kernels are computing F8/F9/F10
 	// for this MyoFilLink THIS step. Mirrors the gating in
-	// GPUMoveThing.packMotorBinding(): scope is MyosinFixed-only; the seg
-	// must be a GPU-handled FilSegment; DIAG_CPU_MOTOR forces the entire path
-	// off. Cheap to recompute every step (it is the same fields the pack
-	// already read).
+	// GPUMoveThing.packMotorBinding(): any bound motor (dimer / minifilament
+	// or MyosinFixed) whose seg is a GPU-handled FilSegment; DIAG_CPU_MOTOR
+	// forces the entire path off. Cheap to recompute every step (it is the
+	// same fields the pack already read).
 	private boolean gpuMotorHandled () {
 		if (!Env.useGPU) return false;
 		if (GPUMoveThing.DIAG_CPU_MOTOR) return false;
 		if (myMotor == null) return false;
-		Myosin myo = myMotor.myMyosin;
-		if (!(myo instanceof MyosinFixed)) return false;
+		// 2026-06-11: admit non-MyosinFixed (dimer / minifilament) motors whose
+		// bound seg is GPU-handled. The device kernels now compute their
+		// cross-bridge F8/F9/F10 (packMotorBinding gives them a real
+		// boundSegSlot when mySeg has a valid move slot), so the CPU pair must
+		// no-op here exactly as for MyosinFixed. The MyosinFixed-only
+		// short-circuit is removed; the null / removeMe / gpuHandled guards
+		// below mirror the pack gate so the two paths agree on the device set
+		// (force applied exactly once — never dropped, never doubled).
 		if (mySeg == null) return false;
 		if (mySeg.removeMe) return false;
 		return mySeg.gpuHandled;

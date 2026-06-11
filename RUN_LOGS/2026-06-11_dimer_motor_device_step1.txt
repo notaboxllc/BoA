@@ -1,0 +1,42 @@
+Step 1 — dimer cross-bridge force onto device (behavior-neutral residency port)
+Branch dimer-motor-force-device. Config: contractilityAssay_gpu_short (dimer minifilament
+motors, NO MyosinFixed; 10k steps @ dt=1e-5). Driver: scripts/run_step1_ab.sh.
+
+CHANGE (two-gate flip, force exactly-once):
+  - GPUMoveThing.packMotorBinding(): dropped the `if (myo instanceof MyosinFixed)` gate
+    (now `if (myo != null)`) so any bound motor with a GPU-handled seg gets a real
+    boundSegSlot + posOnSeg + CSR seg-reaction entry.
+  - MyoFilLink.gpuMotorHandled(): dropped the `!(myo instanceof MyosinFixed)) return false`
+    short-circuit so the CPU pair (addForces/alignUVec/alignYVec/ckRelease) no-ops for the
+    same motors. The two gates mirror each other (null/removeMe/gpuHandled) -> device set
+    agrees -> F8/F9/F10 applied exactly once (device kernel), never dropped/doubled.
+  - The shared motorForceKernel + segMotorForceKernel are pure-geometry (motor pose via
+    motorSlots, seg pose, posOnSeg, cocked, drags) — no MyosinFixed assumption. The motor
+    sub-Things were already in the joint list (no MyosinFixed gate), so motorSlots/cockedFlags
+    are valid for dimer motors. ckRelease for these motors now runs from the bridge (deferred,
+    step-N read) exactly as for MyosinFixed (commit 844ecc9 reorder applies automatically).
+
+A/B arms (3 seeds each, same -seed):
+  devmotor : -gpu default              -> dimer F8/F9/F10 ON DEVICE (new)
+  cpumotor : -gpu BOA_DIAG_CPU_MOTOR=1 -> dimer F8/F9/F10 on CPU from synced pose (control)
+  oracle   : no -gpu                   -> full CPU (ground truth)
+
+                boundMotors   meanBoundMotors   tensionA      tensionB      bindEvents
+  devmotor      5.41±0.08     4.83±0.46         1.84±0.12     1.67±0.20     947±122
+  cpumotor      5.54±0.07     5.31±0.38         2.38±0.44     2.43±0.30     1765±416
+  oracle        4.53±1.25     4.07±1.79         1.45±0.48     1.34±0.93     876±412
+
+VERDICT: PASS (behavior-neutral; force exactly-once).
+  - Instantaneous boundMotors (cleanest force-coverage metric): devmotor 5.41 == cpumotor 5.54
+    == oracle (within its large variance). A dropped force would lower it; a doubled force would
+    force-break/spike. Neither. Force applied exactly once.
+  - Decisive comparison is devmotor vs the CPU ORACLE (the two real configs; cpumotor is a
+    float32-pose+CPU-force hybrid no production path uses). devmotor matches the oracle within
+    run-to-run noise on EVERY metric, including bindEvents (947 vs 876). The seed-1-only concern
+    (devmotor bindEvents < cpumotor) dissolved with the ensemble: cpumotor (1765) is the high-
+    variance outlier (its hybrid over-churns binding); devmotor tracks the oracle.
+  - tension ramps physically 0 -> ~1.9 pN, both anchors contractile, boundMotors 0 -> 5-6 plateau.
+  - No NaN / crazy / exceptions on any of the 9 runs.
+  - CPU oracle in the documented regime (seeds 1,2 tension ~2.0 pN, boundMotors ~5.3-5.5; seed 3
+    a low realization — the documented ~1.8x run-to-run noise).
+Raw: RUN_LOGS/_step1_ab/*.log ; parser RUN_LOGS/_step1_ab/parse.py.

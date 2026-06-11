@@ -1880,10 +1880,12 @@ public class GPUMoveThing {
     // motorForceKernel writes only motor slots; segMotorForceKernel writes
     // only FilSeg slots; both use separate per-slot accumulators on entry.
     //
-    // Anchor for adding MyoMiniFilament later (deferred): the kernel API is
-    // unchanged. boundSegSlot[mj] = -1 for non-MyosinFixed Myosins; flip
-    // that line in packMotorBindingRange when the minifilament path needs
-    // device support.
+    // 2026-06-11: dimer / MyoMiniFilament motors are now ADMITTED — the kernel
+    // API is unchanged (it always read pure geometry). packMotorBinding gives
+    // any bound motor with a GPU-handled seg a real boundSegSlot, and
+    // MyoFilLink.gpuMotorHandled() gates the CPU pair off in lockstep, so
+    // F8/F9/F10 apply exactly once on the device for every GPU-handled bound
+    // motor (was MyosinFixed-only).
     // -------------------------------------------------------------------------
     private static void motorForceKernel(
             FloatArray coord,
@@ -4600,12 +4602,18 @@ public class GPUMoveThing {
             float posOnSegF = 0f;
             if (!cpuMotor) {
                 Myosin myo = myos[toMyo[mj]];
-                // Scope to MyosinFixed only — MyoMiniFilament path is deferred
-                // (its dimers' internal Myosins have their own tipLink, but
-                // the joint coupling that drives them is CPU-only; keeping
-                // them off the device kernel preserves correctness without
-                // any kernel change).
-                if (myo instanceof MyosinFixed) {
+                // 2026-06-11: admit ALL GPU-handled bound motors (dimer /
+                // minifilament + MyosinFixed), not just MyosinFixed. The
+                // cross-bridge force kernels (motorForceKernel + the seg-side
+                // segMotorForceKernel reaction) are pure-geometry — they read
+                // motor pose via motorSlots, seg pose, posOnSeg, the cocked
+                // flag, and drags; nothing is MyosinFixed-specific. The CPU
+                // pair (MyoFilLink.addForces/alignUVec/alignYVec/ckRelease) is
+                // gated off in lockstep by gpuMotorHandled() so F8/F9/F10 are
+                // applied exactly once. The motor's three sub-Things are
+                // already in the joint list (no MyosinFixed gate there), so
+                // motorSlots[mj]/cockedFlags[mj] are valid for dimer motors.
+                if (myo != null) {
                     MyoMotor motor = myo.myoMotor;
                     if (motor != null) {
                         MyoFilLink link = motor.tipLink;
