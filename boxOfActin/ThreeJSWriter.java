@@ -141,10 +141,15 @@ public class ThreeJSWriter {
             FilSegment fs = FilSegment.theFilSegments[i];
             if (fs == null || fs.removeMe) continue;
             if (!first) sb.append(",");
-            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":0.035",
+            // Actin radius = FilSegment.radius (Env.actinWidth/2 = 0.0035 µm = 3.5 nm,
+            // i.e. the real 7 nm filament diameter). Was hardcoded 0.035 µm — 10× too
+            // thick (70 nm diameter) and inconsistent with the myosin parts, which emit
+            // their true radii.
+            sb.append(String.format("{\"id\":%d,\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g",
                     fs.thingInstanceId,
                     fs.getEnd1X(), fs.getEnd1Y(), fs.getEnd1Z(),
-                    fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z()));
+                    fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z(),
+                    FilSegment.radius));
             if (Env.benchmarkFilament) {
                 sb.append(fs.isLpSeg ? ",\"chainType\":\"lp\"" : ",\"chainType\":\"defl\"");
             }
