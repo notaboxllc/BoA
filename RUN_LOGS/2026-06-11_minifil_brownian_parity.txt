@@ -81,3 +81,26 @@ Body-axis total turn (deg over 63 frames):
 
 Net: CPU and GPU minifilament runs now agree on both myosin-piece thermal (5.46~5.51 nm) and
 body wander (20.7~21.5 deg). Staged viewer runs under ~/Code/threejs_output/minifil_*.
+
+================================================================================
+PART 3 — Phase A: MyoMiniFilament body device-integrated (RULE_MINIFIL), commit 1d7dcc3
+================================================================================
+Body moved off cpuFallback onto the device move/derived kernel path. Validated boa10-singleMiniFil
+vs CPU reference (both after the brownianDeltaT + body-scale fixes).
+
+300-step runs (63 frames):
+                       jitter(nm)   body-wander(deg)   span(nm)        COM net drift(nm)
+  GPU Phase A s1         5.50          22.2           180.0 (179.9-180.1)   4.1  (path 87.4)
+  GPU pre-A (CPU-fb) s1  5.51          21.5           --                    --
+  CPU ref s1            5.46          20.7           179.9-180.1            7.3  (path 90.7)
+  GPU Phase A s2         5.46          19.7           179.9-180.1          14.3  (path 95.0)
+  CPU ref s2            5.43          22.1           179.9-180.1           6.8  (path 96.4)
+
+3000-step run (603 frames), GPU Phase A: span locked 180.0 (min 179.9 max 180.1), COM net 23.4 nm
+over a 903.7 nm path, body wander 198.9 deg, crazy/NaN=0, clean exit.
+
+=> body holds device-integrated, matches CPU on all observables, no NaN. Phase A gate PASSED.
+
+Phase B (cohesion->device) DEFERRED per jba (spin rationale void; Phase A already gives matched-
+precision action/reaction; Phase C blocked regardless). Phase C BLOCKED by bind-application
+(MyoFilLink.addForces reads fresh host motor+fil pose every step; dimer motors CPU-handled).

@@ -1,6 +1,6 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**Minifilament Brownian: CPU/GPU parity (`brownianDeltaT` removed) + body thermal scale; spin-seam premise refuted.** Investigating the "GPU minifilament spin" (Path B Phase 2a), the spin-coherence probe does **not** reproduce a real seam on current main: at the 300-step run length its statistical noise floor (~1/√62 ≈ 0.13) swamps the signal (64 correlated myosins ≈ 1 effective DOF). 5-seed ensembles GPU 0.207 / CPU 0.140 / body-off 0.158 all overlap; at 603 frames GPU (0.028–0.036) == CPU (0.021–0.044) at the floor, and in the same first-63-frame window CPU (0.249) is *more* "spun" than GPU (0.104). **No reproducible spin seam → the body+cohesion device port (Phases A/B/C) chases an artifact; Phase 0 bail** (and Phase C would anyway be blocked by bind-application, an in-scope per-step pose consumer). The REAL CPU-vs-GPU difference jba saw in frames ("CPU myosins knocked around, GPU milder") is a **√10 Brownian bug**: GPU kernel scales by `sqrt(2kT/deltaT)` (deltaT=1e-4) while CPU `calcRandomForces` scales by `1/brownianDeltaT` (1e-5) with integration at deltaT — FDT-breaking; CPU diffuses ~10× too fast (rod-center step CPU 17.4 vs GPU 5.5 nm = 3.16×). Per jba (`brownianDeltaT` was always meant to equal `deltaT`; residual): **removed `brownianDeltaT` entirely — Brownian always uses `deltaT`** (`Env.java`, `Thing.java`; `brownianApplyInt`=1). No-op where they already matched (gliding & contractility_gpu both 1e-5/1e-5; Lp configs ran 1e-5/1e-5 too); corrects only the deltaT=1e-4 minifil configs → CPU rod step 17.4→**5.46 nm = GPU 5.51**. Also added **`Env.myoMiniFilBrownianScale`** (default **0.1**, runtime-mutable; `BOA_MINIFIL_BROWNIAN_OFF` still hard-off): minifilament BODY thermal dialed to 1/10 of the (corrected) free-body value — body-axis wander 522°→21° (CPU≈GPU). Branch `minifil-body-cohesion-device`. `RUN_LOGS/2026-06-11_minifil_brownian_parity.txt`; viewer `~/Code/threejs_output/minifil_*`. Full writeup below.)
+Last updated: 2026-06-11 (**Minifilament Brownian: CPU/GPU parity (`brownianDeltaT` removed) + body thermal scale; spin-seam premise refuted.** Investigating the "GPU minifilament spin" (Path B Phase 2a), the spin-coherence probe does **not** reproduce a real seam on current main: at the 300-step run length its statistical noise floor (~1/√62 ≈ 0.13) swamps the signal (64 correlated myosins ≈ 1 effective DOF). 5-seed ensembles GPU 0.207 / CPU 0.140 / body-off 0.158 all overlap; at 603 frames GPU (0.028–0.036) == CPU (0.021–0.044) at the floor, and in the same first-63-frame window CPU (0.249) is *more* "spun" than GPU (0.104). **No reproducible spin seam → the body+cohesion device port (Phases A/B/C) chases an artifact; Phase 0 bail** (and Phase C would anyway be blocked by bind-application, an in-scope per-step pose consumer). The REAL CPU-vs-GPU difference jba saw in frames ("CPU myosins knocked around, GPU milder") is a **√10 Brownian bug**: GPU kernel scales by `sqrt(2kT/deltaT)` (deltaT=1e-4) while CPU `calcRandomForces` scales by `1/brownianDeltaT` (1e-5) with integration at deltaT — FDT-breaking; CPU diffuses ~10× too fast (rod-center step CPU 17.4 vs GPU 5.5 nm = 3.16×). Per jba (`brownianDeltaT` was always meant to equal `deltaT`; residual): **removed `brownianDeltaT` entirely — Brownian always uses `deltaT`** (`Env.java`, `Thing.java`; `brownianApplyInt`=1). No-op where they already matched (gliding & contractility_gpu both 1e-5/1e-5; Lp configs ran 1e-5/1e-5 too); corrects only the deltaT=1e-4 minifil configs → CPU rod step 17.4→**5.46 nm = GPU 5.51**. Also added **`Env.myoMiniFilBrownianScale`** (default **0.1**, runtime-mutable; `BOA_MINIFIL_BROWNIAN_OFF` still hard-off): minifilament BODY thermal dialed to 1/10 of the (corrected) free-body value — body-axis wander 522°→21° (CPU≈GPU). Branch `minifil-body-cohesion-device`. `RUN_LOGS/2026-06-11_minifil_brownian_parity.txt`; viewer `~/Code/threejs_output/minifil_*`. **Then, per jba, did the body→device port (residency, not spin): Phase A landed** — `MyoMiniFilament` body is now device-integrated (`RULE_MINIFIL`), on the same float32 integrator as its rods, so the cohesion action/reaction integrate in matched precision (removes the two-integrator split — the architecturally-correct state). Validated vs CPU: span locked 180.0 nm (300- & 3000-step), no NaN, jitter/wander/COM match. **Phase B (cohesion→device kernels) DEFERRED** and **Phase C (retire per-step pose pull) BLOCKED by bind-application** (`MyoFilLink.addForces`, out of scope) — both documented for the planner. Full writeup below.)
 
 Prior update: 2026-06-11 (**GPU-vs-CPU contractility tension difference — resolved as a measurement artifact, NOT a physics gap.** The prior entry's "~1.8× overshoot = float32/θ_LM seam" was wrong. Measured per-motor cross-bridge force GENERATION (env `BOA_TENSION_DIAG` in `MyoFilLink.addForces` — runs CPU-side on both paths since dimer motors are CPU-handled) plus the anchor force decomposition. Findings: **(1)** the CPU "oracle" ~1.8 pN was UNDER-CONVERGED — CPU tension only plateaus by ~step 15k; true CPU plateau (50k run) = **2.06 ± 0.10 pN**, not 1.8. **(2)** GPU binds motors ~600–1000 steps EARLIER, so its ramp leads; in a 10k window CPU hasn't converged → the "mean over steps>5000" diverges. **(3)** Run-to-run noise is ~1.8× by itself (GPU plateau realizations 1.78 / 2.08 / 2.18 / 3.27 pN — the 3.27 used in the prior entry was an outlier; median ~2.1). **(4)** Small ~6–9% systematic GPU per-motor force excess (meanForceMag 5.65 vs 5.35 pN; bound heads sit ~6% farther from attach points) — a float32 / integration-timing residual, within noise. **NOT** θ_LM/cocking: head-vs-filament alignment `meanMotSegDot` is identical (−0.35 both paths). Readout is clean — no double-count (CPU tension entirely `soaForceSum`, GPU entirely the gathered `jointForceSum`). **Net: true GPU and CPU steady-state tensions agree (~2.0–2.1 pN) within run-to-run noise; neither path is ground truth.** Diagnostic-only (branch `gpu-tension-diag`), not committed. `RUN_LOGS/2026-06-11_gpu_cpu_tension_difference.txt`.)
 
@@ -18,6 +18,95 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-11 — Minifilament Brownian parity + body→device port (Phase A); spin premise refuted
+
+Branch `minifil-body-cohesion-device` (off main). Commits: `84e188c` (remove brownianDeltaT),
+`71db5b0` (body Brownian scale), `1d7dcc3` (Phase A body→device). Data:
+`RUN_LOGS/2026-06-11_minifil_brownian_parity.txt`. Viewer: `~/Code/threejs_output/minifil_*`.
+**Not merged — for the planner.**
+
+### The task and the pivot
+The session began as the scoped "MyoMiniFilament body + cohesion onto device — kill the spin"
+port (Phases 0/A/B/C). **Phase 0 refuted the premise**: the Path-B Phase-2a "GPU minifilament
+spin" does not reproduce as a real seam. The `spin_metric.py` cloud coherence over a 300-step run
+has only ~62 transitions and the 64 myosins of one minifilament are ~1 effective DOF (all chase
+the body), so the metric's statistical noise floor is ~1/√62 ≈ 0.13 — comparable to the signal.
+- 5-seed ensembles: GPU 0.207 / CPU 0.140 / body-off 0.158 — all overlap (per-run 0.003–0.382).
+- 10× longer (3000 steps, 603 frames, floor ~0.04): GPU 0.028–0.036 == CPU 0.021–0.044, random-
+  sign net rotations (diffusive). A real ballistic spin would hold coherence as N grows; this
+  decays as 1/√N. In the *same* first-63-frame window CPU (0.249) is *more* "spun" than GPU (0.104).
+- Phase-2a's own body-axis numbers already showed CPU 536° ≈ GPU 555° (the body wanders the same
+  on both — it was CPU-integrated on both). No GPU-specific rotational excess exists.
+So the spin-collapse rationale for the port is void. The port still has *residency* value, which is
+why jba directed proceeding with A/B/C anyway.
+
+### The real CPU-vs-GPU difference jba saw in frames: a √10 Brownian bug (FIXED)
+With the body thermal equalized, residual myosin rod-center jitter was CPU 17.4 vs GPU 5.5 nm/frame
+= 3.16× = √10 = √(deltaT/brownianDeltaT). Root cause: the GPU move kernel scales Brownian by
+`sqrt(2kT/deltaT)` (`GPUMoveThing.java:5227`, deltaT=1e-4) while CPU `calcRandomForces` scales by
+`1/brownianDeltaT` (`Thing.java:1051`, brownianDeltaT=1e-5) with integration at deltaT — an
+FDT-breaking mismatch; the CPU diffused ~10× too fast in variance. GPU was correct; CPU over-forced.
+Per jba (brownianDeltaT was always meant to equal deltaT; residual), **removed `brownianDeltaT`
+entirely** — Brownian always uses `deltaT`, `brownianApplyInt`=1 (it was every-step already since
+`(int)(1e-5/1e-4)=0` and `counter>=0`). No-op where they already matched (gliding & contractility_gpu
+1e-5/1e-5; Lp configs ran 1e-5/1e-5); corrects only the deltaT=1e-4 minifil configs. Validated:
+CPU rod step 17.4→**5.46 nm = GPU 5.51**. Stale `brownianDeltaT:` lines in old param files are
+non-fatal (logged "misunderstanding") — left in place per jba.
+
+### Minifilament BODY Brownian scale (jba directive)
+`Env.myoMiniFilBrownianScale` (default **0.1**, runtime-mutable; `myoMiniFilBrownianMotionOff` /
+`BOA_MINIFIL_BROWNIAN_OFF` still hard-off). Applied in `MyoMiniFilament.moveThing()` as
+`bForceSum.inc(scale, randForces)`. Body is `cpuFallback`→applies on both paths. Body-axis wander
+522° (full) → 21° (1/10 of corrected free-body), CPU≈GPU.
+
+### Phase A — MyoMiniFilament body device-integrated (`RULE_MINIFIL`) — LANDED (`1d7dcc3`)
+The body was the one `cpuFallback` Thing in a minifilament whose rods were GPU-handled (the
+float64-CPU vs float32-GPU two-integrator split Phase-2a hypothesized as the spin cause). Moved it
+onto the device move/derived kernel path:
+- `RULE_MINIFIL` classification in `classifyThings` (was `else→cpuFallback`).
+- Body Brownian on device: `packRange`/`packDynamicRange` set tScale=rScale=`myoMiniFilBrownianScale`
+  (0 if off) — same free-body drag formula as the rods, so device body Brownian == the CPU formula
+  it replaces.
+- `refreshMiniFilBodyDerived()`: after the per-step `demandSyncPoseToHost`, recompute the body's
+  host `transXTox`/`end1`/`end2` from the synced pose (the CPU cohesion's `xToX` attachment
+  placement reads cached `soaTransXTox[body]`; the body's CPU `moveThing`/`initialize` used to
+  refresh it). Idempotent re-orthog from the device's orthonormal pose; few bodies.
+The body's CPU `step()` (F7 boundary) is inert here (no Bug); its CPU `moveThing` no longer runs.
+Cohesion stays on CPU (it reads fresh host pose, demand-synced). The cohesion reaction (−F/−τ,
+gathered into `soaForceSum[body]`) now integrates on the SAME float32 device integrator as the
+rods' +F/+τ. **Validated** (boa10-singleMiniFil, seeds 1–2, vs CPU): no NaN/crazy; span locked
+180.0 nm over 300- and 3000-step runs; jitter GPU 5.50 ≈ CPU 5.46 nm; body wander GPU 22.2 ≈
+CPU 20.7°; COM drift GPU 4.1 vs CPU 7.3 nm (s1), comparable paths.
+
+### Phase B (cohesion→device) — DEFERRED (jba's call); design + rationale for the planner
+**Decision:** defer. With the spin rationale refuted, Phase A already delivered the only real
+correctness goal (matched-precision integration of the cohesion action/reaction). Moving the
+cohesion *computation* to the device buys nothing physical (the stored force is float32 either
+way) and its only benefit — residency — is blocked at Phase C regardless (below). It is the
+high-risk force-coverage class (the recurring taForce/anchor hazard) with zero wall-clock payoff
+pre-flip. Not worth the risk now; the planner should re-prioritize.
+
+**Design if/when done.** Per-step pose consumers on this config (the things that would need to move):
+(1) `MyoMiniFilament.constrainEnd1/2Dimers` (myoJoints2) — body↔rod spring + alignment torque,
+reads body pose (attachment pts via `xToX`) + rod pose; (2) `MyosinDimer.jointConstraints`
+(myoJoints1) — `alignUVecLeversTorque` + `applyRodCoupling{End1,End2,End1End2,End2End1}`, reads
+the two rods/levers (not the body). A device cohesion kernel would insert into the chained
+TaskGraph BEFORE `move` (after joints/chain), RMW into `jointForceSum`/`jointTorqueSum` on the rod
+and body slots. Per (dimer,end) it needs: rod move-slot, body move-slot, the FIXED body-frame
+attachment offset (`myoDimerPtsEnd{1,2}Inx`, 3 floats), an end flag (end1 uses −uVec / uVecR),
+and drags. **Note:** the normal (non-diag) graph's post-move `derived` task is only
+`yVecOrthoKernel` — device `transXTox` is NOT resident — so the kernel must rebuild the body frame
+(uVec, yVec′, zVec) from `uVec`/`yVec` per body to transform the offset. Validate against CPU via
+a new `BOA_MINIFIL_COHESION_CPU=1` A/B (stability, span, jitter, wander, meanBoundMotors —
+force-coverage exactly-once).
+
+### Phase C (retire per-step `demandSyncPoseToHost`) — BLOCKED (reported)
+Blocked by **bind-application**: `MyoFilLink.addForces`/`updatePos` read fresh host motor+filament
+pose every step (dimer motors are CPU-handled — JOURNAL 2026-06-10). This remains even if all of
+Phase B is done, so Phase B cannot enable the residency flip this session; binding must move first
+("next session", out of scope). Documented so the planner can sequence binding before re-attempting
+B/C.
 
 ## 2026-06-10 — GPU contractility: dimer binding + tension readout + anchor pin (merged)
 
