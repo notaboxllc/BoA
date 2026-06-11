@@ -623,6 +623,16 @@ public class BoxOfActin {
 				// individual params (loaded after, in begin()).
 				Env.contractilityAssay.setActive(true);
 				Env.contractilityAssay.setValue(1.0);
+				// Optional integer arg = dimers per minifilament END (the half-
+				// bipolar head count engaging each filament), e.g.
+				// `-bmContractile 4`. Read fresh at MyoMiniFilament construction,
+				// so setting it here is honoured; a -pf numMyoDimersEachEndOfMiniFil
+				// still overrides. Omit the arg to keep the default (8).
+				if (i + 1 < args.length && args[i + 1].matches("\\d+")) {
+					int nd = Integer.parseInt(args[++i]);
+					Env.numMyoDimersEachEndOfMiniFil.setValue(nd);
+					Env.numMyoDimersEachEndOfMiniFil.setActive(true);
+				}
 			}
 			if (args[i].equals("-singleFilDiag")) {
 				// Phase 2 F3/F4 SingleFilDiag probe: pinned-ends bench chain
