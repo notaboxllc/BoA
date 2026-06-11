@@ -1,0 +1,77 @@
+GPU vs CPU CONTRACTILITY TENSION — investigating the apparent difference
+Date: 2026-06-11   Branch: gpu-tension-diag (throwaway diag, NOT committed)
+Config: ParameterFiles/contractilityAssay_gpu_short (10k) and _gpu (50k), same physics.
+Method: env-gated BOA_TENSION_DIAG instrumentation in MyoFilLink.addForces (per-bound-motor
+        generation metrics — runs CPU-side on BOTH paths since dimer motors are CPU-handled) +
+        an anchor force-decomposition print (host soaForceSum vs device jointForceSum).
+
+PROMPT FRAMING: the prior writeup reported GPU plateau ~3.3 pN vs CPU "oracle" ~1.8 pN (~1.8x) and
+attributed it to a lever-motor theta_LM power-stroke seam. jba flagged that the CPU value is not
+necessarily ground truth. That flag was correct.
+
+================================================================================
+BOTTOM LINE
+================================================================================
+There is essentially NO real steady-state tension difference. The apparent 1.8x was a measurement
+artifact + run-to-run noise, NOT a physics gap. Causes, in order of size:
+
+1. CPU was UNDER-CONVERGED in the original window. CPU tension ramps slowly and only reaches its
+   plateau (~2.05 pN) by ~step 15000. The "mean over steps>5000" in a 10k run sampled the still-
+   rising ramp -> ~1.80 pN, BELOW the true CPU plateau. Long run (50k) plateau:
+   meanTensionA = 2.055 +/- 0.104 pN (step>=20000, n=61). So the CPU "1.8 oracle" was itself an
+   artifact, exactly as jba suspected.
+
+2. GPU binds motors ~600-1000 steps EARLIER, so its tension ramp leads CPU's throughout:
+        step    GPU bound/tensionA     CPU bound/tensionA
+        401     4 / 0.28               0 / 0.28
+        601     7 / 0.32               0 / 0.26
+        1001    6 / 0.46               1 / 0.23
+        1501    4 / 0.61               8 / 0.23
+   GPU reaches its plateau by ~step 5000; CPU not until ~step 15000. In a fixed 10k window the
+   GPU looks plateaued and the CPU does not -> windowed means exaggerate the gap.
+
+3. Large RUN-TO-RUN NOISE (the sim is nondeterministic at 16 threads). GPU plateau realizations
+   (meanTensionA, step>=5000): 1.78, 2.08, 2.18, and 3.27 (the earlier run) — a 1.8x spread BY
+   ITSELF. The headline "3.27" was a high outlier; the GPU median is ~2.1. CPU plateau fluctuates
+   1.93-2.23 around 2.05.
+
+   => CPU plateau 2.06 +/- 0.10  vs  GPU plateau ~2.0-2.2 (median ~2.1): statistically the same.
+
+4. Small SYSTEMATIC residual (~6-9%, within the noise band). Per-motor cross-bridge generation
+   (steady-state, step>=5000), which runs CPU-side on BOTH paths:
+        metric            CPU       GPU      GPU/CPU
+        meanDist (um)     0.00535   0.00565  +5.6%
+        meanForceMag(pN)  5.35      5.65     +5.6%
+        meanAxialSigned   0.829     0.904    +9%
+        meanMotSegDot     -0.364    -0.352   ~same
+   GPU bound heads sit ~6% farther from their attach points -> ~6-9% more cross-bridge force ->
+   ~6-9% higher steady-state tension. This is a float32 / integration-timing residual (the head is
+   integrated on-device in float32; the cross-bridge force is host-computed from the demand-synced
+   pose and applied to the device-integrated head). It is small and inside the run-to-run noise.
+
+================================================================================
+WHAT IS *NOT* THE CAUSE (ruled out by measurement)
+================================================================================
+- NOT the lever-motor theta_LM / cocking seam. meanMotSegDot (head-vs-filament alignment, the
+  cocking proxy) is the SAME on both paths (-0.36 vs -0.35). The cross-bridge force GENERATION
+  matches within ~6-9%. The documented theta_LM divergence (Phase B1/B2a) does not propagate into
+  the actual contractile force here.
+- NOT a readout double-count or plumbing error. Anchor decomposition confirms the split is clean:
+        CPU:  tension = hostSoaForce (1.8) + deviceJoint (0.0)
+        GPU:  tension = hostSoaForce (0.0) + deviceJoint (1.9)
+  i.e. on CPU the chain force is entirely in soaForceSum, on GPU entirely in the gathered
+  jointForceSum, no overlap.
+- NOT force generation. Per-motor forces match (item 4 is only ~6-9%).
+
+================================================================================
+SO THE "CAUSE(S)" OF THE APPARENT DIFFERENCE
+================================================================================
+(a) the CPU reference value was measured before the CPU run converged (dominant);
+(b) GPU develops tension faster (earlier binding onset) so short-window means diverge;
+(c) run-to-run noise of ~1.8x by itself;
+(d) a small (~6-9%) genuine float32/integration per-motor-force excess on GPU.
+True steady-state GPU and CPU contractile tensions agree (~2.0-2.1 pN) within the noise. Neither
+path is "ground truth"; they match.
+
+Instrumentation: throwaway on branch gpu-tension-diag, env BOA_TENSION_DIAG, NOT committed.
+Logs: RUN_LOGS/_tens_cpu.txt, _tens_gpu.txt (+_v2/_v3), _tens_cpu_long.txt.
