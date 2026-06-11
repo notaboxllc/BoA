@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**Minifilament Brownian: CPU/GPU parity (`brownianDeltaT` removed) + body thermal scale; spin-seam premise refuted.** Investigating the "GPU minifilament spin" (Path B Phase 2a), the spin-coherence probe does **not** reproduce a real seam on current main: at the 300-step run length its statistical noise floor (~1/√62 ≈ 0.13) swamps the signal (64 correlated myosins ≈ 1 effective DOF). 5-seed ensembles GPU 0.207 / CPU 0.140 / body-off 0.158 all overlap; at 603 frames GPU (0.028–0.036) == CPU (0.021–0.044) at the floor, and in the same first-63-frame window CPU (0.249) is *more* "spun" than GPU (0.104). **No reproducible spin seam → the body+cohesion device port (Phases A/B/C) chases an artifact; Phase 0 bail** (and Phase C would anyway be blocked by bind-application, an in-scope per-step pose consumer). The REAL CPU-vs-GPU difference jba saw in frames ("CPU myosins knocked around, GPU milder") is a **√10 Brownian bug**: GPU kernel scales by `sqrt(2kT/deltaT)` (deltaT=1e-4) while CPU `calcRandomForces` scales by `1/brownianDeltaT` (1e-5) with integration at deltaT — FDT-breaking; CPU diffuses ~10× too fast (rod-center step CPU 17.4 vs GPU 5.5 nm = 3.16×). Per jba (`brownianDeltaT` was always meant to equal `deltaT`; residual): **removed `brownianDeltaT` entirely — Brownian always uses `deltaT`** (`Env.java`, `Thing.java`; `brownianApplyInt`=1). No-op where they already matched (gliding & contractility_gpu both 1e-5/1e-5; Lp configs ran 1e-5/1e-5 too); corrects only the deltaT=1e-4 minifil configs → CPU rod step 17.4→**5.46 nm = GPU 5.51**. Also added **`Env.myoMiniFilBrownianScale`** (default **0.1**, runtime-mutable; `BOA_MINIFIL_BROWNIAN_OFF` still hard-off): minifilament BODY thermal dialed to 1/10 of the (corrected) free-body value — body-axis wander 522°→21° (CPU≈GPU). Branch `minifil-body-cohesion-device`. `RUN_LOGS/2026-06-11_minifil_brownian_parity.txt`; viewer `~/Code/threejs_output/minifil_*`. **Then, per jba, did the body→device port (residency, not spin): Phase A landed** — `MyoMiniFilament` body is now device-integrated (`RULE_MINIFIL`), on the same float32 integrator as its rods, so the cohesion action/reaction integrate in matched precision (removes the two-integrator split — the architecturally-correct state). Validated vs CPU: span locked 180.0 nm (300- & 3000-step), no NaN, jitter/wander/COM match. **Phase B (cohesion→device kernels) DEFERRED** and **Phase C (retire per-step pose pull) BLOCKED by bind-application** (`MyoFilLink.addForces`, out of scope) — both documented for the planner. Full writeup below.)
+Last updated: 2026-06-11 (**Dimer-motor cross-bridge force onto device + ckRelease lag fix — biochem-path residency step 2.** Branch `dimer-motor-force-device` off main (base has `84e188c` brownianDeltaT-removed + Phase A). **Step 0 — θ_LM closed:** re-measured θ_LM=angle(lever.uVec,motor.uVec) on `boa10-singleMiniFil` (deltaT=1e-4 minifil config) on the brownianDeltaT-fixed base — CPU steady **24.8°** converges to GPU **18.2°** (was CPU ~67–82° / GPU ~16–19° on the √10-buggy base; θ_RL matches 90.3 vs 89.3). The wide CPU θ_LM was the over-excited buggy-Brownian value (√10 over-forcing shifts the soft anharmonic lever-motor joint's *mean*); it is another face of the removed √10 bug → **closed, proceed**. **Step 1 (committed `97bf945`) — dimer cross-bridge force onto device:** extended the device motor-force kernel coverage from MyosinFixed-only to *all* GPU-handled bound motors via a two-gate flip — `GPUMoveThing.packMotorBinding` drops the `instanceof MyosinFixed` gate (any bound motor with a GPU-handled seg gets a real `boundSegSlot`/`posOnSeg`/CSR reaction entry) and `MyoFilLink.gpuMotorHandled` drops the short-circuit (CPU `addForces`/`alignUVec`/`alignYVec`/`ckRelease` no-op in lockstep). NO new kernel — the shared `motorForceKernel`+`segMotorForceKernel` are pure-geometry (motor pose via `motorSlots`, seg pose, `posOnSeg`, cocked, drags), the motor sub-Things were already in the joint list. So F8/F9/F10 apply **exactly once** on device. Behavior-neutral A/B (`contractilityAssay_gpu_short`, dimer motors, 3 seeds): the device path matches the **CPU oracle** (the ground truth; the `BOA_DIAG_CPU_MOTOR=1` control is a float32-pose+CPU-force hybrid that over-churns) within run-to-run noise on *every* metric — boundMotors 5.41 vs 4.53, meanBoundMotors 4.83 vs 4.07, tension 1.84/1.67 vs 1.45/1.34 pN, bindEvents 947 vs 876; instantaneous boundMotors == the control (5.41 vs 5.54) → no drop/double. No NaN/crazy. **Step 2 (no-op, NO commit) — ckRelease reorder ALREADY landed:** the "reorder ckRelease after moveThings" RELEASE_LAG_DIAGNOSIS.md recommends is already on main (`844ecc9`, 2026-06-04; ckRelease deferred to `bridgeMotorForceWriteback`, bit-exact step-N read verified, `git blame` confirms both placements, ancestor of HEAD). It applies automatically to the Step-1 dimer motors (uniform bridge path), and the ensemble confirms the device release rate already tracks the oracle (bindEvents 947 ≈ 876 — a residual −29% lag would put it systematically below) → nothing to implement; hard-bail per the discovery convention. **Step 3 (audit, no change):** after Step 1, **cohesion** (`MyoMiniFilament.constrainEnd*Dimers` + `MyosinDimer.applyRodCoupling*`/`alignUVecLeversTorque`, reads fresh host rod/lever/body pose) is the **sole remaining per-step production-physics host-pose consumer** — Step 1 retired the *bind-application* blocker the Phase A writeup named as blocking Phase C (the motor cross-bridge `MyoFilLink.addForces`/`updatePos`). The contractility anchor-pin is assay-harness-only; biochem is gated-on but inactive (zeroed turnover). `demandSyncPose calls=10203` unchanged (one structural per-step pull gated on the `noMonomersSimd:false` flag — Step 1 removes a *consumer*, not the call). **Deliverable: cohesion→device (the deferred Phase B) is the last port before the residency flip can land on this path, and now GAINS the residency payoff it lacked when first deferred.** Did NOT flip the pull. Logs `RUN_LOGS/2026-06-11_dimer_motor_device_step{0,1,2_BAIL,3_audit}*.txt`. Full writeup below.)
+
+Prior update: 2026-06-11 (**Minifilament Brownian: CPU/GPU parity (`brownianDeltaT` removed) + body thermal scale; spin-seam premise refuted.** Investigating the "GPU minifilament spin" (Path B Phase 2a), the spin-coherence probe does **not** reproduce a real seam on current main: at the 300-step run length its statistical noise floor (~1/√62 ≈ 0.13) swamps the signal (64 correlated myosins ≈ 1 effective DOF). 5-seed ensembles GPU 0.207 / CPU 0.140 / body-off 0.158 all overlap; at 603 frames GPU (0.028–0.036) == CPU (0.021–0.044) at the floor, and in the same first-63-frame window CPU (0.249) is *more* "spun" than GPU (0.104). **No reproducible spin seam → the body+cohesion device port (Phases A/B/C) chases an artifact; Phase 0 bail** (and Phase C would anyway be blocked by bind-application, an in-scope per-step pose consumer). The REAL CPU-vs-GPU difference jba saw in frames ("CPU myosins knocked around, GPU milder") is a **√10 Brownian bug**: GPU kernel scales by `sqrt(2kT/deltaT)` (deltaT=1e-4) while CPU `calcRandomForces` scales by `1/brownianDeltaT` (1e-5) with integration at deltaT — FDT-breaking; CPU diffuses ~10× too fast (rod-center step CPU 17.4 vs GPU 5.5 nm = 3.16×). Per jba (`brownianDeltaT` was always meant to equal `deltaT`; residual): **removed `brownianDeltaT` entirely — Brownian always uses `deltaT`** (`Env.java`, `Thing.java`; `brownianApplyInt`=1). No-op where they already matched (gliding & contractility_gpu both 1e-5/1e-5; Lp configs ran 1e-5/1e-5 too); corrects only the deltaT=1e-4 minifil configs → CPU rod step 17.4→**5.46 nm = GPU 5.51**. Also added **`Env.myoMiniFilBrownianScale`** (default **0.1**, runtime-mutable; `BOA_MINIFIL_BROWNIAN_OFF` still hard-off): minifilament BODY thermal dialed to 1/10 of the (corrected) free-body value — body-axis wander 522°→21° (CPU≈GPU). Branch `minifil-body-cohesion-device`. `RUN_LOGS/2026-06-11_minifil_brownian_parity.txt`; viewer `~/Code/threejs_output/minifil_*`. **Then, per jba, did the body→device port (residency, not spin): Phase A landed** — `MyoMiniFilament` body is now device-integrated (`RULE_MINIFIL`), on the same float32 integrator as its rods, so the cohesion action/reaction integrate in matched precision (removes the two-integrator split — the architecturally-correct state). Validated vs CPU: span locked 180.0 nm (300- & 3000-step), no NaN, jitter/wander/COM match. **Phase B (cohesion→device kernels) DEFERRED** and **Phase C (retire per-step pose pull) BLOCKED by bind-application** (`MyoFilLink.addForces`, out of scope) — both documented for the planner. Full writeup below.)
 
 Prior update: 2026-06-11 (**GPU-vs-CPU contractility tension difference — resolved as a measurement artifact, NOT a physics gap.** The prior entry's "~1.8× overshoot = float32/θ_LM seam" was wrong. Measured per-motor cross-bridge force GENERATION (env `BOA_TENSION_DIAG` in `MyoFilLink.addForces` — runs CPU-side on both paths since dimer motors are CPU-handled) plus the anchor force decomposition. Findings: **(1)** the CPU "oracle" ~1.8 pN was UNDER-CONVERGED — CPU tension only plateaus by ~step 15k; true CPU plateau (50k run) = **2.06 ± 0.10 pN**, not 1.8. **(2)** GPU binds motors ~600–1000 steps EARLIER, so its ramp leads; in a 10k window CPU hasn't converged → the "mean over steps>5000" diverges. **(3)** Run-to-run noise is ~1.8× by itself (GPU plateau realizations 1.78 / 2.08 / 2.18 / 3.27 pN — the 3.27 used in the prior entry was an outlier; median ~2.1). **(4)** Small ~6–9% systematic GPU per-motor force excess (meanForceMag 5.65 vs 5.35 pN; bound heads sit ~6% farther from attach points) — a float32 / integration-timing residual, within noise. **NOT** θ_LM/cocking: head-vs-filament alignment `meanMotSegDot` is identical (−0.35 both paths). Readout is clean — no double-count (CPU tension entirely `soaForceSum`, GPU entirely the gathered `jointForceSum`). **Net: true GPU and CPU steady-state tensions agree (~2.0–2.1 pN) within run-to-run noise; neither path is ground truth.** Diagnostic-only (branch `gpu-tension-diag`), not committed. `RUN_LOGS/2026-06-11_gpu_cpu_tension_difference.txt`.)
 
@@ -18,6 +20,109 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-11 — Dimer-motor cross-bridge force onto device + ckRelease lag fix — biochem-path residency step 2
+
+Branch `dimer-motor-force-device` (off main; base `0c115af`, has `84e188c` brownianDeltaT-removed +
+Phase A). Commit: `97bf945` (Step 1). Logs:
+`RUN_LOGS/2026-06-11_dimer_motor_device_step{0_thetaLM,1,2_BAIL,3_audit}*.txt`.
+Driver `scripts/run_step1_ab.sh`. **For the planner.**
+
+### The port (why it's bounded)
+On the dimer-motor path (contractility, minifilaments — any non-`MyosinFixed` motor) the device
+already had the cross-bridge kernel (`motorForceKernel` motor-slot + `segMotorForceKernel` seg-slot
+reaction, F8 spring / F9 uVec torque / F10 yVec torque from the **resident** pose). It was gated to
+MyosinFixed-only by a single pack line (`boundSegSlot[mj]=-1` for non-MyosinFixed) + the matching
+`MyoFilLink.gpuMotorHandled` short-circuit. The CPU `MyoFilLink.addForces`/`updatePos` computed
+F8/F9/F10 CPU-side from the demand-synced host pose for dimer motors, forcing a per-step pose
+consumer. The port is the two-gate flip — **not a new kernel** (the kernel always read pure
+geometry).
+
+### Step 0 — θ_LM re-measure (CLOSED)
+`boa10-singleMiniFil`, 300 steps / 63 frames, θ_LM=angle(lever.uVec,motor.uVec) mean over the
+minifilament's ~32 myosins, steady = last-20-frame mean.
+
+| | θ_LM steady | θ_RL steady |
+|---|---|---|
+| GPU | 18.2° | 90.3° |
+| CPU | 24.8° | 89.3° |
+
+Prior (Phase B1, on the √10-buggy base): GPU ~16–19°, **CPU ~68–82°**. CPU θ_LM collapsed 67–82 →
+24.8, converging toward GPU 18.2. The √10 Brownian over-forcing shifted the *mean* of the soft
+anharmonic lever-motor joint (angle clamp + cocked/uncocked flips), not just its variance — exactly
+a mean divergence. θ_RL (stiff joint) matched on both bases. Residual 6.6° is a small
+float32/integration-timing mean offset (consistent with the documented `meanMotSegDot`-identical
+finding). **No surviving CPU/GPU internal-joint seam → proceed.**
+
+### Step 1 — dimer cross-bridge force onto device (committed `97bf945`)
+Two-gate flip, force exactly-once:
+- `GPUMoveThing.packMotorBinding()`: dropped `if (myo instanceof MyosinFixed)` → `if (myo != null)`.
+  Any bound motor whose seg has a valid GPU move-slot now gets `boundSegSlot`/`posOnSeg` + the CSR
+  seg-reaction entry.
+- `MyoFilLink.gpuMotorHandled()`: dropped the `!(myo instanceof MyosinFixed)) return false`
+  short-circuit (kept the null/removeMe/`gpuHandled` guards, which mirror the pack gate). CPU pair
+  no-ops for these motors.
+- Force-coverage: the shared `motorForceKernel`(+F,+τ motor slot) and `segMotorForceKernel`(−F,
+  reaction seg slot) cover every admitted motor; the CPU `addForces`/`alignUVec`/`alignYVec` are
+  skipped. ckRelease for them defers to the bridge (Step 2, already present). **Applied exactly once,
+  never dropped/doubled.** `BOA_DIAG_CPU_MOTOR=1` remains the A/B control.
+
+Behavior-neutral A/B — `contractilityAssay_gpu_short` (dimer minifilament motors, **0** MyosinFixed),
+3 seeds. devmotor = device (new); cpumotor = `BOA_DIAG_CPU_MOTOR=1` (CPU cross-bridge on GPU pose);
+oracle = full CPU (ground truth):
+
+| arm | boundMotors | meanBoundMotors | tensionA | tensionB | bindEvents |
+|---|---|---|---|---|---|
+| devmotor | 5.41±0.08 | 4.83±0.46 | 1.84±0.12 | 1.67±0.20 | 947±122 |
+| cpumotor | 5.54±0.07 | 5.31±0.38 | 2.38±0.44 | 2.43±0.30 | 1765±416 |
+| oracle | 4.53±1.25 | 4.07±1.79 | 1.45±0.48 | 1.34±0.93 | 876±412 |
+
+The device path matches the **CPU oracle** within run-to-run noise on every metric, including
+bindEvents (947 vs 876). Instantaneous boundMotors == the control (5.41 vs 5.54) confirms
+force-exactly-once. The single-seed "devmotor bindEvents < cpumotor" concern dissolved with the
+ensemble: cpumotor (1765±416) is the high-variance outlier (its float32-pose+float64-CPU-force
+hybrid over-churns binding — no production path uses it); devmotor tracks the oracle. Tension ramps
+physically 0 → ~1.9 pN, both anchors contractile. No NaN/crazy on any of the 9 runs.
+
+### Step 2 — ckRelease-after-moveThings reorder: ALREADY LANDED (no-op, NO commit, bail)
+The reorder RELEASE_LAG_DIAGNOSIS.md recommends is already on main: `844ecc9` ("reconcile device
+ckRelease force-read with CPU path", 2026-06-04) deferred `ckRelease()` from `MyoFilLink.step()` into
+`bridgeMotorForceWriteback()` (end of `moveThings(N)`, after the EVERY_EXECUTION `motorWriteback`
+transfer), so the device step-N release reads the step-N writeback. `844ecc9` is an ancestor of HEAD;
+`git blame` traces both the bridge `ckRelease` (`GPUMoveThing.java:4723`) and the `step()` placement
+(`MyoFilLink.java:141`) to it; no later commit reverted it. Its own Phase-3 check: 17260/17260
+bit-exact step-N match, 0/17026 vs step-(N-1) — the lag is gone. It applies **automatically** to the
+Step-1 dimer motors (the bridge iterates every `boundSegSlot>=0` motor uniformly), and the Step-1
+ensemble confirms the device release rate already tracks the oracle (bindEvents 947 ≈ 876 — a
+residual −29% lag would put it systematically below). RELEASE_LAG_DIAGNOSIS.md's device-arm
+"move-(N-1) → 1-step lag" row is **stale** w.r.t. the current code (the doc was written against the
+pre-844ecc9 `ckRelease`-in-`step()` state, the same day). Nothing to implement → hard-bail per the
+discovery convention; no commit.
+
+### Step 3 — remaining per-step pose-consumer audit (no change)
+`demandSyncPoseToHost` is gated on `!noMonomersSimd.isActive()` (on for contractility). `[STATS]
+demandSyncPose calls=10203` IDENTICAL pre/post Step 1 — it is ONE structural per-step pull keyed on
+the flag, not per-consumer; Step 1 removes a *consumer*, not a call. Per-step host-pose consumers on
+`contractilityAssay_gpu` after Step 1:
+- **(1) Cohesion** — the deferred Phase B. `MyoMiniFilament.constrainEnd1/2Dimers` (myoJoints2; body
+  ↔rod spring + alignment, reads body `xToX`/`transXTox` + rod `freshEnd1/2AsPt3D`) and
+  `MyosinDimer.jointConstraints`→`applyRodCoupling*`/`alignUVecLeversTorque` (myoJoints1; the two
+  rods/levers). `refreshMiniFilBodyDerived()` (Phase A) feeds cohesion's `xToX` and rides with it.
+  **The production physical consumer.**
+- (2) Anchor pin `applyBenchmarkPins` — reads host `getEnd1/2` each step; contractility-ASSAY
+  harness only (absent in production minifilament configs).
+- (3) Biochem `incCoord`/`splitSegment` — gated on `!noMonomersSimd` so the pull stays on, but ALL
+  turnover rates are zeroed here → never fires (a real biochem-active config WOULD make it a
+  consumer; GPU_STRATEGY lever #2).
+- **Removed by Step 1:** the motor cross-bridge `MyoFilLink.addForces`/`updatePos` — the
+  bind-application blocker the Phase A writeup named as blocking Phase C.
+
+**What blocks the flip now:** cohesion is the SOLE remaining per-step production-physics host-pose
+consumer. So **cohesion→device (Phase B) is the last port before the per-step pull can be retired on
+the minifilament/contractility path — and it now GAINS the residency payoff** it lacked when first
+deferred (Phase A deferred B because its only benefit, residency, was blocked at Phase C by
+bind-application; Step 1 removed that block). Did NOT flip the pull (audit only). `BOA_DIAG_CPU_MOTOR=1`
+left as the A/B control.
 
 ## 2026-06-11 — Minifilament Brownian parity + body→device port (Phase A); spin premise refuted
 

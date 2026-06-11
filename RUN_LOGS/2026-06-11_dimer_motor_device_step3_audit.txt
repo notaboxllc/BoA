@@ -1,0 +1,55 @@
+Step 3 — remaining per-step host-pose-consumer audit on contractilityAssay_gpu (post Steps 1-2).
+No code change. For the planner.
+
+The per-step pull (GPUMoveThing.demandSyncPoseToHost) is gated on !Env.noMonomersSimd.isActive().
+contractilityAssay_gpu sets noMonomersSimd:false -> pull ON. [STATS] demandSyncPose calls=10203
+(= 1/step + a few output-cadence), IDENTICAL pre/post Step 1 (devmotor 10203 == cpumotor 10203).
+=> Step 1 does NOT change the pull CALL COUNT (it is a single per-step pull keyed on the flag, not
+per-consumer). What Step 1 changes is the CONSUMER SET: it removes the dimer-motor cross-bridge as
+a consumer. The "drop the dimer-motor contribution" the prompt expects is a consumer-set change,
+not a call-count change; the call count can only fall to 0 when the gate is flipped, which requires
+ALL per-step host-pose consumers gone.
+
+PER-STEP HOST-POSE CONSUMERS still firing on contractilityAssay_gpu after Step 1:
+
+  (1) COHESION — the deferred Phase B. THE production physical consumer.
+      - MyoMiniFilament.constrainEnd1Dimers / constrainEnd2Dimers (myoJoints2): body<->rod spring
+        + alignment torque. Reads body pose (attachment pts via xToX over the body's transXTox)
+        AND rod pose (curRodEnd via freshEnd1AsPt3D = coord +- half*len*uVec).
+      - MyosinDimer.jointConstraints -> alignUVecLeversTorque + applyRodCoupling{End1,End2,
+        End1End2,End2End1} (myoJoints1): reads the two rods/levers' fresh host pose.
+      - refreshMiniFilBodyDerived() (Phase A support, runs immediately after the pull): recomputes
+        the body's host transXTox/end1/end2 from the synced pose SOLELY so cohesion's xToX can place
+        the dimer attachment points. Part of the cohesion chain; retired/moved with it.
+
+  (2) ANCHOR PIN — applyBenchmarkPins (contractility-ASSAY harness only, not production physics).
+      Reads host getEnd1/2 each step to compute the snap-back incCoord delta + markPoseDirty.
+      Absent in a production minifilament config (no pins). Assay-scaffold consumer.
+
+  (3) BIOCHEM incCoord/splitSegment — gated on !noMonomersSimd so the pull stays on, but ALL
+      turnover rates are zeroed on this config (cofilinRate/kHydrolysis/kATPOn*/capRate/kRdmNuc=0,
+      initialFilaments=0) -> NEVER fires here. The gate is conservative (keyed on the flag, not on
+      actual events). A genuinely biochem-active minifilament config WOULD make biochem a consumer.
+
+REMOVED by Step 1 (was a per-step host-pose consumer, now device-handled):
+  - Motor cross-bridge MyoFilLink.addForces/updatePos (read the demand-synced coord+uVec for
+    freshMotorTip + attachPt every step). This was the bind-application blocker the Phase A writeup
+    named as blocking Phase C. Step 1 retired it.
+
+NOT pose consumers:
+  - captureContractilityTension reads host FORCE (soaForceSum + the EVERY_EXECUTION device
+    jointForceSum gather), not host pose.
+  - mesh fill / collisions: no-op or stale-tolerable (B1 audit; static filaments here).
+
+WHAT BLOCKS THE RESIDENCY FLIP NOW (deliverable):
+  COHESION is the SOLE remaining per-step PRODUCTION-physics host-pose consumer. Step 1 removed the
+  bind-application blocker that the Phase A writeup said blocked Phase C. Therefore the cohesion
+  ->device port (the previously-deferred Phase B) is now the LAST port before the per-step pull can
+  be retired on the minifilament/contractility path -- and it now GAINS the residency payoff it
+  lacked when first deferred (Phase A deferred B because its only benefit, residency, was blocked at
+  Phase C by bind-application; that block is gone). Caveats for a clean flip: (a) the contractility
+  anchor-pin harness still reads host pose every step on the ASSAY config (production minifilament
+  configs have no pins); (b) the biochem gate is conservative -- a real biochem-active minifilament
+  config keeps the pull regardless of cohesion (its incCoord relative writes need a fresh host
+  baseline -- the GPU_STRATEGY lever #2 "biochem-cadence gating / device-side biochem deltas").
+  DID NOT flip the pull (audit only, per scope).

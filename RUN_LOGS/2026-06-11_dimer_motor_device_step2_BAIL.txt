@@ -1,0 +1,33 @@
+Step 2 — ckRelease-after-moveThings reorder: ALREADY IMPLEMENTED (no-op). HARD BAIL, no commit.
+
+FINDING: The reorder the prompt's Step 2 asks me to implement is already on main.
+  - Commit 844ecc9 "reconcile device ckRelease force-read with CPU path" (2026-06-04) deferred
+    ckRelease() from MyoFilLink.step() (force phase) into bridgeMotorForceWriteback(), which runs
+    at the END of moveThings(N) AFTER the EVERY_EXECUTION motorWriteback transferToHost. So the
+    device step-N release decision reads the step-N motor-force writeback.
+  - 844ecc9 is an ANCESTOR of my base (HEAD). git blame: both the bridge ckRelease
+    (GPUMoveThing.java:4723) and the step() ckRelease placement inside `if(!deviceMotor)`
+    (MyoFilLink.java:141) trace to 844ecc9. No later commit reverted it.
+  - 844ecc9's own Phase-3 verification: 17260/17260 bit-exact match between the device read at
+    step N and the step-N bridge writeback; 0/17026 vs the step-(N-1) writeback. "The lag is gone."
+  - It applies AUTOMATICALLY to the dimer motors admitted in Step 1: the bridge iterates every
+    boundSegSlot>=0 motor uniformly and calls link.ckRelease(); MyoFilLink.step() skips ckRelease
+    for them (deviceMotor=true). Same structural path as MyosinFixed -> same step-N read property.
+
+EMPIRICAL CONFIRMATION (no residual lag) from the Step-1 ensemble:
+  device dimer-motor bindEvents 947±122 ≈ CPU oracle 876±412 (within noise). A surviving -29%
+  release lag (RELEASE_LAG_DIAGNOSIS.md) would put the device release/rebind rate systematically
+  BELOW the oracle; it is statistically equal. So the device release rate already tracks the
+  fresh CPU rate — nothing to "increase."
+
+WHY RELEASE_LAG_DIAGNOSIS.md still describes the lag: the doc (dated 2026-06-04, "no fix
+attempted") was written against the pre-844ecc9 ckRelease-in-step() state; its device-arm row
+("move-(N-1) -> step N read; 1-step lag") is stale w.r.t. the current code. 844ecc9 landed the
+exact reorder the doc's "What this implies for the eventual fix" section recommends, the same day.
+844ecc9's Phase-4 gliding ensemble found the empirical bindEvents gap is dominated by ThreadSet
+nondeterminism, NOT the lag (gap -93 -> -179 after the reorder, single-arm |t|<1) -> consistent
+with my contractility ensemble where device ~ oracle.
+
+ACTION: No code change, no commit for Step 2 (there is nothing to implement; re-applying is
+impossible without first reverting 844ecc9, which is out of scope). The behavior the prompt
+attributes to Step 2 is already present and was inherited by the Step-1 dimer motors.
