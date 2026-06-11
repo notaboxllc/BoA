@@ -1,0 +1,118 @@
+GPU DIMER-MOTOR BINDING — FRESH-TIP FIX + VALIDATION
+Date: 2026-06-10   Branch: gpu-fresh-tip-on-assay (NOT merged — hold for jba)
+Base: 17adff9 (= main 2f489bb + the contractility-assay harness commit; the assay is NOT on main,
+      so the fix is based on the assay commit to be testable. The fix itself is a clean 1-file diff
+      (boxOfActin/MyoFilLink.java, +27/-5) that applies equally on main.) No diag instrumentation.
+
+ROOT CAUSE (see 2026-06-10_gpu_dimer_bind_rootcause.txt): GPU dimer (non-MyosinFixed) motors bind
+on-device, but the CPU cross-bridge force in MyoFilLink.addForces read the STALE bindTip host mirror
+(refreshed only at output cadence) instead of the device-fresh head position. Stale distance ran
+40-80 nm vs a fresh 3-25 nm, so every bind tripped the 12 pN break-force release on the next step
+(relBreak == ontoFired, relNorm == 0). Binds never held; motors froze at ADPPi; no contraction.
+
+THE FIX (MyoFilLink.java only)
+- addForces(): derive the motor head tip FRESH from the demand-synced coord+uVec
+  (freshMotorTip = coord + 0.5*myoMotorLength*uVec, == Thing.freshEnd2AsPt3D) and use it for the
+  spring distance, force DIRECTION, and the torque application point — replacing the stale motorPt
+  (=bindTip) at all three uses. Reused per-link scratch Pt3D (no hot-path allocation).
+- updatePos(): build attachPt from mySeg.freshEnd1AsPt3D() (fresh coord-½L·uVec) instead of the
+  stale end1AsPt3D() (soaEnd1 mirror).
+- On the CPU path coord/uVec are also fresh and freshEnd1/2 == end1/2, so CPU behaviour is
+  bit-unchanged. Mirrors the Phase B2a cohesion fix pattern (read fresh-from-pose, not stale derived).
+- Precondition: demandSyncPoseToHost ON (noMonomersSimd:false) — the GPU contractility config
+  already sets this. Under noMonomersSimd:true coord/uVec themselves are stale, so this would not
+  help there (out of scope for this assay).
+
+VALIDATION — contractilityAssay_gpu_short, identical seed, only -gpu differs, 10k steps
+  path        meanBoundMotors   boundMotors range (mode)   tension        NaN/crazy
+  CPU oracle  5.027             3-8 (mode 5-6)             ~2.0 pN (rises 0->2)   0
+  GPU + fix   5.399             3-8 (mode 5-6)             0.0000 (see below)     0
+  GPU pre-fix 0.000             0 (binds break in 1 step)  0.0000                 (held, no NaN)
+
+  GPU boundMotors histogram (99 frame samples): 0:4(startup) 1:1 2:1 3:6 4:10 5:27 6:27 7:14 8:6 9:2 10:1
+  CPU boundMotors histogram:                    0:4(startup) 1:1 2:4 3:15 4:13 5:24 6:20 7:10 8:10 9:1
+
+  => BINDING IS FIXED. GPU sustained occupancy (mean 5.40) matches the CPU oracle (mean 5.03),
+     both squarely in the documented 4-8 band, near-identical distribution shapes. The minifilament
+     stays intact (0 NaN/crazy), so the fix does not destabilize the merged cohesion stack.
+     No tuning was applied; the result landed on target on the first run. The "fresh-distance tail"
+     (a minority of binds whose fresh distance legitimately exceeds 12 nm and break) does NOT
+     suppress occupancy — rebinding equilibrates the population at the CPU level, exactly as on CPU.
+
+TENSION readout still 0 on GPU — SEPARATE, KNOWN artifact, NOT this fix's scope
+  The contractility readout projects the host soaForceSum at the pinned anchor segment. On GPU the
+  anchor's reaction is the CHAIN-LINK force (F3/F4), computed on-device into jointForceSum, which is
+  never gathered into host soaForceSum (demandSyncPoseToHost transfers pose only). So the readout
+  reads ~0 even though the device IS applying contractile force through the chain. This was flagged
+  as a distinct targeted item in the root-cause report. With binding now holding, the remaining work
+  for a GPU tension NUMBER is a device->host gather of the anchor segment's force-sum (or read
+  jointForceSum). Until then the contractility MEASUREMENT must still be read on CPU; GPU now gives
+  the correct sustained binding but not a readable tension. Caveat: because the only tension
+  instrument is that broken readout, this run confirms GPU binding matches CPU but does not
+  independently measure the GPU contractile-force magnitude.
+
+FOLLOW-ON (same branch): ANCHOR-FORCE GATHER — GPU tension now READABLE
+  The tension-readout plumbing gap is now closed so the GPU tension is a real number.
+  - GPUMoveThing: when contractilityAssay is active, jointForceSum is added to the chained
+    graph's EVERY_EXECUTION transferToHost list (1 small buffer). New accessor
+    readDeviceJointForce(thingNumber,out[3]) maps thingNumber -> move slot -> jointForceSum.
+  - BoxOfActin.captureContractilityTension: on -gpu, add the device chain force (jointForceSum)
+    for each anchor segment to the host soaForceSum before projecting onto buildDir. 1-step
+    lagged (read before the next moveThings); negligible for the quasi-static plateau.
+  - CPU path unchanged (chain force already lives in soaForceSum there; the add is GPU-gated).
+  Files: boxOfActin/GPUMoveThing.java (+34), boxOfActin/BoxOfActin.java (+18).
+
+  RESULT — GPU tension is now nonzero, contractile (both anchors positive, ~equal), and tracks
+  boundMotors. BUT the magnitude lands SHORT of CPU (reported, NOT tuned):
+     plateau meanTensionA (steps > 5000, contractilityAssay_gpu_short, 10k):
+        GPU + fix = 0.185 pN      CPU oracle = 1.803 pN     (~10x deficit)
+     boundMotors mean:  GPU 5.40   vs   CPU 5.03            (matches)
+  So the readout works and the deficit is a REAL contractile-FORCE gap, not a binding-count gap
+  and not a readout artifact. It is also NOT frozen chemistry: post-fix the GPU motors now cycle
+  (late frame nucleotide spread ATP=19 / ADPPi=12 / ADP=1 — heads reach the ADP power-stroke
+  state; pre-fix all 32 were stuck at ADPPi). With binding count and nucleotide cycling both
+  matching CPU, the ~10x lower tension points to a weaker PER-MOTOR directed (power-stroke)
+  force — most consistent with the documented GPU lever-motor angle (theta_LM) under-cocking
+  seam (Phase B1 / B2a: GPU ~16-32 deg vs CPU ~67 deg, flagged there as an unresolved internal
+  lever-motor / float32 seam). NOT re-measured in this run — flagged for jba, not tuned away.
+
+FOLLOW-ON 2: ANCHOR PIN NOT PROPAGATED TO DEVICE — the real cause of the low tension
+  jba's viewer observation: the pinned plus-ends drift inward on GPU (not held). Measured in the
+  frames: outer plus-end x goes 1.8999 (f0) -> 1.547 (f100), a 0.35 um inward drift; span collapses
+  3.80 -> 3.07 um. CPU holds it fixed.
+  ROOT CAUSE: applyBenchmarkPins() snaps the anchor endpoint back with an in-place incCoord on the
+  same Thing/slot, then initialize(). On GPU that host-pose mutation is invisible to buildDeltaSet()'s
+  slot-change scan (same identity, same slot) UNLESS explicitly registered — exactly the case the
+  biochem path documents (FilSegment.biochemStep calls GPUMoveThing.markPoseDirty after its incCoord).
+  applyBenchmarkPins did NOT call markPoseDirty, so the pin correction was written to host soaCoord and
+  then discarded; the device-resident pose kept integrating the anchor unpinned -> plus-ends drift.
+  On CPU there is no device pose, so the host incCoord is authoritative and the pin holds.
+  This is why the tension read low: without a held anchor the contraction TRANSLATES the filaments
+  inward (does work) instead of building isometric strain against a fixed pin, so the anchor reaction
+  reads far below the held-anchor value.
+  FIX (BoxOfActin.applyBenchmarkPins, +11): call GPUMoveThing.markPoseDirty(p.seg) after the snap-back
+  on the GPU path, mirroring the biochem pattern. Timing: applyBenchmarkPins runs post-moveThings;
+  markPoseDirty queues into pendingDirty, consumed by next step's buildDeltaSet (which runs at the top
+  of moveThings, BEFORE the post-execute demandSyncPoseToHost), so packDelta reads the still-pinned
+  host coord and the scatterPose kernel lands it on the device ahead of the move. 1-step lagged.
+  Plain CPU unaffected (markPoseDirty gated on Env.useGPU).
+  VALIDATION (contractilityAssay_gpu_short, 10k):
+     anchor plus-end x:   pre-fix 1.8999->1.547 (drift 0.35 um)   post-fix 1.8999->1.8981 (drift <0.4 nm) HELD
+     plateau meanTensionA (steps>5000):  pre-pin-fix 0.185 pN  ->  post-pin-fix 3.269 pN   (CPU oracle 1.803)
+     plateau meanTensionB:                                          post-pin-fix 2.894 pN
+  => Anchoring confirmed as THE cause of the low tension. With the anchor held, GPU tension recovers
+     from ~0.18 pN into the CPU ~2 pN regime (now somewhat ABOVE CPU, ~3.3 vs ~1.8 pN). The residual
+     GPU-vs-CPU magnitude/overshoot is a separate, smaller matter (float32 / lever-motor theta_LM
+     power-stroke / 1-step pin lag), NOT the 10x deficit — left for jba, not tuned.
+
+VISUALIZATION
+  GPU run with -3js written to ~/Code/threejs_output/contractility_gpu_freshtip (102 frames,
+  source.zip, params). View: from ~/Code (the dir containing threejs_output, or wherever
+  sim_server.py + sim_viewer_boa.html live) run `python3 sim_server.py 8000` then open
+  http://localhost:8000/sim_viewer_boa.html and pick the contractility_gpu_freshtip run.
+
+FILES
+  boxOfActin/MyoFilLink.java   (+27/-5)   — the fresh-tip binding fix
+  boxOfActin/GPUMoveThing.java (+34)      — jointForceSum gather + readDeviceJointForce accessor
+  boxOfActin/BoxOfActin.java   (+18)      — anchor device-joint-force add in tension readout
+  Validation logs: RUN_LOGS/_fix_gpu.txt, RUN_LOGS/_fix_cpu.txt, RUN_LOGS/_fix_gpu_tension.txt

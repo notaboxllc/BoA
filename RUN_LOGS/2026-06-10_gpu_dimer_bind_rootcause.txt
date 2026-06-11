@@ -1,0 +1,126 @@
+GPU DIMER-MOTOR BINDING ROOT CAUSE — "heads cycle but don't bind productively"
+Date: 2026-06-10   Branch: dimer-bind-diag (throwaway scratch, NOT for merge)   No committed fix.
+Hardware: aorus (RTX 5070, Java 21, TornadoVM 4.0.1-dev PTX).
+Config: ParameterFiles/contractilityAssay_gpu_short (noMonomersSimd:false, turnover off,
+        32 dimer motors on one bipolar minifilament, two static pinned anti-parallel filaments).
+Method: SAME config run with and without -gpu (only -gpu differs), seed identical. Throwaway
+        diag gated by BOA_DIMER_BIND_DIAG. Raw logs: _diag_gpu3.txt (GPU), _diag_cpu2.txt (CPU oracle).
+
+================================================================================
+VERDICT:  (a) BINDS TRANSIENTLY BUT DOES NOT HOLD.   (c) is REFUTED.
+================================================================================
+The device DOES bind dimer (non-MyosinFixed) motors — there is NO MyosinFixed gate in the
+bind decision or the bind drain. Every GPU bind is then killed by a BREAK-FORCE release on the
+very next step, because the CPU cross-bridge force reads FRAME-STALE host geometry (bindTip),
+inflating the spring distance past the 12 pN break threshold. Binds last ~1 step, so onFil
+never holds, the onFil-gated ADPPi->ADP transition barely fires, and the motors pile up frozen
+at ADPPi (cocked) with no power stroke and no contraction.
+
+The prior investigation's conclusion (c) "device bind scoped to MyosinFixed via gpuMotorHandled()"
+was WRONG for the BIND path. gpuMotorHandled() (MyoFilLink.java:146-154) scopes only the
+on-device cross-bridge FORCE kernels (F8/F9/F10) to MyosinFixed. The bind DECISION
+(GPUMotorBinding.bindKernelResident) and the drain (drainBoundResults) iterate ALL motors with a
+move slot and have no myosin-type filter — so dimer motors are offered, found, and bound.
+
+================================================================================
+THE RED ADP HEAD — resolved
+================================================================================
+Viewer colors: ADPPi = orange 0xff9900, ADP = red 0xff0000 (sim_viewer_boa.html:764-765).
+Off-filament ADPPi->ADP rate is 0 (Env.myoOffFilADPPi_ADP_init = 0), so reaching ADP REQUIRES
+onFil=true when MyoMotor.dissociatePi() fires (rate myoOnFilADPPi_ADP=1e4 -> 0.1/step at dt=1e-5).
+So the red head is real evidence a bind occurred — but only TRANSIENTLY. On GPU, ADP is observed
+only in the early binding window (diag adpObsSteps rises to ~140-560 in the first ~2000 steps then
+FREEZES); a head briefly flicks red during a 1-step hold, then the bind breaks. Steady state
+(step 5000+) is ALL 32 motors at ADPPi (orange), zero ADP, zero binding. So the red head reopened
+the question correctly (a bind did happen) but the answer is (a) transient, not (c) never.
+
+================================================================================
+THE GPU-vs-CPU DIVERGENCE (same config, only -gpu differs)
+================================================================================
+                                  CPU oracle (_diag_cpu2)     GPU (_diag_gpu3)
+  onFil (sampled, sustained)      4 - 8                       0 (every sample)
+  dimerOnFilMax1k                 8 - 9                       1 - 2 then 0
+  nuc ADP at sample               1 - 5 (red heads常在)        0  (always)
+  adpObsSteps / 10000             8882                        557 (all early, frozen)
+  steady nuc state                N/ATP/ADPPi/ADP spread      all 32 at ADPPi
+  release breakdown @10k          relBreak=796  relNorm=332   relBreak=114  relNorm=0
+  ontoFired @10k                  1133                        114
+  KEY INVARIANT                   relNorm > 0, binds survive  relBreak == ontoFired EXACTLY
+  tension                         ~2 pN (CPU oracle)          0
+
+The signature: on GPU relBreak == ontoFired at every sample (15==15, 36==36, 114==114) and
+relNorm == 0. EVERY bind is force-broken the next step; not one survives to a normal catch/slip
+outcome. On CPU break and normal releases coexist and a population of 4-8 binds persists.
+
+================================================================================
+PROOF — stale vs fresh geometry at the break (BOA diag [ADDF], GPU, _diag_gpu3.txt)
+================================================================================
+At each break-force release, addForces computed dist from the STALE host motorPt (= bindTip),
+and the diag also reconstructed the FRESH head tip from the demand-synced soaCoord/soaUVec:
+
+  [ADDF step=123 mot=112] staleDist=0.06605 freshDist=0.00719 um  forceMag=66.1 pN  bindTipStaleBy=0.0711 um
+  [ADDF step=144 mot=109] staleDist=0.06570 freshDist=0.00734 um  forceMag=65.7 pN  bindTipStaleBy=0.0584 um
+  [ADDF step=261 mot=100] staleDist=0.07607 freshDist=0.00356 um  forceMag=76.1 pN  bindTipStaleBy=0.0743 um
+  [ADDF step=366 mot= 43] staleDist=0.06089 freshDist=0.00620 um  forceMag=60.9 pN  bindTipStaleBy=0.0600 um
+  ... 25 samples, all the same shape ...
+
+  break threshold: forceMag > 12 pN  <=>  dist > 0.012 um (myoSpring 1e-9 N/um, breakForce 12 pN)
+  device binds within myoColTol = 0.006 um (fresh device pose)
+
+staleDist is 0.04-0.08 um (40-80 nm) -> forceMag 22-82 pN -> always trips the 12 pN break.
+freshDist is mostly 0.003-0.025 um -> would give 3-25 pN; many binds (freshDist < 12 nm) would
+NOT break and would hold, exactly as on CPU. The host bindTip mirror is stale by 13-80 nm
+(bindTipStaleBy), which fully accounts for the staleDist-freshDist gap.
+
+================================================================================
+MECHANISM (why bindTip is stale)
+================================================================================
+1. The dimer motor's myosin is plain Myosin, NOT MyosinFixed (MyoMiniFilament builds MyosinDimer
+   -> two Myosin). So gpuMotorHandled() == false -> the on-device motor-force kernel does NOT
+   handle it; its cross-bridge force is computed on CPU in MyoFilLink.addForces (via the
+   stepStart wave -> MyoMotor.step -> tipLink.step, !deviceMotor branch).
+2. addForces uses motorPt, which IS the motor's bindTip Pt3D (same reference, set in the
+   MyoFilLink ctor). bindTip is refreshed only inside MyoMotor.initialize() (and at output cadence
+   in refreshHostMirrorsForOutput). For GPU-handled motors, per-step initialize() is gated OFF
+   (the kernel writes pose on-device). demandSyncPoseToHost() (active here, noMonomersSimd:false)
+   syncs soaCoord/soaUVec each step but does NOT touch the per-MyoMotor bindTip Pt3D.
+3. Result: the device integrates the head every step, soaCoord/soaUVec stay fresh, but bindTip
+   lags by tens of nm (up to the 100-step output interval). addForces reads the stale bindTip ->
+   spurious large dist -> forceMag > breakForce -> ckRelease force-breaks the bind next step.
+
+This is the SAME CLASS of seam as the Phase B2a cohesion fix (CPU coupling forces reading
+frame-stale soaEnd1/2 while the GPU moves the bodies every step), surfacing here in the
+motor-filament cross-bridge break-force gate instead of the dimer rod-coupling.
+
+================================================================================
+FIX SCOPE — TARGETED, not the device-binding port
+================================================================================
+This is hypothesis (a) with a localized cause. The device-binding machinery already works for
+dimer motors (devHits/ontoFired prove binds fire). The gap is purely the CPU-side cross-bridge
+force reading a stale head position.
+
+Minimal fix (DESCRIBE only — jba decides; NOT implemented):
+  Make MyoFilLink.addForces use a FRESH motor head tip for non-device (CPU-handled) bound motors,
+  reconstructed from the demand-synced soaCoord/soaUVec (tip = coord + 0.5*motoLen*uVec), mirroring
+  Thing.freshEnd2-style reconstruction used by the Phase B2a fix — instead of the stale bindTip
+  mirror. Equivalently, refresh bindTip per-step for bound non-device motors. The whole addForces
+  (force magnitude AND direction, not just the break check) must use fresh geometry, since a
+  surviving bind would otherwise apply a wrong-magnitude/direction cross-bridge force.
+  Precondition: demandSyncPoseToHost must be ON (noMonomersSimd:false), which the GPU contractility
+  config already sets. Under noMonomersSimd:true the soaCoord host mirror is itself stale, so the
+  reconstruction would not help there — out of scope for this assay.
+
+Still SEPARATELY broken (prior finding, not this bug, also targeted): the contractility tension
+READOUT projects host soaForceSum, which the device chain-link anchor force (in device
+jointForceSum) never reaches. So even after binds hold and contract, the tension number needs a
+device->host gather of the anchor force-sum. Moot until the binding fix lands, but small.
+
+================================================================================
+INSTRUMENTATION (throwaway, scratch branch dimer-bind-diag — do not merge)
+================================================================================
+- MyoMotor.dumpBindDiag() + counters (DIMERBIND line): per-step onFil/nucleotide histogram,
+  device hits, onto-fired/rejected, release breakdown. Called from sampleBoundMotors().
+- MyoMotor.ontoFilament: diagOntoFired / diagOntoRejOnFil / diagOntoRejTimer counters.
+- GPUMotorBinding.diagDevHits: device bind proposals drained (both drain sites).
+- MyoFilLink.addForces [ADDF]: stale-vs-fresh head-tip dist at break-force events (cap 25).
+All gated by env BOA_DIMER_BIND_DIAG; zero effect when unset.

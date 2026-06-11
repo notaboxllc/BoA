@@ -96,6 +96,7 @@ public class BoxOfActin {
 		// Axial force at each anchor, projected onto the inward buildDir: positive = contractile.
 		double tensionA_pN = 0, tensionB_pN = 0;
 		Pt3D forceA = new Pt3D(), forceB = new Pt3D(); // raw lab-frame net force on each anchor segment (N)
+		double[] jointF = new double[3];               // GPU: device chain force (jointForceSum) scratch
 	}
 	static ContractAssay contract = null;
 
@@ -1911,6 +1912,17 @@ public class BoxOfActin {
 					p.anchor.z - p.seg.getEnd2Z());
 			}
 			p.seg.initialize();
+			// GPU residency: the snap-back is an in-place incCoord on the same
+			// Thing/slot, which buildDeltaSet()'s slot-change scan does NOT catch
+			// (same as biochem poly/depoly — see FilSegment.biochemStep). Without
+			// an explicit markPoseDirty the device-resident pose never receives the
+			// pin correction, so the anchor drifts and the assay is no longer
+			// isometric (the plus-ends pull inward and the tension reads far below
+			// the held-anchor value). Mark it so the scatter kernel lands the pinned
+			// pose ahead of the next move integration. No-op on the CPU path.
+			if (Env.useGPU) {
+				GPUMoveThing.markPoseDirty(p.seg);
+			}
 		}
 	}
 
@@ -2779,11 +2791,28 @@ public class BoxOfActin {
 		if (contract == null) return;
 		if (contract.anchorSegA != null) {
 			contract.forceA.setVals(contract.anchorSegA.getForceSumX(), contract.anchorSegA.getForceSumY(), contract.anchorSegA.getForceSumZ());
+			addDeviceJointForce(contract.anchorSegA, contract.forceA);
 			contract.tensionA_pN = Pt3D.Dot(contract.forceA, contract.buildDirA) * 1e12;
 		}
 		if (contract.anchorSegB != null) {
 			contract.forceB.setVals(contract.anchorSegB.getForceSumX(), contract.anchorSegB.getForceSumY(), contract.anchorSegB.getForceSumZ());
+			addDeviceJointForce(contract.anchorSegB, contract.forceB);
 			contract.tensionB_pN = Pt3D.Dot(contract.forceB, contract.buildDirB) * 1e12;
+		}
+	}
+
+	// On the GPU path the anchor's chain reaction (F3/F4) is computed on-device into
+	// jointForceSum and never gathered into the host soaForceSum the readout above
+	// projects, so without this the GPU tension reads ~0 even while the device applies
+	// the full contractile force through the chain. Add the device joint force (gathered
+	// per execute when the assay is active) to the host force sum. No-op on the CPU path
+	// (the chain force is already in soaForceSum there) and when the seg isn't GPU-handled.
+	private static void addDeviceJointForce(FilSegment anchorSeg, Pt3D force) {
+		if (!Env.useGPU) return;
+		if (GPUMoveThing.readDeviceJointForce(anchorSeg.myThingNumber, contract.jointF)) {
+			force.x += contract.jointF[0];
+			force.y += contract.jointF[1];
+			force.z += contract.jointF[2];
 		}
 	}
 

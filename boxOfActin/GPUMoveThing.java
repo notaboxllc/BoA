@@ -3195,6 +3195,18 @@ public class GPUMoveThing {
                 tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                        motorWriteback);
             }
+            // Contractility tension readout: the pinned anchor segment's reaction
+            // is the device chain force (F3/F4) accumulated into jointForceSum,
+            // which is otherwise never gathered to host (the host soaForceSum the
+            // readout projects holds only the CPU-phase forces, ~0 on the static
+            // brownian-off anchor). Pull jointForceSum each execute when the assay
+            // is active so captureContractilityTension() can add the device anchor
+            // reaction. 1-step lagged (read before next moveThings) — negligible
+            // for the quasi-static tension plateau. Small buffer; the assay is a
+            // tiny kernel-launch-bound system, so the extra copy is in the noise.
+            if (Env.contractilityAssay.isActive()) {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION, jointForceSum);
+            }
             // Phase 4.5 small-fix Step 2 — soaLengthArr also persists on device
             // so the bind ITG can consumeFromDevice it.
             // P2 reduction (2026-06-08): the slim per-step kernel does not
@@ -3402,6 +3414,28 @@ public class GPUMoveThing {
     public static IntArray   getFilMoveSlotArray()    { return filMoveSlot; }
     public static int        getBindMotorCap()        { return bindMotorCap; }
     public static int        getBindSegCap()          { return bindSegCap; }
+
+    /**
+     * Read the device-computed joint/chain force (jointForceSum) for a Thing by
+     * its thingNumber into out[0..2], returning true on success. The force is the
+     * F3/F4 chain contribution the move kernel adds to cpuForceSum on device; it
+     * is gathered to host only when the contractility assay is active (see the
+     * jointForceSum transferToHost in the plan build). Returns false if the Thing
+     * is not GPU-handled (no move slot) or the buffers aren't resident yet, in
+     * which case the caller should treat the device contribution as zero.
+     */
+    public static boolean readDeviceJointForce(int thingNumber, double[] out) {
+        if (jointForceSum == null || thingNumberToMoveSlot == null) return false;
+        if (thingNumber < 0 || thingNumber >= thingNumberToMoveSlot.length) return false;
+        int slot = thingNumberToMoveSlot[thingNumber];
+        if (slot < 0) return false;
+        int i3 = slot * 3;
+        if (i3 + 2 >= jointForceSum.getSize()) return false;
+        out[0] = jointForceSum.get(i3);
+        out[1] = jointForceSum.get(i3 + 1);
+        out[2] = jointForceSum.get(i3 + 2);
+        return true;
+    }
 
     /** Phase 4.5 parity — demand-sync coord/uVec back to host so the parity
      *  plan's EVERY_EXECUTION upload of the move plan's resident pose sees the

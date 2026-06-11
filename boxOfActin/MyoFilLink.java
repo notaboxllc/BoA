@@ -42,8 +42,13 @@ public class MyoFilLink {
 	Pt3D R = new Pt3D();
 	Pt3D RcrossF = new Pt3D();
 	Pt3D torsionVec = new Pt3D();
-	Pt3D linkUVec1 = new Pt3D(); 
+	Pt3D linkUVec1 = new Pt3D();
 	Pt3D linkUVec2 = new Pt3D();
+	// GPU residency fix (2026-06-10): the cross-bridge force for a CPU-handled
+	// (non-MyosinFixed) bound motor must use the motor head tip derived fresh
+	// from the demand-synced coord+uVec, not the stale bindTip host mirror.
+	// Reused per-call to avoid allocation in the per-bound-motor hot path.
+	Pt3D freshMotorTip = new Pt3D();
 	
 	
 	public MyoFilLink (MyoMotor mot, Pt3D pt) {
@@ -64,6 +69,7 @@ public class MyoFilLink {
 		torsionVec = null;
 		linkUVec1 = null;
 		linkUVec2 = null;
+		freshMotorTip = null;
 	}
 	
 	// Phase 4.5 diag (2026-06-05): split-counter for updatePos() calls. Each
@@ -156,12 +162,25 @@ public class MyoFilLink {
 	
 	public void addForces () {
 		if (isFree()) return;
-		double dist = Pt3D.ptDist(motorPt, attachPt);
+		// GPU residency: the motor head is integrated on-device every step, but the
+		// bindTip host mirror (== motorPt) is only refreshed at output cadence, so on
+		// the GPU path it lags the true head by tens of nm. Reading it here inflated
+		// the cross-bridge spring distance past the break-force threshold, so every
+		// GPU dimer bind force-released on the next step (binds never held). Derive
+		// the head tip fresh from the demand-synced coord+uVec (== freshEnd2AsPt3D),
+		// and use it for the spring distance, direction, AND the torque application
+		// point. On the CPU path coord/uVec are also fresh and this equals bindTip,
+		// so CPU behaviour is unchanged.
+		final double halfMot = 0.5 * Env.myoMotorLength.getValue();
+		freshMotorTip.setVals(myMotor.getCoordX() + halfMot*myMotor.getUVecX(),
+		                      myMotor.getCoordY() + halfMot*myMotor.getUVecY(),
+		                      myMotor.getCoordZ() + halfMot*myMotor.getUVecZ());
+		double dist = Pt3D.ptDist(freshMotorTip, attachPt);
 		if (dist < 0) { dist = 0; }
 		forceMag = dist*myoSpring;
-		F.unitVec(attachPt,motorPt);
+		F.unitVec(attachPt,freshMotorTip);
 		F.scale(forceMag);
-		myMotor.incForceSum(F,motorPt);
+		myMotor.incForceSum(F,freshMotorTip);
 
 		// calculate component of force toward barbed-end, signed magnitude needed for catch/slip Guo&Guilford (2006) release probability
 		// Here, forceDotFil is positive for a force that will move myosin to plus-end of filament)
@@ -256,7 +275,10 @@ public class MyoFilLink {
 	public void updatePos () {
 		if (lastPosUpdate != Env.counter) {
 			//motorPt.copy(myMotor.bindTip);
-			attachPt.add(mySeg.end1AsPt3D(),posOnSeg,mySeg.uVecAsPt3D());
+			// freshEnd1AsPt3D (coord-½·len·uVec from the demand-synced pose) instead
+			// of end1AsPt3D (stale soaEnd1 mirror) so the filament attach point tracks
+			// current geometry on the GPU path. CPU-bit-identical (freshEnd1==end1).
+			attachPt.add(mySeg.freshEnd1AsPt3D(),posOnSeg,mySeg.uVecAsPt3D());
 			lastPosUpdate = Env.counter;
 		}
 	}
