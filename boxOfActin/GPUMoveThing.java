@@ -375,9 +375,10 @@ public class GPUMoveThing {
     }
 
     // Brownian-rule codes (cached per slot in classifyThings).
-    private static final int RULE_FIL   = 0;
-    private static final int RULE_MYO   = 1;
-    private static final int RULE_LEVER = 2;
+    private static final int RULE_FIL     = 0;
+    private static final int RULE_MYO     = 1;
+    private static final int RULE_LEVER   = 2;
+    private static final int RULE_MINIFIL = 3;   // MyoMiniFilament body — device-integrated rigid rod
 
     // ----- capacity / current count -----
     private static int slotCap   = 0;
@@ -772,6 +773,8 @@ public class GPUMoveThing {
     private static float   sMyoBrownian;
     private static boolean sBrownianFilOff;
     private static boolean sBrownianMyoOff;
+    private static float   sMiniFilBrownian;   // minifilament BODY Brownian scale (Env.myoMiniFilBrownianScale)
+    private static boolean sMiniFilBrownianOff; // Env.myoMiniFilBrownianMotionOff (hard off)
 
     // -------------------------------------------------------------------------
     // Wang hash — 32-bit integer mixer.
@@ -3587,6 +3590,25 @@ public class GPUMoveThing {
         demandSyncPoseCalls++;
     }
 
+    // Phase A (2026-06-11) — refresh host derived fields (transXTox / end1 /
+    // end2 / re-orthog yVec) for every device-handled MyoMiniFilament body from
+    // its just-demand-synced pose. Replaces the per-step recompute the body's
+    // CPU moveThing()/initialize() used to do before it became device-resident.
+    // Required because the CPU minifilament cohesion (MyoMiniFilament.update-
+    // MyosinDimerPositions -> Pt3D.xToX) reads the cached soaTransXTox[body] to
+    // place the dimer attachment points. Few bodies; the recompute is the same
+    // math the device derivedFieldsKernel runs, on the same (orthonormal) pose.
+    private static void refreshMiniFilBodyDerived() {
+        int ct = MyoMiniFilament.myoMiniFilCt;
+        MyoMiniFilament[] mfs = MyoMiniFilament.myoMiniFils;
+        for (int i = 0; i < ct; i++) {
+            MyoMiniFilament mf = mfs[i];
+            if (mf == null || mf.removeMe || !mf.gpuHandled) continue;
+            int n = mf.myThingNumber;
+            Thing.recomputeDerivedSoA(n, n + 1);
+        }
+    }
+
     /**
      * Phase 4 flip — demand-sync the device-resident derived* buffers, then
      * run Thing.recomputeDerivedSoA on CPU to repopulate the per-Thing
@@ -4028,6 +4050,24 @@ public class GPUMoveThing {
                     continue;
                 }
                 rule = RULE_LEVER;
+            } else if (t instanceof MyoMiniFilament) {
+                // Phase A (2026-06-11) — the minifilament BODY is a device-
+                // integrated rigid rod, same move/derived kernel path as the
+                // rods, so its cohesion reaction force (-F/-tau, computed CPU-
+                // side in myoJoints2 and packed via soaForceSum) integrates on
+                // the SAME float32 device integrator as the rods' +F/+tau. Its
+                // CPU step() (F7 boundary) is inert in the minifilament configs
+                // (no Bug); its CPU moveThing (which used to integrate it +
+                // apply body Brownian) is replaced by the move kernel + the
+                // RULE_MINIFIL Brownian scale. Host derived fields (transXTox/
+                // end1/end2 read by the CPU cohesion's attachment-point xToX)
+                // are refreshed each step after demandSyncPoseToHost — see
+                // refreshMiniFilBodyDerived().
+                if (myosinsOff) {
+                    if (cn < cpuFallback.length) cpuFallback[cn++] = t;
+                    continue;
+                }
+                rule = RULE_MINIFIL;
             } else {
                 if (cn < cpuFallback.length) cpuFallback[cn++] = t;
                 continue;
@@ -4872,6 +4912,12 @@ public class GPUMoveThing {
             } else if (rule == RULE_MYO) {
                 if (bMyoOff) { tScale = 0f; rScale = 0f; }
                 else         { tScale = myoBr; rScale = myoBr; }
+            } else if (rule == RULE_MINIFIL) {
+                // Body Brownian = scale * free-body (Env.myoMiniFilBrownianScale);
+                // hard-off via myoMiniFilBrownianMotionOff. Mirrors the CPU
+                // MyoMiniFilament.moveThing() bForceSum.inc(scale, randForces).
+                if (sMiniFilBrownianOff) { tScale = 0f; rScale = 0f; }
+                else { tScale = sMiniFilBrownian; rScale = sMiniFilBrownian; }
             } else {  // RULE_LEVER
                 tScale = 0f;
                 rScale = 0f;
@@ -4973,6 +5019,9 @@ public class GPUMoveThing {
             } else if (rule == RULE_MYO) {
                 if (bMyoOff) { tScale = 0f; rScale = 0f; }
                 else         { tScale = myoBr; rScale = myoBr; }
+            } else if (rule == RULE_MINIFIL) {
+                if (sMiniFilBrownianOff) { tScale = 0f; rScale = 0f; }
+                else { tScale = sMiniFilBrownian; rScale = sMiniFilBrownian; }
             } else {  // RULE_LEVER
                 tScale = 0f;
                 rScale = 0f;
@@ -5198,6 +5247,8 @@ public class GPUMoveThing {
         sMyoBrownian   = (float) Env.myoBrownianAttn.getValue();
         sBrownianFilOff = Env.brownianFilMotionOff;
         sBrownianMyoOff = Env.brownianMyoMotionOff;
+        sMiniFilBrownian    = (float) Env.myoMiniFilBrownianScale.getValue();
+        sMiniFilBrownianOff = Env.myoMiniFilBrownianMotionOff;
 
         long packStart = System.nanoTime();
         int sc = slotCount;
@@ -5396,6 +5447,15 @@ public class GPUMoveThing {
                 dispatchAndWait(OP_UNPACK, sc);
             } else if (!Env.noMonomersSimd.isActive()) {
                 demandSyncPoseToHost();
+                // Phase A — the minifilament BODY is now device-integrated, so
+                // its CPU moveThing()/initialize() no longer refreshes its host
+                // derived fields (transXTox / end1 / end2). The CPU cohesion
+                // (myoJoints2, next step) reads soaTransXTox[body] via xToX to
+                // place the dimer attachment points, so recompute the body
+                // derived from the just-synced pose here. Idempotent re-orthog
+                // from the device's already-orthonormal pose (no drift), few
+                // bodies, cheap.
+                refreshMiniFilBodyDerived();
             }
             // else: per-step pull retired; output cadence handled via
             // refreshHostMirrorsForOutput. Host soaCoord/UVec/YVec stay

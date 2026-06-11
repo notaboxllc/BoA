@@ -1247,9 +1247,10 @@ public class BoxOfActin {
 					// packs eligible Things (MyoMotor/MyoRod/MyoLever/root FilSegment
 					// in this first pass), runs the branchless integration kernel,
 					// unpacks coordAsPt3D()/uVecAsPt3D()/yVecAsPt3D(), and runs initialize() on the affected
-					// Things. Ineligible Things (Bug, ProteinNode, MyoMiniFilament,
-					// branches, ActA-bound segments, etc.) fall back to CPU
-					// moveThing() inside GPUMoveThing.moveThings(). Crucible/Chamber/
+					// Things. The MyoMiniFilament body is now device-integrated too
+					// (RULE_MINIFIL, Phase A 2026-06-11). Ineligible Things (Bug,
+					// ProteinNode, branches, ActA-bound segments, etc.) fall back to
+					// CPU moveThing() inside GPUMoveThing.moveThings(). Crucible/Chamber/
 					// AnchorNode have empty moveThing overrides and the fallback
 					// dispatch is a no-op for them.
 					GPUMoveThing.moveThings();

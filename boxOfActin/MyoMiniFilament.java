@@ -191,10 +191,16 @@ public class MyoMiniFilament extends Thing {
 		int sBase = myThingNumber * 3;
 		bForceSum.XToxFromFloats(this, Thing.soaForceSum, sBase);
 		bTorqueSum.XToxFromFloats(this, Thing.soaTorqueSum, sBase);
-		if (!Env.myoMiniFilBrownianMotionOff) {
-			// add random forces, given in body-fixed frame
-			bForceSum.inc(randForces);
-			bTorqueSum.inc(randTorques);
+		// Minifilament BODY Brownian: scaled to a fraction of the free-body value
+		// (default 1/10, Env.myoMiniFilBrownianScale) so the large body does not
+		// tumble and fling its attached myosins. myoMiniFilBrownianMotionOff /
+		// BOA_MINIFIL_BROWNIAN_OFF still hard-disables it (scale 0).
+		double bodyBrownScale = Env.myoMiniFilBrownianMotionOff
+				? 0.0 : Env.myoMiniFilBrownianScale.getValue();
+		if (bodyBrownScale != 0.0) {
+			// add random forces (in body-fixed frame), scaled
+			bForceSum.inc(bodyBrownScale, randForces);
+			bTorqueSum.inc(bodyBrownScale, randTorques);
 		}
 		// now that the forces and torques are in the body fixed frame, we apply the eoms....
 		bVeloc.div(1.0e6, bForceSum, bTransGam);		// in micron/sec

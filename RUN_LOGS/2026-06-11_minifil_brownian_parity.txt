@@ -1,0 +1,106 @@
+2026-06-11 — Minifilament Brownian: CPU/GPU parity (brownianDeltaT removed) + body thermal scale
+Branch: minifil-body-cohesion-device. Config: boa10-singleMiniFil (deltaT=1e-4, brownianDeltaT=1e-5),
+single minifilament, no actin, seed 1 unless noted, 300 steps / 63 frames.
+
+================================================================================
+PART 0 — Spin-seam premise REFUTED (original task gate)
+================================================================================
+The Path-B Phase-2a "residual GPU spin" (cloud coherence 0.27/0.46 vs CPU 0.03/0.07) does NOT
+reproduce as a real, persistent effect on current main. The spin_metric cloud coherence over a
+300-step run (62 transitions) has a statistical noise floor ~1/sqrt(62) ~ 0.13 — comparable to
+the signal. The 64 myosins of one minifilament are highly correlated (all chase one body) ->
+~1 effective DOF per transition, so the metric does not average that floor down.
+
+5-seed ensembles (cloud coherence), seeds 1-5:
+  GPU baseline : 0.332 0.157 0.149 0.103 0.297  -> mean 0.207
+  CPU floor    : 0.037 0.062 0.142 0.272 0.187  -> mean 0.140
+  GPU body-OFF : 0.089 0.382 0.254 0.003 0.066  -> mean 0.158
+All three overlap; per-run range 0.003-0.382. The Phase-2a CPU "floor" 0.03-0.07 does not hold.
+
+Long runs (3000 steps / 603 frames, noise floor ~1/sqrt(600) ~ 0.04):
+  GPU baseline s1/s2 : 0.028 / 0.036
+  CPU floor    s1/s2 : 0.021 / 0.044
+GPU == CPU at the noise floor. Net rotations random sign (GPU +70/-75, CPU +66/-152) = diffusive.
+Same-window check: long-GPU first-63-frames coherence 0.104 vs long-CPU first-63 0.249 — CPU
+(the supposed floor) is MORE "spun" than GPU in that window. => no reproducible spin seam.
+Consequence: the body+cohesion device port (Phases A/B/C), whose stated payoff was "collapse the
+spin", chases a measurement artifact. Phase 0 BAIL.
+
+Consumer audit (for the record): on contractilityAssay_gpu / minifilament configs the per-step
+demandSyncPoseToHost is justified by (a) cohesion (MyoMiniFilament.constrainEnd1/2Dimers,
+MyosinDimer.applyRodCoupling*, alignUVecLeversTorque — read fresh coord/uVec each step) and
+(b) bind-application (MyoFilLink.addForces/updatePos cross-bridge force, dimer motors CPU-handled).
+F7 body boundary (checkOuterBugCollision) is inert (no Bug). So even had A/B landed, Phase C
+(residency flip) would be BLOCKED by bind-application (b), which is out of scope.
+
+================================================================================
+PART 1 — The real CPU-vs-GPU difference: a sqrt(10) Brownian bug
+================================================================================
+jba viewing frames: CPU myosin pieces "knocked all over"; GPU "much milder". Measured (body
+equalized first via the 1/10 body scale below):
+  rod-center mean step:  CPU 17.42 nm/frame   GPU 5.51 nm/frame   ratio 3.16 = sqrt(10)
+Root cause: GPU move kernel scales Brownian by sqrt(2kT/deltaT) (GPUMoveThing.java:5227, deltaT=1e-4);
+CPU calcRandomForces scales by 1/brownianDeltaT (Thing.java:1051, brownianDeltaT=1e-5) while
+integration uses deltaT -> FDT-breaking mismatch; CPU diffuses ~10x too fast in variance.
+brownianApplyInt = (int)(brownianDeltaT/deltaT) = (int)0.1 = 0, but `counter>=0` is always true,
+so cadence is every-step regardless (same as the correct brownianApplyInt=1). Only the MAGNITUDE
+was wrong. The DEFAULT brownianDeltaT_init = deltaT_init was already correct; 52 param files
+override it to 1e-5.
+
+jba: deltaT and brownianDeltaT were always meant to be identical; brownianDeltaT is residual.
+Fix: REMOVE brownianDeltaT; Brownian always uses deltaT.
+  Env.java: delete Parameter + _init; brownianApplyInt = 1.
+  Thing.java:1050: bDt = Env.deltaT.getValue().
+Unknown "brownianDeltaT:" lines in old configs are non-fatal (loader logs one "misunderstanding").
+
+Blast radius: only configs with deltaT != brownianDeltaT change. Checked:
+  glidingAssay500_val / _short : 1e-5 / 1e-5  -> MATCHED, no-op (gliding validation preserved)
+  contractilityAssay_gpu       : 1e-5 / 1e-5  -> MATCHED, no-op
+  boa10-singleMiniFil          : 1e-4 / 1e-5  -> corrected (CPU thermal drops sqrt(10))
+  boa10-64Seg-dyn-short        : 1e-4 / 1e-5  -> corrected
+  boa10-miniFil-staticActin    : 1e-4 / 1e-5  -> corrected
+jba: Lp benchmark configs ran deltaT==brownianDeltaT==1e-5, so Lp is unaffected (no-op there).
+
+Validation (boa10-singleMiniFil, seed 1, after fix):
+  rod-center mean step:  CPU 5.46 nm   GPU 5.51 nm   -> now MATCH (was 17.42 vs 5.51)
+
+================================================================================
+PART 2 — Minifilament BODY Brownian scale (jba directive)
+================================================================================
+"All minifilament runs should turn off the body Brownian, or dial it to 1/10 of the free body."
+Added Env.myoMiniFilBrownianScale (default 0.1, runtime-mutable). MyoMiniFilament.moveThing()
+applies bForceSum.inc(scale, randForces) / bTorqueSum.inc(scale, randTorques). myoMiniFilBrownianMotionOff
+/ BOA_MINIFIL_BROWNIAN_OFF still hard-off (scale 0). Body is cpuFallback on both paths -> applies
+to CPU and GPU runs alike.
+
+Body-axis total turn (deg over 63 frames):
+  body FULL thermal (old): CPU 522.9   GPU 520.3   (identical -> body was never the CPU/GPU diff)
+  body 1/10 (pre-bug-fix): CPU 68.3    GPU 65.1     (~8x calmer)
+  body OFF               : GPU 34.9
+  body 1/10 (post-fix)   : CPU 20.7    GPU 21.5     (0.1 x corrected free-body; CPU==GPU)
+
+Net: CPU and GPU minifilament runs now agree on both myosin-piece thermal (5.46~5.51 nm) and
+body wander (20.7~21.5 deg). Staged viewer runs under ~/Code/threejs_output/minifil_*.
+
+================================================================================
+PART 3 — Phase A: MyoMiniFilament body device-integrated (RULE_MINIFIL), commit 1d7dcc3
+================================================================================
+Body moved off cpuFallback onto the device move/derived kernel path. Validated boa10-singleMiniFil
+vs CPU reference (both after the brownianDeltaT + body-scale fixes).
+
+300-step runs (63 frames):
+                       jitter(nm)   body-wander(deg)   span(nm)        COM net drift(nm)
+  GPU Phase A s1         5.50          22.2           180.0 (179.9-180.1)   4.1  (path 87.4)
+  GPU pre-A (CPU-fb) s1  5.51          21.5           --                    --
+  CPU ref s1            5.46          20.7           179.9-180.1            7.3  (path 90.7)
+  GPU Phase A s2         5.46          19.7           179.9-180.1          14.3  (path 95.0)
+  CPU ref s2            5.43          22.1           179.9-180.1           6.8  (path 96.4)
+
+3000-step run (603 frames), GPU Phase A: span locked 180.0 (min 179.9 max 180.1), COM net 23.4 nm
+over a 903.7 nm path, body wander 198.9 deg, crazy/NaN=0, clean exit.
+
+=> body holds device-integrated, matches CPU on all observables, no NaN. Phase A gate PASSED.
+
+Phase B (cohesion->device) DEFERRED per jba (spin rationale void; Phase A already gives matched-
+precision action/reaction; Phase C blocked regardless). Phase C BLOCKED by bind-application
+(MyoFilLink.addForces reads fresh host motor+fil pose every step; dimer motors CPU-handled).
