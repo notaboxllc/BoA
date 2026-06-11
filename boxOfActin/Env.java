@@ -176,6 +176,14 @@ public class Env {
 	static final Parameter myoBrownianAttn = new Parameter("myoBrownianAttn",
 			" Attenuation of Brownian forces on Myo parts", 1.0, "");
 
+	// Scale on the minifilament BODY's own Brownian forcing, as a fraction of the
+	// free-body value (computed from the body's drag tensor in calcRandomForces).
+	// Default 0.1 = 1/10 of a free body of the same size/shape, so the big body
+	// does not tumble and fling its attached myosins around. 0.0 = fully off (also
+	// reachable via myoMiniFilBrownianMotionOff / BOA_MINIFIL_BROWNIAN_OFF).
+	static final Parameter myoMiniFilBrownianScale = new Parameter("myoMiniFilBrownianScale",
+			" Scale on minifilament BODY Brownian (fraction of free-body; 0=off)", 0.1, "").setMutableAtRuntime();
+
 	// **** Value Tracking *****
 	static final int forcesToTrack = 4;
 	static final int nodeetherStrainToAverage = 10;
