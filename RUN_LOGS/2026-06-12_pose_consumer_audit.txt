@@ -1,0 +1,44 @@
+Per-step host-pose consumer audit — contractilityAssay_gpu (2026-06-12)
+========================================================================
+Tooling: BOA_POSE_AUDIT=1 (Thing.POSE_AUDIT, final-boolean gated → zero overhead off).
+  - Counter + first-non-Thing/non-Pt3D caller capture on every host-pose accessor:
+    getCoordX/Y/Z, getUVecX/Y/Z, getYVecX/Y/Z, getUVecRX/Y/Z, getCoord/getUVec/getYVec,
+    getEnd1X/Y/Z, getEnd2X/Y/Z, getZVecX/Y/Z, getTransXTox/getTransxToX/copyTransXToxInto/
+    copyTransxToXInto, the bulk Thing.recomputeDerivedSoA (reads soaCoord directly), and the
+    Pt3D body-frame transforms xToX/XTox/xToXPlusxOrigin/XToxFromxOrigin.
+  - Window armed in onStepStart right after demandSyncPoseToHost (steps 300-302), dumped +
+    disarmed in BoxOfActin.updateCounters (before the output logAndDraw → output reads excluded).
+
+Why the prior reasoning-only audits under-counted: pose is read both via getters AND via bulk
+direct-array readers (recomputeDerivedSoA reads soaCoord/soaUVec directly) and via Pt3D transforms
+that read soaTransXTox. Instrumenting only the getters missed refreshMiniFilBodyDerived entirely.
+
+Evolution of the audit (each row a build with more readers instrumented):
+  getters only        : reads=6   {FilSegment.initialize=6}
+  + recomputeDerivedSoA
+    + derived getters  : reads=33  {refreshMiniFilBodyDerived=1, FilSegment.initialize=26, applyBenchmarkPins=6}
+  + Pt3D xToX/XTox     : reads=33  (UNCHANGED — xToX never fired → updateMyosinDimerPositions does
+                                    NOT run per-step; the CPU cohesion attach path is gated off)
+  after gating refreshMiniFilBodyDerived (dead):
+                        reads=32  {FilSegment.initialize=26, applyBenchmarkPins=6}  (anchor pin only)
+
+COMPLETE consumer map (2 roots):
+  1. GPUMoveThing.refreshMiniFilBodyDerived (1/step) — Phase-A recompute of the body's host derived
+     fields (transXTox/end1/end2) to feed the CPU cohesion's xToX. DEAD with cohesion on device
+     (updateMyosinDimerPositions does not run — proven by xToX never firing). Gated off (kept only
+     under DIAG_COHESION_CPU). Output writers refresh via refreshHostMirrorsForOutput.
+  2. applyBenchmarkPins + FilSegment.initialize (32/step) — the contractility anchor pin reads the
+     2 pinned segments' end1/end2, snaps them to fixed anchors, and re-initializes them. Assay-
+     harness only (absent in production minifilament configs). TOLERATES stale pose (targets a fixed
+     point; anchors quasi-static).
+
+Pull retirement (BOA_RETIRE_POSE_PULL / retirePosePull() default-on for contractilityAssay):
+  pullon  : [STATS] demandSyncPose=9.142s(calls=10203)
+  pulloff : [STATS] demandSyncPose=0.063s(calls=102)   ← output cadence only
+  → 10203→102 calls, 9.14s→0.06s, ~0.9 ms/step saved over the 10k-step run.
+
+Behavior (pullon vs pulloff, seed1, full 10k-step run):
+  anchor plus-end drift over run: pullon ±1.0 nm, pulloff ±0.5 nm (held tighter, no drift)
+  tension pN (mean steps>5000): pullon 1.64/1.64, pulloff 1.93/1.71  (both within oracle ~1.8-2.0 noise)
+  boundMotors: pullon 5.27, pulloff 6.77  (within noise); meanBoundMotors 4.9 / 5.35
+  no NaN / no "Crazy torque" in either.

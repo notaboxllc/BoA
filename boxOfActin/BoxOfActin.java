@@ -2267,6 +2267,16 @@ public class BoxOfActin {
 	}
 
 	public static void updateCounters() {
+		// Per-step host-pose consumer audit — disarm + dump before the increment
+		// (so the step number matches the armed window) and before logAndDraw,
+		// excluding output-frame reads from the tally.
+		if (Thing.poseAuditWindow) {
+			Thing.poseAuditWindow = false;
+			System.err.println("[POSE_AUDIT step=" + Env.counter + "] reads=" + Thing.poseAuditReads
+				+ " callers=" + Thing.poseAuditCallers);
+			Thing.poseAuditReads = 0;
+			Thing.poseAuditCallers.clear();
+		}
 		//update counters and flags
 		paintedThisStep = false;
 		Env.counter++;

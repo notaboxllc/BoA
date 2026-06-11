@@ -427,6 +427,7 @@ public class Pt3D {
 	}
 
 	public void xToX (Thing p, Pt3D ptInx) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final float[] m = Thing.soaTransXTox;
 		double px = ptInx.x, py = ptInx.y, pz = ptInx.z;	// snapshot in case ptInx == this
@@ -436,6 +437,7 @@ public class Pt3D {
 	}
 
 	public void xToX (Thing p) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final float[] m = Thing.soaTransXTox;
 		double px = this.x, py = this.y, pz = this.z;
@@ -445,6 +447,7 @@ public class Pt3D {
 	}
 
 	public void xToXPlusxOrigin (Thing p, Pt3D ptInx) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final int b3 = p.myThingNumber * 3;
 		final float[] m = Thing.soaTransXTox;
@@ -456,6 +459,7 @@ public class Pt3D {
 	}
 
 	public void xToXPlusxOrigin (Thing p) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final int b3 = p.myThingNumber * 3;
 		final float[] m = Thing.soaTransXTox;
@@ -487,6 +491,7 @@ public class Pt3D {
 	}
 
 	public void XTox (Thing p, Pt3D ptInX) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final float[] m = Thing.soaTransXTox;
 		double px = ptInX.x, py = ptInX.y, pz = ptInX.z;
@@ -508,6 +513,7 @@ public class Pt3D {
 	}
 
 	public void XTox (Thing p) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final float[] m = Thing.soaTransXTox;
 		double px = this.x, py = this.y, pz = this.z;
@@ -517,6 +523,7 @@ public class Pt3D {
 	}
 
 	public void XToxFromxOrigin (Thing p, Pt3D ptInX) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final int b3 = p.myThingNumber * 3;
 		final float[] m = Thing.soaTransXTox;
@@ -530,6 +537,7 @@ public class Pt3D {
 	}
 
 	public void XToxFromxOrigin (Thing p) {
+		if (Thing.POSE_AUDIT && Thing.poseAuditWindow) Thing.poseAuditHit();
 		final int b9 = p.myThingNumber * 9;
 		final int b3 = p.myThingNumber * 3;
 		final float[] m = Thing.soaTransXTox;

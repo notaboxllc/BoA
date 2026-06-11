@@ -607,6 +607,26 @@ public class GPUMoveThing {
     // BOA_MINIFIL_COHESION_CPU=1 (the A/B control), mirroring DIAG_CPU_MOTOR. Set in
     // BoxOfActin.begin() from the env var.
     public static boolean DIAG_COHESION_CPU = false;
+    // BOA_RETIRE_POSE_PULL: general override to skip the per-step demandSyncPoseToHost
+    // on noMonomersSimd:false configs (for measurement / pin-free biochem-inactive
+    // minifilament configs). The contractility assay retires the pull by default (see
+    // retirePosePull()).
+    static final boolean RETIRE_POSE_PULL = System.getenv("BOA_RETIRE_POSE_PULL") != null;
+
+    // The per-step host pose pull (demandSyncPoseToHost) is retired when no per-step CPU
+    // consumer needs FRESH host pose. After the body cohesion went on device + the dead
+    // refreshMiniFilBodyDerived was gated off, the EXHAUSTIVE pose-consumer audit
+    // (BOA_POSE_AUDIT) leaves exactly one consumer on contractilityAssay_gpu — the anchor
+    // pin (applyBenchmarkPins) — and it TOLERATES stale pose: it snaps each pinned segment
+    // toward a FIXED anchor point and the anchors are quasi-static, so a stale read still
+    // lands the end on target (validated: anchors held <0.5 nm, tension/boundMotors neutral
+    // vs the full pull and the full-CPU oracle, no NaN). Biochem turnover is zeroed in the
+    // assay (applyContractilityDefaults), so the poly/depoly incCoord baseline that keeps
+    // the pull on for biochem-ACTIVE noMonomersSimd:false configs (e.g. boxSpaghetti) does
+    // not apply here. Other biochem-inactive minifilament configs can opt in via the env.
+    static boolean retirePosePull() {
+        return RETIRE_POSE_PULL || Env.contractilityAssay.isActive();
+    }
 
     // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
     // boundaryActive[i] = 1 when slot i holds a GPU-handled FilSegment, the
@@ -5904,17 +5924,26 @@ public class GPUMoveThing {
                 // executeSplit's moveOnlyPlan has transferToHost
                 // EVERY_EXECUTION for coord/uVec/yVec already — just scatter.
                 dispatchAndWait(OP_UNPACK, sc);
-            } else if (!Env.noMonomersSimd.isActive()) {
+            } else if (!Env.noMonomersSimd.isActive() && !retirePosePull()) {
                 demandSyncPoseToHost();
-                // Phase A — the minifilament BODY is now device-integrated, so
-                // its CPU moveThing()/initialize() no longer refreshes its host
-                // derived fields (transXTox / end1 / end2). The CPU cohesion
-                // (myoJoints2, next step) reads soaTransXTox[body] via xToX to
-                // place the dimer attachment points, so recompute the body
-                // derived from the just-synced pose here. Idempotent re-orthog
-                // from the device's already-orthonormal pose (no drift), few
-                // bodies, cheap.
-                refreshMiniFilBodyDerived();
+                // Per-step host-pose consumer audit: arm the window right after the
+                // demand-sync so EVERY downstream read of the freshly-synced pose
+                // (including refreshMiniFilBodyDerived below) is attributed. Disarmed
+                // + dumped in BoxOfActin.updateCounters (before the output logAndDraw).
+                if (Thing.POSE_AUDIT && Env.counter >= 300 && Env.counter <= 302) {
+                    Thing.poseAuditWindow = true;
+                }
+                // Phase A added this per-step recompute of the minifilament BODY's
+                // host derived fields (transXTox / end1 / end2) to feed the CPU
+                // cohesion's xToX attach transform (MyoMiniFilament.updateMyosin-
+                // DimerPositions, myoJoints2). With cohesion on device (default) that
+                // CPU path is gated off and the exhaustive host-pose-consumer audit
+                // (BOA_POSE_AUDIT) confirms NOTHING reads the body's host derived
+                // fields per-step — so it is DEAD unless the CPU-cohesion A/B control
+                // (DIAG_COHESION_CPU) is active. Output writers refresh independently
+                // via refreshHostMirrorsForOutput. Skipping it retires one of the two
+                // per-step host-pose consumers on contractilityAssay_gpu.
+                if (DIAG_COHESION_CPU) refreshMiniFilBodyDerived();
             }
             // else: per-step pull retired; output cadence handled via
             // refreshHostMirrorsForOutput. Host soaCoord/UVec/YVec stay

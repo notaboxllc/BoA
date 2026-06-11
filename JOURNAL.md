@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**Minifilament cohesion onto device + per-step pose pull retired — biochem-path residency flip.** Branch `minifil-cohesion-device` off main (`a2956e9`; has Step-1 dimer port `97bf945`, `84e188c`, Phase A `RULE_MINIFIL`). **Step 0 — force-coverage survey** (`RUN_LOGS/2026-06-11_cohesion_device_step0_survey.txt`): mapped the complete cohesion dispatch — `parallel` is ALWAYS true (antiparallel/`alignYVecLeversTorque`/`keepMyosinsOnSurface` are dead), `alignUVecLeversTorque` gates on `!(both heads onFil)`, the body attach offset is purely axial (y=z=0) so `attachPt = body.coord + offsetX·body.uVec` (no frame rebuild). Expressible as a per-(dimer) kernel with packed flags → no bail. **Step 1 (committed `ed957a3`) — cohesion on device, behavior-neutral:** `dimerCohesionKernel` (one thread per parallel GPU-handled dimer) reproduces `applyRodCouplingEnd1/End2` + conditional `alignUVecLeversTorque` + `constrainEnd{1,2}Dimers` from the resident pose; CPU cohesion gated off in lockstep via `MyosinDimer.cohesionOnDevice()` (verified `cpuCohesionApplyCt=0` — no double-apply). **Two bugs found+fixed in validation: (1) linkUVec SIGN FLIP** — `Pt3D.unitVec(a,b)=(a−b)`, so the kernel's `(p1−p2)` made the springs repulsive → runaway NaN by frame ~9; negated → span locks 180 nm. **(2) the body-reaction gather wouldn't run as a 2nd device kernel** — a per-body gather task never executed in the chained graph (writes to `jointForceSum[bodySlot]` never landed; verified by an unconditional top-of-kernel sentinel), though per-dimer −F/−τ match CPU exactly. Worked around with a **host bridge**: the dimer kernel writes per-dimer −F/−τ to `cohBodyForce/cohBodyTorque` (read back EVERY_EXECUTION), `packCohesion` sums them into the body slot for the next move (1-step lag). Needs `-Dtornado.tvm.maxbytecodesize=16384`. Neutral A/B (devcoh vs `BOA_MINIFIL_COHESION_CPU=1` vs full-CPU oracle): `boa10-singleMiniFil` span 180.0 nm, body wander 16–18° ≈ oracle 18–21°, no NaN; `contractilityAssay_gpu_short` mean tension 1.58 vs oracle 1.85 (within ~1.8× run-to-run noise), boundMotors 5.67 vs 6.08. Body *translational* jitter is mildly over-damped by the bridge lag (sub-nm); the rotational/held DOF + tension are neutral. **Step 2 (audit → BAIL, no flip):** cohesion is NOT the last per-step host-pose consumer (refuting the prior session's Step-3 audit, which predated this port). Remaining on `contractilityAssay_gpu`: (1) `updateMyosinDimerPositions`+`refreshMiniFilBodyDerived` — read host body pose to recompute attach points now DEAD (device computes them internally), a quick gateable follow-on; (2) the contractility anchor-pin (host end1/2, assay-harness); (3) the biochem flag-gate; plus the new host bridge's per-step force readback. So the pull (`demandSyncPose calls=10203`) is NOT retired. `RUN_LOGS/2026-06-11_cohesion_device_step{1,2_audit_BAIL}.txt`. Full writeup below.)
+Last updated: 2026-06-12 (**Residency flip LANDED — minifilament body reaction on device + per-step pose pull retired (contractility path).** Branch `minifil-cohesion-device`. **Obstacle 1 — body reaction on device (host bridge retired):** `dimerCohesionKernel` restructured to **one thread per BODY** (single-writer body slot, race-free) — kills the host bridge (`cohBodyForce/Torque` scratch + readback + `packCohesion` gather). **The real obstacle was float32 stability, not the second kernel:** synchronous body reaction diverges (body wander ~190° vs oracle ~21°) because the body couples to all N dimers and the same-step stiff feedback is unstable in float32 — **the 1-step lag is load-bearing, refuting the "mere over-damping" premise.** Resolution: 1-step lag in a **device-resident buffer** (`cohBodyReact`, FIRST_EXECUTION; body slot SET not RMW). Also fixed `accurateAcos`→`fastAcosDev` (CPU uses raw `Pt3D.fastAcos`). Behavior-neutral vs oracle: span 180nm, **jitter now matches oracle** (1.7 vs 1.5nm; bridge over-damped to 0.4), wander tracks oracle within seed noise, tension/boundMotors neutral, no NaN. Commit `53facdf`. **Obstacle 2 — exhaustive consumer audit + pull RETIRED:** instrumented audit (`BOA_POSE_AUDIT`: counter + caller capture on ALL host-pose accessors incl. the bulk `recomputeDerivedSoA` + `Pt3D` transforms the prior reasoning-only audits missed). Complete map on `contractilityAssay_gpu` = 2 roots: `refreshMiniFilBodyDerived` (DEAD — `updateMyosinDimerPositions` doesn't run per-step, proven by `xToX` never firing; **gated off**) + the anchor pin (harness, **tolerates stale pose** — targets a fixed anchor, quasi-static). **Pull retired** (`retirePosePull()`, default-on for `contractilityAssay`): **`demandSyncPose` 10203→102 calls, 9.14s→0.06s**, anchors held <0.5nm, 3-seed tension/boundMotors neutral, no NaN. Non-contractility minifil keeps the pull (no regression). `RUN_LOGS/2026-06-12_pose_consumer_audit.txt`. **Recommend MERGE** — body-gather landed clean, pull retirement validated. Full writeup below.)
+
+Prior update: 2026-06-11 (**Minifilament cohesion onto device + per-step pose pull retired — biochem-path residency flip.** Branch `minifil-cohesion-device` off main (`a2956e9`; has Step-1 dimer port `97bf945`, `84e188c`, Phase A `RULE_MINIFIL`). **Step 0 — force-coverage survey** (`RUN_LOGS/2026-06-11_cohesion_device_step0_survey.txt`): mapped the complete cohesion dispatch — `parallel` is ALWAYS true (antiparallel/`alignYVecLeversTorque`/`keepMyosinsOnSurface` are dead), `alignUVecLeversTorque` gates on `!(both heads onFil)`, the body attach offset is purely axial (y=z=0) so `attachPt = body.coord + offsetX·body.uVec` (no frame rebuild). Expressible as a per-(dimer) kernel with packed flags → no bail. **Step 1 (committed `ed957a3`) — cohesion on device, behavior-neutral:** `dimerCohesionKernel` (one thread per parallel GPU-handled dimer) reproduces `applyRodCouplingEnd1/End2` + conditional `alignUVecLeversTorque` + `constrainEnd{1,2}Dimers` from the resident pose; CPU cohesion gated off in lockstep via `MyosinDimer.cohesionOnDevice()` (verified `cpuCohesionApplyCt=0` — no double-apply). **Two bugs found+fixed in validation: (1) linkUVec SIGN FLIP** — `Pt3D.unitVec(a,b)=(a−b)`, so the kernel's `(p1−p2)` made the springs repulsive → runaway NaN by frame ~9; negated → span locks 180 nm. **(2) the body-reaction gather wouldn't run as a 2nd device kernel** — a per-body gather task never executed in the chained graph (writes to `jointForceSum[bodySlot]` never landed; verified by an unconditional top-of-kernel sentinel), though per-dimer −F/−τ match CPU exactly. Worked around with a **host bridge**: the dimer kernel writes per-dimer −F/−τ to `cohBodyForce/cohBodyTorque` (read back EVERY_EXECUTION), `packCohesion` sums them into the body slot for the next move (1-step lag). Needs `-Dtornado.tvm.maxbytecodesize=16384`. Neutral A/B (devcoh vs `BOA_MINIFIL_COHESION_CPU=1` vs full-CPU oracle): `boa10-singleMiniFil` span 180.0 nm, body wander 16–18° ≈ oracle 18–21°, no NaN; `contractilityAssay_gpu_short` mean tension 1.58 vs oracle 1.85 (within ~1.8× run-to-run noise), boundMotors 5.67 vs 6.08. Body *translational* jitter is mildly over-damped by the bridge lag (sub-nm); the rotational/held DOF + tension are neutral. **Step 2 (audit → BAIL, no flip):** cohesion is NOT the last per-step host-pose consumer (refuting the prior session's Step-3 audit, which predated this port). Remaining on `contractilityAssay_gpu`: (1) `updateMyosinDimerPositions`+`refreshMiniFilBodyDerived` — read host body pose to recompute attach points now DEAD (device computes them internally), a quick gateable follow-on; (2) the contractility anchor-pin (host end1/2, assay-harness); (3) the biochem flag-gate; plus the new host bridge's per-step force readback. So the pull (`demandSyncPose calls=10203`) is NOT retired. `RUN_LOGS/2026-06-11_cohesion_device_step{1,2_audit_BAIL}.txt`. Full writeup below.)
 
 Prior update: 2026-06-11 (**Dimer-motor cross-bridge force onto device + ckRelease lag fix — biochem-path residency step 2.** Branch `dimer-motor-force-device` off main (base has `84e188c` brownianDeltaT-removed + Phase A). **Step 0 — θ_LM closed:** re-measured θ_LM=angle(lever.uVec,motor.uVec) on `boa10-singleMiniFil` (deltaT=1e-4 minifil config) on the brownianDeltaT-fixed base — CPU steady **24.8°** converges to GPU **18.2°** (was CPU ~67–82° / GPU ~16–19° on the √10-buggy base; θ_RL matches 90.3 vs 89.3). The wide CPU θ_LM was the over-excited buggy-Brownian value (√10 over-forcing shifts the soft anharmonic lever-motor joint's *mean*); it is another face of the removed √10 bug → **closed, proceed**. **Step 1 (committed `97bf945`) — dimer cross-bridge force onto device:** extended the device motor-force kernel coverage from MyosinFixed-only to *all* GPU-handled bound motors via a two-gate flip — `GPUMoveThing.packMotorBinding` drops the `instanceof MyosinFixed` gate (any bound motor with a GPU-handled seg gets a real `boundSegSlot`/`posOnSeg`/CSR reaction entry) and `MyoFilLink.gpuMotorHandled` drops the short-circuit (CPU `addForces`/`alignUVec`/`alignYVec`/`ckRelease` no-op in lockstep). NO new kernel — the shared `motorForceKernel`+`segMotorForceKernel` are pure-geometry (motor pose via `motorSlots`, seg pose, `posOnSeg`, cocked, drags), the motor sub-Things were already in the joint list. So F8/F9/F10 apply **exactly once** on device. Behavior-neutral A/B (`contractilityAssay_gpu_short`, dimer motors, 3 seeds): the device path matches the **CPU oracle** (the ground truth; the `BOA_DIAG_CPU_MOTOR=1` control is a float32-pose+CPU-force hybrid that over-churns) within run-to-run noise on *every* metric — boundMotors 5.41 vs 4.53, meanBoundMotors 4.83 vs 4.07, tension 1.84/1.67 vs 1.45/1.34 pN, bindEvents 947 vs 876; instantaneous boundMotors == the control (5.41 vs 5.54) → no drop/double. No NaN/crazy. **Step 2 (no-op, NO commit) — ckRelease reorder ALREADY landed:** the "reorder ckRelease after moveThings" RELEASE_LAG_DIAGNOSIS.md recommends is already on main (`844ecc9`, 2026-06-04; ckRelease deferred to `bridgeMotorForceWriteback`, bit-exact step-N read verified, `git blame` confirms both placements, ancestor of HEAD). It applies automatically to the Step-1 dimer motors (uniform bridge path), and the ensemble confirms the device release rate already tracks the oracle (bindEvents 947 ≈ 876 — a residual −29% lag would put it systematically below) → nothing to implement; hard-bail per the discovery convention. **Step 3 (audit, no change):** after Step 1, **cohesion** (`MyoMiniFilament.constrainEnd*Dimers` + `MyosinDimer.applyRodCoupling*`/`alignUVecLeversTorque`, reads fresh host rod/lever/body pose) is the **sole remaining per-step production-physics host-pose consumer** — Step 1 retired the *bind-application* blocker the Phase A writeup named as blocking Phase C (the motor cross-bridge `MyoFilLink.addForces`/`updatePos`). The contractility anchor-pin is assay-harness-only; biochem is gated-on but inactive (zeroed turnover). `demandSyncPose calls=10203` unchanged (one structural per-step pull gated on the `noMonomersSimd:false` flag — Step 1 removes a *consumer*, not the call). **Deliverable: cohesion→device (the deferred Phase B) is the last port before the residency flip can land on this path, and now GAINS the residency payoff it lacked when first deferred.** Did NOT flip the pull. Logs `RUN_LOGS/2026-06-11_dimer_motor_device_step{0,1,2_BAIL,3_audit}*.txt`. Full writeup below.)
 
@@ -22,6 +24,99 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-12 — Residency flip: device body-gather + complete consumer retirement — FLIP LANDED
+
+Branch `minifil-cohesion-device`. Commits: `53facdf` (body reaction on device) + the obstacle-2
+commit (audit + pull retirement). Logs: `RUN_LOGS/_cohesion/{retire_*,retireAB_*}.log`,
+`RUN_LOGS/2026-06-12_pose_consumer_audit.txt`. Driver `scripts/run_cohesion_ab.sh`.
+**Both success states reached — the flip landed on the contractility/minifilament path.**
+
+### Obstacle 1 — body reaction on device (host bridge retired)
+`dimerCohesionKernel` restructured to **one thread per minifilament BODY**: each body thread loops
+its dimers, RMW-ing each dimer's UNIQUE rod1/rod2/lever1/lever2 slots (race-free — a Myosin belongs
+to exactly one dimer→one body) and writing the body's jointForce/Torque slot **exactly once**
+(single writer). This sidesteps the failed "second per-body gather kernel" entirely and retires the
+host bridge (per-dimer `cohBodyForce/Torque` scratch + EVERY_EXECUTION host readback + `packCohesion`
+host gather). `cohBodyForce/Torque` deleted; per-body CSR `cohBodyDimStart/cohBodyDimCount` added.
+
+**The real obstacle was NOT the second kernel — it is float32 stability.** Applying the body
+reaction SYNCHRONOUSLY (same execute) is unstable: the body couples to all N dimers at once, so its
+same-step response feeds back into every dimer force and the explicit stiff loop diverges (body
+wander ~190° vs oracle ~21°, growing 0.3→3.3°/frame; NaN once the resident lag buffer was added
+naively). This is **independent of the acos fix** (below) and refutes the brief's premise that the
+host-bridge lag was mere over-damping: **the 1-step lag is load-bearing for stability.** The full-CPU
+oracle is stable synchronously only because float64 sits just inside the stability margin; float32
+tips it. Resolution: carry the body reaction with a **1-step lag in a device-resident buffer**
+(`cohBodyReact`, FIRST_EXECUTION) — the kernel applies the previous step's value and stores the
+current one, all on device, NO host round-trip. The body slot is **SET (overwrite)**, not RMW: the
+cohesion kernel is its sole writer and the slot is not reliably host-zeroed, so += accumulated the
+reaction across steps (verified: body force grew as react[N-1]+react[N-2]+… → divergence).
+
+**Convention fix:** the kernel used Newton-refined `accurateAcos` while the CPU cohesion
+(`moveCoeff`, `applyRodCoupling*`, `constrainEnd*`, lever torque) uses the raw `Pt3D.fastAcos`. Added
+`fastAcosDev` (bit-equivalent to fastAcos — raw `sqrt(2(1±x))` near ±1, accurateAcos in mid-range)
+and used it throughout the cohesion kernel. This fixed the step-1 torque match (1.371e-22 vs CPU
+1.370e-22, was 1.378e-22) but did NOT fix the instability — confirming the two are separate.
+
+**Force exactly-once:** body SET by the sole body thread; rod/lever RMW on slots unique per dimer;
+CPU cohesion gated off (`cohesionOnDevice`, `cpuCohesionApplyCt=0` style). The 1-step lag applies
+each computed reaction exactly once (deferred one step) — the `taForce`/anchor exactly-once class is
+preserved.
+
+**Validation** (`boa10-singleMiniFil` 3 seeds + `contractilityAssay_gpu_short`, devcoh / `BOA_MINIFIL_COHESION_CPU`
+control / full-CPU oracle): span 180.0 nm, no NaN/crazy. Body **translational jitter now MATCHES the
+oracle** (~1.7 nm vs 1.5; the host bridge over-damped it to 0.4 — the improvement the brief expected).
+Body wander tracks the oracle within the large seed-to-seed envelope (seed3: devcoh 132° / oracle 80°
+— both high, a thermal realization; seeds 1-2: 20-22° ≈ oracle 18-19°). Contractility tension ~1.5 pN
+and boundMotors ~5 neutral vs oracle ~1.8 / ~5 (within the documented ~1.8× noise). Needs
+`-Dtornado.tvm.maxbytecodesize=16384`.
+
+### Obstacle 2 — complete consumer enumeration + per-step pull RETIRED
+**Exhaustive instrumented audit** (`BOA_POSE_AUDIT`): a counter + first-non-Thing/Pt3D-caller capture
+on EVERY host-pose accessor — the `getCoordX/UVecX/YVecX` getters, the `getEnd*/ZVec/TransXTox`
+derived getters, the bulk `recomputeDerivedSoA` (reads soaCoord directly, bypassing getters — the
+gap the prior reasoning-only audits missed), and the `Pt3D` body-frame transforms (`xToX/XTox`).
+Armed for 3 mid-run non-output steps, dumped in `updateCounters` (excludes output frames). This is
+the exhaustive enumeration the two prior audits lacked.
+
+**Complete per-step host-pose consumer map on `contractilityAssay_gpu`** — exactly TWO roots:
+1. `GPUMoveThing.refreshMiniFilBodyDerived` (1 read/step) — Phase-A recompute of the body's host
+   derived fields to feed the CPU cohesion's `xToX`. With cohesion on device that CPU path is gated
+   off; the `xToX` instrumentation **never fired**, proving `updateMyosinDimerPositions` does not run
+   per-step → the body derived has NO per-step consumer. **DEAD. Gated off** (kept only under the
+   `DIAG_COHESION_CPU` A/B control). Output writers refresh independently via
+   `refreshHostMirrorsForOutput`.
+2. The **anchor pin** (`applyBenchmarkPins`, 6 reads + `FilSegment.initialize` re-init, 26 reads) —
+   the contractility harness snapping the 2 pinned plus-ends back to their fixed anchors. **Assay-
+   harness only** (absent in production minifilament configs).
+
+After gating (1), the audit shows the anchor pin as the SOLE remaining consumer (32 reads, all
+`applyBenchmarkPins`+`initialize`).
+
+**The pull was RETIRED** (`retirePosePull()`, on by default for `contractilityAssay`; `BOA_RETIRE_POSE_PULL`
+env for other biochem-inactive configs). The anchor pin **tolerates stale pose**: it snaps each
+segment toward a FIXED anchor point and the anchors are quasi-static, so a stale read still lands the
+end on target. Biochem turnover is zeroed in the assay, so the poly/depoly `incCoord` baseline that
+keeps the pull on for biochem-ACTIVE noMonomersSimd:false configs (boxSpaghetti) does not apply.
+
+**Result — `demandSyncPose calls 10203 → 102`** (output cadence only), **9.14 s → 0.06 s** (~0.9 ms/step
+saved over the 10k-step run). Behavior-neutral: anchors held **<0.5 nm** (vs ~1.0 nm with the pull on
+— tighter, no drift), tension/boundMotors within run-to-run noise vs the full pull and the oracle, no
+NaN. 3-seed A/B (`contractilityAssay_gpu_short`): tension pullon 1.64/1.85/1.83 vs pulloff
+1.93/1.88/1.79 pN (means 1.74 vs 1.79, within noise); boundMotors 5.3-5.6 vs 5.5-6.8. Default-on
+confirmation (no env, `retirePosePull()` via `contractilityAssay`): demandSyncPose calls=102,
+tension 1.78/1.82, no NaN. Non-contractility minifil unaffected: `boa10-singleMiniFil` keeps the
+pull (calls=374), span 180.0, wander 22.7≈oracle 22.1, jitter 1.70≈1.51, no NaN (the
+refreshMiniFilBodyDerived gate is neutral there too).
+
+**Net: the residency flip landed on the contractility/minifilament path** — body reaction fully on
+device (host bridge gone), per-step pose pull retired, behavior-neutral, with the measured wall-clock
+payoff. The `BOA_POSE_AUDIT` instrumentation (zero-overhead, final-boolean gated) is left in as
+residency tooling. `BOA_MINIFIL_COHESION_CPU=1` left as the A/B control.
+
+**Recommend MERGE** — the device body-gather landed clean (single-writer per-body, no host bridge),
+not a fallback to the bridge; the pull retirement is validated behavior-neutral with a measured win.
 
 ## 2026-06-11 — Minifilament cohesion onto device + per-step pose pull (audit) — biochem-path residency flip
 

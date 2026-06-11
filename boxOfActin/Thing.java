@@ -708,18 +708,43 @@ public class Thing extends Object {
 	// readers go through getCoordX/Y/Z, getUVecX/Y/Z, getYVecX/Y/Z; writers
 	// go through setCoord/setUVec/setYVec (or the per-component setters /
 	// inc helpers below).
-	public float getCoordX() { return soaCoord[myThingNumber * 3];     }
-	public float getCoordY() { return soaCoord[myThingNumber * 3 + 1]; }
-	public float getCoordZ() { return soaCoord[myThingNumber * 3 + 2]; }
-	public float getUVecX()  { return soaUVec [myThingNumber * 3];     }
-	public float getUVecY()  { return soaUVec [myThingNumber * 3 + 1]; }
-	public float getUVecZ()  { return soaUVec [myThingNumber * 3 + 2]; }
-	public float getYVecX()  { return soaYVec [myThingNumber * 3];     }
-	public float getYVecY()  { return soaYVec [myThingNumber * 3 + 1]; }
-	public float getYVecZ()  { return soaYVec [myThingNumber * 3 + 2]; }
-	public float getUVecRX() { return -soaUVec[myThingNumber * 3];     }
-	public float getUVecRY() { return -soaUVec[myThingNumber * 3 + 1]; }
-	public float getUVecRZ() { return -soaUVec[myThingNumber * 3 + 2]; }
+	// --- Per-step host-pose read audit (BOA_POSE_AUDIT) -----------------------
+	// Counts reads of the host pose SoA (soaCoord/UVec/YVec) and attributes each
+	// to its first non-Thing/non-Pt3D caller, but ONLY while poseAuditWindow is
+	// set (BoxOfActin arms it for a few mid-run, non-output steps). This is the
+	// exhaustive enumeration of per-step host-pose CONSUMERS — anything that
+	// reads fresh pose between the demand-sync and the device execute is what
+	// blocks retiring demandSyncPoseToHost. Off by default; a boolean check on
+	// the hot path otherwise.
+	public static final boolean POSE_AUDIT = System.getenv("BOA_POSE_AUDIT") != null;
+	public static boolean poseAuditWindow = false;
+	public static long poseAuditReads = 0;
+	public static final java.util.HashMap<String,Long> poseAuditCallers = new java.util.HashMap<>();
+	static void poseAuditHit() {
+		poseAuditReads++;
+		StackTraceElement[] st = new Throwable().getStackTrace();
+		String caller = "?";
+		for (int i = 2; i < st.length; i++) {
+			String cn = st[i].getClassName();
+			if (cn.endsWith(".Thing") || cn.endsWith(".Pt3D")) continue;
+			caller = cn.substring(cn.lastIndexOf('.') + 1) + "." + st[i].getMethodName();
+			break;
+		}
+		poseAuditCallers.merge(caller, 1L, Long::sum);
+	}
+
+	public float getCoordX() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaCoord[myThingNumber * 3];     }
+	public float getCoordY() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaCoord[myThingNumber * 3 + 1]; }
+	public float getCoordZ() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaCoord[myThingNumber * 3 + 2]; }
+	public float getUVecX()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaUVec [myThingNumber * 3];     }
+	public float getUVecY()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaUVec [myThingNumber * 3 + 1]; }
+	public float getUVecZ()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaUVec [myThingNumber * 3 + 2]; }
+	public float getYVecX()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaYVec [myThingNumber * 3];     }
+	public float getYVecY()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaYVec [myThingNumber * 3 + 1]; }
+	public float getYVecZ()  { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaYVec [myThingNumber * 3 + 2]; }
+	public float getUVecRX() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return -soaUVec[myThingNumber * 3];     }
+	public float getUVecRY() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return -soaUVec[myThingNumber * 3 + 1]; }
+	public float getUVecRZ() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return -soaUVec[myThingNumber * 3 + 2]; }
 
 	public void setCoordX(double v) { soaCoord[myThingNumber * 3]     = (float) v; }
 	public void setCoordY(double v) { soaCoord[myThingNumber * 3 + 1] = (float) v; }
@@ -781,14 +806,17 @@ public class Thing extends Object {
 
 	// Read pose into Pt3D scratch (callers that still need a Pt3D for legacy APIs).
 	public void getCoord(Pt3D out) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		final int b = myThingNumber * 3;
 		out.x = soaCoord[b]; out.y = soaCoord[b+1]; out.z = soaCoord[b+2];
 	}
 	public void getUVec(Pt3D out) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		final int b = myThingNumber * 3;
 		out.x = soaUVec[b]; out.y = soaUVec[b+1]; out.z = soaUVec[b+2];
 	}
 	public void getYVec(Pt3D out) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		final int b = myThingNumber * 3;
 		out.x = soaYVec[b]; out.y = soaYVec[b+1]; out.z = soaYVec[b+2];
 	}
@@ -855,21 +883,22 @@ public class Thing extends Object {
 
 	// ---- SoA derived-field accessors ----------------------------------------
 
-	public float getEnd1X() { return soaEnd1[myThingNumber * 3];     }
-	public float getEnd1Y() { return soaEnd1[myThingNumber * 3 + 1]; }
-	public float getEnd1Z() { return soaEnd1[myThingNumber * 3 + 2]; }
-	public float getEnd2X() { return soaEnd2[myThingNumber * 3];     }
-	public float getEnd2Y() { return soaEnd2[myThingNumber * 3 + 1]; }
-	public float getEnd2Z() { return soaEnd2[myThingNumber * 3 + 2]; }
-	public float getZVecX() { return soaZVec[myThingNumber * 3];     }
-	public float getZVecY() { return soaZVec[myThingNumber * 3 + 1]; }
-	public float getZVecZ() { return soaZVec[myThingNumber * 3 + 2]; }
+	public float getEnd1X() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd1[myThingNumber * 3];     }
+	public float getEnd1Y() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd1[myThingNumber * 3 + 1]; }
+	public float getEnd1Z() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd1[myThingNumber * 3 + 2]; }
+	public float getEnd2X() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd2[myThingNumber * 3];     }
+	public float getEnd2Y() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd2[myThingNumber * 3 + 1]; }
+	public float getEnd2Z() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaEnd2[myThingNumber * 3 + 2]; }
+	public float getZVecX() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaZVec[myThingNumber * 3];     }
+	public float getZVecY() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaZVec[myThingNumber * 3 + 1]; }
+	public float getZVecZ() { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaZVec[myThingNumber * 3 + 2]; }
 	public float getLengthSoa() { return soaLength[myThingNumber]; }
 	// transXTox row-major; idx in [0,9). transxToX is the transpose
 	// (orthonormal matrix), so transxToX(i)==transXTox(swap(i)).
-	public float getTransXTox(int idx) { return soaTransXTox[myThingNumber * 9 + idx]; }
+	public float getTransXTox(int idx) { if (POSE_AUDIT && poseAuditWindow) poseAuditHit(); return soaTransXTox[myThingNumber * 9 + idx]; }
 	// Transpose accessor: row-major (i,j) for transxToX is (j,i) for transXTox.
 	public float getTransxToX(int idx) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		// idx = row*3+col → transpose idx = col*3+row.
 		final int row = idx / 3, col = idx - row * 3;
 		return soaTransXTox[myThingNumber * 9 + col * 3 + row];
@@ -877,12 +906,14 @@ public class Thing extends Object {
 	// Copy 9 floats of the body→fixed matrix into a caller-supplied double[9]
 	// scratch (Pt3D.XTox-style readers that load m once and reuse 9× per call).
 	public void copyTransXToxInto(double[] out) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		final int b9 = myThingNumber * 9;
 		out[0] = soaTransXTox[b9];   out[1] = soaTransXTox[b9+1]; out[2] = soaTransXTox[b9+2];
 		out[3] = soaTransXTox[b9+3]; out[4] = soaTransXTox[b9+4]; out[5] = soaTransXTox[b9+5];
 		out[6] = soaTransXTox[b9+6]; out[7] = soaTransXTox[b9+7]; out[8] = soaTransXTox[b9+8];
 	}
 	public void copyTransxToXInto(double[] out) {
+		if (POSE_AUDIT && poseAuditWindow) poseAuditHit();
 		final int b9 = myThingNumber * 9;
 		// transpose of the row-major 3×3 stored in soaTransXTox.
 		out[0] = soaTransXTox[b9];   out[1] = soaTransXTox[b9+3]; out[2] = soaTransXTox[b9+6];
@@ -898,6 +929,10 @@ public class Thing extends Object {
 	// the body frame orthonormal (mirrors the per-Thing zVec.cross / yVec.cross
 	// dance in subclass initialize() bodies).
 	public static void recomputeDerivedSoA(int from, int upTo) {
+		// Bulk reader of soaCoord/soaUVec/soaYVec (bypasses the getters) — count it
+		// in the pose audit so refreshMiniFilBodyDerived / output recompute are
+		// attributed (one hit per Thing recomputed).
+		if (POSE_AUDIT && poseAuditWindow) for (int i = from; i < upTo; i++) poseAuditHit();
 		final float[] coordArr = soaCoord;
 		final float[] uVecArr  = soaUVec;
 		final float[] yVecArr  = soaYVec;
