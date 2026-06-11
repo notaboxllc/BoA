@@ -356,8 +356,11 @@ paramName:isActive:value;   // isActive=true/false, value=1.0/0.0 for booleans
 | `-bmManual` | Manual tuning: deflection chain + LP chain, live WebSocket HUD |
 | `-bmDiag` | Diagnostic: fixed parameters, print ratio every 5000 steps, cap 5M steps |
 | `-bmMonomer <N>` | Override monomers/segment (otherwise uses param-file `filSegLength`) |
+| `-contractility` (alias `-bmContractile`) | Minimal contractility assay as a first-class mode: two anti-parallel pinned filaments + one bipolar minifilament, isometric tension readout. Self-configures (box 4×0.3×0.2 µm, dt=1e-5, turnover off) via `applyContractilityDefaults()` so it runs stand-alone like `-bmManual`; a `-pf` passed alongside overrides individual params. Add `-gpu` for the device path. |
 
 In all benchmark modes, population objects (myosins, minifilaments, protein nodes, ActA) are suppressed automatically in `begin()`. The chamber wireframe is hidden in the viewer.
+
+**Contractility assay** (`-contractility`, or param-file `contractilityAssay:true`): unlike the deflection/LP benchmarks it KEEPS the minifilament + chamber. A live stats HUD (`#contractilityHud`, top-right in the viewer) reads the per-frame `contractility` block — instantaneous/cumulative-avg/recent-EWMA bound heads and tension, peak tension, per-anchor tension, and first-bind step. The block (incl. the `stats` sub-object) is emitted by `ThreeJSWriter` for both live and file-based `-3js`, so the HUD works in playback too. Stats accumulate every step in `accumulateContractilityStats()`; `[STATS] contractility …` also prints the same to stdout at frame cadence.
 
 **Deflection chain** (all benchmark modes): 11-segment, pinned ends, midpoint transverse force, measures static deflection ratio obs/exp and dynamic relaxation time τ_meas vs τ_theo. Calibrated defaults target ratio ≈ 1 at aeta = 0.1 Pa·s: `fracMove=0.5`, `fracR=0.1`, `fracMoveTorq=0.265`. All three are runtime-mutable via the Params panel. Parameter intuition: smaller `fracR` → weaker restoring force → softer chain; larger `fracMoveTorq` → stiffer in torsion.
 

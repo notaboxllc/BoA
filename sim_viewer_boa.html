@@ -388,6 +388,31 @@
     #btnBenchForce.defl-off { border-color: #833; color: #f88; }
     #btnBenchForce.defl-off:hover:not(:disabled) { border-color: #f44; color: #faa; }
 
+    /* ── contractility HUD ───────────────────────────────────────────────────── */
+    #contractilityHud {
+      position: absolute;
+      top: 72px;
+      right: 280px;
+      background: rgba(0,0,0,0.72);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 10px;
+      z-index: 10;
+      display: none;
+      font: 12px/1.7 monospace;
+      color: #ddd;
+      min-width: 232px;
+      pointer-events: none;
+    }
+    #contractilityHud.active { display: block; }
+    #contractilityHud .ct-title { color: #9cf; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px; }
+    #contractilityHud .ct-row { display: flex; justify-content: space-between; gap: 16px; }
+    #contractilityHud .ct-row .ct-lbl { color: #999; }
+    #contractilityHud .ct-row .ct-val { color: #eee; }
+    #contractilityHud .ct-strong .ct-val { color: #6f6; font-weight: bold; }
+    #contractilityHud .ct-divider { border-top: 1px solid #444; margin: 4px 0; }
+    #contractilityHud .ct-note { color: #c84; margin-top: 3px; font-size: 11px; }
+
     /* ── LP benchmark panel ──────────────────────────────────────────────────── */
     #lpPanel {
       position: absolute;
@@ -561,6 +586,11 @@
 <div id="paramPanel">
   <h3>Mutable parameters</h3>
   <div id="paramRows"></div>
+</div>
+
+<div id="contractilityHud">
+  <div class="ct-title">— Contractility Assay —</div>
+  <div id="ctHudRows"></div>
 </div>
 
 <div id="benchmarkHud">
@@ -1156,6 +1186,7 @@ function applyFrameData(data) {
   updateAxisLines(data.segments);
   updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
+  updateContractilityHud(data.contractility);
 
   hud.innerHTML =
     `frame ${data.frame}<br>` +
@@ -1164,6 +1195,44 @@ function applyFrameData(data) {
     (data.myosins      ? `<br>myosins: ${data.myosins.length}`           : '') +
     (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '') +
     (data.nodes && data.nodes.length ? `<br>nodes: ${data.nodes.length}`     : '');
+}
+
+// ── contractility HUD ─────────────────────────────────────────────────────────
+// Renders the per-frame 'contractility' block (tension + bound-head stats) into
+// the #contractilityHud box. Works in both live and file-playback modes since it
+// reads the frame payload. Hidden when the frame carries no contractility block.
+const contractilityHud = document.getElementById('contractilityHud');
+const ctHudRows        = document.getElementById('ctHudRows');
+function updateContractilityHud(c) {
+  if (!c) { contractilityHud.classList.remove('active'); return; }
+  contractilityHud.classList.add('active');
+  const s = c.stats || {};
+  const row = (lbl, val, strong) =>
+    `<div class="ct-row${strong ? ' ct-strong' : ''}"><span class="ct-lbl">${lbl}</span>` +
+    `<span class="ct-val">${val}</span></div>`;
+  const f = (x, d) => (x === undefined || x === null) ? '–' : Number(x).toFixed(d);
+  const meanT = (s.meanTension_pN !== undefined)
+    ? s.meanTension_pN
+    : 0.5 * (Math.abs(c.tensionA_pN) + Math.abs(c.tensionB_pN));
+  let html = '';
+  html += row('step', s.step !== undefined ? s.step : '–');
+  html += row('sim time', `${f(s.simTime, 4)} s`);
+  html += `<div class="ct-divider"></div>`;
+  html += row('bound heads', s.boundHeads !== undefined ? s.boundHeads : '–', true);
+  html += row('&nbsp;&nbsp;avg / recent', `${f(s.avgBound, 2)} / ${f(s.ewmaBound, 2)}`);
+  html += row('&nbsp;&nbsp;peak', s.peakBound !== undefined ? s.peakBound : '–');
+  html += `<div class="ct-divider"></div>`;
+  html += row('tension (mean)', `${f(meanT, 3)} pN`, true);
+  html += row('&nbsp;&nbsp;avg / recent', `${f(s.avgTension_pN, 3)} / ${f(s.ewmaTension_pN, 3)} pN`);
+  html += row('&nbsp;&nbsp;peak', `${f(s.peakTension_pN, 3)} pN`);
+  html += row('anchor A / B', `${f(c.tensionA_pN, 2)} / ${f(c.tensionB_pN, 2)} pN`);
+  if (s.firstBindStep !== undefined && s.firstBindStep >= 0)
+    html += row('first bind @', `step ${s.firstBindStep}`);
+  if (s.hasMotor === false)
+    html += `<div class="ct-note">no-motor control</div>`;
+  else if (meanT < -0.05 || (c.tensionA_pN < -0.05 && c.tensionB_pN < -0.05))
+    html += `<div class="ct-note">extensile (negative tension)</div>`;
+  ctHudRows.innerHTML = html;
 }
 
 function updateAxisLines(segments) {

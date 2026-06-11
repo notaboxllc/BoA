@@ -97,7 +97,27 @@ public class BoxOfActin {
 		double tensionA_pN = 0, tensionB_pN = 0;
 		Pt3D forceA = new Pt3D(), forceB = new Pt3D(); // raw lab-frame net force on each anchor segment (N)
 		double[] jointF = new double[3];               // GPU: device chain force (jointForceSum) scratch
+
+		// ── Running statistics for the live HUD (accumulated every step) ──
+		// instBound: heads currently on actin. The two averages address the
+		// user's "drifted to the wrong filament at first" observation: the
+		// cumulative average is dragged down by the early transient, while the
+		// EWMA tracks the current (plateau) regime.
+		int    instBound = 0;                 // heads on actin this step
+		long   statSamples = 0;               // step count contributing to cumulative means
+		double sumBound = 0;                  // Σ instBound
+		double sumTension = 0;                // Σ meanTension (= (|A|+|B|)/2 each step)
+		double sumTensionA = 0, sumTensionB = 0;
+		boolean ewmaInit = false;
+		double ewmaBound = 0, ewmaTension = 0; // recent-window EWMA (α = STAT_EWMA_ALPHA)
+		double peakTension = 0;               // max meanTension over the run
+		int    peakBound = 0;                 // max instBound over the run
+		int    firstBindStep = -1;            // step the first head engaged (-1 until then)
 	}
+	// EWMA smoothing for the HUD's "recent" averages. α=0.005 → ~200-step
+	// window (~2 ms at dt=1e-5), short enough to follow the plateau, long
+	// enough to smooth per-step binding noise.
+	static final double STAT_EWMA_ALPHA = 0.005;
 	static ContractAssay contract = null;
 
 	// LP benchmark state (free BCs, Brownian forces, tangent-correlation measurement)
@@ -199,6 +219,19 @@ public class BoxOfActin {
 		}
 		if (Env.benchmarkManual) {
 			Env.runTime.setValue(600); // 600s sim time — user drives termination via Kill button
+		}
+		// CLI -contractility flag: self-configure the minimal contractility assay
+		// so it launches stand-alone like -bmManual (no param file required). Runs
+		// only when the flag activated the assay (param-file activation happens
+		// later in loadParamConfig, which then overrides any of these defaults).
+		if (Env.contractilityAssay.isActive()) {
+			applyContractilityDefaults();
+			Env.remote = true;
+			Env.paused = false;                  // headless: no client to send resume
+			Env.simOutsideBug.setActive(false);  // suppress Listeria bug + ActA
+			if (Env.threeJSLivePort > 0) {
+				Env.runTime.setValue(600);       // live: user drives termination via Kill
+			}
 		}
 		if (Env.threeJSLivePort > 0) {
 			LiveFrameServer.startServer(Env.threeJSLivePort);
@@ -581,6 +614,15 @@ public class BoxOfActin {
 			if (args[i].equals("-bmManual")) {
 				Env.benchmarkFilament = true;
 				Env.benchmarkManual = true;
+			}
+			if (args[i].equals("-contractility") || args[i].equals("-bmContractile")) {
+				// Launch the minimal contractility assay as a first-class mode
+				// (mirrors -bmManual). The flag activates the assay; begin()
+				// then applies the validated assay defaults (box/dt/turnover-off)
+				// + live-friendly setup. A -pf passed alongside still overrides
+				// individual params (loaded after, in begin()).
+				Env.contractilityAssay.setActive(true);
+				Env.contractilityAssay.setValue(1.0);
 			}
 			if (args[i].equals("-singleFilDiag")) {
 				// Phase 2 F3/F4 SingleFilDiag probe: pinned-ends bench chain
@@ -1226,7 +1268,7 @@ public class BoxOfActin {
 
 				// Contractility assay: read the anchor reaction (= tension) from the gathered
 				// force, before moveThing integrates and the pin snaps the endpoint back.
-				if (Env.contractilityAssay.isActive()) { captureContractilityTension(); }
+				if (Env.contractilityAssay.isActive()) { captureContractilityTension(); accumulateContractilityStats(); }
 
 				// F1 benchmark: apply transverse force to midpoint segment before integration
 				if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
@@ -2726,6 +2768,36 @@ public class BoxOfActin {
 	// minifilament cohesion fix reads fresh host pose via the per-step demandSyncPoseToHost, which
 	// is gated off under noMonomersSimd; with it off the minifilament blows apart on -gpu. Turnover
 	// is suppressed via zeroed rates either way, so the filaments stay static in both modes.
+	// Validated default physics for a stand-alone -contractility launch (no param
+	// file). Mirrors ParameterFiles/contractilityAssay_gpu: a long narrow box, a
+	// small stable timestep, turnover OFF (static phalloidin-stiff filaments), and
+	// noMonomersSimd:false so the per-step host pose sync (the minifilament GPU
+	// cohesion fix) stays on. Each value is overridden if a -pf supplies it (this
+	// runs before loadParamConfig). force(v) sets value AND marks active so a 0
+	// actually applies (vs falling back to the non-zero Java default).
+	private static void applyContractilityDefaults() {
+		java.util.function.BiConsumer<Parameter,Double> force = (p, v) -> { p.setValue(v); p.setActive(true); };
+		force.accept(Env.deltaT, 1.0e-5);          // small, stable
+		force.accept(Env.boxXDim, 4.0);            // long axis
+		force.accept(Env.boxYDim, 0.3);
+		force.accept(Env.boxZDim, 0.2);
+		force.accept(Env.stdSegLength, 64.0);      // monomers/seg -> 13-seg filaments ~2.28 µm (overlap ~0.76 µm)
+		force.accept(Env.toFileInterval, 100.0);   // ~frame cadence
+		force.accept(Env.runTime, 0.2);            // 20k steps @1e-5 — reaches the tension plateau
+		// Turnover OFF — keep the two filaments static for a clean isometric readout.
+		force.accept(Env.initialFilaments, 0.0);
+		force.accept(Env.kATPOn1, 0.0);
+		force.accept(Env.kATPOn2, 0.0);
+		force.accept(Env.capRate, 0.0);
+		force.accept(Env.cofilinRate, 0.0);
+		force.accept(Env.kHydrolysis, 0.0);
+		Env.kRdmNuc.setActive(false);
+		Env.actinConc.setActive(false);
+		Env.noMonomersSimd.setActive(false);       // monomers simulated -> per-step pose sync ON
+		System.out.println("[CONTRACT] -contractility: applied stand-alone assay defaults "
+			+ "(box 4.0x0.3x0.2 µm, dt=1e-5, turnover off). Pass -pf to override; add -gpu for the device path.");
+	}
+
 	public static void makeContractilityAssay() {
 		if (Env.useGPU && Env.noMonomersSimd.isActive()) {
 			System.out.println("[CONTRACT][WARN] -gpu with noMonomersSimd:true gates off the per-step host "
@@ -2817,15 +2889,48 @@ public class BoxOfActin {
 		}
 	}
 
+	// Accumulate the per-step running statistics that feed the live HUD and the
+	// frame 'contractility' block. Called every step (right after
+	// captureContractilityTension), so the averages are true time-averages.
+	private static void accumulateContractilityStats() {
+		if (contract == null) return;
+		contract.instBound = (contract.mini != null) ? contract.mini.countBoundMotors() : 0;
+		double meanTension = 0.5 * (Math.abs(contract.tensionA_pN) + Math.abs(contract.tensionB_pN));
+
+		contract.statSamples++;
+		contract.sumBound    += contract.instBound;
+		contract.sumTension  += meanTension;
+		contract.sumTensionA += contract.tensionA_pN;
+		contract.sumTensionB += contract.tensionB_pN;
+
+		if (!contract.ewmaInit) {
+			contract.ewmaBound   = contract.instBound;
+			contract.ewmaTension = meanTension;
+			contract.ewmaInit = true;
+		} else {
+			contract.ewmaBound   += STAT_EWMA_ALPHA * (contract.instBound - contract.ewmaBound);
+			contract.ewmaTension += STAT_EWMA_ALPHA * (meanTension - contract.ewmaTension);
+		}
+		if (meanTension > contract.peakTension) contract.peakTension = meanTension;
+		if (contract.instBound > contract.peakBound) contract.peakBound = contract.instBound;
+		if (contract.firstBindStep < 0 && contract.instBound > 0) contract.firstBindStep = Env.counter;
+	}
+
+	// Cumulative mean helpers (used by the reporter and the frame writer).
+	static double contractAvgBound()    { return (contract != null && contract.statSamples > 0) ? contract.sumBound   / contract.statSamples : 0; }
+	static double contractAvgTension()  { return (contract != null && contract.statSamples > 0) ? contract.sumTension / contract.statSamples : 0; }
+	static double contractAvgTensionA() { return (contract != null && contract.statSamples > 0) ? contract.sumTensionA / contract.statSamples : 0; }
+	static double contractAvgTensionB() { return (contract != null && contract.statSamples > 0) ? contract.sumTensionB / contract.statSamples : 0; }
+
 	// Emit the contractility tension trace at output-frame cadence. tensionA/B are the axial
 	// reaction at each anchor projected onto the inward direction: positive = contractile (anchors
 	// pulled inward), negative = extensile. boundMotors counts minifilament heads currently on actin.
 	private static void reportContractilityStats() {
 		if (!Env.contractilityAssay.isActive() || contract == null) return;
-		int boundMotors = 0;
-		if (contract.mini != null) { boundMotors = contract.mini.countBoundMotors(); }
-		System.out.printf("[STATS] contractility step=%d t=%.4f tensionA=%.4f tensionB=%.4f pN boundMotors=%d%n",
-			Env.counter, Env.simulationTime, contract.tensionA_pN, contract.tensionB_pN, boundMotors);
+		System.out.printf("[STATS] contractility step=%d t=%.4f tensionA=%.4f tensionB=%.4f pN boundMotors=%d "
+			+ "| avgBound=%.2f ewmaBound=%.2f avgTension=%.3f ewmaTension=%.3f peakTension=%.3f pN%n",
+			Env.counter, Env.simulationTime, contract.tensionA_pN, contract.tensionB_pN, contract.instBound,
+			contractAvgBound(), contract.ewmaBound, contractAvgTension(), contract.ewmaTension, contract.peakTension);
 	}
 
 	public static void makeCrucible () {
