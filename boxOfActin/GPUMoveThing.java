@@ -628,6 +628,32 @@ public class GPUMoveThing {
         return RETIRE_POSE_PULL || Env.contractilityAssay.isActive();
     }
 
+    // ----- Part 2 (turnover residency): global biochem cadence + biochem-step pose pull -----
+    // For biochem-ACTIVE (noMonomersSimd:false) turnover configs the per-step pose pull could
+    // not be retired because every step some FilSegment's PER-INSTANCE biochem counter wraps
+    // (segments created at split/nucleate get scattered phases), and the relative-write poly/
+    // depoly incCoord + splitSegment.setFirstHalf both read the host coord baseline — a stale
+    // baseline would clobber the device-resident pose on the next delta-scatter. Solution:
+    // PHASE-ALIGN biochem to a GLOBAL cadence (all segments mutate on the same step, every
+    // Thing.biochemCheckInt steps), concentrating the relative writes onto 1-in-K steps, then
+    // pull pose to host only on those biochem-fire steps (+ output cadence). Rate is preserved
+    // (still one biochem pass per K steps per segment) — only the PHASE is synchronized, so the
+    // stochastic turnover is statistically unchanged (validated CPU-global vs CPU-per-instance).
+    // Active on the GPU path by default; BOA_BIOCHEM_GLOBAL_CADENCE=1/0 forces on/off (1 lets
+    // the full-CPU oracle run the same aligned cadence for a clean residency A/B).
+    public static boolean biochemGlobalCadence = false;
+    public static boolean biochemFiresThisStep = false;   // set once per step by advanceBiochemCadence()
+    private static int    biochemGlobalCt = 0;
+    // Called ONCE per step from BoxOfActin.doLoop, BEFORE the move phase (so the move-phase
+    // pull and the later biochem phase read the same flag). When global cadence is off, leaves
+    // biochemFiresThisStep=true (FilSegment then uses its per-instance counter; the flag is unread).
+    public static void advanceBiochemCadence() {
+        if (!biochemGlobalCadence) { biochemFiresThisStep = true; return; }
+        biochemGlobalCt++;
+        biochemFiresThisStep = (biochemGlobalCt >= Thing.biochemCheckInt);
+        if (biochemFiresThisStep) biochemGlobalCt = 0;
+    }
+
     // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
     // boundaryActive[i] = 1 when slot i holds a GPU-handled FilSegment, the
     // container is a Chamber (Survey Option A — separate kernels per shape;
@@ -5924,7 +5950,13 @@ public class GPUMoveThing {
                 // executeSplit's moveOnlyPlan has transferToHost
                 // EVERY_EXECUTION for coord/uVec/yVec already — just scatter.
                 dispatchAndWait(OP_UNPACK, sc);
-            } else if (!Env.noMonomersSimd.isActive() && !retirePosePull()) {
+            } else if (!Env.noMonomersSimd.isActive() && !retirePosePull()
+                       && (!biochemGlobalCadence || biochemFiresThisStep)) {
+                // Part 2: with global biochem cadence active, the relative-write
+                // incCoord/split (and the biochem-boundary removals) only happen on
+                // biochemFiresThisStep, so the host-pose baseline only needs to be fresh
+                // then. On non-biochem steps the pull is skipped (pose stays device-
+                // resident); output frames still refresh via refreshHostMirrorsForOutput.
                 demandSyncPoseToHost();
                 // Per-step host-pose consumer audit: arm the window right after the
                 // demand-sync so EVERY downstream read of the freshly-synced pose

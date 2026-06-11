@@ -710,6 +710,19 @@ public class BoxOfActin {
 				Env.useGPU = true;
 			}
 		}
+			// Part 2 (turnover residency): global biochem cadence aligns all FilSegment biochem
+			// mutation onto the same step so the GPU per-step pose pull can be retired in favour
+			// of a biochem-cadence + output-cadence pull. Default ON for the GPU path; the env
+			// BOA_BIOCHEM_GLOBAL_CADENCE=1/0 forces it on/off (=1 lets the full-CPU oracle run the
+			// SAME aligned cadence for a clean residency A/B; =0 restores the legacy per-step pull).
+			GPUMoveThing.biochemGlobalCadence = Env.useGPU;
+			String bgcEnv = System.getenv("BOA_BIOCHEM_GLOBAL_CADENCE");
+			if (bgcEnv != null && !bgcEnv.isEmpty()) {
+				GPUMoveThing.biochemGlobalCadence = !bgcEnv.equals("0") && !bgcEnv.equalsIgnoreCase("false");
+			}
+			if (GPUMoveThing.biochemGlobalCadence) {
+				System.err.println("[TURNOVER] global biochem cadence ON (biochem phase-aligned; GPU pose pull at biochem+output cadence)");
+			}
 		// Mutual exclusivity: v25 > v24 > v23 > v22 > v21 > v20 > v19 > v18 > v17 > v16 > v15 > v14. Warn and clear lower-priority flags.
 		if (Env.benchmarkTunerV25) {
 			if (Env.benchmarkTunerV24) {
@@ -1301,6 +1314,11 @@ public class BoxOfActin {
 						deflFil.midSeg.veloc.y);
 				}
 
+				// Part 2 (turnover residency): set the global biochem-cadence flag ONCE per
+				// step, before the move phase (so the GPU move-phase pose pull and the later
+				// biochem phase read the same value). No-op (flag=true) unless global cadence
+				// is active. See GPUMoveThing.advanceBiochemCadence / biochemGlobalCadence.
+				GPUMoveThing.advanceBiochemCadence();
 				moveTimer.start();
 				if (Env.useGPU) {
 					// Iteration 2b: unified Thing.moveThing() kernel. The GPU path

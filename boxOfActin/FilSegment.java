@@ -536,7 +536,15 @@ public class FilSegment extends Thing {
 		// Viscous-blob stochastic update — removed 2026-05-17 (Round 7); see JOURNAL.md.
 		// if (Env.useViscousBlob.isActive() && length > Env.vBlobMinMons.getIntValue()*Env.actinMonoRadius) { this.viscousBlobSim(length, Env.biochemDeltaT.getValue()); }
 		
-		if (!Env.noMonomersSimd.isActive() && biochemCheckCt >= biochemCheckInt) {
+		// Part 2 (turnover residency): when GPU global biochem cadence is active, all segments
+		// fire on the same step (GPUMoveThing.biochemFiresThisStep, set once per step in doLoop)
+		// instead of their scattered per-instance counter — so the relative-write incCoord/split
+		// concentrate onto 1-in-biochemCheckInt steps where the host pose is pulled fresh. Rate
+		// preserved (still one pass per biochemCheckInt steps), only the phase is synchronized.
+		boolean biochemFires = GPUMoveThing.biochemGlobalCadence
+				? GPUMoveThing.biochemFiresThisStep
+				: (biochemCheckCt >= biochemCheckInt);
+		if (!Env.noMonomersSimd.isActive() && biochemFires) {
 			hydrolizeInFilaments();		// monomer-by-monomer hydrolysis and dissociate
 			checkCofilinDissolve();		// if ratio of cofilin-bound monomers exceeds spec, dissolve
 			

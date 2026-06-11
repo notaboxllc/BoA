@@ -1,0 +1,16 @@
+=== seed1 trio (2000 steps) 16:03:37 ===
+gpuG_s1    rc=0 calls=61 filSegInitFireCt=2428 crazy=0 | tv_gpuG_s1                         frames= 41 segCt[first=200 last=510 peak=510 mean=501] len_nm[mean=197.3 sd=41.2 n=510] nanLen=0
+cpuG_s1    rc=0  filSegInitFireCt=0 crazy=0 | tv_cpuG_s1                         frames= 41 segCt[first=199 last=578 peak=578 mean=565] len_nm[mean=196.4 sd=40.5 n=578] nanLen=0
+cpuP_s1    rc=0  filSegInitFireCt=0 crazy=0 | tv_cpuP_s1                         frames= 41 segCt[first=197 last=590 peak=590 mean=577] len_nm[mean=192.2 sd=36.1 n=590] nanLen=0
+=== seeds 2,3 trio 16:05:24 ===
+gpuG_s2    rc=0 calls=61 crazy=0 | tv_gpuG_s2                         frames= 41 segCt[first=196 last=550 peak=550 mean=536] len_nm[mean=194.2 sd=40.1 n=550] nanLen=0
+cpuG_s2    rc=0  crazy=0 | tv_cpuG_s2                         frames= 41 segCt[first=197 last=526 peak=526 mean=513] len_nm[mean=197.7 sd=40.8 n=526] nanLen=0
+cpuP_s2    rc=0  crazy=0 | tv_cpuP_s2                         frames= 41 segCt[first=198 last=565 peak=565 mean=549] len_nm[mean=194.7 sd=38.9 n=565] nanLen=0
+gpuG_s3    rc=0 calls=61 crazy=0 | tv_gpuG_s3                         frames= 41 segCt[first=197 last=580 peak=580 mean=565] len_nm[mean=193.7 sd=40.1 n=580] nanLen=0
+cpuG_s3    rc=0  crazy=0 | tv_cpuG_s3                         frames= 41 segCt[first=198 last=535 peak=535 mean=521] len_nm[mean=196.6 sd=41.4 n=535] nanLen=0
+cpuP_s3    rc=0  crazy=0 | tv_cpuP_s3                         frames= 41 segCt[first=199 last=557 peak=557 mean=545] len_nm[mean=194.8 sd=39.7 n=557] nanLen=0
+
+=== 3-SEED SUMMARY (2000 steps, final segCt) ===
+gpuG(resident): 510,550,580 mean547 | cpuG(CPU-global): 578,526,535 mean546 | cpuP(CPU-oracle): 590,565,557 mean571
+len_nm ~195 sd~40 all configs; 9/9 runs NaN-free; gpuG demandSyncPose calls=61 (=20 biochem + 41 frames)
+=== FULL 5000-step: demandSyncPose calls=151 (=50 biochem + 101 frames), overflow=0, no NaN, segCt 198->538, len 197.1+/-41.0nm ===

@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-12 (**Residency flip LANDED — minifilament body reaction on device + per-step pose pull retired (contractility path).** Branch `minifil-cohesion-device`. **Obstacle 1 — body reaction on device (host bridge retired):** `dimerCohesionKernel` restructured to **one thread per BODY** (single-writer body slot, race-free) — kills the host bridge (`cohBodyForce/Torque` scratch + readback + `packCohesion` gather). **The real obstacle was float32 stability, not the second kernel:** synchronous body reaction diverges (body wander ~190° vs oracle ~21°) because the body couples to all N dimers and the same-step stiff feedback is unstable in float32 — **the 1-step lag is load-bearing, refuting the "mere over-damping" premise.** Resolution: 1-step lag in a **device-resident buffer** (`cohBodyReact`, FIRST_EXECUTION; body slot SET not RMW). Also fixed `accurateAcos`→`fastAcosDev` (CPU uses raw `Pt3D.fastAcos`). Behavior-neutral vs oracle: span 180nm, **jitter now matches oracle** (1.7 vs 1.5nm; bridge over-damped to 0.4), wander tracks oracle within seed noise, tension/boundMotors neutral, no NaN. Commit `53facdf`. **Obstacle 2 — exhaustive consumer audit + pull RETIRED:** instrumented audit (`BOA_POSE_AUDIT`: counter + caller capture on ALL host-pose accessors incl. the bulk `recomputeDerivedSoA` + `Pt3D` transforms the prior reasoning-only audits missed). Complete map on `contractilityAssay_gpu` = 2 roots: `refreshMiniFilBodyDerived` (DEAD — `updateMyosinDimerPositions` doesn't run per-step, proven by `xToX` never firing; **gated off**) + the anchor pin (harness, **tolerates stale pose** — targets a fixed anchor, quasi-static). **Pull retired** (`retirePosePull()`, default-on for `contractilityAssay`): **`demandSyncPose` 10203→102 calls, 9.14s→0.06s**, anchors held <0.5nm, 3-seed tension/boundMotors neutral, no NaN. Non-contractility minifil keeps the pull (no regression). `RUN_LOGS/2026-06-12_pose_consumer_audit.txt`. **Recommend MERGE** — body-gather landed clean, pull retirement validated. Full writeup below.)
+Last updated: 2026-06-11 (**Float32 verdict (cohesion body-reaction) + residency under ACTIVE TURNOVER.** Two parts. **Part 1 — float32 or "round up the usual suspects"?** Added a diagnostic synchronous (no-lag, SET) body-reaction path (`BOA_COH_SYNC`, off by default) and swept (N, myoMiniFilFracMove, dt) on three schemes: float32-sync (device), float64-sync (CPU oracle), float32-lag (production). **VERDICT: the production-fix rationale is a MISATTRIBUTION (RMW confound) with a narrow genuine float32 effect on the side.** At the PRODUCTION operating point (fm=0.07, N=8) synchronous float32 SET is STABLE (wander 22.7° ≈ oracle 20.4°) — the journal's "190°→NaN synchronous divergence" was the cross-step RMW confound (body slot += across steps), exactly the flagged confound; the lag is NOT load-bearing there. The stability threshold tracks the **fm·N stiff-coupling product** (a stiff explicit-integration instability): float32-sync diverges at product ~1.5, float64-sync at ~1.9, and **float32-LAG is stable to product 32 (fm=4.0, never broke)** — so the lag extends the margin >20×, a SCHEME (staggered) effect that float64 needs too, NOT precision. A genuine but narrow ~20% float32 margin-narrowing DOES exist (sync float32 diverges at product 1.5 vs float64 1.9, confirmed at fm=0.20 N=8: float32-sync DIVERGED, float64-sync STABLE), but only at 2.5–4× production stiffness, seed-marginal, and the device also differs in Brownian RNG so 20% is an upper bound on pure precision. **V2: keep a deliberate lag (or semi-implicit/softer fracMove) for the stiff cohesion term as a stiff-stability measure; f64 on that term is unnecessary and would not remove the lag's need at high stiffness.** Diagnostic branch `float32-stability-diag` (commit `BOA_COH_SYNC` + sweep); `RUN_LOGS/2026-06-11_float32_cohesion_stability_sweep.txt`. **Part 2 — residency under active turnover (LANDED, branch `turnover-residency`).** Retired the per-step pose pull on the biochem-ON turnover path by **phase-aligning biochem to a GLOBAL cadence** (`GPUMoveThing.biochemGlobalCadence`/`advanceBiochemCadence`, default-on for `-gpu`): all FilSegment poly/depoly/split/sever mutations now fire on the same 1-in-`biochemCheckInt` step (rate preserved, phase synchronized) instead of scattered per-instance phases — concentrating the relative-write `incCoord`/`setFirstHalf` (which need a fresh host coord baseline) onto biochem steps, where the pose is pulled. Pull now fires at **biochem-cadence + output-cadence only**. On `boa10-64Seg-dyn-nomini` (full turnover: poly/depoly, cofilin sever, kRdmNuc nucleate, split): **demandSyncPose 2011→61 at 2000 steps (=20 biochem + 41 frames), 5011→151 at 5000 steps (=50 biochem + 101 frames)** — exactly Nsteps/K + frames, not Nsteps. **Validation** (3 seeds, GPU-resident vs CPU-global vs CPU-per-instance oracle): statistically NEUTRAL — final segCt means 547/546/571 (within ~13% seed spread), length 195±40 nm all configs; **10/10 runs NaN-free**, planRebuild=1, poseDelta overflow=0 even at production length. **Force-coverage exactly-once trivially preserved** — the change touches NO force/kernel code (only cadence-gating + pull scheduling). Topology marks already cover split/sever/removeThing; nucleation creates absolute-coord segments handled by the slot-scan. `RUN_LOGS/2026-06-11_turnover_residency_validation.txt`. **Residual blocker:** minifil-ON turnover configs (`boa10-64Seg-dyn`) still hit the pre-existing `packRange` MyoMiniFilament→FilSegment cast crash (orthogonal to this work) — that is the last gate before GPU-resident contractile-NETWORK turnover. **Recommend MERGE Part 2; HOLD Part 1 (diagnostic; cherry-pick `BOA_COH_SYNC` as residency tooling if wanted).** Full writeup below.)
+
+Prior update: 2026-06-12 (**Residency flip LANDED — minifilament body reaction on device + per-step pose pull retired (contractility path).** Branch `minifil-cohesion-device`. **Obstacle 1 — body reaction on device (host bridge retired):** `dimerCohesionKernel` restructured to **one thread per BODY** (single-writer body slot, race-free) — kills the host bridge (`cohBodyForce/Torque` scratch + readback + `packCohesion` gather). **The real obstacle was float32 stability, not the second kernel:** synchronous body reaction diverges (body wander ~190° vs oracle ~21°) because the body couples to all N dimers and the same-step stiff feedback is unstable in float32 — **the 1-step lag is load-bearing, refuting the "mere over-damping" premise.** Resolution: 1-step lag in a **device-resident buffer** (`cohBodyReact`, FIRST_EXECUTION; body slot SET not RMW). Also fixed `accurateAcos`→`fastAcosDev` (CPU uses raw `Pt3D.fastAcos`). Behavior-neutral vs oracle: span 180nm, **jitter now matches oracle** (1.7 vs 1.5nm; bridge over-damped to 0.4), wander tracks oracle within seed noise, tension/boundMotors neutral, no NaN. Commit `53facdf`. **Obstacle 2 — exhaustive consumer audit + pull RETIRED:** instrumented audit (`BOA_POSE_AUDIT`: counter + caller capture on ALL host-pose accessors incl. the bulk `recomputeDerivedSoA` + `Pt3D` transforms the prior reasoning-only audits missed). Complete map on `contractilityAssay_gpu` = 2 roots: `refreshMiniFilBodyDerived` (DEAD — `updateMyosinDimerPositions` doesn't run per-step, proven by `xToX` never firing; **gated off**) + the anchor pin (harness, **tolerates stale pose** — targets a fixed anchor, quasi-static). **Pull retired** (`retirePosePull()`, default-on for `contractilityAssay`): **`demandSyncPose` 10203→102 calls, 9.14s→0.06s**, anchors held <0.5nm, 3-seed tension/boundMotors neutral, no NaN. Non-contractility minifil keeps the pull (no regression). `RUN_LOGS/2026-06-12_pose_consumer_audit.txt`. **Recommend MERGE** — body-gather landed clean, pull retirement validated. Full writeup below.)
 
 Prior update: 2026-06-11 (**Minifilament cohesion onto device + per-step pose pull retired — biochem-path residency flip.** Branch `minifil-cohesion-device` off main (`a2956e9`; has Step-1 dimer port `97bf945`, `84e188c`, Phase A `RULE_MINIFIL`). **Step 0 — force-coverage survey** (`RUN_LOGS/2026-06-11_cohesion_device_step0_survey.txt`): mapped the complete cohesion dispatch — `parallel` is ALWAYS true (antiparallel/`alignYVecLeversTorque`/`keepMyosinsOnSurface` are dead), `alignUVecLeversTorque` gates on `!(both heads onFil)`, the body attach offset is purely axial (y=z=0) so `attachPt = body.coord + offsetX·body.uVec` (no frame rebuild). Expressible as a per-(dimer) kernel with packed flags → no bail. **Step 1 (committed `ed957a3`) — cohesion on device, behavior-neutral:** `dimerCohesionKernel` (one thread per parallel GPU-handled dimer) reproduces `applyRodCouplingEnd1/End2` + conditional `alignUVecLeversTorque` + `constrainEnd{1,2}Dimers` from the resident pose; CPU cohesion gated off in lockstep via `MyosinDimer.cohesionOnDevice()` (verified `cpuCohesionApplyCt=0` — no double-apply). **Two bugs found+fixed in validation: (1) linkUVec SIGN FLIP** — `Pt3D.unitVec(a,b)=(a−b)`, so the kernel's `(p1−p2)` made the springs repulsive → runaway NaN by frame ~9; negated → span locks 180 nm. **(2) the body-reaction gather wouldn't run as a 2nd device kernel** — a per-body gather task never executed in the chained graph (writes to `jointForceSum[bodySlot]` never landed; verified by an unconditional top-of-kernel sentinel), though per-dimer −F/−τ match CPU exactly. Worked around with a **host bridge**: the dimer kernel writes per-dimer −F/−τ to `cohBodyForce/cohBodyTorque` (read back EVERY_EXECUTION), `packCohesion` sums them into the body slot for the next move (1-step lag). Needs `-Dtornado.tvm.maxbytecodesize=16384`. Neutral A/B (devcoh vs `BOA_MINIFIL_COHESION_CPU=1` vs full-CPU oracle): `boa10-singleMiniFil` span 180.0 nm, body wander 16–18° ≈ oracle 18–21°, no NaN; `contractilityAssay_gpu_short` mean tension 1.58 vs oracle 1.85 (within ~1.8× run-to-run noise), boundMotors 5.67 vs 6.08. Body *translational* jitter is mildly over-damped by the bridge lag (sub-nm); the rotational/held DOF + tension are neutral. **Step 2 (audit → BAIL, no flip):** cohesion is NOT the last per-step host-pose consumer (refuting the prior session's Step-3 audit, which predated this port). Remaining on `contractilityAssay_gpu`: (1) `updateMyosinDimerPositions`+`refreshMiniFilBodyDerived` — read host body pose to recompute attach points now DEAD (device computes them internally), a quick gateable follow-on; (2) the contractility anchor-pin (host end1/2, assay-harness); (3) the biochem flag-gate; plus the new host bridge's per-step force readback. So the pull (`demandSyncPose calls=10203`) is NOT retired. `RUN_LOGS/2026-06-11_cohesion_device_step{1,2_audit_BAIL}.txt`. Full writeup below.)
 
@@ -24,6 +26,100 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-11 — Float32 verdict (cohesion body-reaction) + residency under active turnover
+
+Two independent goals. Part 1 settles WHY the cohesion 1-step lag is needed (for the v2 record);
+Part 2 extends the residency flip to biochem turnover.
+
+### Part 1 — Is the cohesion body-reaction instability a genuine float32 effect? (diagnostic)
+
+Branch `float32-stability-diag`. Added `BOA_COH_SYNC=1` (off by default): applies the device body
+reaction SYNCHRONOUSLY (this step's `accB*`, **SET** not RMW) instead of the production 1-step
+device-resident lag — a clean float32-synchronous-SET datapoint with no RMW confound, directly
+comparable to the CPU float64-synchronous-SET oracle. Swept (N=`numMyoDimersEachEndOfMiniFil`,
+fm=`myoMiniFilFracMove`, dt) on `boa10-singleMiniFil`; metric = body-axis wander / span / NaN
+(`RUN_LOGS/_cohesion/analyze_minifil.py`). Full log + table:
+`RUN_LOGS/2026-06-11_float32_cohesion_stability_sweep.txt`.
+
+**Confound ruled out first.** The journal's "synchronous diverges 190°→NaN" does NOT reproduce with a
+clean SET: at the production point (fm=0.07, N=8) float32-synchronous-SET is STABLE (wander 22.7° ≈
+oracle 20.4°, span 180.0). The 190° came from the **RMW confound** (body slot accumulated across
+steps), exactly as the prompt flagged. So at production the lag is NOT load-bearing — synchronous
+float32 works.
+
+**Threshold tracks the fm·N stiff-coupling product** (= a stiff explicit-integration instability,
+not precision):
+| scheme | divergence threshold (fm·N) |
+|---|---|
+| float32-sync | ~1.5 (N8 fm≈0.19 ; N16 fm≈0.09) |
+| float64-sync (CPU oracle) | ~1.9 (N8 fm≈0.23 ; N16 fm≈0.12) |
+| float32-**lag** (production) | **>32** (stable to fm=4.0, never broke) |
+
+The **lag extends the stiff-stability margin >20×** and is stable far past where BOTH synchronous
+schemes (float32 AND float64) diverge → its stabilization is a **scheme (staggered/semi-implicit-like)
+effect that float64 needs too**, NOT a float32 compensation.
+
+**Genuine but narrow float32 margin-narrowing.** float32-sync destabilizes at product ~1.5 vs
+float64 ~1.9 (~20% smaller margin), confirmed at fm=0.20 N=8 (float32-sync DIVERGED wander 10222°
+[rotational; span held], float64-sync STABLE 21.4°; seed-marginal — s2 held, s1/s3 diverged). Caveat:
+the device also differs in Brownian RNG / integration, so ~20% is an UPPER BOUND on the pure-precision
+contribution. This sits at 2.5–4× production stiffness, nowhere near the operating point.
+
+**Verdict:** the production-fix *rationale* ("float32 tips synchronous over at fm=0.07, lag
+load-bearing for precision reasons") is a **MISATTRIBUTION** — production synchronous is float32-stable
+(the divergence the fix responded to was the RMW confound), and the lag's real power is a stiff-scheme
+effect. A genuine float32 stiff-stability effect *exists* but is narrow and irrelevant at production.
+**V2 implication:** keep a deliberate lag (or semi-implicit / softer fracMove) for the stiff cohesion
+constraint as a STIFF-STABILITY measure; f64 on that one term is unnecessary and would not remove the
+lag's need at high stiffness. Production keeps the lag unchanged. `BOA_COH_SYNC` left as residency
+diagnostic tooling — HOLD (cherry-pick to main if wanted).
+
+### Part 2 — Residency under active biochem turnover (LANDED)
+
+Branch `turnover-residency` (off main). **Problem:** for biochem-ACTIVE (`noMonomersSimd:false`)
+turnover configs the per-step pose pull could not be retired, because the per-instance biochem counter
+(`FilSegment.biochemCheckCt`) wraps on scattered steps (segments created at split/nucleate get random
+phases) → some segment's relative-write `incCoord`/split runs on essentially every step, and each needs
+a fresh host coord baseline (a stale baseline clobbers the device-resident pose on the next scatter).
+
+**Fix — phase-align biochem to a GLOBAL cadence.** `GPUMoveThing.biochemGlobalCadence` (default-on for
+`-gpu`; `BOA_BIOCHEM_GLOBAL_CADENCE=1/0` forces on/off) + `advanceBiochemCadence()` (called once/step in
+`doLoop` before the move phase) sets `biochemFiresThisStep` every `Thing.biochemCheckInt` steps.
+`FilSegment.biochemStep` gates its mutation on that flag instead of the per-instance counter, so ALL
+segments mutate on the SAME step — concentrating the relative writes onto 1-in-K steps. The per-step
+pose pull is then gated `(!biochemGlobalCadence || biochemFiresThisStep)` → pull fires at
+**biochem-cadence + output-cadence only** (output frames refresh independently via
+`refreshHostMirrorsForOutput`). Rate is preserved (still one biochem pass per K steps per segment) —
+only the PHASE is synchronized, so the stochastic turnover is statistically unchanged.
+
+**Cadence (boa10-64Seg-dyn-nomini, full turnover: poly/depoly + cofilin sever + kRdmNuc nucleate +
+split):** demandSyncPose **2011→61 at 2000 steps (=20 biochem + 41 frames)**, **5011→151 at 5000 steps
+(=50 biochem + 101 frames)** — exactly Nsteps/biochemCheckInt + frames, NOT Nsteps. ~33× fewer pulls
+(1.96s→0.02s at 2000 steps).
+
+**Validation (3 seeds, 2000 steps): GPU-resident vs CPU-global vs CPU-per-instance oracle.**
+Statistically NEUTRAL — final segCt means **547 / 546 / 571** (within the ~13% seed-to-seed spread;
+ranges overlap), final length **195±40 nm** all three. **10/10 runs (incl. the 5000-step production
+length) NaN-free**, planRebuild=1 (no per-step rebuilds — topology marks → `classifyThings` only),
+poseDelta overflow=0 (max=196 ≪ cap 8192, even with all mutations phase-concentrated).
+`RUN_LOGS/2026-06-11_turnover_residency_validation.txt`.
+
+**Force-coverage exactly-once: trivially preserved** — the change touches NO force/kernel/force-sum
+code (verified `git diff`: only cadence-gating + pull scheduling). Biochem mutations are unchanged
+(same `incCoord`/`markPoseDirty`), only phase-shifted.
+
+**Topology coverage:** split (`markPoseDirty`+`markTopologyDirty`), cofilin sever / depoly-to-zero
+(`cleanup()`→`removeThing` swap, sets `topologyDirty`) all fire INSIDE `biochemStep` = biochem-fire
+steps, so host pose is fresh when they read it. Nucleation (`kRdmNuc`, every step) creates
+absolute-coord segments (`theBox.rdmPtInside()`) with no dependence on existing host pose — handled by
+`buildDeltaSet`'s slot-change scan regardless of pull cadence.
+
+**Residual blocker (next step):** minifil-ON turnover configs (`boa10-64Seg-dyn`,
+`boa10-miniFil-turnover`) still hit the PRE-EXISTING `GPUMoveThing.packRange`
+MyoMiniFilament→FilSegment cast crash when a swap-compaction lands a minifil in a slot the move-pack
+casts as FilSegment — orthogonal to this work, but it is the last gate before GPU-resident contractile-
+NETWORK turnover (minifilaments + actin turnover together). **Recommend MERGE Part 2.**
 
 ## 2026-06-12 — Residency flip: device body-gather + complete consumer retirement — FLIP LANDED
 
