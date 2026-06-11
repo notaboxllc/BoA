@@ -403,10 +403,13 @@ public class LiveFrameServer extends WebSocketServer {
                 valStr = p.getValue() != 0 ? "true" : "false";
             else
                 valStr = formatNum(p.getValue());
+            String descFrag = (p.getDescription() != null && !p.getDescription().isEmpty())
+                ? ",\"description\":\"" + escapeJson(p.getDescription()) + "\""
+                : "";
             sb.append(String.format(
-                "{\"name\":\"%s\",\"displayName\":\"%s\",\"type\":\"%s\",\"value\":%s,\"mutable\":%b}",
+                "{\"name\":\"%s\",\"displayName\":\"%s\",\"type\":\"%s\",\"value\":%s,\"mutable\":%b%s}",
                 escapeJson(p.label), escapeJson(p.parameterName.trim()),
-                typeStr, valStr, p.isMutableAtRuntime()));
+                typeStr, valStr, p.isMutableAtRuntime(), descFrag));
             first = false;
         }
         sb.append("]");

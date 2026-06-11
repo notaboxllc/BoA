@@ -255,10 +255,21 @@ public class ThreeJSWriter {
             BoxOfActin.ContractAssay c = BoxOfActin.contract;
             sb.append(String.format(
                 ",\"contractility\":{\"tensionA_pN\":%.5g,\"tensionB_pN\":%.5g,"
-                + "\"anchorA\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},\"anchorB\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}}",
+                + "\"anchorA\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},\"anchorB\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}",
                 c.tensionA_pN, c.tensionB_pN,
                 c.anchorPtA.x, c.anchorPtA.y, c.anchorPtA.z,
                 c.anchorPtB.x, c.anchorPtB.y, c.anchorPtB.z));
+            // Live-HUD stats block (instantaneous + cumulative + recent-EWMA).
+            sb.append(String.format(
+                ",\"stats\":{\"step\":%d,\"simTime\":%.5g,\"boundHeads\":%d,\"peakBound\":%d,"
+                + "\"avgBound\":%.4g,\"ewmaBound\":%.4g,\"meanTension_pN\":%.5g,\"avgTension_pN\":%.5g,"
+                + "\"ewmaTension_pN\":%.5g,\"peakTension_pN\":%.5g,\"firstBindStep\":%d,\"hasMotor\":%b}",
+                Env.counter, Env.simulationTime, c.instBound, c.peakBound,
+                BoxOfActin.contractAvgBound(), c.ewmaBound,
+                0.5 * (Math.abs(c.tensionA_pN) + Math.abs(c.tensionB_pN)),
+                BoxOfActin.contractAvgTension(), c.ewmaTension, c.peakTension,
+                c.firstBindStep, c.mini != null));
+            sb.append("}");
         }
 
         sb.append("}");

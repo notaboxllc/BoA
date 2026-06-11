@@ -736,32 +736,57 @@ public class Env {
 	static final Parameter myoLeverLength = new Parameter("myoLeverLength"," Myosin lever length", 0.008, distUnits);
 	static final Parameter myoMotorLength = new Parameter("myoMotorLength"," Myosin motor length", 0.020, distUnits);
 	
-	static final Parameter myoMotorAlignWithFilTolerance = new Parameter("myoMotorAlignWithFilTolerance"," Myosin motor alignment with filament tolerance for binding", -0.4, "cos(radians)");
+	// Bind-orientation gate (cos). Runtime-mutable: CPU bind reads getValue() each
+	// step; on -gpu it is baked into gridParams at FIRST_EXECUTION, so a mid-run
+	// change takes effect on restart (the contractility tuning apparatus runs CPU,
+	// where it is fully live).
+	static final Parameter myoMotorAlignWithFilTolerance = new Parameter("myoMotorAlignWithFilTolerance"," Myosin motor alignment with filament tolerance for binding", -0.4, "cos(radians)").setMutableAtRuntime().setDescription(
+		"Bind orientation gate: the cosine of the angle between the head axis and the filament axis. A head binds only if their dot product is at least this value. Default -0.4 (allows up to ~114 degrees of misalignment, fairly permissive). Toward +1: stricter co-alignment, fewer binds; toward -1: almost any orientation binds. On -gpu, applies on restart.");
+
+	// Cross-bridge spring stiffness (force per unit head–attachment strain). Was a
+	// hardcoded constant in MyoFilLink (1e-9 N/µm); promoted to a tunable so the
+	// ensemble tension scale can be dialed. Read fresh CPU-side and packed into the
+	// device motorForceParams EVERY_EXECUTION -> live on both paths.
+	static private final double myoSpring_init = 1.0e-9; // N/µm
+	static final Parameter myoSpring = new Parameter("myoSpring"," Myosin cross-bridge spring stiffness", myoSpring_init, "N/µm").setMutableAtRuntime().setDescription(
+		"Cross-bridge spring stiffness. A bound head acts as a Hookean spring between its tip and its actin attachment point: force = strain * myoSpring. Default 1e-9 N/µm. Higher: more force per nm of strain, but the head reaches the break-force threshold at smaller strain and snaps off sooner, so raising this without also raising break force can REDUCE net tension.");
 
 	static private final double myosinStallForce_init = 6.0; // pN
-	static final Parameter myosinStallForce = new Parameter("myosinStallForce"," Single-head Myosin Stall Force", myosinStallForce_init, "pN");
+	static final Parameter myosinStallForce = new Parameter("myosinStallForce"," Single-head Myosin Stall Force", myosinStallForce_init, "pN").setMutableAtRuntime().setDescription(
+		"Caps the per-head lever-to-motor joint torque on the GPU path (max torque scales as stall force * motor length). Default 6 pN. Limits how forcefully the cocked lever can swing the head into alignment. Note: not used by the CPU release path; it is primarily a GPU joint clamp.");
 
 	static private final double myosinBreakForce_init = 12.0; // pN			// use this to prevent stiffness?
-	static final Parameter myosinBreakForce = new Parameter("myosinBreakForce"," Single-head Myosin Break Force", myosinBreakForce_init, "pN");
-	
+	static final Parameter myosinBreakForce = new Parameter("myosinBreakForce"," Single-head Myosin Break Force", myosinBreakForce_init, "pN").setMutableAtRuntime().setDescription(
+		"Hard detachment threshold. If the cross-bridge force exceeds this value, the head releases immediately, a stiffness safety valve independent of the catch-slip roll. Default 12 pN. Lower: heads break off under modest load (caps peak tension); higher: heads hold larger forces.");
+
 	// values for Guo&Guilford catch/slip probability calculations (see Stam et al 2015)
-	static private final double alphaCatch_init = 0.92; 			
-	static final Parameter alphaCatch = new Parameter("alphaCatch"," Alpha_Catch for force-based myosin release", alphaCatch_init, " ");
-		
-	static private final double alphaSlip_init = 0.08; 			
-	static final Parameter alphaSlip = new Parameter("alphaSlip"," Alpha_Slip for force-based myosin release", alphaSlip_init, " ");
-	
-	static private final double xCatch_init = 2.5e-9; 			
-	static final Parameter xCatch = new Parameter("xCatch"," X_Catch for force-based myosin release", xCatch_init, "m");
-	
-	static private final double xSlip_init = 0.4e-9; 			
-	static final Parameter xSlip = new Parameter("xSlip"," X_Slip for force-based myosin release", xSlip_init, "m");
-	
-	static private final double kOff_init = 100; 			
-	static final Parameter kOff = new Parameter("kOff"," kOff for force-based myosin release", kOff_init, "  ");
+	// All read fresh in MyoFilLink.ckRelease() each step (release runs CPU-side on
+	// both paths), so they are cleanly runtime-mutable.
+	static private final double alphaCatch_init = 0.92;
+	static final Parameter alphaCatch = new Parameter("alphaCatch"," Alpha_Catch for force-based myosin release", alphaCatch_init, " ").setMutableAtRuntime().setDescription(
+		"Relative weight of the catch (load-stabilized) pathway in the catch-slip release sum. Default 0.92 (catch-dominated). Higher: detachment more load-resistant, so heads live longer under stabilizing load. See kOff for the full release formula.");
+
+	static private final double alphaSlip_init = 0.08;
+	static final Parameter alphaSlip = new Parameter("alphaSlip"," Alpha_Slip for force-based myosin release", alphaSlip_init, " ").setMutableAtRuntime().setDescription(
+		"Relative weight of the slip (load-accelerated) pathway in the catch-slip release sum. Default 0.08. Higher: heads more readily pulled off by load. See kOff for the full release formula.");
+
+	static private final double xCatch_init = 2.5e-9;
+	static final Parameter xCatch = new Parameter("xCatch"," X_Catch for force-based myosin release", xCatch_init, "m").setMutableAtRuntime().setDescription(
+		"Force-sensitivity distance of the catch (load-stabilized) term, which scales as exp(-Fpar*xCatch/kT) and shrinks as the along-filament force grows. Default 2.5e-9 m. Larger: stronger load-stabilization, longer attachment in the stabilizing-force regime. (Guo and Guilford 2006; Stam et al 2015.)");
+
+	static private final double xSlip_init = 0.4e-9;
+	static final Parameter xSlip = new Parameter("xSlip"," X_Slip for force-based myosin release", xSlip_init, "m").setMutableAtRuntime().setDescription(
+		"Force-sensitivity distance of the slip (load-accelerated) term, which scales as exp(+Fpar*xSlip/kT) and grows with the along-filament force. Default 0.4e-9 m. Larger: load pulls heads off faster. With xCatch and kOff this sets the biphasic, load-dependent attachment lifetime.");
+
+	static private final double kOff_init = 100;
+	static final Parameter kOff = new Parameter("kOff"," kOff for force-based myosin release", kOff_init, "  ").setMutableAtRuntime().setDescription(
+		"Base detachment rate for the load-dependent Guo-Guilford catch-slip release. Per-step release probability = kOff*dt*[alphaCatch*exp(-Fpar*xCatch/kT) + alphaSlip*exp(+Fpar*xSlip/kT)], where Fpar is the along-filament force component. Default 100 per second. Higher: heads detach faster overall, shortening attachment lifetime and lowering duty ratio, processivity, and sustained tension.");
 
 	static private final double myoColTol_init = 0.006; //µm
-	static final Parameter myoColTol = new Parameter("myoColTol"," Myosin motor collision tolerance", myoColTol_init, distUnits);
+	// Bind capture radius. Runtime-mutable (CPU live each step; -gpu baked at
+	// FIRST_EXECUTION -> takes effect on restart).
+	static final Parameter myoColTol = new Parameter("myoColTol"," Myosin motor collision tolerance", myoColTol_init, distUnits).setMutableAtRuntime().setDescription(
+		"Bind capture radius. A myosin head binds a filament when its tip falls within this perpendicular distance of the filament axis (and the alignment gate passes). Default 0.006 µm (6 nm). Larger: heads capture from farther away, so binding is faster and more frequent; smaller: near-contact required. On -gpu this is baked at first execution, so a change applies on restart.");
 
 	static private final double myoRebindTime_init = 1e-5; // s
 	static final Parameter myoRebindTime = new Parameter("myoRebindTime"," Myosin motor rebind time", myoRebindTime_init, "s");
