@@ -75,6 +75,30 @@ public class BoxOfActin {
 	}
 	static final DeflFil deflFil = new DeflFil();
 
+	// Hard plus-end / endpoint pins applied after integration each step (applyBenchmarkPins()).
+	// Both the deflection benchmark (firstSeg.end1, lastSeg.end2) and the contractility assay
+	// (each filament's outer plus-end terminal segment) register their pins here.
+	static class Pin {
+		final FilSegment seg;
+		final int whichEnd;   // 1 -> end1, 2 -> end2
+		final Pt3D anchor;    // fixed lab-frame point the chosen endpoint is snapped back to
+		Pin(FilSegment seg, int whichEnd, Pt3D anchor) { this.seg = seg; this.whichEnd = whichEnd; this.anchor = anchor; }
+	}
+	static final java.util.List<Pin> pinRegistry = new java.util.ArrayList<>();
+
+	// Minimal contractility assay state (null unless contractilityAssay is active).
+	static class ContractAssay {
+		FilSegment[] filA, filB;            // the two anti-parallel filament chains
+		FilSegment anchorSegA, anchorSegB;  // outer (pinned) terminal segment of each
+		Pt3D buildDirA = new Pt3D(), buildDirB = new Pt3D(); // unit vector pointing INWARD from each anchor
+		Pt3D anchorPtA = new Pt3D(), anchorPtB = new Pt3D();  // pinned endpoint locations (box walls, inset)
+		MyoMiniFilament mini;               // null in the no-motor control
+		// Axial force at each anchor, projected onto the inward buildDir: positive = contractile.
+		double tensionA_pN = 0, tensionB_pN = 0;
+		Pt3D forceA = new Pt3D(), forceB = new Pt3D(); // raw lab-frame net force on each anchor segment (N)
+	}
+	static ContractAssay contract = null;
+
 	// LP benchmark state (free BCs, Brownian forces, tangent-correlation measurement)
 	static class LpFil {
 		FilSegment[] segs;
@@ -1199,6 +1223,10 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.gatherForcesStop);
 				gatherTimer.stopInc();
 
+				// Contractility assay: read the anchor reaction (= tension) from the gathered
+				// force, before moveThing integrates and the pin snaps the endpoint back.
+				if (Env.contractilityAssay.isActive()) { captureContractilityTension(); }
+
 				// F1 benchmark: apply transverse force to midpoint segment before integration
 				if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
 					deflFil.midSeg.incForceSum(deflFil.transForce);
@@ -1249,8 +1277,9 @@ public class BoxOfActin {
 				}
 				moveTimer.stopInc();
 
-				// F1 benchmark: restore pinned endpoints after integration
-				if (Env.benchmarkFilament) { applyBenchmarkPins(); }
+				// Restore pinned endpoints after integration (deflection benchmark and/or
+				// contractility assay register into pinRegistry).
+				if (!pinRegistry.isEmpty()) { applyBenchmarkPins(); }
 				// Round 3 diagnostic: midpoint coordAsPt3D() after integration + pin correction
 				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
 					System.err.printf("[BENCH:POST] step=%d getCoordY()=%.6e veloc.y=%.4e%n",
@@ -1868,17 +1897,21 @@ public class BoxOfActin {
 	// centroid translation and rotation (rotation pivots about centroid, not pin, so the
 	// endpoint drifts; the correction below restores it exactly regardless of the source).
 	private static void applyBenchmarkPins() {
-		if (deflFil.firstSeg == null || deflFil.lastSeg == null) return;
-		deflFil.firstSeg.incCoord(
-			deflFil.anchor1.x - deflFil.firstSeg.getEnd1X(),
-			deflFil.anchor1.y - deflFil.firstSeg.getEnd1Y(),
-			deflFil.anchor1.z - deflFil.firstSeg.getEnd1Z());
-		deflFil.firstSeg.initialize();
-		deflFil.lastSeg.incCoord(
-			deflFil.anchor2.x - deflFil.lastSeg.getEnd2X(),
-			deflFil.anchor2.y - deflFil.lastSeg.getEnd2Y(),
-			deflFil.anchor2.z - deflFil.lastSeg.getEnd2Z());
-		deflFil.lastSeg.initialize();
+		for (Pin p : pinRegistry) {
+			if (p.seg == null || p.seg.removeMe) continue;
+			if (p.whichEnd == 1) {
+				p.seg.incCoord(
+					p.anchor.x - p.seg.getEnd1X(),
+					p.anchor.y - p.seg.getEnd1Y(),
+					p.anchor.z - p.seg.getEnd1Z());
+			} else {
+				p.seg.incCoord(
+					p.anchor.x - p.seg.getEnd2X(),
+					p.anchor.y - p.seg.getEnd2Y(),
+					p.anchor.z - p.seg.getEnd2Z());
+			}
+			p.seg.initialize();
+		}
 	}
 
 	// F1 benchmark: compute midpoint perpendicular deflection as a full snapshot.
@@ -2209,7 +2242,7 @@ public class BoxOfActin {
 			glidingEvaluator.sampleStep();
 		}
 
-		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive() || Env.contractilityAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
@@ -2224,6 +2257,7 @@ public class BoxOfActin {
 					LiveFrameServer.dispatchGlidingAssay(gaJson);
 				}
 			}
+			reportContractilityStats();
 			threeJSCounter = 0;
 		}
 
@@ -2295,8 +2329,9 @@ public class BoxOfActin {
 			glidingEvaluator.sampleStep();
 		}
 
-		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
+		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive() || Env.contractilityAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
+			reportContractilityStats();
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
@@ -2326,6 +2361,10 @@ public class BoxOfActin {
 			deflFil.midSeg   = segs[n / 2];
 			deflFil.anchor1.setVals(segs[0].getEnd1X(), segs[0].getEnd1Y(), segs[0].getEnd1Z());
 			deflFil.anchor2.setVals(segs[n-1].getEnd2X(), segs[n-1].getEnd2Y(), segs[n-1].getEnd2Z());
+			// Register the benchmark's two pinned endpoints (end1 of first seg, end2 of last seg).
+			pinRegistry.clear();
+			pinRegistry.add(new Pin(deflFil.firstSeg, 1, deflFil.anchor1));
+			pinRegistry.add(new Pin(deflFil.lastSeg,  2, deflFil.anchor2));
 			double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac.getValue() / (spanM * spanM);
 			deflFil.transForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
@@ -2574,7 +2613,12 @@ public class BoxOfActin {
 				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}
-		if (Env.twoNodesOneFil) {
+		if (Env.contractilityAssay.isActive()) {
+				makeContractilityAssay();
+				return;
+			}
+
+			if (Env.twoNodesOneFil) {
 				FilSegment.twoNodesOneFilTst();
 				Env.equilNodes.setValue(ProteinNode.nodeCt);
 				return;
@@ -2656,6 +2700,102 @@ public class BoxOfActin {
 			//MyoMiniFilament.makeTestMiniFil();
 			
 			Env.equilNodes.setValue(ProteinNode.nodeCt);  // after all nodes created, set value for number to maintain
+	}
+
+	// Minimal contractility assay. Two anti-parallel stiff filaments lie along X, offset +/- in Y,
+	// overlapping in the central region. Filament A's body is on the +X side, pinned at the +X wall;
+	// filament B's on the -X side, pinned at the -X wall. In the normal (non-reversed) polarity each
+	// filament's PLUS (barbed) end is the pinned outer endpoint, so a single bipolar minifilament in
+	// the central overlap walks both filaments plus-ward and pulls the anchors INWARD = contraction.
+	// Tension is read as the axial force at each pinned anchor (captureContractilityTension()).
+	// noMonomersSimd is set by the config, not forced here: CPU runs use noMonomersSimd:true
+	// (rigid static rods). GPU runs MUST use noMonomersSimd:false (the biochem-sync path) — the
+	// minifilament cohesion fix reads fresh host pose via the per-step demandSyncPoseToHost, which
+	// is gated off under noMonomersSimd; with it off the minifilament blows apart on -gpu. Turnover
+	// is suppressed via zeroed rates either way, so the filaments stay static in both modes.
+	public static void makeContractilityAssay() {
+		if (Env.useGPU && Env.noMonomersSimd.isActive()) {
+			System.out.println("[CONTRACT][WARN] -gpu with noMonomersSimd:true gates off the per-step host "
+				+ "pose sync the minifilament cohesion fix needs -> the minifilament will blow apart. Use a "
+				+ "config with noMonomersSimd:false for GPU runs (e.g. ParameterFiles/contractilityAssay_gpu).");
+		}
+		contract = new ContractAssay();
+		pinRegistry.clear();
+
+		int n = Env.contractFilNSegs.getIntValue();
+		int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+		double segLen = (monCt + 1) * FilSegment.halfmono; // µm
+		double Lfil = n * segLen;
+		double Lx = Env.boxXDim.getValue() / 2.0;
+		double margin = 0.10; // µm: inset the pinned plus end from the box wall so the boundary force
+		                      // never touches the anchor segment, keeping the axial readout clean.
+		double anchorX = Lx - margin;
+		double yOff = Env.contractFilYOffset.getValue();
+		boolean rev = Env.contractReversePolarity.isActive();
+
+		// Filament A: body on +X side, pinned at +X wall, +yOff in Y. buildDir points inward (-X).
+		// Normal polarity uVec=+X -> end2 (plus) at the +X wall (pinned). Reversed -> uVec=-X.
+		contract.buildDirA.setVals(-1, 0, 0);
+		Pt3D uVecA = rev ? new Pt3D(-1, 0, 0) : new Pt3D(1, 0, 0);
+		contract.anchorPtA.setVals(anchorX, yOff, 0);
+		contract.filA = FilSegment.makeStraightChain(n, contract.anchorPtA, contract.buildDirA, uVecA, true);
+		contract.anchorSegA = contract.filA[0];
+		int pinEndA = (Pt3D.Dot(contract.buildDirA, uVecA) > 0) ? 1 : 2;
+		pinRegistry.add(new Pin(contract.anchorSegA, pinEndA, contract.anchorPtA));
+
+		// Filament B: body on -X side, pinned at -X wall, -yOff in Y. buildDir points inward (+X).
+		contract.buildDirB.setVals(1, 0, 0);
+		Pt3D uVecB = rev ? new Pt3D(1, 0, 0) : new Pt3D(-1, 0, 0);
+		contract.anchorPtB.setVals(-anchorX, -yOff, 0);
+		contract.filB = FilSegment.makeStraightChain(n, contract.anchorPtB, contract.buildDirB, uVecB, true);
+		contract.anchorSegB = contract.filB[0];
+		int pinEndB = (Pt3D.Dot(contract.buildDirB, uVecB) > 0) ? 1 : 2;
+		pinRegistry.add(new Pin(contract.anchorSegB, pinEndB, contract.anchorPtB));
+
+		// Single bipolar minifilament centred in the overlap, oriented along X (omitted in the
+		// no-motor control). Turnover is disabled via the myoMiniLifetime parameter in the config.
+		if (!Env.contractNoMotor.isActive()) {
+			contract.mini = new MyoMiniFilament(new Pt3D(0, 0, 0), new Pt3D(1, 0, 0));
+		}
+
+		double overlap = 2.0 * Lfil - 2.0 * anchorX; // central x-extent shared by both filaments
+		double miniSpan = MyoMiniFilament.length;
+		System.out.printf("[CONTRACT] box X=%.3f µm (anchors at x=+/-%.3f, %.2f µm inset), %d-seg filaments, Lfil=%.3f µm%n",
+			Env.boxXDim.getValue(), anchorX, margin, n, Lfil);
+		System.out.printf("[CONTRACT] yOffset=+/-%.3f µm, overlap=%.3f µm, minifilament span=%.3f µm, polarity=%s, motor=%s%n",
+			yOff, overlap, miniSpan, rev ? "REVERSED (plus ends inward)" : "normal (plus ends outward)",
+			Env.contractNoMotor.isActive() ? "OFF (control)" : "ON");
+		if (overlap < miniSpan) {
+			System.out.printf("[CONTRACT][WARN] overlap (%.3f µm) < minifilament span (%.3f µm): the minifilament cannot bridge both filaments. "
+				+ "Increase contractFilNSegs or shrink boxXDim.%n", overlap, miniSpan);
+		}
+	}
+
+	// Read the net force on each pinned anchor segment, projected onto the inward buildDir
+	// (positive = contractile). Called after the per-step force gather, before the pin snaps the
+	// endpoint back: at that point forceSum on the anchor segment is exactly the reaction the pin
+	// must supply = the tension transmitted down the chain from the minifilament.
+	private static void captureContractilityTension() {
+		if (contract == null) return;
+		if (contract.anchorSegA != null) {
+			contract.forceA.setVals(contract.anchorSegA.getForceSumX(), contract.anchorSegA.getForceSumY(), contract.anchorSegA.getForceSumZ());
+			contract.tensionA_pN = Pt3D.Dot(contract.forceA, contract.buildDirA) * 1e12;
+		}
+		if (contract.anchorSegB != null) {
+			contract.forceB.setVals(contract.anchorSegB.getForceSumX(), contract.anchorSegB.getForceSumY(), contract.anchorSegB.getForceSumZ());
+			contract.tensionB_pN = Pt3D.Dot(contract.forceB, contract.buildDirB) * 1e12;
+		}
+	}
+
+	// Emit the contractility tension trace at output-frame cadence. tensionA/B are the axial
+	// reaction at each anchor projected onto the inward direction: positive = contractile (anchors
+	// pulled inward), negative = extensile. boundMotors counts minifilament heads currently on actin.
+	private static void reportContractilityStats() {
+		if (!Env.contractilityAssay.isActive() || contract == null) return;
+		int boundMotors = 0;
+		if (contract.mini != null) { boundMotors = contract.mini.countBoundMotors(); }
+		System.out.printf("[STATS] contractility step=%d t=%.4f tensionA=%.4f tensionB=%.4f pN boundMotors=%d%n",
+			Env.counter, Env.simulationTime, contract.tensionA_pN, contract.tensionB_pN, boundMotors);
 	}
 
 	public static void makeCrucible () {

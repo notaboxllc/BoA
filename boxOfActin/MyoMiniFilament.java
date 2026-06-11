@@ -301,6 +301,25 @@ public class MyoMiniFilament extends Thing {
 			removeMe = true;
 		}
 	}
+
+	// Number of this minifilament's motor heads currently bound to actin (onFil). Mirrors the
+	// enumeration used by ThreeJSWriter.buildInspectJson for the myoMiniFilament inspect payload.
+	public int countBoundMotors () {
+		int count = 0;
+		for (int e = 0; e < 2; e++) {
+			MyosinDimer[] dimers = (e == 0) ? myoDimersEnd1 : myoDimersEnd2;
+			for (int d = 0; d < numMyoDimersEachEnd; d++) {
+				MyosinDimer dimer = dimers[d];
+				if (dimer == null || dimer.removeMe) continue;
+				Myosin[] myos = { dimer.myo1, dimer.myo2 };
+				for (Myosin myo : myos) {
+					if (myo == null || myo.removeMe || myo.myoMotor == null) continue;
+					if (myo.myoMotor.onFil) count++;
+				}
+			}
+		}
+		return count;
+	}
 	
 	public void step () {
 		//increment counters that control how often different sims occur

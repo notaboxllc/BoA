@@ -244,6 +244,18 @@ public class ThreeJSWriter {
             sb.append("]");
         }
 
+        // Contractility assay overlay: the two anchor tensions (pN, contractile positive) and the
+        // pinned anchor points, so the viewer can show the isometric load building at each end.
+        if (Env.contractilityAssay.isActive() && BoxOfActin.contract != null) {
+            BoxOfActin.ContractAssay c = BoxOfActin.contract;
+            sb.append(String.format(
+                ",\"contractility\":{\"tensionA_pN\":%.5g,\"tensionB_pN\":%.5g,"
+                + "\"anchorA\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g},\"anchorB\":{\"x\":%.5g,\"y\":%.5g,\"z\":%.5g}}",
+                c.tensionA_pN, c.tensionB_pN,
+                c.anchorPtA.x, c.anchorPtA.y, c.anchorPtA.z,
+                c.anchorPtB.x, c.anchorPtB.y, c.anchorPtB.z));
+        }
+
         sb.append("}");
         return sb.toString();
     }

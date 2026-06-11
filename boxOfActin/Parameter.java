@@ -1,7 +1,7 @@
 package boxOfActin;
 
 public class Parameter {
-	static Parameter [] theParams = new Parameter[240];
+	static Parameter [] theParams = new Parameter[256];
 	static int paramCt = 0;
 	static final int BOOLEAN = -1;
 	static final int DOUBLE = 0;

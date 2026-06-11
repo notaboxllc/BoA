@@ -1,0 +1,190 @@
+SURVEY — Minimal contractility assay (myosin-generated tension between two anchored anti-parallel filaments)
+Date: 2026-06-10   Mode: read-only survey, no source changes.
+
+Target assay recap: two anti-parallel, overlapping, laterally-offset stiff filaments in a long
+narrow box; one minifilament in the overlap (turnover off); both filament PLUS (barbed) ends
+anchored at the outer box ends; myosin walks plus-ward → inward (contractile) tension at the
+anchors; MEASURE that tension. Crux = (a) anchor a plus-end, (b) read tension off it.
+
+================================================================================
+ITEM 1 — REMNANT ASSAY CODE
+================================================================================
+REUSABLE / EXISTS:
+- No assay named contractility/tension/sarcomere/antiparallel/overlap/isometric exists. Those
+  keywords return nothing in any .java (confirmed). So there is NO prior contractility harness to
+  resurrect — jba's recollection most likely maps to the DEFLECTION BENCHMARK chain (below), which
+  shares the two ingredients we need: a pinned filament end + a fixed-position spring anchor.
+- DEFLECTION BENCHMARK ("DeflFil") is the closest existing scaffold. BoxOfActin.java:
+    * class DeflFil (lines ~62-76): fields anchor1, anchor2 (Pt3D fixed points), firstSeg, lastSeg,
+      midSeg, segs[], transForce, analyticDefl, tauTheo/tauMeas.
+    * init (lines ~2300-2343): FilSegment.makeBenchmarkChain(Env.benchmarkNSegs) builds an
+      11-segment chain along +X; anchor1/anchor2 set to the initial end1/end2 of the terminal segs.
+    * makeBenchmarkChain — FilSegment.java:3908.
+    * Gated by Env.benchmarkFilament (the -bm / -bmManual / -bmDiag flags). Population objects
+      (myosins, minifils, nodes) are auto-suppressed in begin() in benchmark mode.
+- Antiparallel concept exists only as a crosslink param: Env.java:594 sideBonds
+  ("1 parallel, -1 antiparallel, 0 both") — orientation-selective crosslinking, NOT a filament
+  placement primitive. Not directly useful but confirms anti-parallel is a represented notion.
+
+MISSING / MUST BUILD: the whole two-filament + central-minifilament + dual-plus-end-anchor +
+tension-readout configuration. No builder assembles it.
+
+================================================================================
+ITEM 2 — FILAMENT END ANCHORING  *** CRUX (a) ***
+================================================================================
+THREE candidate mechanisms exist; ranked by fitness for a hard plus-end anchor:
+
+(A) BENCHMARK PIN — post-integration endpoint correction  [BEST FIT, REUSE THIS]
+    BoxOfActin.applyBenchmarkPins() — BoxOfActin.java:1853-1865, called each step at line ~1242
+    immediately after moveThing(), gated by Env.benchmarkFilament.
+    Mechanism: after the segment integrates freely, translate the terminal segment so its pinned
+    endpoint snaps back exactly to the fixed anchor:
+        firstSeg.incCoord(anchor1 - firstSeg.end1); firstSeg.initialize();
+        lastSeg .incCoord(anchor2 - lastSeg.end2 ); lastSeg .initialize();
+    - This is a HARD positional constraint on ONE endpoint of ONE terminal segment. Exactly the
+      boundary condition the assay needs.
+    - Per-segment selectable in principle: it operates on whichever FilSegment + whichever end
+      (end1 or end2) you point it at. Currently hardwired to the single deflFil chain's two ends.
+    - To reuse: generalize from one chain to a small registry of (segment, whichEnd, anchorPt)
+      pin records, and call the same incCoord/initialize correction for each, every step.
+    NOTE: it pins the TERMINAL SEGMENT'S ENDPOINT, not a whole rigid filament — interior segments
+    still flex. That is fine (and desired: tension propagates down the chain to the pinned end).
+
+(B) AnchorNode — AnchorNode.java (extends ProteinNode)
+    Constructor sets bTransGam = (1e6,1e6,1e6) (~immobile drag) and overrides step()/moveThing()
+    to no-ops → a node frozen in space. BUT a filament does not attach to it directly; you'd need a
+    tether link (StickyNode/NodeLink/FilLink tether spring) between the node and the filament end.
+    That is a SOFT anchor (spring), more moving parts, and the tether mechanics (NodeLink) are
+    no-op in gliding production. Lower fit than (A) unless we deliberately want a compliant anchor.
+
+(C) "static actin" param idiom (noMonomersSimd:true + all turnover rates off)
+    Used by ParameterFiles/boa10-miniFil-staticActin and boa10-singleMiniFil. IMPORTANT: "static"
+    here means NO MONOMER DYNAMICS (rigid rods, no poly/depoly/aging) — the filaments STILL
+    translate and rotate freely under force. This is NOT spatial anchoring. Useful for the assay's
+    "no turnover / rigid rod" requirement, but does NOT pin the plus-ends. Combine with (A).
+
+ProteinNode.fixedNode (ProteinNode.java:24) — skips moveThing() when true; a node-freeze flag, not
+a filament-end mechanism. There is NO isFixed/pinned/frozen flag on FilSegment itself.
+
+================================================================================
+ITEM 3 — TENSION / END-FORCE READOUT  *** CRUX (b) ***
+================================================================================
+No turnkey "reaction force at anchor" readout exists. But the cleanest quantity is already
+computed every step:
+
+- Net force on a segment: Thing.soaForceSum[] via getForceSumX/Y/Z() (Thing.java:549-551),
+  accumulated through incForceSum() (Thing.java:470-489) from all force phases (Brownian, chain,
+  joints, MOTOR cross-bridge force, boundary). For the PINNED terminal segment, the net force it
+  accumulates in the step BEFORE applyBenchmarkPins() snaps it back IS the reaction force the
+  anchor must supply — i.e. the transmitted tension. Project onto the filament long axis
+  (Pt3D.Dot(uVecAsPt3D(), F)) to get the axial (contractile) component.
+      => CLEANEST READOUT: tension ≈ dot( firstSeg.uVec , (Fx,Fy,Fz) ) read from getForceSum*()
+         on the anchored terminal segment, sampled each step just before the pin correction.
+
+- Axial-force accumulators ALREADY on FilSegment: end1AxialF / end2AxialF (FilSegment.java:230-231),
+  incEnd1AxialForce/incEnd2AxialForce (~2959-2965), zeroed each step (~1259-1260). Today they are
+  fed ONLY by crosslink forces (e.g. line ~1554 incEnd2AxialForce(Dot(uVec,F))), not by the full
+  force sum. They are the natural field to repurpose: have the anchored end record its net axial
+  load here for a clean per-end tension trace.
+
+- Equivalent alternative: tension = (pin correction displacement)·(drag/deltaT). The incCoord
+  applied in applyBenchmarkPins is exactly the un-restored free motion; multiplying by the
+  effective drag over dt recovers the same force. Reading getForceSum* directly is simpler.
+
+MISSING: wiring either of the above into an output column / [STATS] line / WebSocket topic. Trivial
+to add (mirror the benchmark's buildBenchmarkJson pattern, BoxOfActin.java:1905+).
+
+================================================================================
+ITEM 4 — PLACED-FILAMENT IC (position, orientation, polarity)
+================================================================================
+REUSABLE:
+- General placed-filament builder = the FilSegment constructor itself:
+    new FilSegment(Pt3D initCoord, Pt3D initUVec, int filID, int monomerCt, boolean fromFile)
+    FilSegment.java:283. initCoord = center position, initUVec = long-axis orientation (unit),
+    filID = -1 for auto-assign, monomerCt = length in monomers. This is the generalizable primitive.
+- makeGlidingAssayFilament() — FilSegment.java:3457 — is just a thin wrapper around that constructor
+  with HARD-CODED placement: loc = (boxX/2 - filLength/2 - 1.5*segLen, 0, 0), uVec = (1,0,0). Good
+  template, but not parameterized for two offset anti-parallel filaments — call the constructor
+  directly instead.
+- Polarity: encoded by monomer chain direction, minusMon→plusMon (FilSegment.java:251). Chain built
+  minus-end first, monomers added toward PLUSEND (makeInitialMonomers, ~471-478). Geometric end1/end2
+  are coord ∓/± (length/2)·uVec. *** CONFIRM AT BUILD TIME which geometric end (end1 vs end2) is the
+  plus/barbed end for a given uVec sign, and which way the motor walks *** — established empirically
+  by the gliding-assay glide direction; not spelled out in a single constant. Anti-parallel = two
+  filaments with opposite uVec (e.g. +X and −X), so their plus ends point to opposite box ends.
+
+================================================================================
+ITEM 5 — SINGLE-MINIFILAMENT PLACEMENT + TURNOVER OFF
+================================================================================
+REUSABLE:
+- Place ONE at a chosen pose: new MyoMiniFilament(Pt3D initCoord, Pt3D initUVec)
+  MyoMiniFilament.java:75. (The :64 single-arg ctor randomizes orientation; the random-population
+  path is makeRandomMyoMiniFil():555 / equilibrateMyoMiniNumber():561, called from
+  BoxOfActin.java:1680. AVOID those — instantiate the minifilament directly in your IC builder, and
+  set initialMyoMiniFils:0 so equilibrate doesn't add more.)
+- Turnover OFF: minifilament removal is probabilistic per step with rate deltaT/myoMiniLifetime
+  (MyoMiniFilament.biochemStep ~299-302; Env.myoMiniLifetime, Env.java:487, default 10 s). Raise
+  myoMiniLifetime to a huge value (e.g. 1e9) to disable turnover. (CONFIRMED — matches memo.)
+
+================================================================================
+ITEM 6 — NARROW BOX + LATERAL CONFINEMENT
+================================================================================
+REUSABLE:
+- Chamber.makeABox() — Chamber.java:102 — builds a box CENTERED at origin from Env.boxXDim/boxYDim/
+  boxZDim (Env.java:368-380). Walls at ±dim/2. A long narrow box = boxXDim large, boxYDim/boxZDim
+  small (the gliding configs already do 14×2×0.5; go narrower e.g. boxYDim:0.3, boxZDim:0.2).
+  Reached by default in makeCrucible() (BoxOfActin.java:2644) when not a bug-shaped crucible.
+- Lateral confinement of the minifilament: comes "for free" from a thin box (the box-boundary
+  kernel F1 keeps things inside). No separate per-object lateral clamp exists; a thin slab in
+  Y and/or Z confines the minifilament to the filament region. If tighter coupling is needed,
+  that's a build-time addition, not an existing feature.
+
+================================================================================
+ITEM 7 — STIFFNESS REGIME (phalloidin)
+================================================================================
+CONFIRMED from JOURNAL (lines 1729, 10779, 12731) and param files:
+- Phalloidin-stiff regime: fracMove ≈ 0.0573, fracR = 1.0, fracMoveTorq = 0.01.
+  (CLAUDE.md/memo's "0.05725 / 1.0 / 0.1" — the 0.1 is an older fracMoveTorq; the validated gliding
+  baseline used 0.01. Pin the exact value during calibration.)
+- Params: Env.java:127-139 fracMove/fracR/fracMoveTorq, ALL .setMutableAtRuntime() (live-tunable).
+  Applied globally per run (PAIRS chain bending). Set them in the parameter file.
+- Intuition (from comments): smaller fracR → softer restoring force; larger fracMoveTorq → stiffer
+  torsion. For a non-buckling stiff rod under compressive contractile load, keep fracR high (=1.0).
+- Caveat: the deflection benchmark's own calibrated trio (fracMove=0.5/fracR=0.1/fracMoveTorq=0.265,
+  CLAUDE.md) is a DIFFERENT target (ratio≈1 at aeta=0.1). Use the phalloidin trio for the assay.
+
+================================================================================
+PROPOSED BUILD SKETCH  (reuse-first)
+================================================================================
+REUSE AS-IS:
+  - FilSegment(initCoord, initUVec, -1, monCt, false)  → place each of the 2 filaments explicitly.
+  - new MyoMiniFilament(overlapCenter, overlapUVec)     → one minifilament in the overlap.
+  - Chamber.makeABox + boxXDim/Y/Z params              → long narrow box.
+  - Thing.getForceSumX/Y/Z + Pt3D.Dot(uVec, F)         → tension readout primitive.
+  - applyBenchmarkPins() pattern                        → hard plus-end anchor.
+  - phalloidin fracMove/fracR/fracMoveTorq + noMonomersSimd:true + turnover-off param idiom
+    (from boa10-miniFil-staticActin) → rigid non-turning-over filaments.
+  - myoMiniLifetime:1e9, initialMyoMiniFils:0           → no minifilament turnover/extra nucleation.
+
+ADD (new, small):
+  1. A makeContractilityAssay() IC builder (new method, mirror makeGlidingAssayFilament's slot in
+     begin()/makeCrucible): instantiate fil A (uVec +X, plus end at +X box wall), fil B (uVec −X,
+     plus end at −X box wall), laterally offset in Y by ~one filament diameter, overlapping in X;
+     one minifilament centered on the overlap.
+  2. A generalized pin registry: replace the single deflFil pin with a list of
+     {FilSegment seg, int whichEnd, Pt3D anchorPt}; in the post-moveThing hook, apply the same
+     incCoord/initialize correction per record. Pin each filament's PLUS-end terminal segment to its
+     outer box wall. (Reuses applyBenchmarkPins verbatim, just iterated.)
+  3. Tension instrumentation: each step, for each pinned terminal segment, record
+     axialTension = Dot(uVec, getForceSum*) (optionally into end{1,2}AxialF), and emit it on a
+     [STATS] line and/or a new WebSocket topic (mirror buildBenchmarkJson, BoxOfActin.java:1905+).
+  4. A gating flag (e.g. -contractility or an Env param) to select this IC + the pin/readout path,
+     and to suppress random nucleation/population (as benchmark mode already does in begin()).
+
+OPEN QUESTIONS FOR BUILD TIME:
+  - Confirm geometric plus-end (end1 vs end2) per uVec sign, and motor walk direction, so the
+    correct terminal segment/end is pinned and the tension sign is contractile (inward).
+  - Decide hard pin (benchmark-style, exact) vs compliant tether (AnchorNode+spring) — hard pin is
+    simpler and gives a clean reaction-force readout; recommend hard pin first.
+  - Lateral offset magnitude + box Y/Z thinness so the minifilament engages both filaments without
+    a dedicated lateral clamp.

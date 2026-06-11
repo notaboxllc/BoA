@@ -3922,6 +3922,40 @@ public class FilSegment extends Thing {
 		return segs;
 	}
 
+	// Contractility assay: build an end-to-end linked straight chain of n rigid segments.
+	//   outerPt  — the pinned outer endpoint (sits at the box wall); chain extends inward from it
+	//   buildDir — unit vector pointing from outerPt toward the box centre (segments laid along it)
+	//   uVec     — filament polarity (segments' long-axis unit vector; end2 = plus/barbed end)
+	// uVec is independent of buildDir so a single geometry can be run at either polarity (the
+	// reversed-polarity control). Consecutive segments are linked end2<->end1 with the link
+	// direction chosen from sign(buildDir·uVec) so the chain is physically continuous either way.
+	// Caller is responsible for Env.noMonomersSimd being active (rigid rods). brownOff suppresses
+	// per-segment Brownian forcing for a clean axial-tension readout.
+	public static FilSegment[] makeStraightChain(int n, Pt3D outerPt, Pt3D buildDir, Pt3D uVec, boolean brownOff) {
+		int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+		double segLen = (monCt + 1) * halfmono; // µm
+		FilSegment[] segs = new FilSegment[n];
+		int fid = -1;
+		for (int i = 0; i < n; i++) {
+			double s = (i + 0.5) * segLen; // arclength of segment centre from outerPt along buildDir
+			Pt3D c = new Pt3D(outerPt.x + s * buildDir.x, outerPt.y + s * buildDir.y, outerPt.z + s * buildDir.z);
+			segs[i] = new FilSegment(c, uVec, fid, monCt, true);
+			if (i == 0) fid = segs[0].filID; // first segment auto-assigns a unique filID; reuse for the rest
+			if (brownOff) segs[i].brownianOff = true;
+		}
+		boolean buildAlongU = (buildDir.x * uVec.x + buildDir.y * uVec.y + buildDir.z * uVec.z) > 0;
+		for (int i = 0; i < n - 1; i++) {
+			if (buildAlongU) { // segs[i+1] is on segs[i]'s +uVec (end2) side
+				segs[i].setEnd2Links(segs[i + 1], true);
+				segs[i + 1].setEnd1Links(segs[i], true);
+			} else {           // segs[i+1] is on segs[i]'s -uVec (end1) side
+				segs[i].setEnd1Links(segs[i + 1], true);
+				segs[i + 1].setEnd2Links(segs[i], true);
+			}
+		}
+		return segs;
+	}
+
 	// LP benchmark: create n segments in a straight chain along +X axis at the given Y/Z offset.
 	// All segments are marked isLpSeg = true. Caller sets Env.noMonomersSimd active.
 	public static FilSegment[] makeLpChain(int n, double yOff, double zOff) {

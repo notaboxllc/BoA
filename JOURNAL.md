@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-10 (**Cross-pool `taForce` race fix — serialize multi-pool force phases.** Confirmed root cause of the CPU dimer/minifilament dissolution: `incForceSum` accumulates into a per-thread row `taForce[tid]` where `tid` is each worker's **local** index within its own ThreadSet, and `taForce` has only `allThreadCt`(=16) rows — the design assumes one pool writes forces at a time. But waves releasing 2+ force-writing pools concurrently (`spawn()` is non-blocking) make worker-0 of each pool race on `taForce[0]`/`dirtyCounts[0]`/`dirtyIndices[0]` → dropped `+=` updates and corrupted dirty-bookkeeping → restoring forces silently lost → progressive, non-diffusive dissolution. **Not** cross-step accumulation (forces *are* cleared each step). SoA-inc migration regression. Ladder that exposed it: single myosin (1 pool) holds → dimer (Myosin+MyosinDimer) one myosin dissolves → minifilament (+MyoMiniFilament) falls apart → gliding (1 pool) works. **Methodological note: single-pool tests are blind to this bug class** — the earlier "forces applied, no regression" verdict came from a single-myosin test. **Fix** (BoxOfActin.java only): `runForceWave()` serializes the *pools* of a wave against each other (within-pool 16-worker parallelism preserved); applied to the 3 audited multi-pool force waves. **Default behavior**; `BOA_CONCURRENT_FORCES=1` restores the racy legacy dispatch for A/B. **Completeness audit** (every `startAllThreadSets` site): serialized **xLink(6: FilLink+Arp23+ActA — ActA aliases onto xLinkStart=6), myoJoints1(7: Myosin+MyosinDimer), myoJoints2(8: ProteinNode+MyoMiniFilament+ChamberMyo+ChamberMyoD)**. Corrections to the brief: **membrane is NOT a race** (NodeLink wave 14 vs StickyNode wave 15 — different waves, one pool each); myoJoints2 is a **4-pool** collision. **Validation** (all pass): dimer worst joint gap 0.0021µm fix vs 0.172µm racy (82×); minifilament holds low + normal thermal (span stable, gaps ≤0.06µm); gliding velocity unaffected (cross-mode median Δ0.04µm/s ≪ run-to-run noise Δ0.92µm/s — sim is nondeterministic, gliding is single-pool so serialization is a no-op there); step-time 7s vs 7s on 100 minifilaments (3200 myosins) with no -3js — no regression, worst joint gap 0.078µm (holds). `RUN_LOGS/2026-06-10_taforce_race_fix.txt`. **Follow-on (same branch)**: ladder extended — minifilaments hold against a static actin field (`boa10-miniFil-staticActin`, 0.074µm), and protein nodes carry myosins (singlets + dimers all glued to the sphere, joints ~0.4nm — `singleNode_myosins`); added node-sphere rendering (`ThreeJSWriter` `nodes` array + grey transparent spheres in the viewer, commit `924a9d9`). **Not merged — hold for jba.** Full writeup below.)
+Last updated: 2026-06-10 (**Minimal contractility assay (anti-parallel filaments, isometric tension).** Branch `contractility-assay`. Two anti-parallel phalloidin-stiff filaments (13 segs each, ~2.28 µm) pinned at their PLUS ends to the outer walls of a long narrow box (4×0.3×0.2 µm); one bipolar minifilament in the central 0.76 µm overlap, turnover off. **Reused** the placed-`FilSegment` ctor (new `makeStraightChain` helper), `MyoMiniFilament(coord,uVec)`, `Chamber`, and the `applyBenchmarkPins` hard-pin pattern. **Added 4 small pieces**: `makeContractilityAssay()` IC builder; a generalized pin registry (`Pin{seg,whichEnd,anchor}`) that replaced the hardwired `deflFil` pin — **deflection benchmark still passes, ratio 0.998**; per-step tension readout = `Dot(forceSum, inwardDir)` on each pinned anchor segment, emitted to `[STATS]` + a frame `contractility` block; `contractilityAssay`/`contractNoMotor`/`contractReversePolarity` config flags. Polarity confirmed **end2 = plus/barbed** (`MyoFilLink` `forceDotFil` comment; frame `isBarbedEnd`), so plus ends point outward and the minifilament pulls both anchors inward. **Result**: tension rises 0→~2 pN as motors engage (boundMotors→8), both anchors positive (inward/contractile) and ~equal. **Controls**: no-motor → ~0.001 pN (signal is myosin-generated); reversed polarity → **negative** (extension), sign tracks the geometry. CPU-only; run needs `-Xmx4G` (MyoMotor static SoA ~640 MB) + the tornado-api jar on the classpath even on CPU. Config `ParameterFiles/contractilityAssay` (+`_noMotor`/`_reversed`); logs `RUN_LOGS/2026-06-10_contractility-*.txt`; viewer `RUN_LOGS/3js_contractility_v2`. **Not merged — hold for jba.** Full writeup below.)
+
+Prior update: 2026-06-10 (**Cross-pool `taForce` race fix — serialize multi-pool force phases.** Confirmed root cause of the CPU dimer/minifilament dissolution: `incForceSum` accumulates into a per-thread row `taForce[tid]` where `tid` is each worker's **local** index within its own ThreadSet, and `taForce` has only `allThreadCt`(=16) rows — the design assumes one pool writes forces at a time. But waves releasing 2+ force-writing pools concurrently (`spawn()` is non-blocking) make worker-0 of each pool race on `taForce[0]`/`dirtyCounts[0]`/`dirtyIndices[0]` → dropped `+=` updates and corrupted dirty-bookkeeping → restoring forces silently lost → progressive, non-diffusive dissolution. **Not** cross-step accumulation (forces *are* cleared each step). SoA-inc migration regression. Ladder that exposed it: single myosin (1 pool) holds → dimer (Myosin+MyosinDimer) one myosin dissolves → minifilament (+MyoMiniFilament) falls apart → gliding (1 pool) works. **Methodological note: single-pool tests are blind to this bug class** — the earlier "forces applied, no regression" verdict came from a single-myosin test. **Fix** (BoxOfActin.java only): `runForceWave()` serializes the *pools* of a wave against each other (within-pool 16-worker parallelism preserved); applied to the 3 audited multi-pool force waves. **Default behavior**; `BOA_CONCURRENT_FORCES=1` restores the racy legacy dispatch for A/B. **Completeness audit** (every `startAllThreadSets` site): serialized **xLink(6: FilLink+Arp23+ActA — ActA aliases onto xLinkStart=6), myoJoints1(7: Myosin+MyosinDimer), myoJoints2(8: ProteinNode+MyoMiniFilament+ChamberMyo+ChamberMyoD)**. Corrections to the brief: **membrane is NOT a race** (NodeLink wave 14 vs StickyNode wave 15 — different waves, one pool each); myoJoints2 is a **4-pool** collision. **Validation** (all pass): dimer worst joint gap 0.0021µm fix vs 0.172µm racy (82×); minifilament holds low + normal thermal (span stable, gaps ≤0.06µm); gliding velocity unaffected (cross-mode median Δ0.04µm/s ≪ run-to-run noise Δ0.92µm/s — sim is nondeterministic, gliding is single-pool so serialization is a no-op there); step-time 7s vs 7s on 100 minifilaments (3200 myosins) with no -3js — no regression, worst joint gap 0.078µm (holds). `RUN_LOGS/2026-06-10_taforce_race_fix.txt`. **Follow-on (same branch)**: ladder extended — minifilaments hold against a static actin field (`boa10-miniFil-staticActin`, 0.074µm), and protein nodes carry myosins (singlets + dimers all glued to the sphere, joints ~0.4nm — `singleNode_myosins`); added node-sphere rendering (`ThreeJSWriter` `nodes` array + grey transparent spheres in the viewer, commit `924a9d9`). **Not merged — hold for jba.** Full writeup below.)
 
 Prior update: 2026-06-09 (GPU packRange slot-map staleness fix — the pre-existing `ClassCastException MyoMiniFilament→FilSegment` at `GPUMoveThing.packRange` that blocked the minifilament+turnover workload on GPU. Root cause: `Thing.removeThing()` swap-compacts `theThings[]` but never signalled the GPU layer, so the four cached slot-indexed maps `classifyThings()` owns (`gpuThingIndices`/`brownianRule`/`thingNumberToMoveSlot`/joint slot lists) go stale when an add+remove balance in one step keeps `thingCt` unchanged (the `thingCt != lastThingCt` rebuild proxy is a count check, not identity). Everything else GPU-resident is re-packed each step and self-corrects — the maps are the only stale cached state. **Fix**: `removeThing()` sets `topologyDirty` on a real swap (`Env.useGPU && swapId != lastId`), mirroring poly/split — a single idempotent boolean → one batched `classifyThings` (slot-map refresh, **never** a plan rebuild) per step. **No per-removal rebuild-cost regression** (nomini run `planRebuild=1`). Validated: baseProbe + dyn run clean to completion on GPU (was instant crash), CPU control 743/0.380 ≈ ref 679/0.338 (fix CPU-neutral), nomini rc=0, gliding 7.3683 (in band). Separately flagged: GPU minifil binding is systematically lower than CPU (~270/0.054 vs ~710/0.36, stable across seeds) — the pre-existing CPU-fallback-`MyoMiniFilament` seam, not this fix. Full writeup below.)
 Prior update: 2026-06-10 (Path B Phase 2a — fresh-geometry cohesion (kill the spin). The GPU minifilament "strange directed motion" is a coherent spurious **spin**: the CPU cohesion forces (`MyoMiniFilament.constrainEnd*Dimers` C, `MyosinDimer.applyRodCoupling*` D) pulled rod tips toward attach points using **frozen** `soaEnd1/End2` (derived fields refreshed only at output cadence on GPU) while the rods moved on-device every step. **Fix**: derive rod ends on-the-fly from the **fresh, demand-synced** `coord/uVec` (`Thing.freshEnd1/2AsPt3D()` = `coord ∓ ½·length·uVec`) — same formula as `recomputeDerivedSoA`, no new transfer, no per-step derived-SoA recompute, CPU-identical (`freshEnd==end1AsPt3D` on CPU). **Result: spin substantially reduced but NOT eliminated** — matched-seed cloud coherence 0.66→0.27 (s7) / 0.66→0.46 (s11), vs CPU's diffusive 0.03–0.07. The residual is a **rotational integrator-split / float32 seam** (C applies +F/+τ to the float32 device-integrated rod, −F/−τ to the float64 CPU-integrated minifil body — they don't cancel in rotation), **NOT** stale geometry (geometry now as fresh as CPU; the avoided recompute would compute the *same* ends) and **NOT** COM drift (GPU bundle-COM net <13 nm, *tighter* than CPU's 32–45 nm). **θ_LM divergence did NOT resolve** (GPU ~32° vs CPU ~67°, unchanged pre→post) — refuting the Phase-1 hypothesis that it was cohesion-stale-geometry sensitive; it's a separate internal lever-motor/float32 seam. Both residual seams **flagged for jba, not fixed** (out of Phase 2a scope). **Follow-on**: new `BOA_MINIFIL_BROWNIAN_OFF=1` gate (suppresses only the rigid body's own thermal forcing) shows the residual spin is **body-thermal-EXCITED** — body-off drops spin coherence to CPU levels (0.27/0.46→0.026/0.079) and stops the body flopping (axis wander ~12–40× less); the body tumbles on the CPU integrator while the GPU-resident rods chase it (two-integrator seam). **Not merged** — jba views frames first. `RUN_LOGS/2026-06-10_phaseB2a_fresh_cohesion_spin.txt`; frames `~/Code/threejs_output/phaseB2a/{pre,post}_gpu_s{7,11}` + `post_cpu_s{7,11}`. Full writeup below.)
@@ -10,6 +12,113 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-10 — Minimal contractility assay (anti-parallel filaments, isometric tension)
+
+Branch `contractility-assay` (off `main`). Validation logs:
+`RUN_LOGS/2026-06-10_contractility-run.txt` (main), `-noMotor.txt`, `-reversed.txt`,
+`-bench-regression.txt`. Viewer dir `RUN_LOGS/3js_contractility_v2` (101 frames).
+**Not merged — hold for jba.**
+
+### What it is
+
+A sarcomere-like isometric tension probe. Long narrow box (4×0.3×0.2 µm). Two
+anti-parallel, Y-offset (±0.05 µm), overlapping stiff filaments along X; one bipolar
+minifilament centered in the 0.76 µm overlap. Each filament's plus (barbed) end is
+hard-pinned to the outer wall (filament A's at +X, B's at −X); minus ends overlap in
+the center. Myosin walks plus-ward → pulls both anchors inward = contraction. The
+measurement is the axial reaction force at each pinned anchor.
+
+### Polarity (the #1 confirmation)
+
+`end2 = coord + ½L·uVec` is the **plus/barbed end** — confirmed three ways:
+`MyoFilLink.addForces` (`forceDotFil = Dot(F,uVec) > 0` moves a motor toward the plus
+end, +uVec), the frame writer's `isBarbedEnd` (emitted when `end2Fil == null`), and the
+gliding-assay convention. So filament uVec points toward its plus end; normal polarity
+sets both plus ends outward. Verified empirically by the **sign**: normal → positive
+(inward) at both anchors; reversed `uVec` → negative (extension).
+
+### Build = reuse + 4 additions
+
+**Reused**: `new FilSegment(coord,uVec,filID,monCt,fromFile)` (wrapped in a new
+`FilSegment.makeStraightChain(n, outerPt, buildDir, uVec, brownOff)` that lays a linked
+chain from a placed outer point, link direction chosen from `sign(buildDir·uVec)` so it
+works at either polarity); `new MyoMiniFilament(coord,uVec)`; `Chamber.makeABox`; the
+`applyBenchmarkPins` hard-pin (post-`moveThing` `incCoord` snap-back).
+
+**Added** (all CPU; GPU path untouched):
+1. `BoxOfActin.makeContractilityAssay()` — builds the two chains + minifilament, forces
+   `noMonomersSimd` (rigid rods), `brownianOff` on the filaments for a clean readout,
+   logs overlap geometry and warns if overlap < minifilament span (the bail check).
+2. **Generalized pin registry** — `Pin{seg,whichEnd,anchor}` + `pinRegistry`;
+   `applyBenchmarkPins` iterates it; the deflection benchmark now registers its two pins
+   (firstSeg.end1, lastSeg.end2) into the same registry; doLoop gate changed from
+   `if (benchmarkFilament)` to `if (!pinRegistry.isEmpty())`. **Regression: -bmDiag ratio
+   0.998, intact.**
+3. **Tension readout** — after the force gather, before the pin snaps the endpoint back,
+   read the anchor segment's `soaForceSum` and project onto the inward `buildDir`
+   (positive = contractile). Anchors are inset 0.10 µm from the walls so the box-boundary
+   force never contaminates the readout. Emitted to `[STATS] contractility` lines and a
+   frame `contractility` block (tensions + anchor points). `MyoMiniFilament.countBoundMotors()`
+   added for the `boundMotors` column.
+4. Config flags `contractilityAssay` / `contractNoMotor` / `contractReversePolarity`
+   (Env). Bumped `Parameter.theParams` 240→256 (the 5 new params overflowed it).
+
+### Result + controls (50k steps, dt=1e-5, CPU)
+
+| run | tensionA / tensionB (pN) | boundMotors |
+|---|---|---|
+| **main** | rises 0 → ~2.0 / ~2.0 (plateau) | 0 → 8 |
+| no-motor control | ~0.0013 / ~0.0013 | 0 |
+| reversed polarity | **−0.4 / −0.5** (extension) | 1–3 |
+
+Tension rises from a ~0.28 pN settling transient to a ~2 pN contractile plateau as the
+minifilament engages; both anchors positive (inward) and roughly equal. No-motor → ~0
+confirms the signal is myosin-generated. Reversed polarity flips the sign to extension,
+confirming the geometry. Stiffness: phalloidin regime `fracMove=0.0573, fracR=1.0,
+fracMoveTorq=0.01`.
+
+### Run notes / open
+
+- **Run command** needs `-Xmx4G` (MyoMotor's static SoA arrays are ~640 MB, allocated on
+  first motor construction) and the tornado-api jar on the classpath even for CPU:
+  `java --enable-preview -Xmx4G -cp ".:libs/*:$TDIR/tornado-api-4.0.1-dev.jar" BoxOfActin
+  -r -pf ParameterFiles/contractilityAssay -3js <dir>`. (`Myosin.jointConstraints`
+  link-references `WorkerGrid`.)
+- **GPU comparison (same seed 12345, CPU vs `-gpu`)**: CPU minifilament stays intact (span
+  0.18 µm throughout), tension plateaus ~2 pN. `-gpu` **blows the minifilament apart within
+  ~20 ms** (end1 → 75 µm by t=0.02 s → ~1e17 µm) and tension reads a **flat 0.0000** the whole
+  run (boundMotors=0). Two compounding GPU-only failures: (1) MyoMiniFilament is a CPU-fallback
+  object whose internal myosin joints don't hold against the GPU-resident neighbour pose (the
+  pre-existing "single-minifilament cohesion BLOWS APART on GPU" seam); (2) the readout projects
+  host `soaForceSum`, which isn't synced per-step while `noMonomersSimd` is active, so it would
+  read ~0 even without the explosion. Confirms **CPU-only**; added a `[CONTRACT][WARN]` startup
+  guard under `-gpu`. Frames: `~/Code/threejs_output/contractility_{cpu,gpu}`.
+- **GPU follow-up after merging the cohesion stack (`gpu-phaseB2a-fresh-cohesion` → main `2f489bb`).**
+  The minifilament blow-apart is **fixed**: re-running the assay on `-gpu` with the merged
+  output-readonly + fresh-geometry fixes, the minifilament **holds** — span locked at 0.1800 µm,
+  zero NaN, clean exit (102 frames, `~/Code/threejs_output/contractility_gpu_fixed_short`), where
+  pre-fix it exploded to ~1e17 µm by t=0.02 s. **Two changes were needed for the assay to benefit:**
+  (1) stop forcing `noMonomersSimd:true` in `makeContractilityAssay()` — under `noMonomersSimd` the
+  per-step `demandSyncPoseToHost` is gated off, so the fix's fresh-pose reads stay stale and it
+  blows up anyway; the GPU config (`ParameterFiles/contractilityAssay_gpu`) uses
+  `noMonomersSimd:false` (turnover still off via zeroed rates → filaments stay static); (2) the
+  `[CONTRACT][WARN]` guard now fires only on the bad combo `useGPU && noMonomersSimd`. **Remaining
+  GPU seam (separate, not this assay):** motor **binding** is still CPU-only — GPU `boundMotors=0`
+  vs CPU 4–9, so no contractile tension develops on GPU (`tension=0`). The device binding kernel is
+  scoped to gliding `MyosinFixed`; minifilament (dimer) motor binding is unported (the pre-existing
+  GPU-minifilament-binding-fidelity seam, JOURNAL 2026-06-09). So GPU now gives a **stable, viewable
+  minifilament** but the contractile **measurement still requires CPU**. Also: GPU is ~33 steps/s
+  for this tiny system (kernel-launch-bound) — far slower than CPU; the full-length GPU run hit the
+  600 s wall-timeout (its `libcuda` SIGSEGV was the kill-teardown, not a physics fault — the short
+  run exits cleanly). NOTE: GPU pose-sync gating means the host `forceSum` tension readout also
+  would not work on `-gpu` regardless of binding.
+- Reversed-polarity control sustains fewer bound motors than normal (less favorable
+  binding geometry); the **sign** is the decisive observable there, not the magnitude.
+- Tension is read as the full `forceSum` axial projection, not the `end{1,2}AxialF`
+  accumulators (those also pick up boundary forces on CPU; the wall-inset + the clean
+  `forceSum` projection sidesteps that). Dedicated state in `BoxOfActin.ContractAssay`,
+  not overloaded onto `FilSegment` fields.
 
 ## 2026-06-10 — Cross-pool taForce race fix (serialize multi-pool force phases)
 

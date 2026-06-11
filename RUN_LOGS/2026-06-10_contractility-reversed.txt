@@ -1,0 +1,329 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/contractilityAssay_reversed...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.5
+     Parameter assigned: toFileInterval set to 500
+     Parameter assigned: remoteWriteInterval set to 5000
+     Parameter assigned: fracMove set to 0.0573
+     Parameter assigned: fracR set to 1.0
+     Parameter assigned: fracMoveTorq set to 0.01
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: boxXDim set to 4.0
+     Parameter assigned: boxYDim set to 0.3
+     Parameter assigned: boxZDim set to 0.2
+     Parameter assigned: contractilityAssay set to true
+     Parameter assigned: contractFilNSegs set to 13
+     Parameter assigned: contractFilYOffset set to 0.05
+     Parameter assigned: contractNoMotor set to false
+     Parameter assigned: contractReversePolarity set to true
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: myoMiniLifetime set to 1.0E9
+     Parameter assigned: numMyoDimersEachEndOfMiniFil set to 8
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.3
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: kHydrolysis set to 0.0
+     Parameter assigned: kDissociation set to 0.0
+Done... there were 4 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-5696776425367329264 (BOA_RNG_SEED unset)
+[CONTRACT] box X=4.000 µm (anchors at x=+/-1.900, 0.10 µm inset), 13-seg filaments, Lfil=2.282 µm
+[CONTRACT] yOffset=+/-0.050 µm, overlap=0.763 µm, minifilament span=0.180 µm, polarity=REVERSED (plus ends inward), motor=ON
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 21; xBinWidth = 0.2 µm
+nYBins = 3; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 21 x 3 x 2 cells (0.2 µm each)
+[14:51] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[14:51]   ON   ThingStep Threads
+[14:51]   ON   ThingBrownian Threads
+[14:51]   ON   Myosin Threads
+[14:51]   ON   MyoDimer Threads
+[14:51]   OFF  Protein Node Threads
+[14:51]   ON   MyoMiniFil Threads
+[14:51]   OFF  Chamber Myo Threads
+[14:51]   OFF  Chamber MyoDimer Threads
+[14:51]   ON   Mesh Threads
+[14:51]   ON   Ck Mesh Threads
+[14:51]   ON   Ck Mots Threads
+[14:51]   OFF  XLink Threads
+[14:51]   OFF  Arp23 Threads
+[14:51]   OFF  NodeLink Threads
+[14:51]   OFF  Membrane Node Threads
+[14:51]   OFF  ActA Threads
+[14:51]   ON   MotorBindGrid3D Fill
+[14:51] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/BoA/RUN_LOGS/3js_contractility_reversed
+ThreeJSWriter: output directory RUN_LOGS/3js_contractility_reversed
+ThreeJSWriter: archived 1 source files to source.zip
+ThreeJSWriter: wrote params_input.contractilityAssay_reversed
+ThreeJSWriter: wrote params_effective.txt (242 parameters)
+[STATS] contractility step=1 t=0.0000 tensionA=0.2823 tensionB=0.2823 pN boundMotors=0
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=70.5 cumMaxPerThread=22
+[STATS] contractility step=501 t=0.0050 tensionA=0.2707 tensionB=0.2608 pN boundMotors=1
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=71.3 cumMaxPerThread=22
+[STATS] contractility step=1001 t=0.0100 tensionA=0.2260 tensionB=0.1956 pN boundMotors=2
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=71.7 cumMaxPerThread=22
+[STATS] contractility step=1501 t=0.0150 tensionA=0.1818 tensionB=0.0828 pN boundMotors=5
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=71.9 cumMaxPerThread=23
+[STATS] contractility step=2001 t=0.0200 tensionA=0.1413 tensionB=-0.0818 pN boundMotors=2
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=2501 t=0.0250 tensionA=0.0880 tensionB=-0.1989 pN boundMotors=5
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=73.2 cumMaxPerThread=23
+[STATS] contractility step=3001 t=0.0300 tensionA=-0.0438 tensionB=-0.3775 pN boundMotors=7
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=73.6 cumMaxPerThread=23
+[STATS] contractility step=3501 t=0.0350 tensionA=-0.2375 tensionB=-0.6475 pN boundMotors=6
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=74.0 cumMaxPerThread=23
+[STATS] contractility step=4001 t=0.0400 tensionA=-0.4576 tensionB=-0.8423 pN boundMotors=7
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=74.2 cumMaxPerThread=23
+[STATS] contractility step=4501 t=0.0450 tensionA=-0.6646 tensionB=-0.9981 pN boundMotors=6
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=74.3 cumMaxPerThread=23
+Sim. time=00.05....~03.79 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[STATS] contractility step=5001 t=0.0500 tensionA=-0.9348 tensionB=-0.9339 pN boundMotors=5
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=74.3 cumMaxPerThread=23
+[STATS] contractility step=5501 t=0.0550 tensionA=-1.1490 tensionB=-1.0364 pN boundMotors=3
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=74.2 cumMaxPerThread=23
+[STATS] contractility step=6001 t=0.0600 tensionA=-1.2106 tensionB=-0.9599 pN boundMotors=2
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=74.2 cumMaxPerThread=23
+[STATS] contractility step=6501 t=0.0650 tensionA=-1.1484 tensionB=-0.8445 pN boundMotors=5
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=74.2 cumMaxPerThread=23
+[STATS] contractility step=7001 t=0.0700 tensionA=-1.0818 tensionB=-0.7268 pN boundMotors=3
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=74.2 cumMaxPerThread=23
+[STATS] contractility step=7501 t=0.0750 tensionA=-0.9539 tensionB=-0.7007 pN boundMotors=3
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=74.1 cumMaxPerThread=23
+[STATS] contractility step=8001 t=0.0800 tensionA=-0.8377 tensionB=-1.1128 pN boundMotors=3
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=74.1 cumMaxPerThread=23
+[STATS] contractility step=8501 t=0.0850 tensionA=-0.7376 tensionB=-0.5220 pN boundMotors=3
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=74.1 cumMaxPerThread=23
+[STATS] contractility step=9001 t=0.0900 tensionA=-0.6378 tensionB=-0.4303 pN boundMotors=6
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=74.0 cumMaxPerThread=23
+[STATS] contractility step=9501 t=0.0950 tensionA=-0.5590 tensionB=-1.0318 pN boundMotors=2
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=74.0 cumMaxPerThread=23
+Sim. time=00.10....~03.74 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[STATS] contractility step=10001 t=0.1000 tensionA=-0.5428 tensionB=-0.4130 pN boundMotors=2
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=73.9 cumMaxPerThread=23
+[STATS] contractility step=10501 t=0.1050 tensionA=-0.5257 tensionB=-0.3751 pN boundMotors=1
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=73.8 cumMaxPerThread=23
+[STATS] contractility step=11001 t=0.1100 tensionA=-0.4952 tensionB=-0.3200 pN boundMotors=1
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=73.7 cumMaxPerThread=23
+[STATS] contractility step=11501 t=0.1150 tensionA=-0.4561 tensionB=-0.3164 pN boundMotors=1
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=73.6 cumMaxPerThread=23
+[STATS] contractility step=12001 t=0.1200 tensionA=-0.4333 tensionB=-0.3019 pN boundMotors=1
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=73.5 cumMaxPerThread=23
+[STATS] contractility step=12501 t=0.1250 tensionA=-0.4231 tensionB=-0.2777 pN boundMotors=2
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=73.4 cumMaxPerThread=23
+[STATS] contractility step=13001 t=0.1300 tensionA=-0.4163 tensionB=-0.2625 pN boundMotors=1
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=73.4 cumMaxPerThread=23
+[STATS] contractility step=13501 t=0.1350 tensionA=-0.4089 tensionB=-0.2454 pN boundMotors=2
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=73.3 cumMaxPerThread=23
+[STATS] contractility step=14001 t=0.1400 tensionA=-0.4020 tensionB=-0.2111 pN boundMotors=0
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=73.2 cumMaxPerThread=23
+[STATS] contractility step=14501 t=0.1450 tensionA=-0.3701 tensionB=-0.2051 pN boundMotors=1
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=73.2 cumMaxPerThread=23
+Sim. time=00.15....~04.01 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[STATS] contractility step=15001 t=0.1500 tensionA=-0.3307 tensionB=-0.1952 pN boundMotors=2
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=73.1 cumMaxPerThread=23
+[STATS] contractility step=15501 t=0.1550 tensionA=-0.3176 tensionB=-0.1914 pN boundMotors=1
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=73.1 cumMaxPerThread=23
+[STATS] contractility step=16001 t=0.1600 tensionA=-0.3253 tensionB=-0.1658 pN boundMotors=0
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=73.0 cumMaxPerThread=23
+[STATS] contractility step=16501 t=0.1650 tensionA=-0.3069 tensionB=-0.1561 pN boundMotors=1
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=73.0 cumMaxPerThread=23
+[STATS] contractility step=17001 t=0.1700 tensionA=-0.3314 tensionB=-0.1426 pN boundMotors=2
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=72.9 cumMaxPerThread=23
+[STATS] contractility step=17501 t=0.1750 tensionA=-0.3199 tensionB=-0.1327 pN boundMotors=2
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=72.9 cumMaxPerThread=23
+[STATS] contractility step=18001 t=0.1800 tensionA=-0.3174 tensionB=-0.1138 pN boundMotors=1
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=72.9 cumMaxPerThread=23
+[STATS] contractility step=18501 t=0.1850 tensionA=-0.3350 tensionB=-0.1108 pN boundMotors=3
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=72.9 cumMaxPerThread=23
+[STATS] contractility step=19001 t=0.1900 tensionA=-0.3574 tensionB=-0.2190 pN boundMotors=2
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=19501 t=0.1950 tensionA=-0.3879 tensionB=-0.2386 pN boundMotors=2
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+Sim. time=00.20....~04.02 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[STATS] contractility step=20001 t=0.2000 tensionA=-0.3917 tensionB=-0.1960 pN boundMotors=3
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=20501 t=0.2050 tensionA=-0.4270 tensionB=-0.1945 pN boundMotors=2
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=21001 t=0.2100 tensionA=-0.4253 tensionB=-0.1858 pN boundMotors=2
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=21501 t=0.2150 tensionA=-0.3838 tensionB=-0.1640 pN boundMotors=2
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=22001 t=0.2200 tensionA=-0.3386 tensionB=-0.3278 pN boundMotors=3
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=22501 t=0.2250 tensionA=-0.2999 tensionB=-0.3992 pN boundMotors=2
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=23001 t=0.2300 tensionA=-0.2735 tensionB=-0.4643 pN boundMotors=1
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=23501 t=0.2350 tensionA=-0.2546 tensionB=-0.5314 pN boundMotors=2
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=72.8 cumMaxPerThread=23
+[STATS] contractility step=24001 t=0.2400 tensionA=-0.2397 tensionB=-0.6107 pN boundMotors=0
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+[STATS] contractility step=24501 t=0.2450 tensionA=-0.2261 tensionB=-0.5753 pN boundMotors=2
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+Sim. time=00.25....~03.78 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[STATS] contractility step=25001 t=0.2500 tensionA=-0.2131 tensionB=-0.5124 pN boundMotors=3
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+[STATS] contractility step=25501 t=0.2550 tensionA=-0.2002 tensionB=-0.5188 pN boundMotors=4
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+[STATS] contractility step=26001 t=0.2600 tensionA=-0.1870 tensionB=-0.5418 pN boundMotors=1
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+[STATS] contractility step=26501 t=0.2650 tensionA=-0.1738 tensionB=-0.5125 pN boundMotors=0
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=72.7 cumMaxPerThread=23
+[STATS] contractility step=27001 t=0.2700 tensionA=-0.1609 tensionB=-0.4578 pN boundMotors=1
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=27501 t=0.2750 tensionA=-0.1479 tensionB=-0.3865 pN boundMotors=2
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=28001 t=0.2800 tensionA=-0.1356 tensionB=-0.3971 pN boundMotors=1
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=28501 t=0.2850 tensionA=-0.1240 tensionB=-0.4293 pN boundMotors=2
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=29001 t=0.2900 tensionA=-0.1132 tensionB=-0.4480 pN boundMotors=2
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=29501 t=0.2950 tensionA=-0.1033 tensionB=-0.6082 pN boundMotors=2
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+Sim. time=00.30....~03.55 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[STATS] contractility step=30001 t=0.3000 tensionA=-0.0939 tensionB=-0.6050 pN boundMotors=2
+[GATHER] call=61000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=30501 t=0.3050 tensionA=-0.0856 tensionB=-0.6117 pN boundMotors=3
+[GATHER] call=62000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=31001 t=0.3100 tensionA=-0.0779 tensionB=-0.5882 pN boundMotors=2
+[GATHER] call=63000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=31501 t=0.3150 tensionA=-0.0710 tensionB=-0.5986 pN boundMotors=2
+[GATHER] call=64000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=32001 t=0.3200 tensionA=-0.0649 tensionB=-0.6002 pN boundMotors=2
+[GATHER] call=65000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=32501 t=0.3250 tensionA=-0.0596 tensionB=-0.5944 pN boundMotors=1
+[GATHER] call=66000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=33001 t=0.3300 tensionA=-0.0548 tensionB=-0.5821 pN boundMotors=3
+[GATHER] call=67000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=33501 t=0.3350 tensionA=-0.0504 tensionB=-0.5972 pN boundMotors=2
+[GATHER] call=68000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=34001 t=0.3400 tensionA=-0.0465 tensionB=-0.5937 pN boundMotors=3
+[GATHER] call=69000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=34501 t=0.3450 tensionA=-0.0431 tensionB=-0.5810 pN boundMotors=3
+[GATHER] call=70000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+Sim. time=00.35....~03.38 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[STATS] contractility step=35001 t=0.3500 tensionA=-0.0401 tensionB=-0.5813 pN boundMotors=2
+[GATHER] call=71000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=35501 t=0.3550 tensionA=-0.0375 tensionB=-0.6070 pN boundMotors=1
+[GATHER] call=72000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=36001 t=0.3600 tensionA=-0.0350 tensionB=-0.6121 pN boundMotors=2
+[GATHER] call=73000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=36501 t=0.3650 tensionA=-0.0327 tensionB=-0.5712 pN boundMotors=4
+[GATHER] call=74000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=37001 t=0.3700 tensionA=-0.0308 tensionB=-0.5518 pN boundMotors=2
+[GATHER] call=75000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=37501 t=0.3750 tensionA=-0.0288 tensionB=-0.5175 pN boundMotors=2
+[GATHER] call=76000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=38001 t=0.3800 tensionA=-0.0271 tensionB=-0.5021 pN boundMotors=4
+[GATHER] call=77000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=38501 t=0.3850 tensionA=-0.0256 tensionB=-0.5126 pN boundMotors=2
+[GATHER] call=78000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=39001 t=0.3900 tensionA=-0.0243 tensionB=-0.4965 pN boundMotors=3
+[GATHER] call=79000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=39501 t=0.3950 tensionA=-0.0230 tensionB=-0.4963 pN boundMotors=3
+[GATHER] call=80000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+Sim. time=00.40....~03.29 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[STATS] contractility step=40001 t=0.4000 tensionA=-0.0218 tensionB=-0.4942 pN boundMotors=1
+[GATHER] call=81000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=40501 t=0.4050 tensionA=-0.0206 tensionB=-0.5342 pN boundMotors=2
+[GATHER] call=82000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=41001 t=0.4100 tensionA=-0.0196 tensionB=-0.5210 pN boundMotors=1
+[GATHER] call=83000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=41501 t=0.4150 tensionA=-0.0186 tensionB=-0.5340 pN boundMotors=2
+[GATHER] call=84000 totalDirty=0 maxThread=0 cumAvg=72.6 cumMaxPerThread=23
+[STATS] contractility step=42001 t=0.4200 tensionA=-0.0178 tensionB=-0.5507 pN boundMotors=1
+[GATHER] call=85000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=42501 t=0.4250 tensionA=-0.0169 tensionB=-0.5632 pN boundMotors=1
+[GATHER] call=86000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=43001 t=0.4300 tensionA=-0.0160 tensionB=-0.5446 pN boundMotors=0
+[GATHER] call=87000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=43501 t=0.4350 tensionA=-0.0151 tensionB=-0.5385 pN boundMotors=2
+[GATHER] call=88000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=44001 t=0.4400 tensionA=-0.0144 tensionB=-0.5394 pN boundMotors=1
+[GATHER] call=89000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=44501 t=0.4450 tensionA=-0.0137 tensionB=-0.5380 pN boundMotors=2
+[GATHER] call=90000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+Sim. time=00.45....~03.24 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] contractility step=45001 t=0.4500 tensionA=-0.0130 tensionB=-0.5056 pN boundMotors=2
+[GATHER] call=91000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=45501 t=0.4550 tensionA=-0.0123 tensionB=-0.5056 pN boundMotors=0
+[GATHER] call=92000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=46001 t=0.4600 tensionA=-0.0117 tensionB=-0.4495 pN boundMotors=1
+[GATHER] call=93000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=46501 t=0.4650 tensionA=-0.0111 tensionB=-0.4323 pN boundMotors=1
+[GATHER] call=94000 totalDirty=0 maxThread=0 cumAvg=72.5 cumMaxPerThread=23
+[STATS] contractility step=47001 t=0.4700 tensionA=-0.0106 tensionB=-0.4264 pN boundMotors=1
+[GATHER] call=95000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+[STATS] contractility step=47501 t=0.4750 tensionA=-0.0100 tensionB=-0.4195 pN boundMotors=2
+[GATHER] call=96000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+[STATS] contractility step=48001 t=0.4800 tensionA=-0.0094 tensionB=-0.4172 pN boundMotors=1
+[GATHER] call=97000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+[STATS] contractility step=48501 t=0.4850 tensionA=-0.0089 tensionB=-0.4226 pN boundMotors=0
+[GATHER] call=98000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+[STATS] contractility step=49001 t=0.4900 tensionA=-0.0085 tensionB=-0.4099 pN boundMotors=0
+[GATHER] call=99000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+[STATS] contractility step=49501 t=0.4950 tensionA=-0.0081 tensionB=-0.3891 pN boundMotors=1
+[GATHER] call=100000 totalDirty=0 maxThread=0 cumAvg=72.4 cumMaxPerThread=23
+Sim. time=00.50....~03.18 minutes computation to simulate 1 sec, run finished in ~-00.00 hours
+[STATS] contractility step=50001 t=0.5000 tensionA=-0.0078 tensionB=-0.3947 pN boundMotors=1
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=1292
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=2.163
+ThingStep Threads took 28.543000 seconds.
+ThingBrownian Threads took 5.202000 seconds.
+Myosin Threads took 5.234000 seconds.
+MyoDimer Threads took 5.105000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 5.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 10.096000 seconds.
+Ck Mesh Threads took 5.096000 seconds.
+Ck Mots Threads took 5.094000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 5.103000 seconds.
+Finished closing JSON plots!

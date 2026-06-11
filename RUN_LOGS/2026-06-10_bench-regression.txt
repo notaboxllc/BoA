@@ -1,0 +1,112 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-4875527177378756556 (BOA_RNG_SEED unset)
+[BENCH] 11-seg × 32-mon/seg chain, span=0.9801 µm, F=3.085e-14 N, analytic δ=0.0098 µm
+[BENCH:FORCE] deflFil.transForce=(0.0000e+00, -3.0854e-14, 0.0000e+00) N  EI=6.1747e-26  frac=0.0100  spanM=9.8010e-07
+[BENCH] τ_theo=0.057 s  ζ_perp_seg=3.309e-08 N·s/m
+[BENCH:CHAIN] i=0 coordAsPt3D()=(-0.4455,0.0000,0.0000) length=0.0891 isAnchor=true
+[BENCH:CHAIN] i=1 coordAsPt3D()=(-0.3564,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=2 coordAsPt3D()=(-0.2673,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=3 coordAsPt3D()=(-0.1782,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=4 coordAsPt3D()=(-0.0891,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=5 coordAsPt3D()=(0.0000,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=6 coordAsPt3D()=(0.0891,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=7 coordAsPt3D()=(0.1782,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=8 coordAsPt3D()=(0.2673,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=9 coordAsPt3D()=(0.3564,0.0000,0.0000) length=0.0891 isAnchor=false
+[BENCH:CHAIN] i=10 coordAsPt3D()=(0.4455,0.0000,0.0000) length=0.0891 isAnchor=true
+[LP] 539-seg × 32-mon/seg LP chain, contour=48.0249 µm, offset=(0, -1.5, -0.5) µm
+[BENCH] box auto-sized to 144.07 × 144.07 × 0.100 µm
+[BMDIAG] fixed-param diagnostic: fracR=0.1000  fracMoveTorq=0.2650  fracMove=0.5000  monomerCt=32  span=0.9801 µm
+[BMDIAG] analytic δ=0.009801 µm  reporting every 5000 steps  cap=5,000,000 steps
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 11; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 11 x 11 x 2 cells (0.2 µm each)
+[14:51] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[14:51]   ON   ThingStep Threads
+[14:51]   ON   ThingBrownian Threads
+[14:51]   ON   Myosin Threads
+[14:51]   OFF  MyoDimer Threads
+[14:51]   OFF  Protein Node Threads
+[14:51]   OFF  MyoMiniFil Threads
+[14:51]   OFF  Chamber Myo Threads
+[14:51]   OFF  Chamber MyoDimer Threads
+[14:51]   ON   Mesh Threads
+[14:51]   ON   Ck Mesh Threads
+[14:51]   ON   Ck Mots Threads
+[14:51]   OFF  XLink Threads
+[14:51]   OFF  Arp23 Threads
+[14:51]   OFF  NodeLink Threads
+[14:51]   OFF  Membrane Node Threads
+[14:51]   OFF  ActA Threads
+[14:51]   ON   MotorBindGrid3D Fill
+[14:51] [phase-plan] 7 active, 10 inert (will skip dispatch)
+[BENCH:STEP] step=0 forceSum=(0.0000e+00,-3.0854e-14,0.0000e+00) coordAsPt3D()=(0.0000,0.0000,0.0000) veloc.y=0.0000e+00
+[BENCH:POST] step=0 getCoordY()=-9.324754e-05 veloc.y=-9.3248e-01
+[BENCH:STEP] step=1 forceSum=(0.0000e+00,-1.9730e-14,0.0000e+00) coordAsPt3D()=(0.0000,-0.0001,0.0000) veloc.y=-9.3248e-01
+[BENCH:POST] step=1 getCoordY()=-1.528765e-04 veloc.y=-5.9629e-01
+[BENCH:STEP] step=2 forceSum=(9.1823e-19,-1.4965e-14,-2.9219e-32) coordAsPt3D()=(0.0000,-0.0002,-0.0000) veloc.y=-5.9629e-01
+[BENCH:POST] step=2 getCoordY()=-1.981030e-04 veloc.y=-4.5227e-01
+[BENCH:STEP] step=3 forceSum=(1.8135e-18,-1.2657e-14,-5.5599e-29) coordAsPt3D()=(0.0000,-0.0002,-0.0000) veloc.y=-4.5227e-01
+[BENCH:POST] step=3 getCoordY()=-2.363552e-04 veloc.y=-3.8252e-01
+[BENCH:STEP] step=4 forceSum=(1.6138e-18,-1.1399e-14,-1.0909e-28) coordAsPt3D()=(0.0000,-0.0002,-0.0000) veloc.y=-3.8252e-01
+[BENCH:POST] step=4 getCoordY()=-2.708050e-04 veloc.y=-3.4450e-01
+[BENCH:STEP] step=5 forceSum=(2.7643e-19,-1.0197e-14,9.0567e-23) coordAsPt3D()=(0.0000,-0.0003,-0.0000) veloc.y=-3.4450e-01
+[BENCH:POST] step=5 getCoordY()=-3.016218e-04 veloc.y=-3.0817e-01
+[BENCH:STEP] step=6 forceSum=(7.8410e-19,-9.5437e-15,8.4798e-23) coordAsPt3D()=(0.0000,-0.0003,0.0000) veloc.y=-3.0817e-01
+[BENCH:POST] step=6 getCoordY()=-3.304647e-04 veloc.y=-2.8843e-01
+[BENCH:STEP] step=7 forceSum=(1.5190e-18,-9.2656e-15,-5.2935e-24) coordAsPt3D()=(0.0000,-0.0003,0.0000) veloc.y=-2.8843e-01
+[BENCH:POST] step=7 getCoordY()=-3.584672e-04 veloc.y=-2.8003e-01
+[BENCH:STEP] step=8 forceSum=(5.4976e-19,-8.8631e-15,-5.0382e-23) coordAsPt3D()=(0.0000,-0.0004,0.0000) veloc.y=-2.8003e-01
+[BENCH:POST] step=8 getCoordY()=-3.852533e-04 veloc.y=-2.6786e-01
+[BENCH:STEP] step=9 forceSum=(-1.7391e-19,-8.3451e-15,-3.7532e-23) coordAsPt3D()=(0.0000,-0.0004,0.0000) veloc.y=-2.6786e-01
+[BENCH:POST] step=9 getCoordY()=-4.104737e-04 veloc.y=-2.5220e-01
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[BMDIAG] step=    5000  simT=    0.50s  ratio=0.998124  defl=0.009783µm  lpMeas=4070.3429µm  lpSamples=5
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[BMDIAG] step=   10000  simT=    1.00s  ratio=0.998399  defl=0.009785µm  lpMeas=4033.5785µm  lpSamples=10
+Sim. time=01.00....~00.29 minutes computation to simulate 1 sec, run finished in ~02.90 hours
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[BMDIAG] step=   15000  simT=    1.50s  ratio=0.998432  defl=0.009786µm  lpMeas=3994.6702µm  lpSamples=15
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=282.6 cumMaxPerThread=37
+[BMDIAG] step=   20000  simT=    2.00s  ratio=0.998430  defl=0.009786µm  lpMeas=3982.5510µm  lpSamples=20
+[BMDIAG] DONE: 20000 steps  simT=2.0s  final ratio=0.998430  final lpMeas=3982.5510µm  lpTheo=15.0000µm  lpSamples=20

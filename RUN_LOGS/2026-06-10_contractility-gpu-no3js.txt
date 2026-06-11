@@ -1,0 +1,137 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/contractilityAssay...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.5
+     Parameter assigned: toFileInterval set to 500
+     Parameter assigned: remoteWriteInterval set to 5000
+     Parameter assigned: fracMove set to 0.0573
+     Parameter assigned: fracR set to 1.0
+     Parameter assigned: fracMoveTorq set to 0.01
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: boxXDim set to 4.0
+     Parameter assigned: boxYDim set to 0.3
+     Parameter assigned: boxZDim set to 0.2
+     Parameter assigned: contractilityAssay set to true
+     Parameter assigned: contractFilNSegs set to 13
+     Parameter assigned: contractFilYOffset set to 0.05
+     Parameter assigned: contractNoMotor set to false
+     Parameter assigned: contractReversePolarity set to false
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: myoMiniLifetime set to 1.0E9
+     Parameter assigned: numMyoDimersEachEndOfMiniFil set to 8
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.3
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: kHydrolysis set to 0.0
+     Parameter assigned: kDissociation set to 0.0
+Done... there were 4 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=12345 (BOA_RNG_SEED set)
+[CONTRACT][WARN] contractility assay is CPU-only; the -gpu path blows the minifilament apart and reports zero tension. Re-run without -gpu.
+[CONTRACT] box X=4.000 µm (anchors at x=+/-1.900, 0.10 µm inset), 13-seg filaments, Lfil=2.282 µm
+[CONTRACT] yOffset=+/-0.050 µm, overlap=0.763 µm, minifilament span=0.180 µm, polarity=normal (plus ends outward), motor=ON
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 21; xBinWidth = 0.2 µm
+nYBins = 3; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 21 x 3 x 2 cells (0.2 µm each)
+[15:40] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[15:40]   ON   ThingStep Threads
+[15:40]   ON   ThingBrownian Threads
+[15:40]   ON   Myosin Threads
+[15:40]   ON   MyoDimer Threads
+[15:40]   OFF  Protein Node Threads
+[15:40]   ON   MyoMiniFil Threads
+[15:40]   OFF  Chamber Myo Threads
+[15:40]   OFF  Chamber MyoDimer Threads
+[15:40]   ON   Mesh Threads
+[15:40]   ON   Ck Mesh Threads
+[15:40]   ON   Ck Mots Threads
+[15:40]   OFF  XLink Threads
+[15:40]   OFF  Arp23 Threads
+[15:40]   OFF  NodeLink Threads
+[15:40]   OFF  Membrane Node Threads
+[15:40]   OFF  ActA Threads
+[15:40]   ON   MotorBindGrid3D Fill
+[15:40] [phase-plan] 9 active, 8 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=1, peakModel=4, safety=4x, floor=8192)
+GPUMoveThing: slotCap=1024 myoCap=1024 moveBlock=64 jointBlock=64 runSeed=-155963970 nWorkers=16
+[STATS] contractility step=1 t=0.0000 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=40.0 cumMaxPerThread=22
+[STATS] contractility step=501 t=0.0050 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=40.0 cumMaxPerThread=22
+[STATS] contractility step=1001 t=0.0100 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=40.2 cumMaxPerThread=22
+[STATS] contractility step=1501 t=0.0150 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=40.3 cumMaxPerThread=22
+[STATS] contractility step=2001 t=0.0200 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=40.3 cumMaxPerThread=22
+[STATS] contractility step=2501 t=0.0250 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=40.3 cumMaxPerThread=22
+[STATS] contractility step=3001 t=0.0300 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=40.4 cumMaxPerThread=22
+[STATS] contractility step=3501 t=0.0350 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=40.4 cumMaxPerThread=22
+[STATS] contractility step=4001 t=0.0400 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=40.4 cumMaxPerThread=22
+[STATS] contractility step=4501 t=0.0450 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=40.4 cumMaxPerThread=22
+Sim. time=00.05....~45.37 minutes computation to simulate 1 sec, run finished in ~00.34 hours
+[STATS] contractility step=5001 t=0.0500 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=40.4 cumMaxPerThread=22
+[STATS] contractility step=5501 t=0.0550 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyDtoHMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007ff5520a8c7f, pid=1490236, tid=1490529
+#
+# JRE version: OpenJDK Runtime Environment (21.0.11+10) (build 21.0.11+10-1-22.04.2-Ubuntu)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.11+10-1-22.04.2-Ubuntu, mixed mode, tiered, jvmci, compressed oops, compressed class ptrs, parallel gc, linux-amd64)
+# Problematic frame:
+# C  [libcuda.so.1+0x345c7f]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E" (or dumping to /home/jba/Code/BoA/core.1490236)
+#
+# An error report file with more information is saved as:
+# /home/jba/Code/BoA/hs_err_pid1490236.log
+[150.024s][warning][os] Loading hsdis library failed
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugs.launchpad.net/ubuntu/+source/openjdk-21
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+timeout: the monitored command dumped core

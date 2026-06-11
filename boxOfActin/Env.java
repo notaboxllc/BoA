@@ -260,6 +260,15 @@ public class Env {
 	static final Parameter externalDensitySweep = new Parameter("externalDensitySweep", " External density sweep (disables glidingAssayDataSetRun)", 0, "", Parameter.BOOLEAN, false);
 	static final Parameter nodeGrowthPerStep = new Parameter("nodeGrowthPerStep"," Node Growth (testing)", 0.001, "microns", Parameter.DOUBLE);
 
+	// Minimal contractility assay — two anti-parallel stiff filaments pinned at their plus ends
+	// to the outer box walls, one minifilament in the central overlap; measures the isometric
+	// contractile tension at each anchor. See BoxOfActin.makeContractilityAssay(). CPU-only.
+	static final Parameter contractilityAssay = new Parameter("contractilityAssay"," Minimal contractility assay", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter contractNoMotor = new Parameter("contractNoMotor"," Contractility control: omit the minifilament (no motor)", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter contractReversePolarity = new Parameter("contractReversePolarity"," Contractility control: flip filament polarity (plus ends inward -> extension)", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter contractFilNSegs = new Parameter("contractFilNSegs"," Contractility: segments per filament", 13, " ", Parameter.INT);
+	static final Parameter contractFilYOffset = new Parameter("contractFilYOffset"," Contractility: filament +/- Y offset from minifilament axis", 0.05, "microns", Parameter.DOUBLE);
+
 	// F1 static-deflection benchmark — gated by Env.benchmarkFilament (set by -bm flag)
 	static boolean benchmarkFilament = false;
 	static int benchmarkNSegs = 11;       // odd → midpoint segment is exactly at midspan

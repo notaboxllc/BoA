@@ -1,0 +1,122 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/boa10-miniFil-staticActin...
+     Parameter assigned: deltaT set to 1.0E-4
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 18.0
+     Parameter assigned: toFileInterval set to 600
+     Parameter assigned: remoteWriteInterval set to 100000
+     Parameter assigned: fracMove set to 0.4
+     Parameter assigned: fracR set to 0.134
+     Parameter assigned: fracMoveTorq set to 0.013685
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 100
+     Parameter assigned: initialMyoMiniFils set to 50
+     Parameter assigned: minFilLength set to 0.5
+     Parameter assigned: maxFilLength set to 2.0
+     Parameter assigned: stdDevActinDist set to 0.5
+     Parameter assigned: boxXDim set to 10.0
+     Parameter assigned: boxYDim set to 10.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: actinConc set to 0.0
+     Parameter assigned: actinConcNonHydro set to 0.0
+     Parameter assigned: nodeZone set to 0.9
+     Parameter assigned: nodeRadius set to 0.025
+     Parameter assigned: forminsPerNode set to 0
+     No match found for parameter label myosPerNode ... you best check that out!
+     Parameter assigned: actinSeed set to 3
+     Parameter assigned: aeta set to 1.0
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.5
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kHydrolysis set to 0.0
+     Parameter assigned: kDissociation set to 0.0
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     Parameter assigned: filTorqSpring set to 1.0E-20
+     Parameter assigned: nodeTorqSpring set to 1.0E-20
+     No match found for parameter label maxFilLinkDist ... you best check that out!
+     Parameter assigned: filLinkSpring set to 1.0E-9
+     Parameter assigned: filLinkTorqSpring set to 1.0E-19
+     No match found for parameter label linkDissolveRate ... you best check that out!
+Done... there were 7 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=999 (BOA_RNG_SEED set)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 51; xBinWidth = 0.2 µm
+nYBins = 51; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 51 x 51 x 4 cells (0.2 µm each)
+[15:22] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[15:22]   ON   ThingStep Threads
+[15:22]   ON   ThingBrownian Threads
+[15:22]   ON   Myosin Threads
+[15:22]   ON   MyoDimer Threads
+[15:22]   OFF  Protein Node Threads
+[15:22]   ON   MyoMiniFil Threads
+[15:22]   OFF  Chamber Myo Threads
+[15:22]   OFF  Chamber MyoDimer Threads
+[15:22]   ON   Mesh Threads
+[15:22]   ON   Ck Mesh Threads
+[15:22]   ON   Ck Mots Threads
+[15:22]   OFF  XLink Threads
+[15:22]   OFF  Arp23 Threads
+[15:22]   OFF  NodeLink Threads
+[15:22]   OFF  Membrane Node Threads
+[15:22]   OFF  ActA Threads
+[15:22]   ON   MotorBindGrid3D Fill
+[15:22] [phase-plan] 9 active, 8 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=100, peakModel=202, safety=4x, floor=8192)
+GPUMoveThing: slotCap=9902 myoCap=3200 moveBlock=64 jointBlock=64 runSeed=-349276389 nWorkers=16
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/staticActin_gpu_test
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/staticActin_gpu_test
+ThreeJSWriter: archived 1 source files to source.zip
+ThreeJSWriter: wrote params_input.boa10-miniFil-staticActin
+ThreeJSWriter: wrote params_effective.txt (242 parameters)
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=1681.7 cumMaxPerThread=219
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=1681.6 cumMaxPerThread=219
+Crazy forceSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy torqueSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy forceSum in boxOfActin.MyoMiniFilament@2531949c
+Crazy torqueSum in boxOfActin.MyoMiniFilament@2531949c
+Crazy forceSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy torqueSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy forceSum in boxOfActin.MyoMiniFilament@29da40a6
+Crazy torqueSum in boxOfActin.MyoMiniFilament@29da40a6
+Crazy forceSum in boxOfActin.MyoMiniFilament@4a26a38b
+Crazy torqueSum in boxOfActin.MyoMiniFilament@4a26a38b
+Crazy forceSum in boxOfActin.MyoMiniFilament@2531949c
+Crazy torqueSum in boxOfActin.MyoMiniFilament@2531949c
+Crazy forceSum in boxOfActin.MyoMiniFilament@2bf6c52c
+Crazy torqueSum in boxOfActin.MyoMiniFilament@2bf6c52c
+Crazy forceSum in boxOfActin.MyoMiniFilament@24a21ba
+Crazy torqueSum in boxOfActin.MyoMiniFilament@24a21ba
+Crazy forceSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy torqueSum in boxOfActin.MyoMiniFilament@400426ad
+Crazy forceSum in boxOfActin.MyoMiniFilament@796e8e25
+Crazy torqueSum in boxOfActin.MyoMiniFilament@796e8e25
+Crazy forceSum in boxOfActin.MyoMiniFilament@6ab5078
+Crazy torqueSum in boxOfActin.MyoMiniFilament@6ab5078
+Crazy forceSum in boxOfActin.MyoMiniFilament@1be92a24
+Crazy torqueSum in boxOfActin.MyoMiniFilament@1be92a24
+Crazy forceSum in boxOfActin.MyoMiniFilament@48fd8f12
+
+... [TRUNCATED: ~1.5M "Crazy"/NaN lines removed; full 123MB log discarded — static-actin minifil config blows up on GPU pre-cohesion-fix, the "not a regression" evidence] ...
