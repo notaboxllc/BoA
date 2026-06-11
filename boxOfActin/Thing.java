@@ -1047,7 +1047,7 @@ public class Thing extends Object {
 		// left-to-right Java FP), so the result is bit-identical to the Pt3D form.
 		// xVals/yVals/zVals and the PRNG used to be per-Thing; now both live in
 		// WorkerScratch (one set per worker) — see per-worker RNG consolidation.
-		final double bDt = Env.brownianDeltaT.getValue();
+		final double bDt = Env.deltaT.getValue();   // brownianDeltaT removed — always == deltaT
 		final double invBDt = 1.0 / bDt;
 		final UCircRnd xVals = ws.xVals;
 		final UCircRnd yVals = ws.yVals;

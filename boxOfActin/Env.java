@@ -110,7 +110,6 @@ public class Env {
 	static private final double deltaT_init = 1e-4; // seconds
 	static private final double biochemDeltaT_init = 1e-3; // seconds
 	static private final double collisionDeltaT_init = 1e-4; // seconds
-	static private final double brownianDeltaT_init = deltaT_init;
 	static double simStartTime = 0.0;	// if we need some pre-zero time for sim. to initialize
 	static double runBump = 0.001; // a chunk of time to make sure round-off doesn't screw us out of the last JSon write... that format is picky with commas
 	static double linkMembraneTime = 0.0;
@@ -121,7 +120,12 @@ public class Env {
 	static final Parameter deltaT = new Parameter("deltaT", " Time Step",deltaT_init, "seconds");
 	static final Parameter biochemDeltaT = new Parameter("biochemDeltaT"," Time Step For Biochemical Events", biochemDeltaT_init, "seconds");
 	static final Parameter collisionDeltaT = new Parameter("collisionDeltaT"," Time Step For Collison Detection", collisionDeltaT_init,"seconds");
-	static final Parameter brownianDeltaT = new Parameter("brownianDeltaT"," Time Step at which to apply Brownian forces",brownianDeltaT_init, "seconds");
+	// brownianDeltaT removed (2026-06-11): it was always meant to equal deltaT. Configs
+	// that set it to 1e-5 (< deltaT=1e-4) made the CPU Brownian force magnitude sqrt(10)
+	// too strong (calcRandomForces scaled by 1/brownianDeltaT while integration uses
+	// deltaT — an FDT-breaking mismatch; the GPU kernel already used deltaT). Brownian
+	// now always uses deltaT. Stale "brownianDeltaT:..." lines in old param files are
+	// harmless (loader logs them as one "misunderstanding" and ignores them).
 	static final Parameter runTime = new Parameter("runTime", " Run Time",runTime_init, "seconds");
 
 	// **** "Alberts Force", or Pairwise Agent Interaction with Rational
@@ -1055,7 +1059,7 @@ public class Env {
 	public static void setTimeStepCounts() {
 		Thing.biochemCheckInt = (int) (Env.biochemDeltaT.getValue() / Env.deltaT.getValue());
 		Thing.collisionCheckInt = (int) (Env.collisionDeltaT.getValue() / Env.deltaT.getValue());
-		Thing.brownianApplyInt = (int) (Env.brownianDeltaT.getValue() / Env.deltaT.getValue());
+		Thing.brownianApplyInt = 1;   // Brownian applied every step (brownianDeltaT == deltaT)
 		
 		simJSonFreq = (int)(Math.ceil((1.0/deltaT.getValue())*(1.0/simJSonSavesPerSec))); 	// number of integration steps between Simularium jSon saves
 		simJSon2Freq = (int)(Math.ceil((1.0/deltaT.getValue())*(1.0/simJSon2SavesPerSec))); 	// number of integration steps between Simularium jSon saves for second file
