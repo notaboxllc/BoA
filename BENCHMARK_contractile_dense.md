@@ -1,5 +1,13 @@
 # Dense contractile compute benchmark (v4 — heavy-crosslink load, no percolation gate)
 
+> **Follow-up (2026-06-12, `COPYOUT_RESIDENCY.md`):** the flat ~115 ms / ~1.08 GB
+> copy-out flagged below was identified as the fixed 1.024 GB `ffCandPartner`
+> fil-fil candidate buffer, declared `EVERY_EXECUTION` but consumed by the host only
+> at crosslink cadence (every 100 steps). Cadence-gating it to `UNDER_DEMAND` (Part 1
+> there) moved **GPU÷CPU from 3.32→1.17 at 1× and 1.12→0.82 at 8× (GPU now wins at
+> dense)**, crossover ~10×→~1.3×, physics-neutral. Part 2 there decomposes the host
+> "other" bucket; the GPU elephant is `recompute`/`onStepStart` (superlinear).
+
 Branch `benchmark-contractile-dense`. Machine: aorus1, RTX 5070 (12 GB), Java 21,
 TornadoVM 4.0.1-dev PTX. `main` + `crosslink-lifecycle` merged (`3d0b6f7`). 2026-06-12.
 

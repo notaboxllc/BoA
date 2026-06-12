@@ -3835,7 +3835,17 @@ public class GPUMoveThing {
             tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                    bindBoundSegId, bindArcOnFilDev);
             if (filFilBroadphaseActive) {
-                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                // Copy-out residency (2026-06-12): ffCandPartner is the dominant
+                // device→host copy-out — a FIXED-capacity buffer (segCap=1e6 ×
+                // FILFIL_MAX_CAND=256 ints = 1.024 GB, independent of N) that the
+                // v4 profiler measured as a flat ~115 ms/execute, ~80 % of exec at
+                // 1×. But the host only reads it in drainFilFilCandidates(), which
+                // fires every crosslinkCheckInt (=100) steps, not every step — so
+                // EVERY_EXECUTION copied it 100× more often than consumed. Demote to
+                // UNDER_DEMAND; demandSyncFilFilCandidates() pulls it on fire steps
+                // only (same residency pattern as the pose buffers). Amortizes the
+                // 115 ms over 100 steps → ~1.1 ms/step.
+                tg = tg.transferToHost(DataTransferMode.UNDER_DEMAND,
                                        ffCandPartner, ffCandPerSegCount);
             }
         }
@@ -4120,6 +4130,25 @@ public class GPUMoveThing {
         } catch (Throwable t) {
             // best effort; the host snapshot may be one step stale but parity
             // still operates on the same data the bind path consumed.
+        }
+    }
+
+    /** Copy-out residency (2026-06-12) — demand-sync the fil-fil broad-phase
+     *  candidate buffers (ffCandPartner ~1.024 GB + ffCandPerSegCount) from
+     *  device to host. These are declared UNDER_DEMAND in the chained graph (the
+     *  kernel rewrites them every execute, but the host only consumes them in
+     *  drainFilFilCandidates() at crosslinkCheckInt cadence). Call this on a
+     *  crosslink-fire step, after the move execute, before the host drain. */
+    public static void demandSyncFilFilCandidates() {
+        if (lastExecResult == null || !filFilBroadphaseActive) return;
+        IntArray candPartner     = GPUMotorBinding.getCandPartnerArray();
+        IntArray candPerSegCount = GPUMotorBinding.getCandPerSegCountArray();
+        if (candPartner == null || candPerSegCount == null) return;
+        try {
+            lastExecResult.transferToHost(candPartner, candPerSegCount);
+        } catch (Throwable t) {
+            // best effort; if the pull fails the drain sees the prior fire-step's
+            // candidates (rare, diagnostic-only impact on link formation).
         }
     }
 

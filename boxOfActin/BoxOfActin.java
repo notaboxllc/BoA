@@ -47,6 +47,27 @@ public class BoxOfActin {
 	static long    pbExecN, pbPackN, pbJointPackN, pbSyncPoseN, pbSyncDerivedN;
 	static long    pbMeshMs, pbXlinkMs, pbBiochemMs, pbMoveMs, pbFormMs, pbStepMs, pbGatherMs, pbBrownMs;
 	static long    pbBiochemFire, pbXlinkFire, pbSyncCalls;
+	// Part-2 "other"-bucket attribution (2026-06-12). nanoTime accumulators for
+	// per-step host regions that had no named timer; baselines snapshot at the
+	// window start so the report subtracts the warmup. The motor-collision /
+	// resetCt / cleanup1 phases already have ms RunTimers — surfaced via their
+	// own pb* ms baselines below.
+	static long    pcRecomputeNs, pcOutputNs, pcCleanupTailNs, pcMembraneNs, pcSafepointNs, pcJointsNs;
+	static long    pbRecomputeNs, pbOutputNs, pbCleanupTailNs, pbMembraneNs, pbSafepointNs, pbJointsNs;
+	static long    pbMotorColMs, pbResetMs, pbCleanup1Ms;
+	static long    pbGcMs;   // total JVM GC collection time (ms) at window start
+
+	// Sum of collection time across all GC collectors (ms). Used to attribute the
+	// share of the "other" residual that is GC pauses (not a phase bracket).
+	static long totalGcCollectionMs() {
+		long t = 0;
+		for (java.lang.management.GarbageCollectorMXBean gc
+		     : java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+			long ct = gc.getCollectionTime();
+			if (ct > 0) t += ct;
+		}
+		return t;
+	}
 
 
 	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,gatherTimer,moveTimer,biochemTimer,resetCtTimer,cleanupTimer1};
@@ -1180,6 +1201,10 @@ public class BoxOfActin {
 				// Inert-wave cull: refresh per-ThreadSet active flags from live
 				// counts. Cheap (17 int compares); catches mid-run population
 				// growth in biochem-active configs.
+				// Part-2 attribution: bracket the per-step "recompute/setup"
+				// region (recompute flags → setBiophys → accum-cap → force-zero
+				// → fillSoa/onStepStart → cadence flag) lumped into "other".
+				long _recoT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				recomputeActiveThreadSets();
 				// set biophysical values needed for this next time step
 				FilSegment.setBiophysValues();
@@ -1222,6 +1247,7 @@ public class BoxOfActin {
 				 crosslinkCkCounter++;
 				 GPUMoveThing.crosslinkFiresThisStep = (crosslinkCkCounter >= Thing.crosslinkCheckInt);
 				 if (GPUMoveThing.crosslinkFiresThisStep) { crosslinkCkCounter = 0; GPUMoveThing.crosslinkFireCt++; }
+				 if (StepProfiler.ENABLED) { pcRecomputeNs += System.nanoTime() - _recoT0; }
 				 // Meshed Collisions
 				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
 					 collisionMeshTimer.start();
@@ -1314,6 +1340,13 @@ public class BoxOfActin {
 				runForceWave(Env.xLinkStart, Env.xLinkStop);
 				xLinkTimer.stopInc();
 
+				// Part-2 attribution: bracket the CPU joint-force waves (membrane
+				// links + myoJoints1 + myoJoints2) that sit unlabeled between xLink
+				// and step. On -gpu the per-Myosin internal joints run as a device
+				// kernel, but MyosinDimer / ProteinNode / MyoMiniFilament / Chamber
+				// joint pools still dispatch on CPU here — ∝N with the minifilament
+				// population and the dominant share of the residual.
+				long _jointsT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				// Membrane links
 				startAllThreadSets(Env.membraneLinksStart);
 				waitOnAllThreadSets(Env.membraneLinksStop);
@@ -1334,6 +1367,7 @@ public class BoxOfActin {
 				// connections to other things. myoJoints2: ProteinNode + MyoMiniFilament
 				// + ChamberMyo + ChamberMyoD — 4 force-writing pools → serialize.
 				runForceWave(Env.myoJoints2Start, Env.myoJoints2Stop);
+				if (StepProfiler.ENABLED) { pcJointsNs += System.nanoTime() - _jointsT0; }
 
 				// Thing.step() calls
 				stepTimer.start();
@@ -1401,6 +1435,11 @@ public class BoxOfActin {
 						// check → makeLink on each. 1-step lag vs the CPU meshColl
 						// wave (which formed links pre-step), matching the bind drain.
 						if (GPUMoveThing.filFilBroadphaseActive && GPUMoveThing.crosslinkFiresThisStep) {
+							// Copy-out residency (2026-06-12): the candidate buffers are now
+							// UNDER_DEMAND (the ~1 GB ffCandPartner copy-out no longer rides
+							// every execute). Pull them on this fire step before any host
+							// consumer (parity harness + drain) reads them.
+							GPUMoveThing.demandSyncFilFilCandidates();
 							// Candidate-completeness harness (validation #2): the kernel just
 							// emitted this fire-step's candidates; compare vs brute-force before
 							// the drain consumes them. No-op unless BOA_FILFIL_PARITY==this step.
@@ -1445,6 +1484,9 @@ public class BoxOfActin {
 				resetCtTimer.stopInc();
 
 				// Membrane relaxation loop... special passes to allow forces to propogate/move nodes, especially laterally at collisions
+				// Part-2 attribution: bracket the membrane relaxation block (no-op
+				// in non-membrane fixtures but its threadset fan-out is unlabeled).
+				long _membT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				int mPass = 0;
 				NodeLink.maxStrain = 10;
 				while (NodeLink.maxStrain > Env.membraneMaxLinkStrain.getValue() && mPass < Env.maxMembranePasses.getIntValue()) {
@@ -1463,7 +1505,13 @@ public class BoxOfActin {
 
 					mPass++;
 				}
+				if (StepProfiler.ENABLED) { pcMembraneNs += System.nanoTime() - _membT0; }
 
+				// Part-2 attribution: bracket the post-step / safe-point region
+				// (updateCounters + mem-trace + per-step diagnostics + inspect/param
+				// drains + benchmark tuners) lumped into "other". Mostly no-op in the
+				// dense fixture; measures the residual that is NOT GC / fan-out.
+				long _safeT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				updateCounters();
 
 				// Phase 4.5 Part-1 — periodic device-memory tick. No-op unless
@@ -1833,7 +1881,12 @@ public class BoxOfActin {
 					}
 				}
 
+				if (StepProfiler.ENABLED) { pcSafepointNs += System.nanoTime() - _safeT0; }
+
 				// output to screen and/or files
+				// Part-2 attribution: bracket the output region (logAndDraw /
+				// remoteLog + the GPU output-render restore) lumped into "other".
+				long _outT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				if (!Env.remote) { logAndDraw(); } else { remoteLog(); }
 
 				// Close the output-render episode: restore the physics-owned host
@@ -1841,6 +1894,7 @@ public class BoxOfActin {
 				// mutated, so emitting a frame leaves simulation state unchanged.
 				// No-op when no frame was written this step (snapshot inactive).
 				if (Env.useGPU) { GPUMoveThing.endOutputRender(); }
+				if (StepProfiler.ENABLED) { pcOutputNs += System.nanoTime() - _outT0; }
 
 				//**** Clean Up ****
 				cleanupTimer1.start();
@@ -1862,6 +1916,9 @@ public class BoxOfActin {
 				Arp23.setInactiveArp23s();
 				cleanupTimer1.stopInc();
 
+				// Part-2 attribution: bracket the cleanup tail (ActA cleanup +
+				// fill-node + spawn + equilibrate) lumped into "other".
+				long _ctailT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				ActA.cleanUpActAs();
 
 				if (Env.simulationTime > 0 && StickyNode.sphericalGeometry) { FillNode.addFillNodeToCell(); }   // fill cell as appropriate
@@ -1873,6 +1930,7 @@ public class BoxOfActin {
 
 				ProteinNode.equilibrateNodeNumber();
 				MyoMiniFilament.equilibrateMyoMiniNumber();
+				if (StepProfiler.ENABLED) { pcCleanupTailNs += System.nanoTime() - _ctailT0; }
 			}
 		}
 		System.out.println("collisionTime = " + collisionTime);
@@ -2435,6 +2493,17 @@ public class BoxOfActin {
 		pbStepMs    = stepTimer.time;
 		pbGatherMs  = gatherTimer.time;
 		pbBrownMs   = brownianTimer.time;
+		// Part-2 "other"-bucket attribution baselines.
+		pbMotorColMs    = motorsAndFilsColTimer.time;
+		pbResetMs       = resetCtTimer.time;
+		pbCleanup1Ms    = cleanupTimer1.time;
+		pbRecomputeNs   = pcRecomputeNs;
+		pbOutputNs      = pcOutputNs;
+		pbCleanupTailNs = pcCleanupTailNs;
+		pbMembraneNs    = pcMembraneNs;
+		pbSafepointNs   = pcSafepointNs;
+		pbJointsNs      = pcJointsNs;
+		pbGcMs          = totalGcCollectionMs();
 		pbBiochemFire = GPUMoveThing.biochemFireCt;
 		pbXlinkFire   = GPUMoveThing.crosslinkFireCt;
 		pbSyncCalls   = GPUMoveThing.getDemandSyncPoseCalls();
@@ -2492,13 +2561,56 @@ public class BoxOfActin {
 		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "crosslinkFormation", formMs / M,    xlinkFires   > 0 ? formMs    / xlinkFires   : 0.0, xlinkFires);
 		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "biochem",            biochemMs / M, biochemFires > 0 ? biochemMs / biochemFires : 0.0, biochemFires);
 		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "sync",               syncMs / M,    syncCalls    > 0 ? syncMs    / syncCalls    : 0.0, syncCalls);
+		// Part-2 "other"-bucket decomposition (2026-06-12). Named sub-phases that
+		// were previously unlabeled. motorFilCol/resetCt/cleanup come from
+		// existing ms RunTimers; recompute/output/cleanupTail from nanoTime
+		// brackets. moveDrains (GPU only) = move-wrap wall minus the parts already
+		// labeled that live inside it: device exec, the OOP->FloatArray pack, and
+		// crosslinkFormation. pack is gathered inside moveThings() so it is part of
+		// moveMs and MUST be subtracted or it double-counts (it is labeled
+		// separately). What remains is the host drains (drainBoundResults, fil-fil
+		// candidate demand-sync + drain, frame poison) inside moveTimer but outside
+		// the device execute.
+		double motorColMs  = (motorsAndFilsColTimer.time - pbMotorColMs);
+		double resetMs     = (resetCtTimer.time          - pbResetMs);
+		double cleanup1Ms  = (cleanupTimer1.time         - pbCleanup1Ms);
+		double recompMs    = (pcRecomputeNs   - pbRecomputeNs)   / 1.0e6;
+		double outputMs    = (pcOutputNs      - pbOutputNs)      / 1.0e6;
+		double cleanTailMs = (pcCleanupTailNs - pbCleanupTailNs) / 1.0e6;
+		double membraneMs  = (pcMembraneNs    - pbMembraneNs)    / 1.0e6;
+		double safepointMs = (pcSafepointNs   - pbSafepointNs)   / 1.0e6;
+		double jointsCpuMs = (pcJointsNs      - pbJointsNs)      / 1.0e6;
+		double moveDrainMs = gpu ? Math.max(0.0, moveMs - execMs - packMs - formMs) : 0.0;
+		System.out.println("  --- 'other' decomposition (ms/step) ---");
+		System.out.printf("    %-18s %10.5f%n", "jointsCpu",     jointsCpuMs / M);
+		System.out.printf("    %-18s %10.5f%n", "motorFilCol",  motorColMs  / M);
+		System.out.printf("    %-18s %10.5f%n", "recompute",     recompMs    / M);
+		System.out.printf("    %-18s %10.5f%n", "resetCt",       resetMs     / M);
+		System.out.printf("    %-18s %10.5f%s%n", "moveDrains",   moveDrainMs / M, gpu ? "" : "  (n/a CPU)");
+		System.out.printf("    %-18s %10.5f%n", "membrane",      membraneMs  / M);
+		System.out.printf("    %-18s %10.5f%n", "safepoint",     safepointMs / M);
+		System.out.printf("    %-18s %10.5f%n", "output",        outputMs    / M);
+		System.out.printf("    %-18s %10.5f%n", "cleanup",       cleanup1Ms  / M);
+		System.out.printf("    %-18s %10.5f%n", "cleanupTail",   cleanTailMs / M);
+		// step/gather/brownian are CPU threadset phases that run on BOTH paths
+		// (on -gpu the per-Thing integrate moved to device, but the CPU step()/
+		// gatherForces()/Brownian-force phases still dispatch — measured ~20 ms/step
+		// at 8× GPU, NOT zero). Include them in labeled for both paths so the GPU
+		// residual is fully attributed (they were excluded for GPU before, which
+		// dumped them into "other").
 		double labeled = (gpu ? execMs + packMs : 0) + xforceMs + meshMs + (gpu ? 0 : moveMs)
-		               + formMs + biochemMs + syncMs + (gpu ? 0 : stepMs + gathMs + brownMs);
+		               + formMs + biochemMs + syncMs + stepMs + gathMs + brownMs
+		               + motorColMs + resetMs + cleanup1Ms + recompMs + outputMs + cleanTailMs + moveDrainMs
+		               + membraneMs + safepointMs + jointsCpuMs;
 		double otherMs = wallMs - labeled;
+		double gcMs    = (totalGcCollectionMs() - pbGcMs);
+		System.out.printf("    %-18s %10.5f%s%n", "gc(of residual)", gcMs / M,
+		                  "  [subset of otherResidual: JVM GC pauses]");
 		System.out.printf("  --- totals (ms/step) ---%n");
 		System.out.printf("    %-18s %10.5f%n", "total(wall)", totalPerStep);
 		System.out.printf("    %-18s %10.5f%n", "host(=tot-exec)", hostPerStep);
-		System.out.printf("    %-18s %10.5f%n", "other(unlabeled)", otherMs / M);
+		System.out.printf("    %-18s %10.5f  (of which gc=%.4f, non-gc=%.4f)%n", "otherResidual",
+		                  otherMs / M, gcMs / M, (otherMs - gcMs) / M);
 		System.out.println();
 	}
 
