@@ -1,0 +1,7 @@
+config	seed	segCt	totalLen_um	meanBound	nan	rc
+cpu	1	515	101.695	1.472	0	0
+gpudev	1	534	105.07	1.148	0	0
+cpu	2	560	109.408	2.149	0	0
+gpudev	2	548	107.796	1.967	0	0
+cpu	3	544	106.328	2.442	0	0
+gpudev	3	538	105.011	3.390	0	0

@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**GPU-vs-CPU dense benchmarks — gliding point + ratio-locked contractile weak-scaling (campaign thesis + v2 baseline).** Measurement only (no physics/kernel change), recording the campaign's thesis-validating number on the REAL contractile workload and the quantitative v2 baseline. **Stoichiometry (B1):** `boa10-64Seg-dyn` 1× = 100 filaments → 197 segments → **101.2 µm actin** (measured from the initial frame; 64 mon/seg, 0.0027 µm/mon = 370 subunits/µm), mean filament ~1.0 µm; minifilament = 8 dimers/end ×2 = **16 molecules = 32 heads**; 100 minifils → **0.99 minifil/µm** (hits the ~1/µm target exactly), **R = 0.043 molar, 31.6 heads/µm** — minifil size in the non-muscle 15–30 band, R/heads just below the contractile literature band. Kept the 100:100 (1:1) count. **Contractile weak-scaling (B2/B3):** held myosin:actin ratio + actin density constant, grew box AREA by N (boxXY = 10√N, Z = 0.5 held → density constant, slab preserved; matches 06-08 areal method over isotropic N^(1/3)); fil = mini = 100·N. GPU-resident vs full-CPU, same seed, ≥3 seeds, two-step-diff steady-state ms/step, output off. **GPU÷CPU = 9.67× (1×) → 6.17× (2×) → 2.17× (4×) → 1.72× (8×) → 1.55× (16×)** — GPU SLOWER at every scale (opposite of gliding) but the gap narrows **6.2× monotonically** with N (the weak-scaling thesis: fixed per-launch overhead amortizes). CPU 3.6→68.1 ms/step, GPU 34.8→105.5. **Breakdown (B4):** kernel-bound at every scale — `exec` 62–73% of GPU step; **transfer (`demandSyncPose`) < 1 ms/step (output-cadence only, 7–25 calls)** = residency eliminated the transfer wall, confirmed; host SoA pack the secondary cost (0.4→9.5 ms/step). **Ceiling (B5):** SOFT — VRAM 782 MiB/12 GB at 16×, CPU tractable at 16× (68 ms/step), both paths complete; the benign 701-per-execute (`LAUNCH_OUT_OF_RESOURCES`, slotCap 19602→313602, oracle-neutral) is fixed per-launch overhead that amortizes (the #1 v2 kernel-launch lever), not a cap. **Gliding dense point (A):** attempting 12× exposed two GPU gliding ceilings below 12× — (1) TaskGraph bytecode wall (`BufferOverflowException` at `plan.execute`; needs `-Dtornado.tvm.maxbytecodesize=16384`, which 8× didn't), (2) host-RAM OOM-kill (`rc=137`, heap 28G + off-heap > 31G; VRAM only 2.6G) — so the densest CLEAN GPU gliding point stays 8× (0.65×); the 06-08 curve is unchanged. **Verdict: residency converts transfer→0 (kernel-bound), and GPU÷CPU on the contractile network improves 6.2× across 1×→16×, but the workload is still GPU-negative (1.5–9.7× slower) because it is sparse + launch-throttled — this curve is the v2 baseline v2 must reproduce and beat.** `BENCHMARK_contractile_scaling.md`; tooling `RUN_LOGS/2026-06-11_contractile_scaling/` (+ `2026-06-08_scaling_study/run_dense_point.sh`). **Recommend MERGE (benchmark tooling + docs; no source change).** Full writeup below.)
+Last updated: 2026-06-11 (**The 701 hunt — move/bind launch-config fix + contractile re-measure (Outcome 3: 701 benign AND cheap; the fix is a CORRECTNESS win, not a speed win).** Hunted the `cuLaunchKernel → 701 (LAUNCH_OUT_OF_RESOURCES)` that fires on every move-execute on `boa10-64Seg-dyn`. **Root cause (proven by `-Dtornado.threadInfo=true`):** of the ~12 tasks in the chained move/bind/cohesion TaskGraph, every parallel one is pinned to a 64-thread block (segBbox 128, gridAssemble 1) **except `dimerCohesion`, which had NO registered `WorkerGrid`** → TornadoVM defaulted it to an **800-thread block** (`Blocks dimensions [800,1,1]`, the lone outlier). 800 threads × (≥82 regs/thread for the fused cohesion kernel) > the 5070's **65,536-register SM file** → the launch is rejected with 701, every execute. NOT a register-pressure-in-the-kernel problem and NOT the move kernel — a single missing launch-config line on the cohesion task. **The 701 was not pure overhead — it was silently DROPPING physics:** `MyosinDimer.cohesionOnDevice()` makes the CPU **skip** minifilament cohesion (rod↔rod, lever torque, body↔rod) on the `-gpu` path and defer to the device kernel — so a rejected launch meant **minifilament cohesion was absent on the entire GPU path** (the kernel, added 2026-06-11, had likely never executed). **Fix (one structural line):** register `WorkerGrid("chained.dimerCohesion", myoCap)` at block 64 (matching its joints/motorForce siblings). Block 800→64, **701 count 60/50-steps → 0**, clean launch every step. **Correctness (firm, vs full-CPU oracle, `boa10-64Seg-dyn` 1×, 3 seeds, 2500 steps):** the now-running kernel is **oracle-neutral** — segCt CPU 540 ≈ GPU 540, total actin length 105.8 ≈ 106.0 µm (within seed spread), `meanBoundMotors` overlaps (the documented binding seam), **NaN=0, rc=0 on every run** incl. a clean 5000-step run. **Re-measured curve (two-step-diff, same weak-scaling configs, output OFF, 3/3/1 seeds):** GPU÷CPU **9.60× (1×) / 1.64× (8×) / 1.56× (16×)** — statistically identical to the pre-fix **9.67 / 1.72 / 1.55**; `exec`/step actually ticked *up* slightly (25.4→26.3 ms at 1×) because the cohesion kernel now does real work where before it was a rejected no-op. **Verdict = Outcome 3:** clearing the 701 leaves GPU÷CPU unchanged — a rejected launch is ~free and the now-running kernel adds ~the same cost back, so the 701 was never throttling throughput. The contractile GPU-slower-than-CPU loss is **structural** (sparse workload — ~306 blocks across 48 SMs at 1× — latency/dispatch-bound, not launch- or occupancy-throttled; at block 64 the mechanics kernels can't overrun the register file, so block-size tuning can't recover it). The real win is correctness: minifilament cohesion is now actually applied on the GPU path. **Recommend MERGE** (one-line launch-config fix, correctness-positive, perf-neutral; behind the existing single-graph default). Branch `fix-701-cohesion-launch`. `RUN_LOGS/2026-06-11_701_hunt/`. Full writeup below.)
+
+Prior update: 2026-06-11 (**GPU-vs-CPU dense benchmarks — gliding point + ratio-locked contractile weak-scaling (campaign thesis + v2 baseline).** Measurement only (no physics/kernel change), recording the campaign's thesis-validating number on the REAL contractile workload and the quantitative v2 baseline. **Stoichiometry (B1):** `boa10-64Seg-dyn` 1× = 100 filaments → 197 segments → **101.2 µm actin** (measured from the initial frame; 64 mon/seg, 0.0027 µm/mon = 370 subunits/µm), mean filament ~1.0 µm; minifilament = 8 dimers/end ×2 = **16 molecules = 32 heads**; 100 minifils → **0.99 minifil/µm** (hits the ~1/µm target exactly), **R = 0.043 molar, 31.6 heads/µm** — minifil size in the non-muscle 15–30 band, R/heads just below the contractile literature band. Kept the 100:100 (1:1) count. **Contractile weak-scaling (B2/B3):** held myosin:actin ratio + actin density constant, grew box AREA by N (boxXY = 10√N, Z = 0.5 held → density constant, slab preserved; matches 06-08 areal method over isotropic N^(1/3)); fil = mini = 100·N. GPU-resident vs full-CPU, same seed, ≥3 seeds, two-step-diff steady-state ms/step, output off. **GPU÷CPU = 9.67× (1×) → 6.17× (2×) → 2.17× (4×) → 1.72× (8×) → 1.55× (16×)** — GPU SLOWER at every scale (opposite of gliding) but the gap narrows **6.2× monotonically** with N (the weak-scaling thesis: fixed per-launch overhead amortizes). CPU 3.6→68.1 ms/step, GPU 34.8→105.5. **Breakdown (B4):** kernel-bound at every scale — `exec` 62–73% of GPU step; **transfer (`demandSyncPose`) < 1 ms/step (output-cadence only, 7–25 calls)** = residency eliminated the transfer wall, confirmed; host SoA pack the secondary cost (0.4→9.5 ms/step). **Ceiling (B5):** SOFT — VRAM 782 MiB/12 GB at 16×, CPU tractable at 16× (68 ms/step), both paths complete; the benign 701-per-execute (`LAUNCH_OUT_OF_RESOURCES`, slotCap 19602→313602, oracle-neutral) is fixed per-launch overhead that amortizes (the #1 v2 kernel-launch lever), not a cap. **Gliding dense point (A):** attempting 12× exposed two GPU gliding ceilings below 12× — (1) TaskGraph bytecode wall (`BufferOverflowException` at `plan.execute`; needs `-Dtornado.tvm.maxbytecodesize=16384`, which 8× didn't), (2) host-RAM OOM-kill (`rc=137`, heap 28G + off-heap > 31G; VRAM only 2.6G) — so the densest CLEAN GPU gliding point stays 8× (0.65×); the 06-08 curve is unchanged. **Verdict: residency converts transfer→0 (kernel-bound), and GPU÷CPU on the contractile network improves 6.2× across 1×→16×, but the workload is still GPU-negative (1.5–9.7× slower) because it is sparse + launch-throttled — this curve is the v2 baseline v2 must reproduce and beat.** `BENCHMARK_contractile_scaling.md`; tooling `RUN_LOGS/2026-06-11_contractile_scaling/` (+ `2026-06-08_scaling_study/run_dense_point.sh`). **Recommend MERGE (benchmark tooling + docs; no source change).** Full writeup below.)
 
 Prior update: 2026-06-11 (**Minifil-ON turnover on device — packRange cast fixed; GPU-resident contractile network with turnover (CAMPAIGN CLOSER).** The terminal gate of the mainline GPU residency campaign is closed: the full contractile network — 100 actin filaments + 100 minifilaments + active turnover — runs GPU-resident to completion, behavior-neutral vs the CPU oracle. **Crash mechanism:** `packRange`/`packDynamicRange` cast `(FilSegment) t` in the `RULE_FIL` branch; the historical `ClassCastException` is a `rules[]`/`theThings[]` desync — a slot cached `RULE_FIL` whose live occupant is a `MyoMiniFilament`. The ONLY path that puts a different-typed Thing in a slot's index without an append is `removeThing`'s swap-compaction, which the **2026-06-09 fix already covers** (`markTopologyDirty` on swap → `classifyThings` refresh before the next pack); Phase A `1d7dcc3` added the `RULE_MINIFIL` pack branches. **So on HEAD the cast does NOT reproduce** (`boa10-64Seg-dyn` seeds 1&2 ran 5000 steps clean pre-change) — the journal's "residual blocker" note was STALE (carried from pre-fix; boa10-64Seg-dyn was never re-tested on the merged HEAD, Part-2 used the `-nomini` variant). **Reproduced the mechanism on demand** via fault injection `BOA_DISABLE_TOPODIRTY_ON_SWAP=1` (default OFF): 538 desyncs over 5000 steps, rc=0 (all caught). **Fix:** `reconcilePackRule` dispatches on the LIVE occupant type, not the cached rule — the `FilSegment` cast runs only when the live type IS FilSegment, so a stale rule can never throw; on mismatch it counts (`[STATS] packRuleDesync=N`), logs, and `markTopologyDirty` to self-heal. Closes the crash class structurally, independent of the topologyDirty signal; in production `packRuleDesync=0` (provable pass-through → behavior-neutral). **Force-coverage exactly-once preserved** (only selects per-slot Brownian + makes the cast safe; no force/kernel change). **Validation (3 seeds + 10k long, GPU-resident vs full-CPU oracle):** 10/10 runs `cast=0 NaN=0 packRuleDesync=0 overflow=0 planRebuild=1`; segCt GPU 545 ≈ CPU 557 (neutral), len ~197±42 nm identical; **residency cadence held with minifils — `demandSyncPose calls=151 @5k / 301 @10k` (biochem+frame, not per-step)**; minifils hold span ~180 nm (cohesion on device works). `meanBoundMotors` GPU<CPU = the **pre-existing GPU-minifil-binding seam** (2026-06-09), NOT this fix (noisy both paths). **Flagged separate residual:** at `slotCap=19602` one INERT kernel emits a benign per-step `cuLaunchKernel 701` (out-of-resources) — results oracle-neutral, no NaN; newly exposed at scale, a kernel block-size tuning item (the v2 scale lever), independent of this fix. `RUN_LOGS/2026-06-11_minifil_turnover_packrange_fix.txt`. **Recommend MERGE — campaign closed.** Full writeup below.)
 
@@ -30,6 +32,105 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-11 — The 701 hunt: move/bind launch-config fix + contractile re-measure
+
+**Mission.** The `cuLaunchKernel → 701 (LAUNCH_OUT_OF_RESOURCES)` that fires on every
+move-execute on the `boa10-64Seg-dyn` family (flagged benign in the campaign closer +
+benchmark) sits inside the dominant exec cost. Find why it launches out of resources,
+fix the first launch, re-measure the contractile curve, and decide whether clearing it
+moves GPU÷CPU toward parity (→ v2-for-speed on) or not (→ mechanics-bound).
+
+**Root cause — a single missing `WorkerGrid`, not the move kernel, not kernel register
+pressure.** `-Dtornado.threadInfo=true` dumps the per-task block/grid dims. In the
+chained move/bind/cohesion TaskGraph (~12 tasks) every parallel task is pinned to a
+64-thread block (`segBbox` 128, `gridAssemble` 1 since its `@Parallel` is `gid<1`) —
+**except `chained.dimerCohesion`, which printed `Blocks dimensions [800,1,1]`**, the
+lone outlier. The grid scheduler in `installResidentPlan` registers a `WorkerGrid` for
+`move`, `joints`, `chain`, `scatterPose`, `boundary`, `motorForce`, `segMotorForce`,
+`derived`, `bind`, `segBbox` — but the `dimerCohesion` task (added 2026-06-11) was
+never given one, so TornadoVM fell back to its default block size (800). The cohesion
+kernel is large (rod↔rod springs + lever torque + body↔rod reaction gather); at
+**800 threads × ≥82 regs/thread** it overruns the 5070's **65,536-register SM file**
+(65536/800 = 81.9 → the kernel uses ≥82 regs/thread), so the driver rejects the launch
+with 701. The starting hypothesis (an oversized *move* block / in-kernel register
+pressure) was wrong: every other kernel was already at block 64 (where even the 255-reg
+hardware max fits: 64×255 = 16 320 ≪ 65 536). The bug was a launch-config omission on
+exactly one task.
+
+**The 701 was not pure overhead — it was silently dropping physics.** A 701 means the
+kernel did **not** execute. And `MyosinDimer.cohesionOnDevice()` (true when `-gpu` and
+not `BOA_MINIFIL_COHESION_CPU`) makes the CPU **skip** minifilament cohesion —
+`MyosinDimer.applyRodCoupling*`/`alignUVecLeversTorque` and
+`MyoMiniFilament.constrainEnd{1,2}Dimers` all `continue`/short-circuit and defer to the
+device kernel. So the rejected launch meant **minifilament cohesion was absent on the
+entire GPU contractile path** — the device kernel had likely never run successfully
+(the 800-block default is independent of body count, so it 701s on any config with
+cohesion active). The campaign-closer's "oracle-neutral" check held because segCt and
+total length are insensitive to cohesion over a run; the missing cohesion did not show
+up in those metrics.
+
+**Fix (one structural line, `GPUMoveThing.installResidentPlan`).** Register a
+`WorkerGrid1D(myoCap)` for `chained.dimerCohesion` with `setLocalWork(64)` — the same
+block and range as the `joints`/`motorForce` kernels it mirrors (its `@Parallel` range
+is `cohBodyDimStart.getSize() = myoCap`). Block 800→64 (`Blocks [64,1,1]`, 100 blocks ×
+64 = 6400 = myoCap). **701 count: 60 over 50 steps → 0**, clean launch every step, every
+scale.
+
+**Correctness (firm — vs the full-CPU oracle, same seed).** The fix makes a
+never-executed kernel run for the first time, so this is the load-bearing check.
+`boa10-64Seg-dyn` 1×, 3 seeds, 2500 steps, `-3js` final-frame segment count + total
+actin length (Σ endpoint distances), `meanBoundMotors` from `[STATS]`, NaN scan:
+
+| seed | CPU segCt | GPU segCt | CPU len µm | GPU len µm | CPU mBound | GPU mBound | NaN |
+|---|---|---|---|---|---|---|---|
+| 1 | 515 | 534 | 101.7 | 105.1 | 1.47 | 1.15 | 0 |
+| 2 | 560 | 548 | 109.4 | 107.8 | 2.15 | 1.97 | 0 |
+| 3 | 544 | 538 | 106.3 | 105.0 | 2.44 | 3.39 | 0 |
+| mean | 540 | 540 | 105.8 | 106.0 | 2.02 | 2.17 | 0 |
+
+segCt and total length are **statistically neutral** (means identical, within seed
+spread); `meanBoundMotors` overlaps (the documented GPU-minifil-binding seam, noisy both
+paths). A clean 5000-step GPU run: **NaN=0, rc=0**, `planRebuild=1`, `overflow=0`,
+`meanBoundMotors=2.458`. The now-running cohesion kernel produces correct, stable
+physics — no blow-up, span held. (Side note: a `BOA_MINIFIL_COHESION_CPU=1` A/B — CPU
+cohesion + GPU pose — collapsed `meanBoundMotors` to ~0.08, a pre-existing mixed-mode
+diagnostic artifact unrelated to this fix; the production path is device cohesion, which
+is the path validated above.)
+
+**Re-measured contractile curve (two-step-diff, same weak-scaling configs as
+`BENCHMARK_contractile_scaling.md`, warm-up excluded, output OFF, 3/3/1 seeds).**
+
+| N | CPU ms/step | GPU ms/step | **GPU÷CPU (after)** | GPU÷CPU (before) | exec/step after | exec before | 701 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1× | 3.67 | 35.2 | **9.60×** | 9.67× | 26.3 ms | 25.4 ms | 0 |
+| 8× | 42.8 | 70.1 | **1.64×** | 1.72× | 45.9 ms | 44.8 ms | 0 |
+| 16× | 70.4 | 110.0 | **1.56×** | 1.55× | 68.5 ms | 64.9 ms | 0 |
+
+The ratios are statistically **identical** to the pre-fix curve, and `exec`/step ticked
+slightly *up* at every scale (the cohesion kernel now does real work where before it was
+a rejected no-op). The CPU column reproduced the documented numbers (3.6 / ~42 / 70),
+confirming negligible machine drift. The pre-fix 701 contrast was captured directly: the
+unmodified build emits 60 × 701 over 50 steps; the fixed build emits 0.
+
+**Verdict — Outcome 3 (of the three framed): the fallback was cheap; the contractile GPU
+loss is structural.** A rejected `cuLaunchKernel` is ~free, and running the real cohesion
+kernel costs about the same, so clearing the 701 nets to zero on GPU÷CPU — it was never
+throttling throughput. The contractile network is sparse (hundreds of real Things;
+slotCap 19 602 at 1× → only ~306 64-thread blocks across the 5070's 48 SMs), so the step
+is **launch/dispatch/latency-bound**, not launch-config-throttled and not occupancy-
+limited (at block 64 the mechanics kernels cannot overrun the register file, so there is
+no block-size lever left to pull). The honest gating result for v2: GPU-for-contractile
+is not made viable by launch tuning — the wall is the mechanics kernels' efficiency on a
+sparse bed, which a follow-on per-kernel bandwidth profile quantifies. The concrete win
+here is **correctness**: minifilament cohesion is now actually applied on the GPU path
+(it was silently absent), at zero measured speed cost.
+
+**Files / repro.** Fix in `boxOfActin/GPUMoveThing.java` (`installResidentPlan`, the
+`cohesionWorker` block). Tooling + raw data in `RUN_LOGS/2026-06-11_701_hunt/`
+(`timing.sh`, `correctness.sh`/`correctness2.sh`, `raw_after.tsv`, `correctness2.tsv`).
+**Recommend MERGE** — one-line launch-config fix, correctness-positive, perf-neutral,
+behind the existing single-graph default. Branch `fix-701-cohesion-launch`.
 
 ## 2026-06-11 — GPU-vs-CPU dense benchmarks — gliding point + ratio-locked contractile weak-scaling (campaign thesis + v2 baseline)
 
