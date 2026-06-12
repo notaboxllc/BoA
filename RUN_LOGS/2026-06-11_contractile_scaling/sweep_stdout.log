@@ -1,0 +1,116 @@
+[19:28:41] Contractile scaling sweep starting: 5 sizes, seeds=1 2 3
+[19:28:41] === Size 1/5: 1x N=1.0 box=10.000 fil=100 mini=100 heads=3200 K1=500 K2=2500 seeds=3 (elapsed 0s) ===
+[19:28:41]   cpu s1 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=2400s)
+[19:28:44]     rc=0 wall=2.88s
+[19:28:44]   cpu s1 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=3600s)
+[19:28:54]     rc=0 wall=10.07s
+[19:28:54]   gpu s1 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=3600s)
+[19:29:15]     rc=0 wall=21.23s
+[19:29:15]   gpu s1 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=5400s)
+[19:30:46]     rc=0 wall=90.95s
+[19:30:46]   cpu s2 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=2400s)
+[19:30:49]     rc=0 wall=2.82s
+[19:30:49]   cpu s2 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=3600s)
+[19:30:59]     rc=0 wall=9.99s
+[19:30:59]   gpu s2 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=3600s)
+[19:31:20]     rc=0 wall=21.16s
+[19:31:20]   gpu s2 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=5400s)
+[19:32:50]     rc=0 wall=90.09s
+[19:32:50]   cpu s3 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=2400s)
+[19:32:53]     rc=0 wall=2.85s
+[19:32:53]   cpu s3 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=3600s)
+[19:33:04]     rc=0 wall=10.39s
+[19:33:04]   gpu s3 K1 (box=10.000 fil=100 mini=100 K=500 rt=0.050000 budget=3600s)
+[19:33:25]     rc=0 wall=21.21s
+[19:33:25]   gpu s3 K2 (box=10.000 fil=100 mini=100 K=2500 rt=0.250000 budget=5400s)
+[19:34:56]     rc=0 wall=91.49s
+[19:34:56]   1x done: CPU 3.6 GPU 34.8 ratio 9.67x
+[19:34:56] === Size 2/5: 2x N=2.0 box=14.142 fil=200 mini=200 heads=6400 K1=500 K2=2500 seeds=3 (elapsed 375s) ===
+[19:34:56]   cpu s1 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=2400s)
+[19:35:01]     rc=0 wall=4.66s
+[19:35:01]   cpu s1 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=3600s)
+[19:35:20]     rc=0 wall=18.91s
+[19:35:20]   gpu s1 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=3600s)
+[19:35:45]     rc=0 wall=24.80s
+[19:35:45]   gpu s1 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=5400s)
+[19:37:30]     rc=0 wall=105.52s
+[19:37:30]   cpu s2 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=2400s)
+[19:37:35]     rc=0 wall=4.53s
+[19:37:35]   cpu s2 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=3600s)
+[19:37:52]     rc=0 wall=17.02s
+[19:37:52]   gpu s2 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=3600s)
+[19:38:17]     rc=0 wall=25.19s
+[19:38:17]   gpu s2 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=5400s)
+[19:40:02]     rc=0 wall=105.27s
+[19:40:02]   cpu s3 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=2400s)
+[19:40:07]     rc=0 wall=4.44s
+[19:40:07]   cpu s3 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=3600s)
+[19:40:24]     rc=0 wall=17.10s
+[19:40:24]   gpu s3 K1 (box=14.142 fil=200 mini=200 K=500 rt=0.050000 budget=3600s)
+[19:40:48]     rc=0 wall=24.10s
+[19:40:48]   gpu s3 K2 (box=14.142 fil=200 mini=200 K=2500 rt=0.250000 budget=5400s)
+[19:42:35]     rc=0 wall=107.35s
+[19:42:35]   2x done: CPU 6.6 GPU 40.7 ratio 6.17x
+[19:42:35] === Size 3/5: 4x N=4.0 box=20.000 fil=400 mini=400 heads=12800 K1=400 K2=2000 seeds=3 (elapsed 834s) ===
+[19:42:35]   cpu s1 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=2400s)
+[19:42:46]     rc=0 wall=10.69s
+[19:42:46]   cpu s1 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=3600s)
+[19:43:35]     rc=0 wall=48.45s
+[19:43:35]   gpu s1 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=3600s)
+[19:44:00]     rc=0 wall=25.54s
+[19:44:00]   gpu s1 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=5400s)
+[19:45:47]     rc=0 wall=106.89s
+[19:45:47]   cpu s2 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=2400s)
+[19:45:58]     rc=0 wall=10.58s
+[19:45:58]   cpu s2 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=3600s)
+[19:46:46]     rc=0 wall=48.66s
+[19:46:46]   gpu s2 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=3600s)
+[19:47:11]     rc=0 wall=24.96s
+[19:47:11]   gpu s2 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=5400s)
+[19:48:58]     rc=0 wall=106.62s
+[19:48:58]   cpu s3 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=2400s)
+[19:49:09]     rc=0 wall=10.98s
+[19:49:09]   cpu s3 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=3600s)
+[19:49:57]     rc=0 wall=48.07s
+[19:49:57]   gpu s3 K1 (box=20.000 fil=400 mini=400 K=400 rt=0.040000 budget=3600s)
+[19:50:23]     rc=0 wall=25.70s
+[19:50:23]   gpu s3 K2 (box=20.000 fil=400 mini=400 K=2000 rt=0.200000 budget=5400s)
+[19:52:10]     rc=0 wall=107.65s
+[19:52:10]   4x done: CPU 23.5 GPU 51.0 ratio 2.17x
+[19:52:10] === Size 4/5: 8x N=8.0 box=28.284 fil=800 mini=800 heads=25600 K1=300 K2=1300 seeds=3 (elapsed 1409s) ===
+[19:52:10]   cpu s1 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=2400s)
+[19:52:24]     rc=0 wall=13.89s
+[19:52:24]   cpu s1 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=3600s)
+[19:53:19]     rc=0 wall=54.67s
+[19:53:19]   gpu s1 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=3600s)
+[19:53:46]     rc=0 wall=27.09s
+[19:53:46]   gpu s1 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=5400s)
+[19:55:22]     rc=0 wall=96.23s
+[19:55:22]   cpu s2 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=2400s)
+[19:55:37]     rc=0 wall=14.26s
+[19:55:37]   cpu s2 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=3600s)
+[19:56:31]     rc=0 wall=53.91s
+[19:56:31]   gpu s2 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=3600s)
+[19:56:58]     rc=0 wall=27.04s
+[19:56:58]   gpu s2 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=5400s)
+[19:58:34]     rc=0 wall=96.15s
+[19:58:34]   cpu s3 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=2400s)
+[19:58:48]     rc=0 wall=13.89s
+[19:58:48]   cpu s3 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=3600s)
+[19:59:42]     rc=0 wall=54.21s
+[19:59:42]   gpu s3 K1 (box=28.284 fil=800 mini=800 K=300 rt=0.030000 budget=3600s)
+[20:00:08]     rc=0 wall=26.31s
+[20:00:08]   gpu s3 K2 (box=28.284 fil=800 mini=800 K=1300 rt=0.130000 budget=5400s)
+[20:01:44]     rc=0 wall=95.78s
+[20:01:44]   8x done: CPU 40.2 GPU 69.2 ratio 1.72x
+[20:01:44] === Size 5/5: 16x N=16.0 box=40.000 fil=1600 mini=1600 heads=51200 K1=200 K2=700 seeds=1 (elapsed 1983s) ===
+[20:01:44]   cpu s1 K1 (box=40.000 fil=1600 mini=1600 K=200 rt=0.020000 budget=2400s)
+[20:02:00]     rc=0 wall=16.18s
+[20:02:00]   cpu s1 K2 (box=40.000 fil=1600 mini=1600 K=700 rt=0.070000 budget=3600s)
+[20:02:51]     rc=0 wall=50.24s
+[20:02:51]   gpu s1 K1 (box=40.000 fil=1600 mini=1600 K=200 rt=0.020000 budget=3600s)
+[20:03:20]     rc=0 wall=29.42s
+[20:03:20]   gpu s1 K2 (box=40.000 fil=1600 mini=1600 K=700 rt=0.070000 budget=5400s)
+[20:04:42]     rc=0 wall=82.15s
+[20:04:42]   16x done: CPU 68.1 GPU 105.5 ratio 1.55x
+[20:04:42] === Contractile scaling sweep complete (elapsed 2161s) ===

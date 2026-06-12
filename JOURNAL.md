@@ -1,6 +1,8 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**Minifil-ON turnover on device — packRange cast fixed; GPU-resident contractile network with turnover (CAMPAIGN CLOSER).** The terminal gate of the mainline GPU residency campaign is closed: the full contractile network — 100 actin filaments + 100 minifilaments + active turnover — runs GPU-resident to completion, behavior-neutral vs the CPU oracle. **Crash mechanism:** `packRange`/`packDynamicRange` cast `(FilSegment) t` in the `RULE_FIL` branch; the historical `ClassCastException` is a `rules[]`/`theThings[]` desync — a slot cached `RULE_FIL` whose live occupant is a `MyoMiniFilament`. The ONLY path that puts a different-typed Thing in a slot's index without an append is `removeThing`'s swap-compaction, which the **2026-06-09 fix already covers** (`markTopologyDirty` on swap → `classifyThings` refresh before the next pack); Phase A `1d7dcc3` added the `RULE_MINIFIL` pack branches. **So on HEAD the cast does NOT reproduce** (`boa10-64Seg-dyn` seeds 1&2 ran 5000 steps clean pre-change) — the journal's "residual blocker" note was STALE (carried from pre-fix; boa10-64Seg-dyn was never re-tested on the merged HEAD, Part-2 used the `-nomini` variant). **Reproduced the mechanism on demand** via fault injection `BOA_DISABLE_TOPODIRTY_ON_SWAP=1` (default OFF): 538 desyncs over 5000 steps, rc=0 (all caught). **Fix:** `reconcilePackRule` dispatches on the LIVE occupant type, not the cached rule — the `FilSegment` cast runs only when the live type IS FilSegment, so a stale rule can never throw; on mismatch it counts (`[STATS] packRuleDesync=N`), logs, and `markTopologyDirty` to self-heal. Closes the crash class structurally, independent of the topologyDirty signal; in production `packRuleDesync=0` (provable pass-through → behavior-neutral). **Force-coverage exactly-once preserved** (only selects per-slot Brownian + makes the cast safe; no force/kernel change). **Validation (3 seeds + 10k long, GPU-resident vs full-CPU oracle):** 10/10 runs `cast=0 NaN=0 packRuleDesync=0 overflow=0 planRebuild=1`; segCt GPU 545 ≈ CPU 557 (neutral), len ~197±42 nm identical; **residency cadence held with minifils — `demandSyncPose calls=151 @5k / 301 @10k` (biochem+frame, not per-step)**; minifils hold span ~180 nm (cohesion on device works). `meanBoundMotors` GPU<CPU = the **pre-existing GPU-minifil-binding seam** (2026-06-09), NOT this fix (noisy both paths). **Flagged separate residual:** at `slotCap=19602` one INERT kernel emits a benign per-step `cuLaunchKernel 701` (out-of-resources) — results oracle-neutral, no NaN; newly exposed at scale, a kernel block-size tuning item (the v2 scale lever), independent of this fix. `RUN_LOGS/2026-06-11_minifil_turnover_packrange_fix.txt`. **Recommend MERGE — campaign closed.** Full writeup below.)
+Last updated: 2026-06-11 (**GPU-vs-CPU dense benchmarks — gliding point + ratio-locked contractile weak-scaling (campaign thesis + v2 baseline).** Measurement only (no physics/kernel change), recording the campaign's thesis-validating number on the REAL contractile workload and the quantitative v2 baseline. **Stoichiometry (B1):** `boa10-64Seg-dyn` 1× = 100 filaments → 197 segments → **101.2 µm actin** (measured from the initial frame; 64 mon/seg, 0.0027 µm/mon = 370 subunits/µm), mean filament ~1.0 µm; minifilament = 8 dimers/end ×2 = **16 molecules = 32 heads**; 100 minifils → **0.99 minifil/µm** (hits the ~1/µm target exactly), **R = 0.043 molar, 31.6 heads/µm** — minifil size in the non-muscle 15–30 band, R/heads just below the contractile literature band. Kept the 100:100 (1:1) count. **Contractile weak-scaling (B2/B3):** held myosin:actin ratio + actin density constant, grew box AREA by N (boxXY = 10√N, Z = 0.5 held → density constant, slab preserved; matches 06-08 areal method over isotropic N^(1/3)); fil = mini = 100·N. GPU-resident vs full-CPU, same seed, ≥3 seeds, two-step-diff steady-state ms/step, output off. **GPU÷CPU = 9.67× (1×) → 6.17× (2×) → 2.17× (4×) → 1.72× (8×) → 1.55× (16×)** — GPU SLOWER at every scale (opposite of gliding) but the gap narrows **6.2× monotonically** with N (the weak-scaling thesis: fixed per-launch overhead amortizes). CPU 3.6→68.1 ms/step, GPU 34.8→105.5. **Breakdown (B4):** kernel-bound at every scale — `exec` 62–73% of GPU step; **transfer (`demandSyncPose`) < 1 ms/step (output-cadence only, 7–25 calls)** = residency eliminated the transfer wall, confirmed; host SoA pack the secondary cost (0.4→9.5 ms/step). **Ceiling (B5):** SOFT — VRAM 782 MiB/12 GB at 16×, CPU tractable at 16× (68 ms/step), both paths complete; the benign 701-per-execute (`LAUNCH_OUT_OF_RESOURCES`, slotCap 19602→313602, oracle-neutral) is fixed per-launch overhead that amortizes (the #1 v2 kernel-launch lever), not a cap. **Gliding dense point (A):** attempting 12× exposed two GPU gliding ceilings below 12× — (1) TaskGraph bytecode wall (`BufferOverflowException` at `plan.execute`; needs `-Dtornado.tvm.maxbytecodesize=16384`, which 8× didn't), (2) host-RAM OOM-kill (`rc=137`, heap 28G + off-heap > 31G; VRAM only 2.6G) — so the densest CLEAN GPU gliding point stays 8× (0.65×); the 06-08 curve is unchanged. **Verdict: residency converts transfer→0 (kernel-bound), and GPU÷CPU on the contractile network improves 6.2× across 1×→16×, but the workload is still GPU-negative (1.5–9.7× slower) because it is sparse + launch-throttled — this curve is the v2 baseline v2 must reproduce and beat.** `BENCHMARK_contractile_scaling.md`; tooling `RUN_LOGS/2026-06-11_contractile_scaling/` (+ `2026-06-08_scaling_study/run_dense_point.sh`). **Recommend MERGE (benchmark tooling + docs; no source change).** Full writeup below.)
+
+Prior update: 2026-06-11 (**Minifil-ON turnover on device — packRange cast fixed; GPU-resident contractile network with turnover (CAMPAIGN CLOSER).** The terminal gate of the mainline GPU residency campaign is closed: the full contractile network — 100 actin filaments + 100 minifilaments + active turnover — runs GPU-resident to completion, behavior-neutral vs the CPU oracle. **Crash mechanism:** `packRange`/`packDynamicRange` cast `(FilSegment) t` in the `RULE_FIL` branch; the historical `ClassCastException` is a `rules[]`/`theThings[]` desync — a slot cached `RULE_FIL` whose live occupant is a `MyoMiniFilament`. The ONLY path that puts a different-typed Thing in a slot's index without an append is `removeThing`'s swap-compaction, which the **2026-06-09 fix already covers** (`markTopologyDirty` on swap → `classifyThings` refresh before the next pack); Phase A `1d7dcc3` added the `RULE_MINIFIL` pack branches. **So on HEAD the cast does NOT reproduce** (`boa10-64Seg-dyn` seeds 1&2 ran 5000 steps clean pre-change) — the journal's "residual blocker" note was STALE (carried from pre-fix; boa10-64Seg-dyn was never re-tested on the merged HEAD, Part-2 used the `-nomini` variant). **Reproduced the mechanism on demand** via fault injection `BOA_DISABLE_TOPODIRTY_ON_SWAP=1` (default OFF): 538 desyncs over 5000 steps, rc=0 (all caught). **Fix:** `reconcilePackRule` dispatches on the LIVE occupant type, not the cached rule — the `FilSegment` cast runs only when the live type IS FilSegment, so a stale rule can never throw; on mismatch it counts (`[STATS] packRuleDesync=N`), logs, and `markTopologyDirty` to self-heal. Closes the crash class structurally, independent of the topologyDirty signal; in production `packRuleDesync=0` (provable pass-through → behavior-neutral). **Force-coverage exactly-once preserved** (only selects per-slot Brownian + makes the cast safe; no force/kernel change). **Validation (3 seeds + 10k long, GPU-resident vs full-CPU oracle):** 10/10 runs `cast=0 NaN=0 packRuleDesync=0 overflow=0 planRebuild=1`; segCt GPU 545 ≈ CPU 557 (neutral), len ~197±42 nm identical; **residency cadence held with minifils — `demandSyncPose calls=151 @5k / 301 @10k` (biochem+frame, not per-step)**; minifils hold span ~180 nm (cohesion on device works). `meanBoundMotors` GPU<CPU = the **pre-existing GPU-minifil-binding seam** (2026-06-09), NOT this fix (noisy both paths). **Flagged separate residual:** at `slotCap=19602` one INERT kernel emits a benign per-step `cuLaunchKernel 701` (out-of-resources) — results oracle-neutral, no NaN; newly exposed at scale, a kernel block-size tuning item (the v2 scale lever), independent of this fix. `RUN_LOGS/2026-06-11_minifil_turnover_packrange_fix.txt`. **Recommend MERGE — campaign closed.** Full writeup below.)
 
 Prior update: 2026-06-11 (**Float32 verdict (cohesion body-reaction) + residency under ACTIVE TURNOVER.** Two parts. **Part 1 — float32 or "round up the usual suspects"?** Added a diagnostic synchronous (no-lag, SET) body-reaction path (`BOA_COH_SYNC`, off by default) and swept (N, myoMiniFilFracMove, dt) on three schemes: float32-sync (device), float64-sync (CPU oracle), float32-lag (production). **VERDICT: the production-fix rationale is a MISATTRIBUTION (RMW confound) with a narrow genuine float32 effect on the side.** At the PRODUCTION operating point (fm=0.07, N=8) synchronous float32 SET is STABLE (wander 22.7° ≈ oracle 20.4°) — the journal's "190°→NaN synchronous divergence" was the cross-step RMW confound (body slot += across steps), exactly the flagged confound; the lag is NOT load-bearing there. The stability threshold tracks the **fm·N stiff-coupling product** (a stiff explicit-integration instability): float32-sync diverges at product ~1.5, float64-sync at ~1.9, and **float32-LAG is stable to product 32 (fm=4.0, never broke)** — so the lag extends the margin >20×, a SCHEME (staggered) effect that float64 needs too, NOT precision. A genuine but narrow ~20% float32 margin-narrowing DOES exist (sync float32 diverges at product 1.5 vs float64 1.9, confirmed at fm=0.20 N=8: float32-sync DIVERGED, float64-sync STABLE), but only at 2.5–4× production stiffness, seed-marginal, and the device also differs in Brownian RNG so 20% is an upper bound on pure precision. **V2: keep a deliberate lag (or semi-implicit/softer fracMove) for the stiff cohesion term as a stiff-stability measure; f64 on that term is unnecessary and would not remove the lag's need at high stiffness.** Diagnostic branch `float32-stability-diag` (commit `BOA_COH_SYNC` + sweep); `RUN_LOGS/2026-06-11_float32_cohesion_stability_sweep.txt`. **Part 2 — residency under active turnover (LANDED, branch `turnover-residency`).** Retired the per-step pose pull on the biochem-ON turnover path by **phase-aligning biochem to a GLOBAL cadence** (`GPUMoveThing.biochemGlobalCadence`/`advanceBiochemCadence`, default-on for `-gpu`): all FilSegment poly/depoly/split/sever mutations now fire on the same 1-in-`biochemCheckInt` step (rate preserved, phase synchronized) instead of scattered per-instance phases — concentrating the relative-write `incCoord`/`setFirstHalf` (which need a fresh host coord baseline) onto biochem steps, where the pose is pulled. Pull now fires at **biochem-cadence + output-cadence only**. On `boa10-64Seg-dyn-nomini` (full turnover: poly/depoly, cofilin sever, kRdmNuc nucleate, split): **demandSyncPose 2011→61 at 2000 steps (=20 biochem + 41 frames), 5011→151 at 5000 steps (=50 biochem + 101 frames)** — exactly Nsteps/K + frames, not Nsteps. **Validation** (3 seeds, GPU-resident vs CPU-global vs CPU-per-instance oracle): statistically NEUTRAL — final segCt means 547/546/571 (within ~13% seed spread), length 195±40 nm all configs; **10/10 runs NaN-free**, planRebuild=1, poseDelta overflow=0 even at production length. **Force-coverage exactly-once trivially preserved** — the change touches NO force/kernel code (only cadence-gating + pull scheduling). Topology marks already cover split/sever/removeThing; nucleation creates absolute-coord segments handled by the slot-scan. `RUN_LOGS/2026-06-11_turnover_residency_validation.txt`. **Residual blocker:** minifil-ON turnover configs (`boa10-64Seg-dyn`) still hit the pre-existing `packRange` MyoMiniFilament→FilSegment cast crash (orthogonal to this work) — that is the last gate before GPU-resident contractile-NETWORK turnover. **Recommend MERGE Part 2; HOLD Part 1 (diagnostic; cherry-pick `BOA_COH_SYNC` as residency tooling if wanted).** Full writeup below.)
 
@@ -28,6 +30,89 @@ Prior update: 2026-06-10 (Path B Phase 1 investigation — internal myosin joint
 Prior update: 2026-06-10 (`-3js` output-sync read-only fix — the GPU minifilament "blow-apart" is the output path corrupting host physics state, not dropped cohesion. `refreshHostMirrorsForOutput()` recomputes the host derived arrays (`soaYVec`/`soaEnd1/2`/`soaTransXTox` + `end1Pt/end2Pt`/`bindTip` Pt3D mirrors); the GPU-resident minifilament dimers' CPU coupling (`alignUVecLeversTorque`/`constrainEnd*Dimers`/`applyRodCoupling`) reads those same arrays next step, and the stale→fresh jump under the stiff alignment torque cascades to NaN. **Fix**: snapshot the physics-owned host arrays before the output recompute (`beginOutputSnapshot`), restore them bit-identically after the frame (`endOutputRender`, at the safe point); device pose read, never written. Minifilaments stay GPU-resident — NOT the cpuFallback hybrid. Paired same-seed `boa10-64Seg-dyn-short` GPU runs: with-`-3js` now matches without (crazy=0, no NaN, frames hold, meanBoundMotors≈0.054 = documented stable occupancy) where before with-`-3js` → ~1.16M crazy → NaN by frame 5. Frames staged `RUN_LOGS/3js_readonly_test/frames/`. **Not merged** — jba views frames first. Full writeup below.)
 
 > Earlier entries (2026-05-17 through 2026-05-25) archived in JOURNAL_ARCHIVE.md.
+
+## 2026-06-11 — GPU-vs-CPU dense benchmarks — gliding point + ratio-locked contractile weak-scaling (campaign thesis + v2 baseline)
+
+Measurement only — no physics/kernel change. Produces the campaign's thesis-validating
+number on the real contractile workload and records the v2 baseline. Full doc:
+`BENCHMARK_contractile_scaling.md`. Tooling committed under
+`RUN_LOGS/2026-06-11_contractile_scaling/` (base config + generator/runner +
+`results.md` + `raw_rows.tsv`) and `RUN_LOGS/2026-06-08_scaling_study/run_dense_point.sh`.
+
+### B1 — Stoichiometry mapping
+Measured from the realized initial frame of `boa10-64Seg-dyn` (seed 1): 100 filaments →
+197 segments → **101.2 µm total actin** (Σ endpoint distances; `actinMonoRadius=0.0027 µm`
+⇒ 370 subunits/µm, matches literature), mean filament ~1.0 µm. Minifilament =
+`numMyoDimersEachEndOfMiniFil`=8 → 8×2 = **16 dimers = 16 molecules = 32 heads** (in the
+non-muscle 15–30 band). 100 minifilaments ⇒ **0.99 minifil/µm of actin** (≈1/µm target hit
+exactly), **R = 1600/37459 = 0.043 molar**, **31.6 heads/µm** (R and heads/µm just below the
+0.05–0.08 / 40–60 contractile band, consistent with the 16-molecule minifilament). The
+100:100 (1:1) count already meets the target → kept unchanged. The ratio is set at init;
+turnover net-grows actin ~2.8×/run with minifil count fixed, so minifil/µm drifts down
+during a run (the weak-scaling invariant holds in the density/statistical sense across N).
+
+### B2 — Weak-scaling design
+Held myosin:actin ratio AND actin density constant, grew box ∝ N: **boxXY = 10√N, Z = 0.5
+held** (volume ∝ N, areal+volumetric density constant, quasi-2D slab preserved), fil =
+mini = 100·N. Chose areal √N over isotropic N^(1/3) because the workload is a 0.5 µm slab —
+N^(1/3) would thicken it 0.5→1.26 µm at 16× (a z-confinement physics change) — and √N
+matches the established 06-08 gliding method. Sizes 1×/2×/4×/8×/16× = 100…1600 fil,
+3200…51200 heads, box 50…800 µm³.
+
+### B3 — GPU-vs-CPU timing (the curve)
+Full workload (minifils + turnover), GPU-resident vs full-CPU, same seed, two-step-diff
+steady-state ms/step, output off, ≥3 seeds (16× single-seed ceiling probe).
+
+| N | fil | mini | heads | CPU ms/step | GPU ms/step | **GPU÷CPU** |
+|---:|---:|---:|---:|---:|---:|:--:|
+| 1× | 100 | 100 | 3 200 | 3.6 ± 0.1 | 34.8 ± 0.3 | **9.67×** |
+| 2× | 200 | 200 | 6 400 | 6.6 ± 0.4 | 40.7 ± 0.8 | **6.17×** |
+| 4× | 400 | 400 | 12 800 | 23.5 ± 0.3 | 51.0 ± 0.2 | **2.17×** |
+| 8× | 800 | 800 | 25 600 | 40.2 ± 0.6 | 69.2 ± 0.2 | **1.72×** |
+| 16× | 1 600 | 1 600 | 51 200 | 68.1 | 105.5 | **1.55×** |
+
+GPU is slower at every scale (opposite of the gliding bed), but GPU÷CPU narrows **6.2×
+monotonically** with N — the weak-scaling thesis (fixed per-launch overhead amortizes).
+Inter-seed spread tiny (GPU ±0.2–0.8). The 701 fires deterministically once per execute.
+Absolute ms/step carries a turnover-growth/window caveat across N; the **per-row ratio is
+clean** (CPU/GPU share seed+window; segCt/length statistically neutral per the campaign
+closer; `meanBoundMotors` GPU<CPU is the documented binding seam, not a cost difference).
+
+### B4 — GPU breakdown (kernel vs transfer vs host)
+Per-step from `[STATS] gpuMoveThing`: exec (kernel, incl. 701 round-trip) = **62–73%** of
+GPU step at every scale (25.4 ms/step @1× → 64.9 @16×). **Transfer (`demandSyncPose`) <1
+ms/step always** (output-cadence only: 25 calls @1× → 7 @16×) — residency eliminated the
+transfer wall, **confirmed kernel-bound**. Host SoA pack (`slotPack`) is the secondary cost
+and the only piece growing materially with N (0.4→9.5 ms/step) — a candidate v2 cleanup,
+secondary to the kernel. **v2 lever = kernel efficiency + the 701 launch throttle, not PCIe.**
+
+### B5 — Practical ceiling (soft)
+Neither VRAM (782 MiB/12 GB at 16×) nor host heap (`-Xmx16G`) caps the contractile workload
+— object count is tiny vs the gliding bed; 32×/64× reachable on memory. CPU stays tractable
+(68 ms/step at 16×) — it does NOT go intractable before GPU (contrast gliding's 8× CPU heap
+wall). The 701-at-scale is benign (oracle-neutral, no NaN; slotCap 19602→313602 linear), a
+fixed per-launch overhead that amortizes (≡ why GPU÷CPU improves), not a cap — the #1 v2
+kernel-launch tuning lever. The contractile ceiling is just GPU kernel cost.
+
+### A — Gliding dense point (ceiling refinement; no new timing dot)
+Attempting a 12× point on the 06-08 curve exposed two GPU gliding ceilings below 12×:
+(1) **TaskGraph bytecode wall** — `BufferOverflowException` in `plan.execute`
+(`GPUMoveThing.moveThings:5932`) without `-Dtornado.tvm.maxbytecodesize=16384` (8× didn't
+need it; the larger 12× graph does — same flag the contractile path requires); with the
+flag the first ~40 steps run clean. (2) **Host-RAM OOM-kill** — sustained 12× is SIGKILL-ed
+(`rc=137`, 31.8 s): `-Xmx28G` heap + TornadoVM off-heap (slotCap≈7.07 M) > 31 GB host
+(VRAM only 2.6 G — host RAM, not VRAM). So the densest **clean** GPU gliding point stays the
+existing **8× (GPU÷CPU 0.65×)**; the 06-08 0.65–0.68× curve is unchanged. A 10× timing point
+was queued but not run (stopped per operator — 8× + ceiling are sufficient).
+
+### Verdict
+Residency converts transfer→0 (kernel-bound on both workloads), and GPU÷CPU on the real
+contractile network improves **6.2× across 1×→16×** — but the contractile workload is still
+**GPU-negative (1.5–9.7× slower)** because it is sparse and the kernels are launch-throttled,
+the mirror image of the dense, kernel-light, memory-bound gliding bed where GPU wins (0.65×).
+**This curve is the quantitative v2 baseline** (reproduce for correctness, beat the GPU column
+— target the 701/launch overhead + kernel efficiency). **Recommend MERGE** — benchmark tooling
++ docs only, no source change. Next conversation: v2 scoping.
 
 ## 2026-06-11 — Minifil-ON turnover on device — packRange cast fixed; GPU-resident contractile network with turnover (campaign closer)
 
