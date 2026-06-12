@@ -1,0 +1,88 @@
+=== Part E: per-task TASK_KERNEL_TIME (ms/execute, profiler, warmup-skip 15) ===
+
+## 1x  (runs=2, executes/run~299)
+   graph wall=144.11ms  totalKernel=4.27ms  copyIn=20.994ms copyOut=115.531ms
+   copyInBytes=182.05MB copyOutBytes=1083.10MB allocBytes=1305.3MB
+     gridScatter           3.126 ms
+     dimerCohesion         0.471 ms
+     joints                0.161 ms
+     bind                  0.140 ms
+     move                  0.080 ms
+     chain                 0.062 ms
+     gridScanLocal         0.049 ms
+     gridScanAdd           0.045 ms
+     segMotorForce         0.027 ms
+     filFilCandidate       0.020 ms
+     boundary              0.017 ms
+     gridHist              0.016 ms
+     motorForce            0.015 ms
+     scatterPose           0.013 ms
+     segBbox               0.012 ms
+     derived               0.009 ms
+     gridScanChunks        0.007 ms
+     gridZero              0.005 ms
+
+## 4x  (runs=2, executes/run~299)
+   graph wall=170.33ms  totalKernel=16.78ms  copyIn=34.842ms copyOut=115.483ms
+   copyInBytes=312.36MB copyOutBytes=1089.28MB allocBytes=1479.1MB
+     gridScatter          14.701 ms
+     joints                0.549 ms
+     dimerCohesion         0.535 ms
+     move                  0.302 ms
+     bind                  0.254 ms
+     chain                 0.115 ms
+     gridScanAdd           0.065 ms
+     gridScanLocal         0.061 ms
+     boundary              0.035 ms
+     segMotorForce         0.033 ms
+     derived               0.021 ms
+     filFilCandidate       0.021 ms
+     motorForce            0.020 ms
+     gridHist              0.017 ms
+     gridScanChunks        0.015 ms
+     segBbox               0.013 ms
+     scatterPose           0.013 ms
+     gridZero              0.005 ms
+
+## 8x  (runs=2, executes/run~299)
+   graph wall=203.95ms  totalKernel=33.34ms  copyIn=52.401ms copyOut=115.022ms
+   copyInBytes=486.12MB copyOutBytes=1097.52MB allocBytes=1710.8MB
+     gridScatter          29.909 ms
+     joints                1.087 ms
+     dimerCohesion         0.725 ms
+     move                  0.597 ms
+     bind                  0.435 ms
+     chain                 0.198 ms
+     gridScanAdd           0.067 ms
+     gridScanLocal         0.062 ms
+     boundary              0.054 ms
+     segMotorForce         0.044 ms
+     derived               0.042 ms
+     gridScanChunks        0.026 ms
+     motorForce            0.025 ms
+     filFilCandidate       0.021 ms
+     gridHist              0.018 ms
+     segBbox               0.015 ms
+     scatterPose           0.013 ms
+     gridZero              0.006 ms
+
+=== kernel slope (ms/execute) 1x -> 4x -> 8x, ratio 8x/1x ===
+   kernel                    1x        4x        8x   8x/1x   4x/1x
+   gridScatter            3.126    14.701    29.909    9.57    4.70
+   joints                 0.161     0.549     1.087    6.75    3.41
+   dimerCohesion          0.471     0.535     0.725    1.54    1.14
+   move                   0.080     0.302     0.597    7.47    3.78
+   bind                   0.140     0.254     0.435    3.11    1.82
+   chain                  0.062     0.115     0.198    3.20    1.85
+   gridScanAdd            0.045     0.065     0.067    1.51    1.45
+   gridScanLocal          0.049     0.061     0.062    1.27    1.26
+   boundary               0.017     0.035     0.054    3.17    2.06
+   segMotorForce          0.027     0.033     0.044    1.63    1.20
+   derived                0.009     0.021     0.042    4.86    2.52
+   gridScanChunks         0.007     0.015     0.026    3.75    2.18
+   motorForce             0.015     0.020     0.025    1.62    1.28
+   filFilCandidate        0.020     0.021     0.021    1.09    1.07
+   gridHist               0.016     0.017     0.018    1.10    1.06
+   segBbox                0.012     0.013     0.015    1.20    1.10
+   scatterPose            0.013     0.013     0.013    1.05    1.05
+   gridZero               0.005     0.005     0.006    1.11    1.06

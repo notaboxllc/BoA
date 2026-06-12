@@ -1912,6 +1912,21 @@ public class BoxOfActin {
 			System.out.printf("[STATS] fActin segs=%d monomers=%d fActinUM=%.2f meanSegLenUM=%.3f freePoolUM=%.2f%n",
 				segs, monoSum, fActinUM, segs > 0 ? lenSum / segs : 0.0, Env.actinConc.getValue());
 		}
+		// Memory ceiling readout (Part D, benchmark-contractile-dense): JVM used/max
+		// heap + (GPU) device-buffer slotCap/estimate. Peak host RSS comes from an
+		// external /usr/bin/time -v wrapper; true device VRAM from NVML (nvidia-smi).
+		{
+			Runtime rt = Runtime.getRuntime();
+			long usedHeap = rt.totalMemory() - rt.freeMemory();
+			long maxHeap  = rt.maxMemory();
+			if (Env.useGPU) {
+				System.out.printf("[STATS] mem usedHeapMB=%.1f maxHeapMB=%.1f slotCap=%d slotCount=%d myoCap=%d devBufEstMB=%.1f%n",
+					usedHeap / 1.0e6, maxHeap / 1.0e6, GPUMoveThing.getSlotCap(), GPUMoveThing.getSlotCount(),
+					GPUMoveThing.getMyoCap(), GPUMoveThing.getDeviceBufBytesEstimate() / 1.0e6);
+			} else {
+				System.out.printf("[STATS] mem usedHeapMB=%.1f maxHeapMB=%.1f%n", usedHeap / 1.0e6, maxHeap / 1.0e6);
+			}
+		}
 		// Filament-network percolation / spanning (benchmark-contractile-dense). Read-only end-of-run probe.
 		PercolationProbe.report();
 		// Windowed host-phase decomposition report (Part C). No-op unless BOA_STEP_PROFILE set.
