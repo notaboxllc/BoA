@@ -89,7 +89,14 @@ public class GPUMoveThing {
     // ON; set BOA_SINGLE_GRAPH=0 to fall back to the Step-2 separate-plan
     // path (kept for A/B comparison during 3.1–3.3 validation).
     public static final boolean SINGLE_GRAPH;
+    // Parallel bind-grid build (counting sort). Default ON; set BOA_SERIAL_GRID=1
+    // to fall back to the single-threaded GPUMotorBinding.gridAssembleKernel
+    // (the correctness oracle). Only affects the single-graph (production) bind
+    // subgraph; the BOA_SINGLE_GRAPH=0 two-plan path keeps the serial kernel.
+    public static final boolean PARALLEL_GRID;
     static {
+        String sgr = System.getenv("BOA_SERIAL_GRID");
+        PARALLEL_GRID = !(sgr != null && (sgr.equals("1") || sgr.equalsIgnoreCase("true")));
         String s = System.getenv("BOA_SOA_POSE");
         SOA_POSE = (s != null && !s.isEmpty()
                 && !s.equals("0") && !s.equalsIgnoreCase("false"));
@@ -801,6 +808,9 @@ public class GPUMoveThing {
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
     private static GridScheduler        gridScheduler;
+    // KernelContext for the parallel bind-grid histogram (atomicAdd) task.
+    private static final uk.ac.manchester.tornado.api.KernelContext gridHistContext =
+            new uk.ac.manchester.tornado.api.KernelContext();
     // Phase 4 — last execute()'s result, retained so demandSyncPoseToHost() can
     // trigger a TornadoVM device→host copy for the UNDER_DEMAND buffers (coord,
     // uVec, yVec, derived*). Reset to null on closePlan / reset and before the
@@ -3450,6 +3460,7 @@ public class GPUMoveThing {
         IntArray   bindSegBbox = null;
         IntArray   bindSegCellCount = null;
         IntArray   bindCellCount = null;
+        IntArray   bindChunkSum = null;
         IntArray   bindGridCellOffsets = null;
         IntArray   bindGridCellContents = null;
         IntArray   bindBoundSegId = null;
@@ -3463,6 +3474,7 @@ public class GPUMoveThing {
             bindSegBbox          = GPUMotorBinding.getSegBboxArray();
             bindSegCellCount     = GPUMotorBinding.getSegCellCountArray();
             bindCellCount        = GPUMotorBinding.getCellCountArray();
+            bindChunkSum         = GPUMotorBinding.getChunkSumArray();
             bindGridCellOffsets  = GPUMotorBinding.getGridCellOffsetsArray();
             bindGridCellContents = GPUMotorBinding.getGridCellContentsArray();
             bindBoundSegId       = GPUMotorBinding.getBoundSegIdArray();
@@ -3499,12 +3511,42 @@ public class GPUMoveThing {
                       GPUMotorBinding::segBboxKernelResident,
                       coord, uVec, soaLengthArr, filMoveSlot,
                       bindGridParams, bindGridDims, bindCounts,
-                      bindSegCellCount, bindSegBbox)
-                .task("gridAssemble",
-                      GPUMotorBinding::gridAssembleKernel,
-                      bindSegCellCount, bindSegBbox,
-                      bindGridDims, bindCounts,
-                      bindGridCellOffsets, bindGridCellContents, bindCellCount)
+                      bindSegCellCount, bindSegBbox);
+            if (PARALLEL_GRID) {
+                // Parallel counting-sort grid build (zero → histogram → 2-level
+                // scan → scatter). Bit-identical CSR to the serial gridAssemble.
+                tg = tg
+                    .task("gridZero",
+                          GPUMotorBinding::gridZeroKernel,
+                          bindGridDims, bindCellCount)
+                    .task("gridHist",
+                          GPUMotorBinding::gridHistogramKernel,
+                          gridHistContext, bindSegBbox,
+                          bindGridDims, bindCounts, bindCellCount)
+                    .task("gridScanLocal",
+                          GPUMotorBinding::gridScanLocalKernel,
+                          bindGridDims, bindCellCount,
+                          bindGridCellOffsets, bindChunkSum)
+                    .task("gridScanChunks",
+                          GPUMotorBinding::gridScanChunksKernel,
+                          bindGridDims, bindChunkSum)
+                    .task("gridScanAdd",
+                          GPUMotorBinding::gridScanAddKernel,
+                          bindGridDims, bindGridCellOffsets,
+                          bindGridCellContents, bindCellCount, bindChunkSum)
+                    .task("gridScatter",
+                          GPUMotorBinding::gridScatterKernel,
+                          bindSegBbox, bindGridDims, bindCounts,
+                          bindGridCellOffsets, bindGridCellContents, bindCellCount);
+            } else {
+                tg = tg
+                    .task("gridAssemble",
+                          GPUMotorBinding::gridAssembleKernel,
+                          bindSegCellCount, bindSegBbox,
+                          bindGridDims, bindCounts,
+                          bindGridCellOffsets, bindGridCellContents, bindCellCount);
+            }
+            tg = tg
                 .task("bind",
                       GPUMotorBinding::bindKernelResident,
                       coord, uVec, soaLengthArr,
@@ -3802,6 +3844,47 @@ public class GPUMoveThing {
             segBboxWorker.setLocalWork(GPUMotorBinding.segBboxKernelBlockSize(), 1, 1);
             gridScheduler.addWorkerGrid("chained.bind",    bindWorker);
             gridScheduler.addWorkerGrid("chained.segBbox", segBboxWorker);
+
+            if (PARALLEL_GRID) {
+                // Parallel grid-build worker grids. Block 64 (the graph-wide
+                // default — never leave a parallel task's block defaulted: the
+                // 701 lesson). Global work is padded UP to a multiple of the
+                // block, since a WorkerGrid drops the remainder partial block
+                // when global%local != 0; the kernels' @Parallel bounds
+                // (totalCells / numChunks) and the histogram's globalIdx>=S
+                // guard skip the padding threads.
+                final int B = 64;
+                int gTotalCells = GPUMotorBinding.totalCells();
+                int gNumChunks  = (gTotalCells + GPUMotorBinding.GRID_SCAN_CHUNK - 1)
+                                  / GPUMotorBinding.GRID_SCAN_CHUNK;
+                int cellsGlobal  = ((gTotalCells  + B - 1) / B) * B;
+                int segGlobal    = ((bindSegCapLocal + B - 1) / B) * B;
+                int chunksGlobal = ((gNumChunks   + B - 1) / B) * B;
+
+                WorkerGrid gridZeroWorker = new WorkerGrid1D(cellsGlobal);
+                gridZeroWorker.setLocalWork(B, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridZero", gridZeroWorker);
+
+                WorkerGrid gridHistWorker = new WorkerGrid1D(segGlobal);
+                gridHistWorker.setLocalWork(B, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridHist", gridHistWorker);
+
+                WorkerGrid gridScanLocalWorker = new WorkerGrid1D(chunksGlobal);
+                gridScanLocalWorker.setLocalWork(B, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridScanLocal", gridScanLocalWorker);
+
+                WorkerGrid gridScanChunksWorker = new WorkerGrid1D(1);
+                gridScanChunksWorker.setLocalWork(1, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridScanChunks", gridScanChunksWorker);
+
+                WorkerGrid gridScanAddWorker = new WorkerGrid1D(chunksGlobal);
+                gridScanAddWorker.setLocalWork(B, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridScanAdd", gridScanAddWorker);
+
+                WorkerGrid gridScatterWorker = new WorkerGrid1D(1);
+                gridScatterWorker.setLocalWork(1, 1, 1);
+                gridScheduler.addWorkerGrid("chained.gridScatter", gridScatterWorker);
+            }
         }
 
         if (DIAG_CPU_DELTA_ADD) {

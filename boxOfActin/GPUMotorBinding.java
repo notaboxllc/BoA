@@ -1,6 +1,7 @@
 package boxOfActin;
 
 import uk.ac.manchester.tornado.api.GridScheduler;
+import uk.ac.manchester.tornado.api.KernelContext;
 import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.TaskGraph;
 import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
@@ -83,6 +84,16 @@ public class GPUMotorBinding {
     private static IntArray   segBbox;          // segCap*6
     private static IntArray   segCellCount;     // segCap
     private static IntArray   cellCount;        // totalCells
+
+    // Parallel grid-build (counting-sort) scratch — see the gridZero/gridHistogram/
+    // gridScanLocal/gridScanChunks/gridScanAdd/gridScatter kernels below. The
+    // prefix-sum is a two-level block scan: each of GRID_SCAN_CHUNK-sized chunks
+    // is scanned in parallel, the per-chunk totals are scanned by a single thread,
+    // then the chunk bases are added back in parallel. chunkSum holds the per-chunk
+    // totals (then, after gridScanChunks, the exclusive per-chunk base offsets);
+    // chunkSum[numChunks] stashes the grand total for the offsets[totalCells] write.
+    static final int          GRID_SCAN_CHUNK = 512;
+    private static IntArray   chunkSum;         // ceil(totalCells/GRID_SCAN_CHUNK)+1
 
     // Static grid params — FIRST_EXECUTION upload, packed FloatArray:
     //   [0]=xMin, [1]=yMin, [2]=zMin, [3]=cellSize, [4]=invCellSize,
@@ -319,6 +330,177 @@ public class GPUMotorBinding {
             gridCellOffsets.set(totalCells, finalOff);
 
             // 4. Scatter
+            for (int s = 0; s < S; s++) {
+                int ix0 = segBbox.get(s * 6);
+                int ix1 = segBbox.get(s * 6 + 1);
+                int iy0 = segBbox.get(s * 6 + 2);
+                int iy1 = segBbox.get(s * 6 + 3);
+                int iz0 = segBbox.get(s * 6 + 4);
+                int iz1 = segBbox.get(s * 6 + 5);
+                for (int iz = iz0; iz <= iz1; iz++) {
+                    int izOff = iz * nXY;
+                    for (int iy = iy0; iy <= iy1; iy++) {
+                        int iyOff = iy * nXBins;
+                        for (int ix = ix0; ix <= ix1; ix++) {
+                            int cellId = ix + iyOff + izOff;
+                            int writePos = gridCellOffsets.get(cellId) + cellCount.get(cellId);
+                            if (writePos < contentsCap) {
+                                gridCellContents.set(writePos, s);
+                            }
+                            cellCount.set(cellId, cellCount.get(cellId) + 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Parallel grid-build (counting sort) — replaces the single-threaded
+    // gridAssembleKernel above with six device-barrier-separated passes so the
+    // O(totalCells) zero + prefix-sum (the dominant cost at scale: totalCells
+    // grows ∝ box area while a single thread scans it) run across the whole GPU.
+    //
+    //   gridZero        — parallel over cells: cellCount[c] = 0
+    //   gridHistogram   — parallel over segments (KernelContext): for each cell
+    //                     in the segment's AABB, atomicAdd(cellCount,cellId,1)
+    //   gridScanLocal   — parallel over GRID_SCAN_CHUNK-sized chunks: local
+    //                     exclusive prefix of cellCount into gridCellOffsets +
+    //                     per-chunk total into chunkSum
+    //   gridScanChunks  — single thread: exclusive scan of chunkSum in place
+    //                     (per-chunk base offsets); chunkSum[numChunks] = total
+    //   gridScanAdd     — parallel over chunks: add chunk base to the local
+    //                     offsets, reset cellCount to 0 (scatter cursor), and
+    //                     write offsets[totalCells] = min(total, contentsCap)
+    //   gridScatter     — single thread: walk segments × AABB, place seg IDs at
+    //                     offsets[cellId] + cellCount[cellId]++ (serial because
+    //                     this PTX KernelContext exposes only a void atomicAdd —
+    //                     no value-returning fetch-add for a parallel cursor)
+    //
+    // The histogram counts and prefix-sum are order-independent and the scatter
+    // is serial, so the CSR this produces is BIT-IDENTICAL to gridAssembleKernel
+    // (same per-cell contents in the same within-cell order) — determinism is
+    // preserved, not merely multiset-equal. Kept behind GPUMoveThing's serial-
+    // grid flag with gridAssembleKernel as the correctness oracle.
+    // -------------------------------------------------------------------------
+    static void gridZeroKernel(IntArray gridDims, IntArray cellCount) {
+        int totalCells = gridDims.get(3);
+        for (@Parallel int c = 0; c < totalCells; c++) {
+            cellCount.set(c, 0);
+        }
+    }
+
+    static void gridHistogramKernel(
+            KernelContext context,
+            IntArray segBbox,
+            IntArray gridDims,
+            IntArray counts,
+            IntArray cellCount) {
+
+        int s = context.globalIdx;
+        int S = counts.get(1);
+        if (s >= S) { return; }
+
+        int nXBins = gridDims.get(0);
+        int nYBins = gridDims.get(1);
+        int nXY    = nXBins * nYBins;
+
+        int ix0 = segBbox.get(s * 6);
+        int ix1 = segBbox.get(s * 6 + 1);
+        int iy0 = segBbox.get(s * 6 + 2);
+        int iy1 = segBbox.get(s * 6 + 3);
+        int iz0 = segBbox.get(s * 6 + 4);
+        int iz1 = segBbox.get(s * 6 + 5);
+        for (int iz = iz0; iz <= iz1; iz++) {
+            int izOff = iz * nXY;
+            for (int iy = iy0; iy <= iy1; iy++) {
+                int iyOff = iy * nXBins;
+                for (int ix = ix0; ix <= ix1; ix++) {
+                    int cellId = ix + iyOff + izOff;
+                    context.atomicAdd(cellCount, cellId, 1);
+                }
+            }
+        }
+    }
+
+    static void gridScanLocalKernel(
+            IntArray gridDims,
+            IntArray cellCount,
+            IntArray gridCellOffsets,
+            IntArray chunkSum) {
+
+        int totalCells = gridDims.get(3);
+        int numChunks  = (totalCells + GRID_SCAN_CHUNK - 1) / GRID_SCAN_CHUNK;
+        for (@Parallel int ch = 0; ch < numChunks; ch++) {
+            int start = ch * GRID_SCAN_CHUNK;
+            int end   = start + GRID_SCAN_CHUNK;
+            if (end > totalCells) { end = totalCells; }
+            int acc = 0;
+            for (int c = start; c < end; c++) {
+                gridCellOffsets.set(c, acc);   // chunk-relative exclusive prefix
+                acc += cellCount.get(c);
+            }
+            chunkSum.set(ch, acc);             // this chunk's total
+        }
+    }
+
+    static void gridScanChunksKernel(
+            IntArray gridDims,
+            IntArray chunkSum) {
+
+        for (@Parallel int gid = 0; gid < 1; gid++) {
+            int totalCells = gridDims.get(3);
+            int numChunks  = (totalCells + GRID_SCAN_CHUNK - 1) / GRID_SCAN_CHUNK;
+            int acc = 0;
+            for (int ch = 0; ch < numChunks; ch++) {
+                int t = chunkSum.get(ch);
+                chunkSum.set(ch, acc);         // exclusive base offset of chunk ch
+                acc += t;
+            }
+            chunkSum.set(numChunks, acc);      // grand total (uncapped)
+        }
+    }
+
+    static void gridScanAddKernel(
+            IntArray gridDims,
+            IntArray gridCellOffsets,
+            IntArray gridCellContents,
+            IntArray cellCount,
+            IntArray chunkSum) {
+
+        int totalCells  = gridDims.get(3);
+        int numChunks   = (totalCells + GRID_SCAN_CHUNK - 1) / GRID_SCAN_CHUNK;
+        int contentsCap = gridCellContents.getSize();
+        for (@Parallel int ch = 0; ch < numChunks; ch++) {
+            int start = ch * GRID_SCAN_CHUNK;
+            int end   = start + GRID_SCAN_CHUNK;
+            if (end > totalCells) { end = totalCells; }
+            int base = chunkSum.get(ch);
+            for (int c = start; c < end; c++) {
+                gridCellOffsets.set(c, gridCellOffsets.get(c) + base);
+                cellCount.set(c, 0);           // reset to per-cell write cursor
+            }
+            if (ch == 0) {
+                int total = chunkSum.get(numChunks);
+                gridCellOffsets.set(totalCells, total < contentsCap ? total : contentsCap);
+            }
+        }
+    }
+
+    static void gridScatterKernel(
+            IntArray segBbox,
+            IntArray gridDims,
+            IntArray counts,
+            IntArray gridCellOffsets,
+            IntArray gridCellContents,
+            IntArray cellCount) {
+
+        for (@Parallel int gid = 0; gid < 1; gid++) {
+            int S          = counts.get(1);
+            int nXBins     = gridDims.get(0);
+            int nYBins     = gridDims.get(1);
+            int nXY        = nXBins * nYBins;
+            int contentsCap = gridCellContents.getSize();
             for (int s = 0; s < S; s++) {
                 int ix0 = segBbox.get(s * 6);
                 int ix1 = segBbox.get(s * 6 + 1);
@@ -1092,6 +1274,7 @@ public class GPUMotorBinding {
     public static IntArray   getSegBboxArray()          { return segBbox; }
     public static IntArray   getSegCellCountArray()     { return segCellCount; }
     public static IntArray   getCellCountArray()        { return cellCount; }
+    public static IntArray   getChunkSumArray()         { return chunkSum; }
     public static IntArray   getGridCellOffsetsArray()  { return gridCellOffsets; }
     public static IntArray   getGridCellContentsArray() { return gridCellContents; }
     public static IntArray   getBoundSegIdArray()       { return boundSegId; }
@@ -1174,6 +1357,7 @@ public class GPUMotorBinding {
         segBbox      = new IntArray(segCap * 6);
         segCellCount = new IntArray(segCap);
         cellCount    = new IntArray(totalCells);
+        chunkSum     = new IntArray((totalCells + GRID_SCAN_CHUNK - 1) / GRID_SCAN_CHUNK + 1);
 
         arcOnFilDev  = new FloatArray(motorCap);
 
