@@ -1,0 +1,9 @@
+[14:02] VALIDATE 1 cpu START
+[14:02] VALIDATE 1 cpu DONE ms/step=52.6461 activeLinks=481 fActin segs=5933
+[14:02] VALIDATE 1 gpu START
+[14:03] VALIDATE 1 gpu DONE ms/step=61.4586 activeLinks=219 fActin segs=5961
+[14:03] VALIDATE 8 cpu START
+[14:07] VALIDATE 8 cpu DONE ms/step=335.5752 activeLinks=3193 fActin segs=47677
+[14:07] VALIDATE 8 gpu START
+[14:10] VALIDATE 8 gpu DONE ms/step=274.8277 activeLinks=1657 fActin segs=47510
+[14:10] === VALIDATE DONE ===

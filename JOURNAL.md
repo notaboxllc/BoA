@@ -1,5 +1,37 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — Retired the flat ~1 GB copy-out: GPU now WINS at dense (branch `benchmark-contractile-dense`)
+
+Follow-up to v4. Full writeup `COPYOUT_RESIDENCY.md`; data `RUN_LOGS/2026-06-12_copyout_fix/`. Not merged.
+
+**Part 1 — the copy-out was `ffCandPartner`.** The v4 "flat ~115 ms / ~1.08 GB device→host
+copy-out, constant across scale" is the fil-fil broad-phase candidate buffer:
+`IntArray(segCap × FILFIL_MAX_CAND)` = `1 000 000 × 256 × 4 B` = **1.024 GB**, allocated at a
+FIXED capacity (`segCap = FilSegment.soaEnd1X.length = 1e6`, the SoA cap — not ∝N), which is
+exactly why it was flat. It was declared `EVERY_EXECUTION` in the chained graph, but the host
+consumer `drainFilFilCandidates()` reads it (b) only every `crosslinkCheckInt` (=100) steps and
+(c) only the live sub-range `[0, filSegmentCt×256)`. **Verdict (b)+(c)** → cadence-gated to
+`UNDER_DEMAND` + `demandSyncFilFilCandidates()` on fire steps (same residency pattern as pose).
+
+**Result: GPU÷CPU 3.32→1.17 at 1×, 1.12→0.82 at 8× — GPU now wins at dense.** Crossover moved
+from "just beyond 8×" to ~1.3×. GPU 1× exec 142→34 ms/step. Profiler-confirmed: copy-out
+1083→64.8 MB/execute (−1018 MB = the buffer exactly), 115.5→7.2 ms; copy-in + kernels untouched.
+**Physics-neutral:** segs +0.10 %/−0.44 %, activeLinks within the GPU path's own run-to-run
+spread (v4's two 1× runs differed ±8 % links / ±0.18 % segs), `crosslinkFireCt`=6 unchanged,
+NaN=0, overflow=0. (c) live-subrange transfer left as a cheap follow-on (fire-step cost already
+amortized to <2 ms/step). Next device cost down: the superlinear `gridScatter` kernel.
+
+**Part 2 — host "other" bucket decomposed** (new `BOA_STEP_PROFILE` nanoTime brackets at existing
+boundaries; residual now <2 ms/step, ~100 % attributed). The v4 GPU "other" (16.7→95.6) breaks
+down to: **`recompute` 1.2→27.7 ms — the elephant, superlinear 23×** (`setBiophys` + force-zero
+memset + `GPUMoveThing.onStepStart` reclassification/delta-audit, which re-runs every step under
+turnover); then resetCt 21, cleanup 14, and the CPU force phases still on the GPU path
+(step 13.5, jointsCpu 11.8, brownian 5.5 ≈ 31 ms of un-offloaded CPU work — the next residency
+frontier). CPU "other" co-elephants: jointsCpu 56.8 + motorFilCol 52.5. Found+fixed two
+accounting bugs in the decomposition (pack is inside the move-wrap → double-counted in
+moveDrains; step/gather/brownian run on `-gpu` but were excluded from labeled). Attribution only,
+no host optimization, pack untouched.
+
 ## 2026-06-12 — Dense contractile compute benchmark v4 COMPLETE (Parts A–E; GPU does not win at dense) (branch `benchmark-contractile-dense`)
 
 **Percolation dropped as a gate** (compute cost is count-driven, not connectivity-driven). Ran
