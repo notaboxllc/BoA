@@ -44,6 +44,15 @@ public class BoxOfActin {
 	static int toFileCounter = 0;
 	static int remoteOutCounter = 0;
 	static int collisionCkCounter = 0;
+	static int crosslinkCkCounter = 0;   // crosslink-formation cadence counter (fires every Thing.crosslinkCheckInt)
+	// Time-averaged active FilLink count (steady-state metric, 2026-06-12). The
+	// instantaneous filLinkCt at run-end is a post-formation snapshot (the run
+	// typically ends a step after a crosslink-fire step) that masks dissolution
+	// between checks; the per-step mean is the true formation/dissolution balance.
+	static long linkCtSum = 0;
+	static long linkCtSamples = 0;
+	static long linkCtSumSettled = 0;     // mean over the back half (after warm-up)
+	static long linkCtSamplesSettled = 0;
 	static int ckElasticityCounter = 0;
 	static int ckPersistenceCounter = 0;
 	static int applyBrownianForcesCounter = 0;
@@ -1182,6 +1191,17 @@ public class BoxOfActin {
 				// Brownian phase, so calcRandomForces() can skip GPU-handled Things.
 				// No-op on topology-stable steps after the first call.
 				if (Env.useGPU) { GPUMoveThing.onStepStart(); }
+				 // Crosslink-FORMATION cadence (2026-06-12): formation is a biochem-class
+				 // stochastic event, fired every Thing.crosslinkCheckInt steps — not every
+				 // collision step. Set the per-step flag HERE (before the CPU mesh walk below
+				 // AND before the GPU move plan / drain) so all three formation sites agree.
+				 // Increment-then-check, matching GPUMoveThing.advanceBiochemCadence's phase:
+				 // when crosslinkCheckInt == biochemCheckInt (the default) the two fire on the
+				 // SAME steps, so the fil-fil drain rides the move-phase biochem-cadence pose
+				 // pull (refreshHostPoseForFilFil skips its redundant same-step transfer).
+				 crosslinkCkCounter++;
+				 GPUMoveThing.crosslinkFiresThisStep = (crosslinkCkCounter >= Thing.crosslinkCheckInt);
+				 if (GPUMoveThing.crosslinkFiresThisStep) { crosslinkCkCounter = 0; GPUMoveThing.crosslinkFireCt++; }
 				 // Meshed Collisions
 				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
 					 collisionMeshTimer.start();
@@ -1360,7 +1380,13 @@ public class BoxOfActin {
 						// pose the bind kernel used). Run the host checkToLink fine
 						// check → makeLink on each. 1-step lag vs the CPU meshColl
 						// wave (which formed links pre-step), matching the bind drain.
-						if (GPUMoveThing.filFilBroadphaseActive) {
+						if (GPUMoveThing.filFilBroadphaseActive && GPUMoveThing.crosslinkFiresThisStep) {
+							// Candidate-completeness harness (validation #2): the kernel just
+							// emitted this fire-step's candidates; compare vs brute-force before
+							// the drain consumes them. No-op unless BOA_FILFIL_PARITY==this step.
+							if (Env.counter == GPUMoveThing.FILFIL_PARITY_STEP) {
+								GPUMoveThing.filFilCandidateParityCheck();
+							}
 							GPUMotorBinding.drainFilFilCandidates();
 						}
 					}
@@ -1839,6 +1865,13 @@ public class BoxOfActin {
 		// the device broad-phase activity / FILSEG_MESH-skip confirmation.
 		System.out.printf("[STATS] filLinks=%d (active=%d inactive=%d)%n",
 			FilLink.filLinkCt, FilLink.filLinkCt, FilLink.filLinkCt_inactive);
+		// Steady-state metric: time-averaged active link population (full run + back
+		// half). The back-half mean is the formation/dissolution balance, insensitive
+		// to the post-formation-snapshot phase of the instantaneous final count.
+		System.out.printf("[STATS] linkCtMean=%.2f (samples=%d) linkCtMeanSettled=%.2f (samples=%d) finalActive=%d%n",
+			linkCtSamples > 0 ? (double) linkCtSum / linkCtSamples : 0.0, linkCtSamples,
+			linkCtSamplesSettled > 0 ? (double) linkCtSumSettled / linkCtSamplesSettled : 0.0, linkCtSamplesSettled,
+			FilLink.filLinkCt);
 		System.out.printf("[STATS] filFilBroadphase active=%b filsegMeshFillSkipped=%d candPairs=%d candMaxPerSeg=%d overflowSegs=%d drainCalls=%d%n",
 			GPUMoveThing.filFilBroadphaseActive, GPUMoveThing.filFilFillSkipCt,
 			GPUMotorBinding.filFilCandPairs, GPUMotorBinding.filFilCandMaxSeg,
@@ -1950,10 +1983,11 @@ public class BoxOfActin {
 			// Cadence measurement (2026-06-12): realized demandSyncPose calls and
 			// biochem fires over the run vs total steps — settles whether the pose
 			// pull fires every step (biochem-active path) or at output cadence.
-			System.out.printf("[STATS] cadence steps=%d demandSyncPoseCalls=%d biochemFireCt=%d (pull/step=%.3f biochem/step=%.3f)%n",
-				Env.counter, dspC, GPUMoveThing.biochemFireCt,
+			System.out.printf("[STATS] cadence steps=%d demandSyncPoseCalls=%d biochemFireCt=%d crosslinkFireCt=%d crosslinkCheckInt=%d (pull/step=%.3f biochem/step=%.3f xlink/step=%.3f)%n",
+				Env.counter, dspC, GPUMoveThing.biochemFireCt, GPUMoveThing.crosslinkFireCt, Thing.crosslinkCheckInt,
 				(double) dspC / Math.max(1, Env.counter),
-				(double) GPUMoveThing.biochemFireCt / Math.max(1, Env.counter));
+				(double) GPUMoveThing.biochemFireCt / Math.max(1, Env.counter),
+				(double) GPUMoveThing.crosslinkFireCt / Math.max(1, Env.counter));
 			// Step 2 — per-step pose-delta scatter stats. avg=mean entries per
 			// gathered step (excludes the freshPlan steps that snapshot only);
 			// max=largest single delta; overflow=times the cap was exceeded
@@ -2338,6 +2372,10 @@ public class BoxOfActin {
 		Env.simulationTime += Env.deltaT.getValue();
 		remoteOutCounter++;
 		collisionCkCounter++;
+		// Sample the active link population for the steady-state mean (cheap; one
+		// add/step). filLinkCt is the live active count at this end-of-step point.
+		linkCtSum += FilLink.filLinkCt; linkCtSamples++;
+		if (Env.simulationTime * 2 >= Env.runTime.getValue()) { linkCtSumSettled += FilLink.filLinkCt; linkCtSamplesSettled++; }
 		ckElasticityCounter++;
 		ckPersistenceCounter++;
 		applyBrownianForcesCounter++;

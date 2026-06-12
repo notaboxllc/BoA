@@ -1012,6 +1012,11 @@ public class GPUMotorBinding {
             IntArray   candPerSegCount) {
 
         int S      = counts.get(1);
+        // Crosslink-formation cadence gate (2026-06-12): counts[3]=0 off the
+        // crosslink-check step → emit nothing (each thread zeroes its count and
+        // returns). The host drain is gated identically, so the broad-phase walk +
+        // its host pose pull only do real work at crosslinkCheckInt cadence.
+        int gate   = counts.get(3);
         int nXBins = gridDims.get(0);
         int nYBins = gridDims.get(1);
         int nZBins = gridDims.get(2);
@@ -1021,6 +1026,7 @@ public class GPUMotorBinding {
 
         for (@Parallel int i = 0; i < filMoveSlot.getSize(); i++) {
             candPerSegCount.set(i, 0);
+            if (gate == 0) { continue; }
             if (i >= S) { continue; }
             int iSlot = filMoveSlot.get(i);
             if (iSlot < 0) { continue; }
@@ -1455,6 +1461,11 @@ public class GPUMotorBinding {
         counts.set(0, M);
         counts.set(1, S);
         counts.set(2, Env.counter);
+        // Crosslink-formation cadence gate: filFilCandidateKernel emits candidates
+        // only on crosslink-check steps; off-cadence each thread just zeroes its
+        // count and returns. The host drain is likewise gated, so the device walk +
+        // host pose pull amortize to crosslinkCheckInt (2026-06-12).
+        counts.set(3, GPUMoveThing.crosslinkFiresThisStep ? 1 : 0);
         long packEnd = System.nanoTime();
         packNanos += packEnd - packStart;
     }
@@ -1575,7 +1586,10 @@ public class GPUMotorBinding {
         gridDims.set(2, grid.nZBins);
         gridDims.set(3, totalCells);
 
-        counts     = new IntArray(3);
+        // counts: [0]=M motors, [1]=S segments, [2]=Env.counter, [3]=crosslink
+        // formation cadence gate (1 on crosslink-check steps, else 0 — read by
+        // filFilCandidateKernel to early-return off-cadence; 2026-06-12).
+        counts     = new IntArray(4);
         boundSegId = new IntArray(motorCap);
 
         // Fil–fil crosslink broad-phase buffers (see filFilCandidateKernel).
