@@ -1,0 +1,10 @@
+config	seed	segCt	totalLen_um	meanBound	nanLines	rc
+cpu	1	0	0	1.648	0	0
+gpudev	1	0	0	1.974	0	0
+gpucpu	1	0	0	0.021	0	0
+cpu	2	0	0	1.658	0	0
+gpudev	2	0	0	3.040	0	0
+gpucpu	2	0	0	0.124	0	0
+cpu	3	0	0	0.358	0	0
+gpudev	3	0	0	1.198	0	0
+gpucpu	3	0	0	0.100	0	0

@@ -3769,6 +3769,18 @@ public class GPUMoveThing {
         segMotorForceWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
         gridScheduler.addWorkerGrid("chained.segMotorForce", segMotorForceWorker);
 
+        // Minifilament cohesion: one thread per minifilament-body slot (range =
+        // cohBodyDimStart.getSize() = myoCap). WITHOUT this explicit grid TornadoVM
+        // defaults dimerCohesion to an 800-thread block, which overruns the SM
+        // register file (800 threads x >81 regs/thread > 65536) and throws
+        // cuLaunchKernel -> 701 (LAUNCH_OUT_OF_RESOURCES) on every execute (the
+        // launch fails and falls back, oracle-neutral but fixed per-step overhead).
+        // Pin it to the same 64-thread block as the joints/motorForce kernels it
+        // mirrors (same myoCap range) so the launch fits and succeeds first try.
+        WorkerGrid cohesionWorker = new WorkerGrid1D(myoCap);
+        cohesionWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler.addWorkerGrid("chained.dimerCohesion", cohesionWorker);
+
         // Phase 4 prep — derived-field kernel: one thread per move slot.
         WorkerGrid derivedWorker = new WorkerGrid1D(slotCap);
         derivedWorker.setLocalWork(MOVE_KERNEL_BLOCK_SIZE, 1, 1);
