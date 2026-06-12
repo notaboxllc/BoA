@@ -635,9 +635,40 @@ public class Env {
 	static private final double crossLinkGrabDist_init = 2 * Env.actinMonoDiam;
 	static final Parameter crossLinkGrabDist = new Parameter("crossLinkGrabDist", " Max. Distance to establish cross-link",crossLinkGrabDist_init, distUnits, Parameter.DOUBLE, true);
 
-	static final Parameter linkOffConst = new Parameter("linkOffConst"," FilLink Dissolution Constant - (C)", 1, "/s");
-	static final Parameter linkOffCoeff = new Parameter("linkOffCoeff"," FilLink Dissolution Coeff. - (alpha)", 1, "/s");
-	static final Parameter linkOffExp = new Parameter("linkOffExp"," FilLink Dissolution Exp. - (beta)", 2, "");
+	// Crosslink lifecycle (2026-06-12) — three cadences:
+	//   FORMATION  (crosslinkCheckInt): proximity broad-phase + checkToLink alignment
+	//              test + a concentration-dependent dice roll → makeLink.
+	//   FORCE      (every step): FilLink spring force into forceSum (unchanged).
+	//   DISSOLUTION(every step): FilLink.ckLinkBreak Bell-model off-rate dice roll
+	//              riding the just-computed strain (linkOffConst/Coeff/Exp below).
+	// Formation cadence: crosslinkCheckInt = crosslinkDeltaT/deltaT (default =
+	// biochemDeltaT → biochem cadence). Launch-time only (mirrors biochemDeltaT;
+	// not runtime-mutable so no crosslinkCheckInt-recompute hook is needed).
+	// Inactive by default → crosslinkCheckInt falls back to biochemCheckInt (the
+	// actual derived value, honoring a param-file biochemDeltaT override). Set
+	// crosslinkDeltaT:true:<s> in a param file to decouple the formation cadence.
+	static final Parameter crosslinkDeltaT = new Parameter("crosslinkDeltaT"," Time Step For Crosslink Formation Check", biochemDeltaT_init, "seconds", Parameter.DOUBLE, false);
+
+	// Concentration-dependent formation: per qualifying candidate per check,
+	//   P_form = 1 - exp(-xLinkOnRate * xLinkConc * dtCheck),  dtCheck = deltaT*crosslinkCheckInt.
+	// (linearizes to xLinkOnRate*xLinkConc*dtCheck for small p). With dissolution
+	// this gives a finite, tunable steady-state link population. Defaults chosen
+	// (see JOURNAL 2026-06-12) to give a healthy steady state in the dense xlink
+	// fixture; raising either scales formation, raising it past saturation just
+	// fills every qualifying site.
+	static final Parameter xLinkOnRate = new Parameter("xLinkOnRate"," Crosslinker formation on-rate (k_on)", 10.0, " /(uM s)", Parameter.DOUBLE, true).setMutableAtRuntime().setDescription("Crosslinker formation on-rate k_on. Per qualifying candidate per crosslink-check, P_form = 1 - exp(-k_on*[xlink]*dtCheck). Higher k_on -> faster formation -> larger steady-state link count (until qualifying sites saturate). Pairs with xLinkConc and the dissolution knobs linkOffConst/Coeff/Exp to set the steady state.");
+	static final Parameter xLinkConc = new Parameter("xLinkConc"," Crosslinker concentration ([xlink])", 1.0, " uM", Parameter.DOUBLE, true).setMutableAtRuntime().setDescription("Free crosslinker concentration [xlink]. Multiplies k_on in the formation probability P_form = 1 - exp(-k_on*[xlink]*dtCheck). Higher concentration -> more formation -> larger steady-state link count. Set to 0 to suspend new formation (existing links still dissolve).");
+
+	// Bell-model force/strain-dependent dissolution (PRE-EXISTING; surfaced as
+	// tunable 2026-06-12). FilLink.ckLinkBreak fires every step:
+	//   k_off = linkOffConst + linkOffCoeff*exp(aveStrain*linkOffExp);  P_break = k_off*deltaT.
+	// aveStrain is the EWMA normalized stretch (force ∝ strain for the linear
+	// link spring), so this is the force-dependent off-rate (k0=linkOffConst+coeff,
+	// F_c sets the strain scale via 1/linkOffExp). Higher coeff/exp -> faster
+	// force-driven turnover -> lower steady-state count under load.
+	static final Parameter linkOffConst = new Parameter("linkOffConst"," FilLink Dissolution Constant - (C)", 1, "/s", Parameter.DOUBLE, true).setMutableAtRuntime().setDescription("Force-independent baseline off-rate (k0) for crosslink dissolution. P_break per step = (linkOffConst + linkOffCoeff*exp(aveStrain*linkOffExp))*deltaT. Higher -> faster spontaneous turnover -> lower steady-state link count.");
+	static final Parameter linkOffCoeff = new Parameter("linkOffCoeff"," FilLink Dissolution Coeff. - (alpha)", 1, "/s", Parameter.DOUBLE, true).setMutableAtRuntime().setDescription("Force-dependent prefactor (alpha) of the Bell off-rate. Off-rate = linkOffConst + linkOffCoeff*exp(aveStrain*linkOffExp). Higher -> strained links rupture sooner.");
+	static final Parameter linkOffExp = new Parameter("linkOffExp"," FilLink Dissolution Exp. - (beta)", 2, "", Parameter.DOUBLE, true).setMutableAtRuntime().setDescription("Strain sensitivity (beta) of the Bell off-rate exponential exp(aveStrain*beta). Effective rupture-force scale F_c ~ 1/beta: higher beta -> sharper, earlier force-driven rupture.");
 
 	// **** Biochemical Rates ****
 	// ** End1
@@ -1092,6 +1123,9 @@ public class Env {
 	public static void setTimeStepCounts() {
 		Thing.biochemCheckInt = (int) (Env.biochemDeltaT.getValue() / Env.deltaT.getValue());
 		Thing.collisionCheckInt = (int) (Env.collisionDeltaT.getValue() / Env.deltaT.getValue());
+		Thing.crosslinkCheckInt = Env.crosslinkDeltaT.isActive()
+			? Math.max(1, (int) (Env.crosslinkDeltaT.getValue() / Env.deltaT.getValue()))
+			: Thing.biochemCheckInt;   // default: formation rides the biochem cadence
 		Thing.brownianApplyInt = 1;   // Brownian applied every step (brownianDeltaT == deltaT)
 		
 		simJSonFreq = (int)(Math.ceil((1.0/deltaT.getValue())*(1.0/simJSonSavesPerSec))); 	// number of integration steps between Simularium jSon saves

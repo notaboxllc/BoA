@@ -2037,7 +2037,11 @@ public class FilSegment extends Thing {
 						for (int j=i;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
 							int jSegID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
 							jSeg=FilSegment.theFilSegments[jSegID];
-							if ((iSeg.filID != jSeg.filID) & (Env.xLinks.isActive())) { checkToLink(iSeg,jSeg); }  // don't check to link if segs belong to same filament or no xlinks at all
+							// Crosslink formation re-cadenced to crosslinkCheckInt (2026-06-12):
+							// only attempt links on crosslink-check steps. The mesh walk still
+							// runs every collision step (membraneFilMeshCollisions needs FILSEG_MESH),
+							// but formation is a biochem-class stochastic event, not every-step.
+							if ((iSeg.filID != jSeg.filID) & (Env.xLinks.isActive()) & GPUMoveThing.crosslinkFiresThisStep) { checkToLink(iSeg,jSeg); }  // don't check to link if segs belong to same filament, no xlinks, or off crosslink cadence
 						}
 					}
 				}
@@ -2058,7 +2062,11 @@ public class FilSegment extends Thing {
 						for (int j=i;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
 							int jSegID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
 							jSeg=FilSegment.theFilSegments[jSegID];
-							if ((iSeg.filID != jSeg.filID) & (Env.xLinks.isActive())) { checkToLink(iSeg,jSeg); }  // don't check to link if segs belong to same filament or no xlinks at all
+							// Crosslink formation re-cadenced to crosslinkCheckInt (2026-06-12):
+							// only attempt links on crosslink-check steps. The mesh walk still
+							// runs every collision step (membraneFilMeshCollisions needs FILSEG_MESH),
+							// but formation is a biochem-class stochastic event, not every-step.
+							if ((iSeg.filID != jSeg.filID) & (Env.xLinks.isActive()) & GPUMoveThing.crosslinkFiresThisStep) { checkToLink(iSeg,jSeg); }  // don't check to link if segs belong to same filament, no xlinks, or off crosslink cadence
 						}
 					}
 				}
@@ -2177,7 +2185,23 @@ public class FilSegment extends Thing {
 			
 			if (fil1.tooCloseFilLinkLoc(loc1)) { return; }
 			if (fil2.tooCloseFilLinkLoc(loc2)) { return; }
-			
+
+			// Probabilistic, concentration-dependent formation (2026-06-12). A
+			// qualifying candidate (alignment + line-segment proximity + spacing) forms
+			// a link only with probability
+			//   P_form = 1 - exp(-k_on * [xlink] * dtCheck),  dtCheck = deltaT*crosslinkCheckInt,
+			// the standard first-order on-event over one crosslink-check interval (it
+			// linearizes to k_on*[xlink]*dtCheck for small p; the exact form stays
+			// bounded in [0,1) for large rate). This makes formation a stochastic
+			// biochem-class event balanced against the FilLink Bell-model dissolution,
+			// giving a finite tunable steady-state link population. checkToLink is the
+			// single formation site for BOTH the CPU mesh walk and the GPU candidate
+			// drain, so one roll covers both paths. RNG: per-worker currentScratch().rng
+			// (the drain runs on the main loop thread → main-thread scratch slot).
+			double dtCheck = Env.deltaT.getValue() * Thing.crosslinkCheckInt;
+			double pForm = 1.0 - Math.exp(-Env.xLinkOnRate.getValue() * Env.xLinkConc.getValue() * dtCheck);
+			if (currentScratch().rng.nextDouble() >= pForm) { return; }
+
 			FilLink.makeLink(fil1, loc1, fil2, loc2);
 		}
 	}

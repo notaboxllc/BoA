@@ -94,6 +94,29 @@ public class GPUMoveThing {
     // (the correctness oracle). Only affects the single-graph (production) bind
     // subgraph; the BOA_SINGLE_GRAPH=0 two-plan path keeps the serial kernel.
     public static final boolean PARALLEL_GRID;
+    // Fil–fil crosslink broad-phase on device (2026-06-12). When true, the
+    // device filFilCandidate kernel feeds the host checkToLink fine check and
+    // the host FILSEG_MESH fill + fil-fil mesh walk are skipped. Set at plan
+    // build (allocateAndBuildPlan) to: useGPU && SINGLE_GRAPH && xLinks active
+    // && no StickyNodes (membrane configs keep the host FILSEG_MESH path so
+    // membraneFilMeshCollisions is unaffected). Disable with BOA_FILFIL_GPU=0.
+    public static boolean filFilBroadphaseActive = false;
+    public static long filFilFillSkipCt = 0;  // steps the host FILSEG_MESH fill was skipped on -gpu
+    public static final boolean FILFIL_GPU_ENABLED;
+    static {
+        String ff = System.getenv("BOA_FILFIL_GPU");
+        FILFIL_GPU_ENABLED = !(ff != null && (ff.equals("0") || ff.equalsIgnoreCase("false")));
+    }
+    // Frozen-pose candidate-completeness harness (validation #2, 2026-06-12): fire
+    // filFilCandidateParityCheck() once at this step (a crosslink-FIRE step, so the
+    // kernel actually emitted). -1 = off. Set BOA_FILFIL_PARITY=<step>.
+    public static final int FILFIL_PARITY_STEP;
+    static {
+        String fp = System.getenv("BOA_FILFIL_PARITY");
+        int v = -1;
+        if (fp != null) { try { v = Integer.parseInt(fp.trim()); } catch (NumberFormatException e) { v = -1; } }
+        FILFIL_PARITY_STEP = v;
+    }
     static {
         String sgr = System.getenv("BOA_SERIAL_GRID");
         PARALLEL_GRID = !(sgr != null && (sgr.equals("1") || sgr.equalsIgnoreCase("true")));
@@ -709,14 +732,32 @@ public class GPUMoveThing {
     public static boolean biochemGlobalCadence = false;
     public static boolean biochemFiresThisStep = false;   // set once per step by advanceBiochemCadence()
     private static int    biochemGlobalCt = 0;
+    public static long    biochemFireCt = 0;   // realized biochem fires (cadence measurement)
+
+    // Crosslink-FORMATION cadence (2026-06-12). Formation (broad-phase + checkToLink
+    // + makeLink) is re-cadenced to Thing.crosslinkCheckInt — a biochem-class
+    // stochastic event, not an every-collision-step mechanics event. Set ONCE per
+    // step in BoxOfActin.doLoop BEFORE the collision/CPU-mesh block AND before the
+    // move plan, so the CPU meshColl walk, the device filFilCandidate kernel (reads
+    // it via counts[3], packed in packForSingleGraph), and drainFilFilCandidates all
+    // see the same value. When false: the CPU walk skips checkToLink, the device
+    // kernel early-returns (no candidate emit), and the drain is skipped — so the
+    // per-collision-step host pose refresh (refreshHostPoseForFilFil → demandSync)
+    // only fires on crosslink-check steps, restoring biochem-cadence pose pulls.
+    public static boolean crosslinkFiresThisStep = true;
+    public static long    crosslinkFireCt = 0;   // realized crosslink-formation fires (cadence measurement)
+    // Track the last step a full device→host pose pull happened, so the fil-fil
+    // drain can ride the move-phase biochem-cadence pull instead of adding a 2nd
+    // pull on the same step (keeps demandSyncPose at ~biochem cadence, not 2×).
+    public static int     lastPoseSyncCounter = -1;
     // Called ONCE per step from BoxOfActin.doLoop, BEFORE the move phase (so the move-phase
     // pull and the later biochem phase read the same flag). When global cadence is off, leaves
     // biochemFiresThisStep=true (FilSegment then uses its per-instance counter; the flag is unread).
     public static void advanceBiochemCadence() {
-        if (!biochemGlobalCadence) { biochemFiresThisStep = true; return; }
+        if (!biochemGlobalCadence) { biochemFiresThisStep = true; biochemFireCt++; return; }
         biochemGlobalCt++;
         biochemFiresThisStep = (biochemGlobalCt >= Thing.biochemCheckInt);
-        if (biochemFiresThisStep) biochemGlobalCt = 0;
+        if (biochemFiresThisStep) { biochemGlobalCt = 0; biochemFireCt++; }
     }
 
     // ----- Phase 2 F1 — per-slot boundary-kernel gate + box geometry -----
@@ -3465,6 +3506,23 @@ public class GPUMoveThing {
         IntArray   bindGridCellContents = null;
         IntArray   bindBoundSegId = null;
         FloatArray bindArcOnFilDev = null;
+        // Fil–fil broad-phase wiring (set below if filFilBroadphaseActive).
+        IntArray   ffSegFilId = null;
+        IntArray   ffCandPartner = null;
+        IntArray   ffCandPerSegCount = null;
+        FloatArray ffParams = null;
+        IntArray   ffDims = null;
+        // Decide the fil–fil broad-phase gate ONCE at plan build: device path
+        // replaces the host FILSEG_MESH fil-fil walk only when xLinks are active
+        // and there are no membrane StickyNodes (which need the host FILSEG_MESH
+        // for membraneFilMeshCollisions). The grid is built every -gpu step
+        // regardless, so this adds only the candidate kernel + its output pull.
+        boolean anyStickyNode = false;
+        for (int n = 0; n < ProteinNode.nodeCt; n++) {
+            if (ProteinNode.theNodes[n] instanceof StickyNode) { anyStickyNode = true; break; }
+        }
+        filFilBroadphaseActive = Env.useGPU && SINGLE_GRAPH && FILFIL_GPU_ENABLED
+                                 && Env.xLinks.isActive() && !anyStickyNode;
         if (SINGLE_GRAPH) {
             bindGridParams       = GPUMotorBinding.getGridParamsArray();
             bindGridDims         = GPUMotorBinding.getGridDimsArray();
@@ -3485,6 +3543,16 @@ public class GPUMoveThing {
                 .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                                   motMoveSlot, motRodMoveSlot, filMoveSlot,
                                   bindMotOnFil, bindFilNodeAtEnd2, bindCounts);
+            if (filFilBroadphaseActive) {
+                ffSegFilId        = GPUMotorBinding.getSegFilIdArray();
+                ffCandPartner     = GPUMotorBinding.getCandPartnerArray();
+                ffCandPerSegCount = GPUMotorBinding.getCandPerSegCountArray();
+                ffParams          = GPUMotorBinding.getFilFilParamsArray();
+                ffDims            = GPUMotorBinding.getFilFilDimsArray();
+                tg = tg
+                    .transferToDevice(DataTransferMode.FIRST_EXECUTION, ffParams, ffDims)
+                    .transferToDevice(DataTransferMode.EVERY_EXECUTION, ffSegFilId);
+            }
         }
 
         tg = tg
@@ -3661,6 +3729,28 @@ public class GPUMoveThing {
                       uVec, yVec, counts);
         }
 
+        // Fil–fil crosslink proximity broad-phase. Declared AFTER move so it
+        // reads the POST-integration resident pose — the same pose the host
+        // checkToLink will see after the drain refreshes host endpoints. (When
+        // it ran pre-move, candidate selection and the host fine check were one
+        // integration step apart, so post-move-only-close pairs were missed and
+        // the link count under-counted vs the CPU host-mesh path.) The grid CSR
+        // (segBbox/offsets/contents) is built pre-move and not rebuilt; segment
+        // drift per step (~nm) ≪ CELL_SIZE (0.2 µm) and the per-segment walk
+        // already expands the AABB by one cell, so the pre-move grid still
+        // covers every post-move neighbour.
+        if (filFilBroadphaseActive) {
+            tg = tg
+                .task("filFilCandidate",
+                      GPUMotorBinding::filFilCandidateKernel,
+                      coord, soaLengthArr,
+                      filMoveSlot, ffSegFilId, bindSegBbox,
+                      bindGridCellOffsets, bindGridCellContents,
+                      bindGridDims, bindCounts,
+                      ffParams, ffDims,
+                      ffCandPartner, ffCandPerSegCount);
+        }
+
         // Phase 4 flip — transferToHost split by demand:
         //   EVERY_EXECUTION (still per-step; small):
         //     boundaryTipC    — consumed by bridgeBoundaryTipC() each step.
@@ -3744,6 +3834,10 @@ public class GPUMoveThing {
         if (SINGLE_GRAPH) {
             tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
                                    bindBoundSegId, bindArcOnFilDev);
+            if (filFilBroadphaseActive) {
+                tg = tg.transferToHost(DataTransferMode.EVERY_EXECUTION,
+                                       ffCandPartner, ffCandPerSegCount);
+            }
         }
 
         itg = tg.snapshot();
@@ -3844,6 +3938,19 @@ public class GPUMoveThing {
             segBboxWorker.setLocalWork(GPUMotorBinding.segBboxKernelBlockSize(), 1, 1);
             gridScheduler.addWorkerGrid("chained.bind",    bindWorker);
             gridScheduler.addWorkerGrid("chained.segBbox", segBboxWorker);
+
+            // Fil–fil broad-phase: one thread per FilSegment slot. Block 64
+            // (never leave a parallel task's block defaulted — the 701 lesson);
+            // global padded UP to a block multiple (the WorkerGrid drops the
+            // remainder partial block when global%local != 0) and self-guarded
+            // in-kernel (i >= S / @Parallel bound = filMoveSlot.getSize()).
+            if (filFilBroadphaseActive) {
+                final int FFB = 64;
+                int ffGlobal = ((bindSegCapLocal + FFB - 1) / FFB) * FFB;
+                WorkerGrid filFilWorker = new WorkerGrid1D(ffGlobal);
+                filFilWorker.setLocalWork(FFB, 1, 1);
+                gridScheduler.addWorkerGrid("chained.filFilCandidate", filFilWorker);
+            }
 
             if (PARALLEL_GRID) {
                 // Parallel grid-build worker grids. Block 64 (the graph-wide
@@ -4149,6 +4256,7 @@ public class GPUMoveThing {
         dispatchAndWait(OP_UNPACK, slotCount);
         demandSyncPoseNanos += System.nanoTime() - t0;
         demandSyncPoseCalls++;
+        lastPoseSyncCounter = Env.counter;
     }
 
     // Phase A (2026-06-11) — refresh host derived fields (transXTox / end1 /
@@ -4305,6 +4413,109 @@ public class GPUMoveThing {
             m.bindTip.x = snapMotorBindTip[b]; m.bindTip.y = snapMotorBindTip[b+1]; m.bindTip.z = snapMotorBindTip[b+2];
         }
         renderSnapshotActive = false;
+    }
+
+    // Fil–fil broad-phase: refresh the host pose + the FilSegment endpoints/ranges
+    // that checkToLink reads, so the host fine check sees the same geometry the
+    // device candidate kernel used. On the residency path the host pose is
+    // otherwise stale between biochem/output syncs (end1Pt/end2Pt would lag by up
+    // to biochemCheckInt steps → checkToLink rejects the device candidates). This
+    // is the residual per-collision-step host-pose cost of the Phase-1 design
+    // (host checkToLink); Phase 2 (device-side geometry test) would remove it.
+    // Mirrors the FilSegment loop in refreshHostMirrorsForOutput without the
+    // output snapshot/motor work.
+    public static void refreshHostPoseForFilFil() {
+        // Ride the move-phase pull: on a crosslink-check step that is also a biochem
+        // -fire step (the default, crosslinkCheckInt == biochemCheckInt), moveThings
+        // already pulled pose this step — skip the redundant transfer. Between that
+        // pull and this drain nothing mutates pose (bind drain only sets boundSegId;
+        // biochem runs later), so the host pose is still fresh. Only pull here when
+        // this step has not yet synced (crosslink cadence ≠ biochem cadence).
+        if (lastPoseSyncCounter != Env.counter) { demandSyncPoseToHost(); }
+        int tc = Thing.thingCt;
+        if (tc <= 0) return;
+        Thing.recomputeDerivedSoA(0, tc);
+        int filCt = FilSegment.filSegmentCt;
+        FilSegment[] fils = FilSegment.theFilSegments;
+        for (int i = 0; i < filCt; i++) {
+            FilSegment fs = fils[i];
+            if (fs == null || fs.removeMe) continue;
+            fs.xRange = Math.abs(fs.getCoordX() - fs.getEnd2X());
+            fs.yRange = Math.abs(fs.getCoordY() - fs.getEnd2Y());
+            fs.zRange = Math.abs(fs.getCoordZ() - fs.getEnd2Z());
+            fs.end1Pt.x = fs.getEnd1X(); fs.end1Pt.y = fs.getEnd1Y(); fs.end1Pt.z = fs.getEnd1Z();
+            fs.end2Pt.x = fs.getEnd2X(); fs.end2Pt.y = fs.getEnd2Y(); fs.end2Pt.z = fs.getEnd2Z();
+        }
+    }
+
+    // Frozen-pose candidate-completeness check (validation #2). On the CURRENT
+    // resident pose, compare the device filFilCandidateKernel output against a host
+    // BRUTE-FORCE within-reach reference using the kernel's OWN bounding-sphere
+    // criterion (centerDistSq <= (halfI+halfJ+grab)^2, i<j, different filament).
+    //
+    // Why this is the authoritative dedup test: §the kernel header proves that any
+    // pair whose centers are within the bounding-sphere reach has overlapping AABBs
+    // inside i's one-cell-expanded scan region (grab=0.0108µm ≪ CELL=0.2µm, and per
+    // axis |Δ| ≤ centerDist ≤ reach), so the grid walk MUST visit a shared cell. The
+    // min-corner dedup then emits that pair exactly once. Therefore the device set
+    // SHOULD equal the brute-force within-reach set. Any `missing` (within-reach pair
+    // the device failed to emit) is a real dropped pair — the dedup bug the earlier
+    // ~56%-of-host link deficit was suspected to be. `extra` (device pair beyond
+    // reach) should be 0. setMismatch=0 ⟹ dedup complete ⟹ the deficit is the
+    // float32-trajectory / single-RNG / 1-step-lag seam, NOT a broad-phase miss.
+    // O(S^2); diagnostic only. Fired at BOA_FILFIL_PARITY=<crosslink-fire step>.
+    public static void filFilCandidateParityCheck() {
+        if (!filFilBroadphaseActive) { System.out.println("[FFPARITY] broadphase inactive — skip"); return; }
+        refreshHostPoseForFilFil();   // pull the exact device pose the kernel read
+        int S = FilSegment.filSegmentCt;
+        IntArray segFilId        = GPUMotorBinding.getSegFilIdArray();
+        IntArray candPartner     = GPUMotorBinding.getCandPartnerArray();
+        IntArray candPerSegCount = GPUMotorBinding.getCandPerSegCountArray();
+        if (segFilId == null || candPartner == null || candPerSegCount == null) {
+            System.out.println("[FFPARITY] buffers null — skip"); return;
+        }
+        final int MAXC = GPUMotorBinding.FILFIL_MAX_CAND;
+        float grab = (float) Env.crossLinkGrabDist.getValue();
+
+        // Device candidate set (kernel emits i<j by construction).
+        java.util.HashSet<Long> dev = new java.util.HashSet<>();
+        long devOverflowSegs = 0;
+        for (int i = 0; i < S; i++) {
+            int cnt = candPerSegCount.get(i);
+            int n = cnt; if (n > MAXC) { n = MAXC; devOverflowSegs++; }
+            for (int k = 0; k < n; k++) {
+                int j = candPartner.get(i * MAXC + k);
+                if (j < 0 || j >= S) continue;
+                dev.add((long) i * S + j);
+            }
+        }
+
+        // Brute-force within-reach reference (same arrays + arithmetic as the kernel).
+        java.util.HashSet<Long> bf = new java.util.HashSet<>();
+        for (int i = 0; i < S; i++) {
+            int iSlot = filMoveSlot.get(i);
+            if (iSlot < 0) continue;
+            int iFil = segFilId.get(i);
+            float icx = coord.get(iSlot * 3), icy = coord.get(iSlot * 3 + 1), icz = coord.get(iSlot * 3 + 2);
+            float halfI = 0.5f * soaLengthArr.get(iSlot);
+            for (int j = i + 1; j < S; j++) {
+                int jSlot = filMoveSlot.get(j);
+                if (jSlot < 0) continue;
+                if (segFilId.get(j) == iFil) continue;
+                float dxc = icx - coord.get(jSlot * 3);
+                float dyc = icy - coord.get(jSlot * 3 + 1);
+                float dzc = icz - coord.get(jSlot * 3 + 2);
+                float centerDistSq = dxc * dxc + dyc * dyc + dzc * dzc;
+                float reach = halfI + 0.5f * soaLengthArr.get(jSlot) + grab;
+                if (centerDistSq > reach * reach) continue;
+                bf.add((long) i * S + j);
+            }
+        }
+
+        int missing = 0; for (long key : bf)  if (!dev.contains(key)) missing++;  // dropped pairs
+        int extra   = 0; for (long key : dev) if (!bf.contains(key))  extra++;    // beyond-reach emits
+        System.out.printf("[FFPARITY] step=%d S=%d devicePairs=%d bruteForceWithinReach=%d missing(dropped)=%d extra=%d setMismatch=%d devOverflowSegs=%d%n",
+            Env.counter, S, dev.size(), bf.size(), missing, extra, missing + extra, devOverflowSegs);
     }
 
     public static void refreshHostMirrorsForOutput() {

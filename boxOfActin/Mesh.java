@@ -8,7 +8,9 @@ import java.awt.geom.*;
 public class Mesh {
 	public static Mesh FILSEG_MESH;
 	public static Mesh NODE_MESH;
-	public static Mesh MYOHEADS_MESH;
+	// MYOHEADS_MESH removed 2026-06-12: its only consumers (MyoMotor.motorFilMeshCollisions /
+	// meshAllMotors) had zero call sites — it was write-only on every path. Motor-fil
+	// collisions are served by MotorBindGrid3D (CPU) / the device bind kernel (GPU).
 	public static final float SHIFT=0.49f*0;
 	
 	public static float MIN_LENGTH_FOR_LINE_ALGORITHM=200;
@@ -67,7 +69,6 @@ public class Mesh {
 		
 		FILSEG_MESH=new Mesh();
 		NODE_MESH= new Mesh();
-		MYOHEADS_MESH= new Mesh();
 	}
 	
 	public Mesh(){
@@ -108,12 +109,6 @@ public class Mesh {
 						jobDiv[i] = i*ProteinNode.nodeCt/numThreads;	// divide the job amongst threads
 					}
 					spawn(); break;
-				case Env.meshMotorsStart:
-					if (MyoMotor.motorCt == 0) return;
-					for (int i=0; i <= numThreads; i++) {
-						jobDiv[i] = i*MyoMotor.motorCt/numThreads;	// divide the job amongst threads
-					}
-					spawn(); break;
 			}
 
 		}
@@ -125,9 +120,6 @@ public class Mesh {
 					gather(); break;
 				case Env.meshNodesStop:
 					if (ProteinNode.nodeCt == 0) return;
-					gather(); break;
-				case Env.meshMotorsStop:
-					if (MyoMotor.motorCt == 0) return;
 					gather(); break;
 			}
 		}
@@ -144,11 +136,6 @@ public class Mesh {
 				case Env.meshNodesStart:
 					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
 						Mesh.NODE_MESH.fillNodeMesh(ProteinNode.theNodes[i]);
-					}
-					break;
-				case Env.meshMotorsStart:
-					for (int i = jobDiv[threadId]; i < jobDiv[threadId+1]; i++) {
-						Mesh.MYOHEADS_MESH.fillMotorMesh(MyoMotor.theMotors[i]);
 					}
 					break;
 			}
@@ -418,57 +405,6 @@ public class Mesh {
 			}
 		}
 	}
-	
-	public void fillMotorMesh (MyoMotor motor){
-		
-		int id=motor.myMotorNumber;
-	
-		//X AXIS
-		double startValue=motor.bindTip.x-Env.myoColTol.getValue();
-		double stopValue=motor.bindTip.x+Env.myoColTol.getValue();			
-		
-		int startBinX = getBinX(startValue);
-		int stopBinX = getBinX(stopValue);
-				
-		if(startBinX>stopBinX){
-			int temp=stopBinX;
-			stopBinX=startBinX;
-			startBinX=temp;
-		}
-	
-		//Y AXIS
-		startValue=motor.bindTip.y-Env.myoColTol.getValue();
-		stopValue=motor.bindTip.y+Env.myoColTol.getValue();			
-		
-		int startBinY = getBinY(startValue);
-		int stopBinY = getBinY(stopValue);
-					
-		if(startBinY>stopBinY){
-			int temp=stopBinY;
-			stopBinY=startBinY;
-			startBinY=temp;
-		}
-		
-		if(OVERLAP){
-			startBinX--;
-			stopBinX++;
-			if(startBinX<0)startBinX=0;
-			if(stopBinX>=nXBins)stopBinX=nXBins-1;
-			
-			startBinY--;
-			stopBinY++;
-			if(startBinY<0)startBinY=0;
-			if(stopBinY>=nYBins)stopBinY=nYBins-1;
-		}
-		
-		//FILL BINS
-		for(int x=startBinX;x<=stopBinX;x++){
-			for(int y=startBinY;y<=stopBinY;y++){
-				addToMesh(x,y,id);				
-			}
-		}
-	}
-	
 	
 	public static void reportMeshActives () {
 		//System.out.println ("CortSeg_Mesh actives = " + CORTSEG_MESH.countActiveEntries());

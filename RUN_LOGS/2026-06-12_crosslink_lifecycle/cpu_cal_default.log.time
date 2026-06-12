@@ -1,0 +1,33 @@
+Exception in thread "main" java.lang.NoClassDefFoundError: uk/ac/manchester/tornado/api/WorkerGrid
+	at boxOfActin.BoxOfActin.parseArgs(BoxOfActin.java:719)
+	at boxOfActin.BoxOfActin.begin(BoxOfActin.java:212)
+	at BoxOfActin.main(BoxOfActin.java:6)
+Caused by: java.lang.ClassNotFoundException: uk.ac.manchester.tornado.api.WorkerGrid
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 3 more
+Command exited with non-zero status 1
+	Command being timed: "java --enable-preview -Xmx4G -cp libs/*:. BoxOfActin -r -pf ParameterFiles/boa-xlink-dense-nomotor"
+	User time (seconds): 0.10
+	System time (seconds): 0.01
+	Percent of CPU this job got: 140%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.08
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 52924
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 8
+	Minor (reclaiming a frame) page faults: 7502
+	Voluntary context switches: 809
+	Involuntary context switches: 3
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 72
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1

@@ -154,6 +154,12 @@ public class Thing extends Object {
 	
 	//	different time-steps for sim pieces
 	static int collisionCheckInt, biochemCheckInt,brownianApplyInt;
+	// crosslinkCheckInt (2026-06-12): crosslink FORMATION cadence (broad-phase +
+	// checkToLink + makeLink fire every crosslinkCheckInt steps, not every
+	// collision step). Default = biochemCheckInt; derived in Env.setTimeStepCounts
+	// from Env.crosslinkDeltaT. Formation is a biochem-class stochastic event, so it
+	// rides the biochem-cadence pose pull on the -gpu residency path.
+	static int crosslinkCheckInt;
 	int collCheckCt, biochemCheckCt;
 	
 	// Per-Thing UCircRnd xVals/yVals/zVals used to live here — three pure-
