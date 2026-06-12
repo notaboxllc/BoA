@@ -380,6 +380,50 @@ public class GPUMoveThing {
     private static final int RULE_LEVER   = 2;
     private static final int RULE_MINIFIL = 3;   // MyoMiniFilament body — device-integrated rigid rod
 
+    // Live type -> Brownian rule for a GPU-handled slot occupant. Mirrors the
+    // rule assignment in classifyThings() (the only difference being that
+    // classifyThings also decides GPU-vs-CPU-fallback; a Thing that reaches a
+    // pack slot is by construction GPU-handled). Used by packRange/
+    // packDynamicRange to dispatch on the live occupant rather than the cached
+    // brownianRule[slot], so a stale cached rule can never miscast a slot.
+    // Returns -1 for an unexpected type (treated as RULE_LEVER = zero Brownian).
+    private static int ruleForGpuThing(Thing t) {
+        if (t instanceof FilSegment)      return RULE_FIL;
+        if (t instanceof MyoMiniFilament) return RULE_MINIFIL;   // before MyoRod/Lever checks (distinct type)
+        if (t instanceof MyoMotor || t instanceof MyoRod) return RULE_MYO;
+        if (t instanceof MyoLever)        return RULE_LEVER;
+        return -1;
+    }
+
+    // Reconcile a slot's cached Brownian rule against its live occupant. Returns
+    // the rule to dispatch on (the LIVE-type rule when it disagrees with the
+    // cached one). On a mismatch — which signals the slot maps went stale
+    // without a classifyThings() refresh before this pack — count it, log the
+    // first occurrence, and force a refresh next step. This is the single point
+    // that makes the pack dispatch crash-proof against a rules[]/theThings[]
+    // desync (the historical packRange MyoMiniFilament->FilSegment cast crash).
+    // Diagnostic bypass: reproduce the historical raw-cast behaviour (dispatch
+    // on the cached rule, no reconciliation) to demonstrate the ClassCastException
+    // the guard prevents. OFF in production.
+    private static final boolean PACK_RAW_CAST = "1".equals(System.getenv("BOA_PACK_RAW_CAST"));
+
+    private static int reconcilePackRule(int slot, Thing t, int cachedRule) {
+        if (PACK_RAW_CAST) return cachedRule;
+        int live = ruleForGpuThing(t);
+        if (live == cachedRule || live < 0) return cachedRule;
+        packRuleDesyncCount++;
+        if (!packRuleDesyncFirstLogged) {
+            packRuleDesyncFirstLogged = true;
+            System.err.printf(
+                "[PACK_DESYNC] step=%d slot=%d cachedRule=%d liveType=%s liveRule=%d — "
+              + "dispatching on live type and forcing classifyThings() refresh next step%n",
+                stepCounter, slot, cachedRule,
+                (t == null ? "null" : t.getClass().getSimpleName()), live);
+        }
+        markTopologyDirty();   // rebuild slot maps + joint lists next onStepStart
+        return live;
+    }
+
     // ----- capacity / current count -----
     private static int slotCap   = 0;
     private static int slotCount = 0;
@@ -536,6 +580,20 @@ public class GPUMoveThing {
     private static long poseDeltaCountMax = 0L;
     private static long poseDeltaOverflowCount = 0L;
     private static long poseDeltaCallsResident = 0L;
+
+    // Pack-dispatch slot/rule desync guard (2026-06-11). The cached
+    // brownianRule[slot] and the live occupant theThings[gpuThingIndices[slot]]
+    // can in principle disagree if a topology mutation reaches the slot maps
+    // without a classifyThings() refresh before the next pack. The only such
+    // mutation in practice is removeThing()'s swap-compaction, which signals
+    // topologyDirty (Thing.java) — so this guard is expected to NEVER fire.
+    // packRange/packDynamicRange dispatch the Brownian scale and the
+    // FilSegment cast on the LIVE type (ruleForGpuThing) rather than the cached
+    // rule, so a stale rule can never throw a ClassCastException; on any
+    // mismatch we count it, capture the first occurrence, and force a
+    // classifyThings() refresh next step via markTopologyDirty().
+    private static long packRuleDesyncCount = 0L;
+    private static boolean packRuleDesyncFirstLogged = false;
 
     // ----- Phase 2 F8/F9/F10 — motor cross-bridge force port (2026-06-03) -----
     // Per-Myosin binding state uploaded each step:
@@ -5320,7 +5378,7 @@ public class GPUMoveThing {
             int thingIdx = indices[slot];
             Thing t = theThings[thingIdx];
             int s3 = thingIdx * 3;
-            int rule = rules[slot];
+            int rule = reconcilePackRule(slot, t, rules[slot]);
 
             // Axis indices. AoS writes contiguous triplets at slot*3; SoA
             // writes axis-major (x at slot, y at slot+stride, z at slot+2*stride).
@@ -5463,7 +5521,7 @@ public class GPUMoveThing {
             int thingIdx = indices[slot];
             Thing t = theThings[thingIdx];
             int s3 = thingIdx * 3;
-            int rule = rules[slot];
+            int rule = reconcilePackRule(slot, t, rules[slot]);
 
             int aX, aY, aZ;
             int bT, bR;
@@ -6106,6 +6164,7 @@ public class GPUMoveThing {
     public static long getPoseDeltaCountSum()       { return poseDeltaCountSum;       }
     public static long getPoseDeltaCountMax()       { return poseDeltaCountMax;       }
     public static long getPoseDeltaOverflowCount()  { return poseDeltaOverflowCount;  }
+    public static long getPackRuleDesyncCount()     { return packRuleDesyncCount;     }
     public static long getPoseDeltaCallsResident()  { return poseDeltaCallsResident;  }
 
     // Phase-A churn stats — true (pre-clamp) per-step dirty demand.
@@ -6199,6 +6258,8 @@ public class GPUMoveThing {
         demandSyncPoseNanos = demandSyncDerivedNanos = 0;
         demandSyncPoseCalls = demandSyncDerivedCalls = 0;
         planRebuildCount = 0;
+        packRuleDesyncCount = 0L;
+        packRuleDesyncFirstLogged = false;
     }
 
     // -------------------------------------------------------------------------

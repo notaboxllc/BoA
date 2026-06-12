@@ -1,0 +1,112 @@
+Minifil-ON turnover on device — packRange cast desync: reproduction, fix, validation
+=====================================================================================
+Date: 2026-06-11   Machine: aorus1 (Java 21 + TornadoVM 4.0.1-dev PTX)
+Config: ParameterFiles/boa10-64Seg-dyn (100 fil + 100 minifil + cofilin sever +
+        kRdmNuc nucleate + poly/depoly; noMonomersSimd:false; deltaT 1e-4; 5000 steps)
+
+WHAT THE CRASH IS
+-----------------
+GPUMoveThing.packRange / packDynamicRange iterate move-slots, read the cached
+brownianRule[slot] and the live occupant theThings[gpuThingIndices[slot]], and
+dispatch the Brownian scale by rule. The RULE_FIL branch casts (FilSegment) t.
+The historical crash: a slot cached RULE_FIL whose live occupant is a
+MyoMiniFilament -> ClassCastException. Root cause is a rules[]/theThings[] DESYNC:
+the cached slot maps (built by classifyThings()) describe an older theThings[]
+layout than the one the pack reads.
+
+The only mutation that moves a different-typed Thing into an existing slot's index
+without an append is removeThing()'s swap-compaction (last Thing swapped into the
+freed slot). The 2026-06-09 fix (Thing.removeThing, commit 197bed4) signals
+GPUMoveThing.markTopologyDirty() on every swap (swapId != lastId), forcing a
+classifyThings() refresh at the next onStepStart BEFORE the next pack. Phase A
+(1d7dcc3) added the RULE_MINIFIL pack branches. On HEAD both are present.
+
+REPRODUCTION (the discipline: prove the mechanism on demand)
+-----------------------------------------------------------
+1. Production build (topologyDirty-on-swap ON), boa10-64Seg-dyn, seeds 1 & 2,
+   5000 steps each: BOTH rc=0, NO ClassCastException, no NaN. The crash does not
+   reproduce on HEAD — the 2026-06-09 fix keeps the slot maps consistent before
+   every pack, so no minifil ever sits in a RULE_FIL slot at pack time.
+
+2. Fault injection: BOA_DISABLE_TOPODIRTY_ON_SWAP=1 (Thing.java diagnostic flag,
+   default OFF) skips the markTopologyDirty() signal on swap — deliberately
+   reintroducing the historical staleness. Run boa10-64Seg-dyn seed 1, guard ON:
+       [PACK_DESYNC] step=395 slot=9606 cachedRule=3 liveType=FilSegment liveRule=0
+       [STATS] gpuMoveThing ... planRebuild=1 packRuleDesync=538
+       rc=0  (completed, NO crash)
+   => The desync IS real and frequent (538 slot/rule mismatches over 5000 steps)
+      when the 2026-06-09 signal is removed. It is bidirectional; the historical
+      ClassCastException is the (cachedRule=RULE_FIL, live=MyoMiniFilament) subset.
+      The guard caught every one and self-healed -> no crash.
+
+THE FIX (type-consistent pack dispatch)
+---------------------------------------
+GPUMoveThing.reconcilePackRule(slot, t, cachedRule): dispatch on the LIVE occupant
+type (ruleForGpuThing) rather than the cached rule. When live != cached:
+  - count it (packRuleDesyncCount, surfaced as [STATS] packRuleDesync=N),
+  - log the first occurrence,
+  - markTopologyDirty() so classifyThings() rebuilds slot maps + joint lists next
+    step.
+packRange and packDynamicRange both route their per-slot rule through it. Because
+the FilSegment cast now only runs when the LIVE type is FilSegment, a stale cached
+rule can NEVER throw a ClassCastException — the crash class is closed structurally,
+independent of the topologyDirty signal. In production (signal ON) the guard never
+fires (packRuleDesync=0); under fault injection it absorbs all 538 events.
+
+Force-coverage exactly-once: unchanged. reconcilePackRule only selects the Brownian
+scale + makes the cast safe; it touches no force-sum / joint-apply code. Each slot's
+force/pose still packs from soaForce[thingIdx]/soaCoord[thingIdx] via the same
+gpuThingIndices[slot] (which co-varies with brownianRule[slot]; both are written as
+a pair in classifyThings, so gpuThingIndices points at the live occupant whose force
+we pack — only the rule label could lag, and that is what we reconcile).
+
+Minifil Brownian: a RULE_MINIFIL slot already gets sMiniFilBrownian (=
+Env.myoMiniFilBrownianScale) in both pack functions (added Phase A 1d7dcc3); the
+reconciliation makes that dispatch robust to a stale cached rule too.
+
+NOTE — do not SIGTERM a TornadoVM run mid-kernel: it leaves the CUDA context dirty
+and the next run floods cuLaunchKernel->701. Let runs complete or time out cleanly.
+
+DIAGNOSTIC HOOKS (default OFF, kept as residency tooling)
+--------------------------------------------------------
+  BOA_DISABLE_TOPODIRTY_ON_SWAP=1  (Thing.java) — reintroduce the swap staleness.
+  BOA_PACK_RAW_CAST=1              (GPUMoveThing) — bypass reconcile (raw cached-rule
+                                    dispatch + cast) to exhibit pre-guard behavior.
+
+VALIDATION (production build, vs full-CPU oracle) — see SUMMARY below
+--------------------------------------------------------------------
+=== minifil-ON turnover validation Thu Jun 11 05:08:03 PM PDT 2026 pf=ParameterFiles/boa10-64Seg-dyn ===
+gpu_s1     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=1.864 filSegInitFireCt=3792 | gpu_s1                             frames= 97 segCt[first=194 last=542 peak=542 mean=529] len_nm[mean=196.7 sd=42.4 n=542] nanLen=0
+cpu_s1     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=6.930 filSegInitFireCt=0 | cpu_s1                             frames=101 segCt[first=194 last=568 peak=568 mean=557] len_nm[mean=197.4 sd=43.1 n=568] nanLen=0
+gpu_s2     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=0.852 filSegInitFireCt=3959 | gpu_s2                             frames=101 segCt[first=195 last=564 peak=564 mean=545] len_nm[mean=195.2 sd=40.7 n=564] nanLen=0
+cpu_s2     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=2.261 filSegInitFireCt=0 | cpu_s2                             frames=101 segCt[first=193 last=535 peak=535 mean=517] len_nm[mean=196.2 sd=45.9 n=535] nanLen=0
+gpu_s3     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=1.742 filSegInitFireCt=4059 | gpu_s3                             frames=101 segCt[first=194 last=530 peak=530 mean=515] len_nm[mean=198.7 sd=42.7 n=530] nanLen=0
+cpu_s3     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=1.997 filSegInitFireCt=0 | cpu_s3                             frames=101 segCt[first=197 last=567 peak=567 mean=550] len_nm[mean=194.4 sd=42.2 n=567] nanLen=0
+=== DONE Thu Jun 11 05:18:36 PM PDT 2026 ===
+
+LONG RUN (10k steps, actinConc 14, seed 1):
+  rc=0 packRuleDesync=0 demandSyncPose calls=301 (=100 biochem + 201 frames)
+  poseDelta avg=18.87 max=194 overflow=0 cap=8192 planRebuild=1
+  segCt 197->578 mean562 len 196.3+/-43.9 nm nanLen=0
+  minifilament span held ~180 nm (frame0 180.0, frame200 181.4) => cohesion on device works.
+
+NEUTRALITY (3 seeds, GPU-resident vs full-CPU oracle, same seed):
+  segCt last  GPU 542/564/530 (mean 545) vs CPU 568/535/567 (mean 557) — overlapping, neutral
+  len_nm      GPU ~197+/-42 vs CPU ~196+/-43 — identical
+  meanBoundMotors GPU 1.86/0.85/1.74 vs CPU 6.93/2.26/2.00 — both noisy; GPU trends lower
+                  = the PRE-EXISTING GPU-minifil-binding seam (2026-06-09 entry), NOT this fix
+  10/10 GPU runs (3 seeds + long): cast=0, NaN=0, packRuleDesync=0, overflow=0, planRebuild=1,
+                  demandSyncPose at biochem+frame cadence (151 @5k, 301 @10k).
+
+SEPARATE PRE-EXISTING ITEM (flagged, not this fix): on boa10-64Seg-dyn (slotCap=19602) one
+inert kernel in the chained graph emits a per-step "[TornadoVM-PTX-JNI] ERROR cuLaunchKernel
+Returned: 701" (LAUNCH_OUT_OF_RESOURCES). BENIGN: results are oracle-neutral, minifils hold
+span ~180nm (cohesion runs), no NaN, run completes rc=0. Newly EXPOSED now that minifil-ON
+turnover reaches the GPU at this scale (the cast crash previously masked it). Small configs
+(boa10-miniFil-turnover, boa10-singleMiniFil) show 701=0. Touches no code in this fix.
+
+PRE-FIX vs POST-FIX A/B (seed 1, boa10-64Seg-dyn, scripts/prefix_ab.sh):
+  prefix_gpu_s1  (fix stashed): meanBoundMotors=1.728 segCt last=541 len 197.2+/-42.8 nanLen=0
+  postfix_gpu_s1 (fix on):      meanBoundMotors=2.110 segCt last=547 len 196.7+/-42.4 nanLen=0 packRuleDesync=0
+  => pre-fix ~= post-fix within run-to-run noise; both far below CPU oracle (binding seam predates
+     this fix). reconcilePackRule is a pure pass-through in production (packRuleDesync=0).

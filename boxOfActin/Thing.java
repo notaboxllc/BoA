@@ -16,6 +16,14 @@ public class Thing extends Object {
 	
 	static Thing [] theThings = new Thing [32000000];	// array of all things
 	static int thingCt = 0;								// how many things
+	// Fault-injection diagnostic (2026-06-11): when set, removeThing() does NOT
+	// signal topologyDirty on a swap-compaction. This deliberately reintroduces
+	// the historical GPU slot-map staleness that produced the packRange
+	// MyoMiniFilament->FilSegment ClassCastException, so the pack-dispatch
+	// desync guard (GPUMoveThing.reconcilePackRule) can be exercised. OFF in
+	// all production runs.
+	static final boolean DISABLE_TOPODIRTY_ON_SWAP =
+		"1".equals(System.getenv("BOA_DISABLE_TOPODIRTY_ON_SWAP"));
 	static Crucible theBox;								// only one bug/box
 	static Bug lmBug;				// only one listeria
 	// for efficiency
@@ -1226,7 +1234,7 @@ public class Thing extends Object {
 		// — topologyDirty never triggers allocateAndBuildPlan), idempotent
 		// across all removals in a step. Only meaningful when a swap actually
 		// moved a Thing (swapId != lastId).
-		if (Env.useGPU && swapId != lastId) {
+		if (Env.useGPU && swapId != lastId && !DISABLE_TOPODIRTY_ON_SWAP) {
 			GPUMoveThing.markTopologyDirty();
 		}
 		instanceRegistry.remove(byeThing.thingInstanceId);

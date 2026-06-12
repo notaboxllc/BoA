@@ -1915,8 +1915,9 @@ public class BoxOfActin {
 			double dsdN = GPUMoveThing.getDemandSyncDerivedNanos() / 1.0e9;
 			int    dsdC = GPUMoveThing.getDemandSyncDerivedCalls();
 			int    prc  = GPUMoveThing.getPlanRebuildCount();
-			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d%n",
-				dspN, dspC, dsdN, dsdC, prc);
+			long pkDesync = GPUMoveThing.getPackRuleDesyncCount();
+			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d packRuleDesync=%d%n",
+				dspN, dspC, dsdN, dsdC, prc, pkDesync);
 			// Step 2 — per-step pose-delta scatter stats. avg=mean entries per
 			// gathered step (excludes the freshPlan steps that snapshot only);
 			// max=largest single delta; overflow=times the cap was exceeded
