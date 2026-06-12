@@ -1,5 +1,43 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — Dense contractile re-baseline benchmark: GATE BAIL (10× density won't percolate) (branch `benchmark-contractile-dense`)
+
+**Outcome: bailed at the Part A gate** per the prompt — the spec'd 10× areal density does
+**not percolate**, so Parts B–E (speed sweep, memory ceilings, kernel profiler) did not run.
+Full writeup in `BENCHMARK_contractile_dense.md`; calibration numbers in
+`RUN_LOGS/2026-06-12_dense_rebaseline/`.
+
+**What was established.**
+- **GPU minifil + turnover is clean now.** A 211-step GPU run of `boa10-64Seg-dyn` (minifils +
+  active turnover) completed rc=0, no 701/packRange/ClassCast/overflow. The base fixture's
+  "RUN ON CPU — GPU crashes on minifils + FilSegment removal" warning is **stale** (fixed by
+  RULE_MINIFIL, 2026-06-11). filFilBroadphase active, FILSEG_MESH skipped every step, sync at
+  biochem cadence — as designed.
+- **Percolation is a density wall, not a rate/reach problem.** Even with formation saturated
+  (P_form≈1, every step) and crosslinker reach widened to 0.40 µm (37× default), the largest
+  connected component stays ≤12 of 1000 filaments. Mechanism: with `maxLinksOnSeg=10` crosslinks
+  **bundle adjacent filament pairs** (components of size ~2) instead of bridging. Onset is sharp
+  with density: 10×→largestComp 12, 20×→20, **40× (4000 fils)→2171 (54 %), spanFrac 0.99,
+  percolates=TRUE**.
+- **F-actin units caveat.** `Chamber.makeABox` normalises concentration by `boxVolume =
+  8·dimX·dimY·dimZ` (400 µm³) while filaments occupy 50 µm³, so sim-internal F-actin is 8× below
+  geometric. At 10× density: geometric ~13.7 µM (on target), sim-internal ~1.7 µM.
+- **Host-phase decomposition captured** (gate run, GPU, window [200,460)): exec dominates
+  145 ms/step (84 %); host = 28 ms/step; largest every-step **host** phase is **`pack` 8.1 ms/step**
+  (OOP→device gather), then step 2.4 / brownian 1.6 / gather 1.2 / crosslinkForce 0.77;
+  `meshFill` 0.008 (skipped ✅); `sync` 0.81 amortized / 104.7 per-fire, 2 calls = biochem cadence ✅.
+  The dense config is strongly device-bound (a kernel-scaling question, not run).
+
+**Instrumentation added (branch, reusable):** `PercolationProbe.java` (union-find largest
+component + spanning + links/fil → `[STATS] percolation`); windowed `BOA_STEP_PROFILE` host-phase
+report (`reportStepPhaseProfile`/`maybeTakeProfileBaseline`, `BOA_PROFILE_WARMUP`, new
+`crosslinkFormTimer`); `[STATS] fActin` readout. Fixture `boa10-64Seg-dyn-dense` (annotated
+non-percolating at 10×). **No change to main's defaults.**
+
+**Open / for jba:** decide target density (~40× to percolate, or relax the requirement, or change
+the bundle-vs-bridge model) and the F-actin convention (geometric vs sim-internal). Then Parts
+B–E run unchanged; confirm a 40× config stays GPU-clean (watch `POSE_DELTA_CAP`/overflow).
+
 ## 2026-06-12 — Crosslink lifecycle: cadenced stochastic formation + force-dependent dissolution (branch `crosslink-lifecycle`, NOT merged)
 
 **Mission / design record.** Re-cadence crosslink FORMATION from every-collision-step

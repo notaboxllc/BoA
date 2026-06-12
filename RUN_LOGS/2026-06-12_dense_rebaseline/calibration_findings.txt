@@ -1,0 +1,75 @@
+Dense contractile re-baseline — GPU crosslink calibration + gate (2026-06-12)
+Branch: benchmark-contractile-dense.  Machine: aorus1, RTX 5070 (12GB), Java 21, TornadoVM 4.0.1-dev PTX.
+Fixture: ParameterFiles/boa10-64Seg-dyn-dense (10x areal density of boa10-64Seg-dyn).
+
+=========================================================================
+GATE VERDICT: BAIL — config needs jba. The spec'd 10x areal density does NOT
+percolate; not at any reasonable formation rate, and not even with a 40x-enlarged
+crosslinker reach. F-actin is on-target geometrically (~13.7 uM) but a box-volume
+units convention makes the simulation-internal value ~8x lower (1.7 uM).
+=========================================================================
+
+--- GPU dense-1x gate (xLinkOnRate=40, xLinkConc=1, grab=default 0.0108um, W=200) ---
+rc=0, NaN=0, no 701 / packRange / ClassCast / overflow (overflowSegs=0, planRebuild=1 initial only).
+filsegMeshFillSkipped=460 (every step, FILSEG_MESH skipped on -gpu)  -> meshFill 0.008 ms/step CONFIRMED ~0.
+demandSyncPoseCalls=4 over 460 steps = biochem cadence (pull/step=0.009) -> sync CADENCED CONFIRMED.
+fActin: segs=5934 monomers=413167 fActinUM=1.72 (sim units)  meanSegLen=0.191um  freePool 20->18.28.
+percolation: filaments=1001 activeLinks=28 linksPerFil=0.028 largestComp=3 (0.3%) spanFrac=0.14 percolates=FALSE.
+
+Host-phase decomposition (window=[200,460), 260 steps, GPU):
+  total(wall)      173.47 ms/step
+  exec             145.26 ms/step  (84% of wall — GPU chained task graph DOMINATES)
+  host(=tot-exec)   28.20 ms/step
+  EVERY-STEP HOST phases (ranked):
+    pack            8.09   <-- largest every-step host phase (gather OOP -> device FloatArrays)
+    step            2.42
+    brownian        1.65
+    gatherForces    1.18
+    crosslinkForce  0.77
+    meshFill        0.008  (~0, FILSEG_MESH skipped — confirmed)
+  CADENCE phases (amortized ms/step | per-fire ms | fires over window):
+    biochem         2.13 | 277.0 | 2
+    sync            0.81 | 104.7 | 2   (biochem cadence, NOT every step — confirmed)
+    crosslinkFormation 0.05 | 6.0 | 2
+  other(unlabeled) 16.36   (motor-fil collision sample, resetCt, cleanups, recompute, logAndDraw cadence)
+
+--- Link CEILING probe (CPU, fire EVERY step, P_form~1: xLinkOnRate=1000, xLinkConc=10) ---
+Even with formation SATURATED, the network does not percolate at 10x density:
+  grab=0.0108 (default): linkCtMean=403  largestComp=4   spanFrac=0.15  percolates=FALSE
+  grab=0.05:             linkCtMean=1826 largestComp=12  spanFrac=0.23  percolates=FALSE
+  grab=0.15:             linkCtMean=4215 largestComp=7   spanFrac=0.19  percolates=FALSE
+  grab=0.40:             linkCtMean=7237 largestComp=5   spanFrac=0.14  percolates=FALSE
+MECHANISM: with maxLinksOnSeg=10, crosslinks pile up between already-adjacent filament
+PAIRS (bundling -> components of size ~2), rather than bridging new filaments. More links
+and longer reach BUNDLE harder; they do not connect the box. At 10x areal density the
+mean filament spacing (~0.6um) leaves too few distinct neighbours per filament.
+
+--- Density is the lever (CPU, fire-every-step, P_form~1, grab=0.05) ---
+  initialFilaments=1000 (10x): largestComp=12   (1.2%)  spanFrac=0.15  percolates=FALSE  fActin 1.7uM
+  initialFilaments=2000 (20x): largestComp=20   (1.0%)  spanFrac=0.39  percolates=FALSE  fActin 3.4uM
+  initialFilaments=4000 (40x): largestComp=2171 (54.3%) spanFrac=0.99  percolates=TRUE   fActin 6.8uM
+Percolation onset is sharp between 20x and 40x areal density.
+
+--- Box-volume / F-actin units note ---
+Chamber.makeABox sets boxVolume = 8*dimX*dimY*dimZ (= 8*10*10*0.5 = 400 um^3) while
+filaments are seeded in [-0.5*boxXDim, +0.5*boxXDim]^... = the 10x10x0.5 = 50 um^3 region.
+microMolarChangePerMonomer (and hence actinConc and the reported fActinUM) is normalised
+by the 400 um^3 reference, so the simulation-internal F-actin is 8x lower than the
+geometric concentration in the occupied 50 um^3. Geometric F-actin at 10x density is
+~13.7 uM (on the prompt's 12-20 uM target); the sim-internal value is ~1.7 uM. The biochem
+rates (poly/depoly draw from actinConc) operate in the sim-internal units, so this is an
+internal-consistency convention, not a correctness bug — but it must be reconciled before
+"F-actin uM" is quoted as a target.
+
+=========================================================================
+RECOMMENDATION FOR JBA (to unblock Parts B-E):
+  1. Density: raise initialFilaments to ~4000 (40x areal) to get a percolating network,
+     OR relax the percolation requirement, OR change the network model so crosslinks
+     bridge rather than bundle (e.g. lower maxLinksOnSeg + larger crossLinkGrabDist).
+  2. F-actin target: decide whether 12-20 uM means geometric (occupied 50 um^3) or
+     sim-internal (400 um^3 reference). At 40x density geometric ~27 uM, sim-internal ~6.8 uM.
+  3. The instrumentation (PercolationProbe, windowed BOA_STEP_PROFILE, fActin readout) and
+     the GPU path (clean with minifils+turnover) are ready; only the density/percolation
+     target is unresolved. Confirm a 40x config is GPU-clean (watch POSE_DELTA_CAP/overflow
+     at higher churn) and Parts B-E can run unchanged.
+=========================================================================
