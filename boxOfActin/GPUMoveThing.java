@@ -6465,6 +6465,20 @@ public class GPUMoveThing {
     public static long getDemandSyncDerivedNanos() { return demandSyncDerivedNanos; }
     public static int  getDemandSyncDerivedCalls() { return demandSyncDerivedCalls; }
     public static int  getPlanRebuildCount()       { return planRebuildCount;       }
+    // Part D (benchmark-contractile-dense): device-buffer sizing for the memory
+    // ceiling table. slotCap is the per-Thing SoA capacity; the byte estimate
+    // sums the major FloatArray strides (33 floats/slot per-Thing + myo/bind
+    // index arrays). Approximate — NVML (nvidia-smi) gives true process VRAM.
+    public static long getDeviceBufBytesEstimate() {
+        // per-Thing FloatArrays: ~33 floats/slot (coord/uVec/yVec/cpuF/cpuT/
+        // jointF/jointT/bTrans/bRot 3 each =27, brownianScales 2, velMask 3,
+        // soaLength 1 = 33); per-Myosin: myoDrags 9 + anchorPts 3 + flags 2
+        // ≈14 floats + 3 int index arrays; bind index arrays 3*(seg+motor).
+        long perThing = (long) slotCap * 33L * 4L;
+        long perMyo   = (long) myoCap * (14L * 4L + 3L * 4L);
+        long bind     = (long) (bindSegCap + bindMotorCap) * 3L * 4L;
+        return perThing + perMyo + bind;
+    }
 
     // Step 2 — pose-delta-scatter stats.
     public static long getPoseDeltaCountSum()       { return poseDeltaCountSum;       }

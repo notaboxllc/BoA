@@ -32,6 +32,21 @@ public class BoxOfActin {
 	static RunTimer cleanupTimer2 = new RunTimer("Cleanups2");
 	static RunTimer cleanupTimer3 = new RunTimer("Cleanups3");
 	static RunTimer cleanupTimer4 = new RunTimer("Cleanups4");
+	// Part C (benchmark-contractile-dense): host-side crosslink FORMATION drain
+	// (device filFilCandidate kernel result -> host checkToLink/makeLink). The
+	// kernel itself rides exec; this captures the host drain cost (cadence phase).
+	static RunTimer crosslinkFormTimer = new RunTimer("CrosslinkFormation");
+
+	// Part C windowed host-phase profile. Gated by StepProfiler.ENABLED
+	// (BOA_STEP_PROFILE). Window = [BOA_PROFILE_WARMUP, end); per-phase ms/step =
+	// (final - baseline-at-warmup) / windowSteps. Wall is bracketed exactly to the
+	// loop via profWallLastNs (updated every step in updateCounters).
+	static long    profWarmupSteps   = -2;   // -2 = unresolved; resolved lazily from env
+	static boolean profBaselineTaken = false;
+	static long    profWallBaselineNs = 0, profWallLastNs = 0, profWindowStartStep = 0;
+	static long    pbExecN, pbPackN, pbJointPackN, pbSyncPoseN, pbSyncDerivedN;
+	static long    pbMeshMs, pbXlinkMs, pbBiochemMs, pbMoveMs, pbFormMs, pbStepMs, pbGatherMs, pbBrownMs;
+	static long    pbBiochemFire, pbXlinkFire, pbSyncCalls;
 
 
 	static RunTimer [] runTimers = {collisionMeshTimer,motorsAndFilsColTimer,brownianTimer,xLinkTimer,stepTimer,gatherTimer,moveTimer,biochemTimer,resetCtTimer,cleanupTimer1};
@@ -1157,6 +1172,11 @@ public class BoxOfActin {
 				}
 				if (Env.terminating) break outer;
 
+				// Part C: take the windowed-profile baseline once Env.counter (steps
+				// completed) reaches the warmup boundary. Captures cumulative-so-far
+				// for every phase accumulator; the window delta is final - baseline.
+				if (StepProfiler.ENABLED) { maybeTakeProfileBaseline(); }
+
 				// Inert-wave cull: refresh per-ThreadSet active flags from live
 				// counts. Cheap (17 int compares); catches mid-run population
 				// growth in biochem-active configs.
@@ -1387,7 +1407,9 @@ public class BoxOfActin {
 							if (Env.counter == GPUMoveThing.FILFIL_PARITY_STEP) {
 								GPUMoveThing.filFilCandidateParityCheck();
 							}
+							crosslinkFormTimer.start();
 							GPUMotorBinding.drainFilFilCandidates();
+							crosslinkFormTimer.stopInc();
 						}
 					}
 					// Phase 4.5 scoping — poison the frame-only host mirrors
@@ -1876,6 +1898,39 @@ public class BoxOfActin {
 			GPUMoveThing.filFilBroadphaseActive, GPUMoveThing.filFilFillSkipCt,
 			GPUMotorBinding.filFilCandPairs, GPUMotorBinding.filFilCandMaxSeg,
 			GPUMotorBinding.filFilOverflowCt, GPUMotorBinding.filFilDrainCalls);
+		// F-actin density readout (benchmark-contractile-dense). Sum of monomers in
+		// all live filament segments * the per-monomer uM conversion = polymerized
+		// actin concentration; reports alongside the free hydrolyzable pool.
+		{
+			long monoSum = 0; int segs = 0; double lenSum = 0;
+			for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+				FilSegment fs = FilSegment.theFilSegments[i];
+				if (fs == null || fs.removeMe) continue;
+				monoSum += fs.monomerCt; segs++; lenSum += fs.length;
+			}
+			double fActinUM = monoSum * Crucible.microMolarChangePerMonomer;
+			System.out.printf("[STATS] fActin segs=%d monomers=%d fActinUM=%.2f meanSegLenUM=%.3f freePoolUM=%.2f%n",
+				segs, monoSum, fActinUM, segs > 0 ? lenSum / segs : 0.0, Env.actinConc.getValue());
+		}
+		// Memory ceiling readout (Part D, benchmark-contractile-dense): JVM used/max
+		// heap + (GPU) device-buffer slotCap/estimate. Peak host RSS comes from an
+		// external /usr/bin/time -v wrapper; true device VRAM from NVML (nvidia-smi).
+		{
+			Runtime rt = Runtime.getRuntime();
+			long usedHeap = rt.totalMemory() - rt.freeMemory();
+			long maxHeap  = rt.maxMemory();
+			if (Env.useGPU) {
+				System.out.printf("[STATS] mem usedHeapMB=%.1f maxHeapMB=%.1f slotCap=%d slotCount=%d myoCap=%d devBufEstMB=%.1f%n",
+					usedHeap / 1.0e6, maxHeap / 1.0e6, GPUMoveThing.getSlotCap(), GPUMoveThing.getSlotCount(),
+					GPUMoveThing.getMyoCap(), GPUMoveThing.getDeviceBufBytesEstimate() / 1.0e6);
+			} else {
+				System.out.printf("[STATS] mem usedHeapMB=%.1f maxHeapMB=%.1f%n", usedHeap / 1.0e6, maxHeap / 1.0e6);
+			}
+		}
+		// Filament-network percolation / spanning (benchmark-contractile-dense). Read-only end-of-run probe.
+		PercolationProbe.report();
+		// Windowed host-phase decomposition report (Part C). No-op unless BOA_STEP_PROFILE set.
+		reportStepPhaseProfile();
 		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
 		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
 		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
@@ -2355,6 +2410,98 @@ public class BoxOfActin {
 		}
 	}
 
+	// Part C — resolve the warmup boundary and snapshot all phase accumulators
+	// the first time Env.counter (steps completed) reaches it.
+	static void maybeTakeProfileBaseline() {
+		if (profBaselineTaken) return;
+		if (profWarmupSteps == -2) {
+			String w = System.getenv("BOA_PROFILE_WARMUP");
+			profWarmupSteps = (w != null && !w.isEmpty()) ? Long.parseLong(w.trim()) : 0;
+		}
+		if (Env.counter < profWarmupSteps) return;
+		profWindowStartStep = Env.counter;
+		profWallBaselineNs  = System.nanoTime();
+		profWallLastNs      = profWallBaselineNs;
+		pbExecN        = GPUMoveThing.getExecNanos();
+		pbPackN        = GPUMoveThing.getPackNanos();
+		pbJointPackN   = GPUMoveThing.getJointPackNanos();
+		pbSyncPoseN    = GPUMoveThing.getDemandSyncPoseNanos();
+		pbSyncDerivedN = GPUMoveThing.getDemandSyncDerivedNanos();
+		pbMeshMs    = collisionMeshTimer.time;
+		pbXlinkMs   = xLinkTimer.time;
+		pbBiochemMs = biochemTimer.time;
+		pbMoveMs    = moveTimer.time;
+		pbFormMs    = crosslinkFormTimer.time;
+		pbStepMs    = stepTimer.time;
+		pbGatherMs  = gatherTimer.time;
+		pbBrownMs   = brownianTimer.time;
+		pbBiochemFire = GPUMoveThing.biochemFireCt;
+		pbXlinkFire   = GPUMoveThing.crosslinkFireCt;
+		pbSyncCalls   = GPUMoveThing.getDemandSyncPoseCalls();
+		profBaselineTaken = true;
+	}
+
+	// Part C — windowed host-phase decomposition. No-op unless BOA_STEP_PROFILE set.
+	// Prints ms/step per phase split into every-step vs biochem-cadence groups,
+	// plus total and host (= total - exec).
+	static void reportStepPhaseProfile() {
+		if (!StepProfiler.ENABLED) return;
+		if (!profBaselineTaken) {
+			System.out.println("[STEP_PROFILE] no window captured (run did not reach warmup boundary)");
+			return;
+		}
+		long steps = Math.max(1, Env.counter - profWindowStartStep);
+		double wallMs = (profWallLastNs - profWallBaselineNs) / 1.0e6;
+		double M = steps;
+		// Every-step phases (ms over window)
+		double execMs  = (GPUMoveThing.getExecNanos()            - pbExecN)        / 1.0e6;
+		double packMs  = (GPUMoveThing.getPackNanos()            - pbPackN)        / 1.0e6
+		               + (GPUMoveThing.getJointPackNanos()       - pbJointPackN)   / 1.0e6;
+		double xforceMs= (xLinkTimer.time          - pbXlinkMs);
+		double meshMs  = (collisionMeshTimer.time  - pbMeshMs);
+		double moveMs  = (moveTimer.time           - pbMoveMs);     // GPU: wraps exec+drains; CPU: cpuIntegrate
+		double stepMs  = (stepTimer.time           - pbStepMs);
+		double gathMs  = (gatherTimer.time         - pbGatherMs);
+		double brownMs = (brownianTimer.time       - pbBrownMs);
+		// Cadence phases
+		double formMs    = (crosslinkFormTimer.time - pbFormMs);
+		double biochemMs = (biochemTimer.time       - pbBiochemMs);
+		double syncMs    = (GPUMoveThing.getDemandSyncPoseNanos()    - pbSyncPoseN)    / 1.0e6
+		                 + (GPUMoveThing.getDemandSyncDerivedNanos() - pbSyncDerivedN) / 1.0e6;
+		long biochemFires = GPUMoveThing.biochemFireCt    - pbBiochemFire;
+		long xlinkFires   = GPUMoveThing.crosslinkFireCt  - pbXlinkFire;
+		long syncCalls    = GPUMoveThing.getDemandSyncPoseCalls() - pbSyncCalls;
+
+		boolean gpu = Env.useGPU;
+		double totalPerStep = wallMs / M;
+		double hostPerStep  = totalPerStep - (gpu ? execMs / M : 0.0);
+
+		System.out.println();
+		System.out.printf("*** [STEP_PROFILE] window=[%d,%d) steps=%d path=%s wall=%.1fms (%.4f ms/step) ***%n",
+			profWindowStartStep, Env.counter, steps, gpu ? "GPU" : "CPU", wallMs, totalPerStep);
+		System.out.println("  --- every-step phases (ms/step) ---");
+		System.out.printf("    %-18s %10.5f%s%n", "exec",          execMs / M, gpu ? "" : "  (n/a CPU)");
+		System.out.printf("    %-18s %10.5f%s%n", "pack",          packMs / M, gpu ? "" : "  (n/a CPU)");
+		System.out.printf("    %-18s %10.5f%n",   "crosslinkForce", xforceMs / M);
+		System.out.printf("    %-18s %10.5f%n",   "meshFill",       meshMs / M);
+		System.out.printf("    %-18s %10.5f%s%n", "cpuIntegrate",   moveMs / M, gpu ? "  (GPU: move-wrap)" : "");
+		System.out.printf("    %-18s %10.5f%n",   "  step",         stepMs / M);
+		System.out.printf("    %-18s %10.5f%n",   "  gatherForces",  gathMs / M);
+		System.out.printf("    %-18s %10.5f%n",   "  brownian",      brownMs / M);
+		System.out.println("  --- biochem-cadence phases (amortized ms/step | per-fire ms | fires) ---");
+		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "crosslinkFormation", formMs / M,    xlinkFires   > 0 ? formMs    / xlinkFires   : 0.0, xlinkFires);
+		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "biochem",            biochemMs / M, biochemFires > 0 ? biochemMs / biochemFires : 0.0, biochemFires);
+		System.out.printf("    %-18s %10.5f | %8.4f | %d%n", "sync",               syncMs / M,    syncCalls    > 0 ? syncMs    / syncCalls    : 0.0, syncCalls);
+		double labeled = (gpu ? execMs + packMs : 0) + xforceMs + meshMs + (gpu ? 0 : moveMs)
+		               + formMs + biochemMs + syncMs + (gpu ? 0 : stepMs + gathMs + brownMs);
+		double otherMs = wallMs - labeled;
+		System.out.printf("  --- totals (ms/step) ---%n");
+		System.out.printf("    %-18s %10.5f%n", "total(wall)", totalPerStep);
+		System.out.printf("    %-18s %10.5f%n", "host(=tot-exec)", hostPerStep);
+		System.out.printf("    %-18s %10.5f%n", "other(unlabeled)", otherMs / M);
+		System.out.println();
+	}
+
 	public static void updateCounters() {
 		// Per-step host-pose consumer audit — disarm + dump before the increment
 		// (so the step number matches the armed window) and before logAndDraw,
@@ -2368,6 +2515,8 @@ public class BoxOfActin {
 		}
 		//update counters and flags
 		paintedThisStep = false;
+		// Part C: bracket the profile window's wall-clock exactly to the loop body.
+		if (StepProfiler.ENABLED && profBaselineTaken) { profWallLastNs = System.nanoTime(); }
 		Env.counter++;
 		Env.simulationTime += Env.deltaT.getValue();
 		remoteOutCounter++;
