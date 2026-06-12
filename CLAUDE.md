@@ -90,9 +90,12 @@ java -Xmx800M -cp ".:libs/*" BoxOfActin -help                  # full option lis
 TORNADOVM_HOME="$HOME/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx"
 TDIR="$TORNADOVM_HOME/share/java/tornado"
 java @$TORNADOVM_HOME/tornado-argfile --enable-preview -Xmx800M \
+     -Dtornado.tvm.maxbytecodesize=16384 \
      -cp "$TDIR/tornado-api-4.0.1-dev.jar:libs/*:." \
      BoxOfActin -r -gpu -pf ParameterFiles/glidingAssay500_val
 ```
+
+`-Dtornado.tvm.maxbytecodesize=16384` is **required** on the single-graph path (the default): the cohesion/minifil device kernels push the chained TaskGraph's bytecode past TornadoVM's 4096-byte default, which fails at first-execute compile with an internal `BufferOverflowException` in `TornadoVMBytecodeBuilder.addDependency` (deterministic, independent of seed/runTime). Symptom and fix were easy to miss because a too-small `-Xmx` can OOM *before* the compile, masking it. (The `BOA_SINGLE_GRAPH=0` two-plan fallback splits the graph and stays under 4096, so it runs without the flag — but the single graph is the production path.)
 
 `@tornado-argfile` injects `--add-modules`, `--add-exports`, JVMCI, and native library paths in one shot. The `-gpu` flag enables the chained move+bind TaskGraph (`GPUMoveThing.moveThings()` + folded `GPUMotorBinding` bind kernels — see "GPU Acceleration" below). The motor-binding decision, per-segment chain forces, per-Myosin joint constraints, box-boundary, motor cross-bridge forces, and the unified `Thing.moveThing()` integration all run on device with pose resident across executes. xLink/membrane/mesh phases remain CPU. CPU and GPU paths are mutually exclusive per run.
 

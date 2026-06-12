@@ -688,6 +688,8 @@
   <label><span class="pLabel">Myo rod</span>        <input id="sRod"      type="range" min="0.1" max="8" step="0.1" value="1"><span class="pVal" id="vRod">1.00</span></label>
   <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"       type="checkbox"></label>
   <label><span class="pLabel">Barbed ends</span>     <input id="chkBarbedEnds" type="checkbox" checked></label>
+  <label><span class="pLabel">Age color</span>       <input id="chkAgeColor"   type="checkbox" checked></label>
+  <label><span class="pLabel">Age legend</span>      <span style="display:inline-block;width:90px;height:10px;border:1px solid #555;background:linear-gradient(to right,#ff0000,#ff8800,#ffff00)"></span>&nbsp;<span style="font-size:10px;color:#aaa">ADP→ATP</span></label>
   <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
 </div>
@@ -794,10 +796,23 @@ const MAX_MYOSINS       = 5000;
 const MAX_MINIFILAMENTS = 2000;
 const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1);
 const segMesh = new THREE.InstancedMesh(cylGeo,
-  new THREE.MeshPhongMaterial({ color: 0xcc44bb }), MAX_SEGMENTS);
+  new THREE.MeshPhongMaterial({ color: 0xffffff }), MAX_SEGMENTS);
 segMesh.count = 0;
 segMesh.frustumCulled = false;
+// Per-segment instance color: age-coloring (red=old ADP -> yellow=young ATP) driven by
+// the frame's notADPRatio, or the flat fallback magenta when Age color is off.
+segMesh.instanceColor = new THREE.InstancedBufferAttribute(
+  new Float32Array(MAX_SEGMENTS * 3), 3);
 scene.add(segMesh);
+let showAgeColor = true;            // toggled by #chkAgeColor
+const SEG_FALLBACK = new THREE.Color(0xcc44bb);
+const _ageCol = new THREE.Color();
+// Map notADPRatio in [0,1] to a colour: 0 (fully ADP / old) -> red, 1 (all ATP / young)
+// -> yellow, blending through orange. r=1 throughout; green channel rises with ATP fraction.
+function ageColor(notADPRatio) {
+  const a = Math.max(0, Math.min(1, notADPRatio == null ? 1 : notADPRatio));
+  return _ageCol.setRGB(1.0, a, 0.0);
+}
 
 const rodMesh = new THREE.InstancedMesh(cylGeo,
   new THREE.MeshPhongMaterial({ color: 0x888888 }), MAX_MYOSINS);
@@ -1223,12 +1238,14 @@ function applyFrameData(data) {
     if (count >= MAX_SEGMENTS) break;
     if (!setCylinderMatrix(seg.end1, seg.end2, seg.r * actinScale)) continue;
     segMesh.setMatrixAt(count, dummy.matrix);
+    segMesh.setColorAt(count, showAgeColor ? ageColor(seg.notADPRatio) : SEG_FALLBACK);
     segIdToSlot.set(seg.id, count);
     segSlotToId.set(count, seg.id);
     count++;
   }
   segMesh.count = count;
   segMesh.instanceMatrix.needsUpdate = true;
+  if (segMesh.instanceColor) segMesh.instanceColor.needsUpdate = true;
 
   updateMyosinData(data.myosins, data.minifilaments, data.nodes);
   updateAxisLines(data.segments);
@@ -1734,6 +1751,18 @@ document.getElementById('chkArrow').addEventListener('change', e => {
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {
   showBarbedEnds = e.target.checked;
   updateBarbedEnds(currentFrameData ? currentFrameData.segments : null);
+});
+document.getElementById('chkAgeColor').addEventListener('change', e => {
+  showAgeColor = e.target.checked;
+  // Recolor the segments of the current frame in place (works while paused).
+  if (currentFrameData && currentFrameData.segments) {
+    for (const seg of currentFrameData.segments) {
+      const slot = segIdToSlot.get(seg.id);
+      if (slot !== undefined)
+        segMesh.setColorAt(slot, showAgeColor ? ageColor(seg.notADPRatio) : SEG_FALLBACK);
+    }
+    if (segMesh.instanceColor) segMesh.instanceColor.needsUpdate = true;
+  }
 });
 
 window.addEventListener('keydown', e => {

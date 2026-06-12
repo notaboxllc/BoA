@@ -3688,6 +3688,23 @@ public class FilSegment extends Thing {
 		}
 	}
 	
+
+		// Fraction of monomers NOT in the ADP (aged) state, walking the minus->plus
+		// chain. Drives the viewer's age-coloring (red = old/ADP -> yellow = young/ATP):
+		// 1.0 = all ATP/ADPPi (newly polymerized), 0.0 = fully hydrolyzed to ADP. Returns
+		// 1.0 when monomers aren't individually tracked (noMonomersSimd) or the chain is
+		// empty/degenerate. Walked only at output cadence (cheap), mirroring hydrolizeInFilaments.
+		public double notADPFraction () {
+			if (Env.noMonomersSimd.isActive() || minusMon == null || monomerCt <= 0) return 1.0;
+			int n = 0, notAdp = 0;
+			Monomer curMon = minusMon;
+			while (curMon != Monomer.plusGhost && curMon != null && n < monomerCt + 2) {
+				if (curMon.nucleotideState != Monomer.ADPstate) notAdp++;
+				n++;
+				curMon = curMon.frontMon;
+			}
+			return n > 0 ? ((double) notAdp) / n : 1.0;
+		}
 	public void checkCofilinDissolve () {
 		double curCofilinRatio = ((double)cofilinCt)/((double)monomerCt);
 		if (curCofilinRatio > Env.cofilinRatio.getValue()) {

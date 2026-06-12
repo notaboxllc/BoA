@@ -150,6 +150,12 @@ public class ThreeJSWriter {
                     fs.getEnd1X(), fs.getEnd1Y(), fs.getEnd1Z(),
                     fs.getEnd2X(), fs.getEnd2Y(), fs.getEnd2Z(),
                     FilSegment.radius));
+            // Nucleotide age for the viewer's age-coloring (red=old ADP -> yellow=young ATP).
+            // notADPRatio = fraction of monomers NOT in ADP state (1.0 young, 0.0 fully aged);
+            // cofilinCount marks severing-prone (cofilin-decorated) segments. Maintained on CPU
+            // biochem even on the GPU residency path.
+            sb.append(String.format(",\"notADPRatio\":%.3g,\"cofilinCount\":%d",
+                    fs.notADPFraction(), fs.cofilinCt));
             if (Env.benchmarkFilament) {
                 sb.append(fs.isLpSeg ? ",\"chainType\":\"lp\"" : ",\"chainType\":\"defl\"");
             }
@@ -351,7 +357,7 @@ public class ThreeJSWriter {
         sb.append(",\"segmentArrayPos\":").append(fs.filArrayPos);
         sb.append(",\"monomerCount\":").append(fs.monomerCt);
         // notADPRatio is the fraction of monomers NOT in ADP state (aggregate nucleotide state proxy)
-        sb.append(String.format(",\"notADPRatio\":%.4g", fs.notADPRatio));
+        sb.append(String.format(",\"notADPRatio\":%.4g", fs.notADPFraction()));
         sb.append(",\"cofilinCount\":").append(fs.cofilinCt);
         sb.append(",\"end2Capped\":").append(fs.end2Capped);
         sb.append(",\"ageSteps\":").append(Env.counter - fs.createdAtStep);
