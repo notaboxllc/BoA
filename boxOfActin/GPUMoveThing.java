@@ -107,6 +107,23 @@ public class GPUMoveThing {
         String ff = System.getenv("BOA_FILFIL_GPU");
         FILFIL_GPU_ENABLED = !(ff != null && (ff.equals("0") || ff.equalsIgnoreCase("false")));
     }
+    // A1 (2026-06-12) — validation oracle for the incremental pose-audit fix.
+    // When BOA_FULL_RECOMPUTE=1, buildDeltaSet() always runs the full
+    // O(slotCount) slot-change scan every step (the pre-fix behavior), so the
+    // incremental path (scan only on occupant-change steps) can be A/B'd
+    // against it for bit-identical device pose. Leave permanently as the oracle.
+    public static final boolean FULL_RECOMPUTE =
+        "1".equals(System.getenv("BOA_FULL_RECOMPUTE"));
+    // A1 — skip-invariant verifier. When BOA_DELTASET_VERIFY=1, on every step
+    // the gate SKIPS the slot-change scan, re-run the scan read-only and assert
+    // it would have found zero slot changes. A non-zero count = a missed
+    // invalidation (an occupant changed without occupantsChanged being set) =
+    // a correctness bug. This is the turnover-stress oracle: if it never fires,
+    // the skip is provably safe step-for-step. Read-only; never packs.
+    public static final boolean DELTASET_VERIFY =
+        "1".equals(System.getenv("BOA_DELTASET_VERIFY"));
+    public static long deltaSetVerifyFailSteps = 0L;
+    public static long deltaSetVerifyMissed    = 0L;
     // Frozen-pose candidate-completeness harness (validation #2, 2026-06-12): fire
     // filFilCandidateParityCheck() once at this step (a crosslink-FIRE step, so the
     // kernel actually emitted). -1 = off. Set BOA_FILFIL_PARITY=<step>.
@@ -592,6 +609,21 @@ public class GPUMoveThing {
     private static long trueDirtyPendingMax = 0L;
     private static long trueDirtyTotalUpperMax = 0L;
     private static long trueDirtyCalls = 0L;
+
+    // A1 diagnosis (2026-06-12) — sub-bracket of onStepStart, behavior-neutral.
+    // Splits the recompute "elephant" into classification vs pose-audit vs
+    // capacity, and counts how many classifyThings() runs were structurally
+    // necessary vs forced only by a length change (the redundancy ratio).
+    static long classifyNanos = 0L;     // cumulative time in classifyThings()
+    static long classifyCalls = 0L;     // # steps classifyThings() actually ran
+    static long deltaSetNanos = 0L;     // cumulative time in buildDeltaSet()
+    static long capacityNanos = 0L;     // cumulative time in the cap/alloc check
+    static long classifyStructuralSteps = 0L; // classify-run steps w/ a real topology event
+    static long classifyLengthOnlySteps = 0L;  // classify-run steps forced only by length change
+    // Dirty-reason tallies (incremented at the markTopologyDirty call sites).
+    public static long structuralDirtyCount = 0L; // split / remove-swap / plan-internal
+    public static long lengthDirtyCount     = 0L; // poly/depoly length-only (no structural change)
+    private static long lastStructDirtySnap  = 0L;
 
     // Per-slot prev-step Thing instance id, for change detection in onStepStart.
     // -1 sentinel = "no Thing here last step". Reset on plan build/rebuild
@@ -5077,6 +5109,7 @@ public class GPUMoveThing {
 
     public static void onStepStart() {
         ensureRunSeed();
+        long _capT0 = System.nanoTime();
         int desiredSlotCap = Math.max(1024, Thing.thingCt * 2);
         int desiredMyoCap  = Math.max(1024, Myosin.myoCt   * 2);
         if (plan == null) {
@@ -5106,16 +5139,43 @@ public class GPUMoveThing {
         // EVERY_EXECUTION upload. classifyThings still runs on topology
         // change to refresh the slot maps in place (no buffer reallocation
         // — same Java IntArray identities, just rewritten contents).
-        if (topologyDirty || Thing.thingCt != lastThingCt) {
+        capacityNanos += System.nanoTime() - _capT0;
+        boolean countChanged = (Thing.thingCt != lastThingCt);
+        // Occupant-change signal for the pose-audit gate: slot occupants can
+        // only change via creation (countChanged↑) or removeThing swap-
+        // compaction (sets topologyDirty). Both also trigger classifyThings
+        // below, so this is exactly the same condition. Captured BEFORE
+        // classifyThings() clears topologyDirty. Length-only marks (poly/
+        // depoly) also set topologyDirty — harmlessly conservative: they make
+        // the gate run an extra (empty) scan on the few biochem-cadence steps.
+        boolean occupantsChanged = topologyDirty || countChanged;
+        if (topologyDirty || countChanged) {
             if (MEM_TRACE) System.out.printf("[MEM] topoDirty (no rebuild) thingCt=%d lastThingCt=%d topoDirty=%b%n",
                 Thing.thingCt, lastThingCt, topologyDirty);
+            // Redundancy classification: a classify run is structurally
+            // necessary only if the population changed (nucleation/dissolve)
+            // or a structural dirty mark fired (split / remove-swap / plan-
+            // internal). A run forced solely by length-change marks (poly/
+            // depoly) is redundant — the slot maps, rules, chain topology and
+            // joint lists are unchanged; only the pose moved (handled by
+            // markPoseDirty + scatter). This is measurement only; the run
+            // still happens either way under the current code.
+            boolean structural = countChanged
+                              || (structuralDirtyCount != lastStructDirtySnap);
+            if (structural) classifyStructuralSteps++; else classifyLengthOnlySteps++;
+            long _clT0 = System.nanoTime();
             classifyThings();
+            classifyNanos += System.nanoTime() - _clT0;
+            classifyCalls++;
         }
+        lastStructDirtySnap = structuralDirtyCount;
 
         // Step 2 — build the per-step pose delta. After classifyThings so
         // newly-created Things already have slots; before plan.execute() so
         // the EVERY_EXECUTION upload + scatter kernel run on this step's data.
-        buildDeltaSet();
+        long _dsT0 = System.nanoTime();
+        buildDeltaSet(occupantsChanged || FULL_RECOMPUTE);
+        deltaSetNanos += System.nanoTime() - _dsT0;
     }
 
     // -------------------------------------------------------------------------
@@ -5148,7 +5208,7 @@ public class GPUMoveThing {
     // FIRST_EXECUTION upload then re-syncs everything. Overflow is logged
     // and counted; sustained overflow means POSE_DELTA_CAP needs growing.
     // -------------------------------------------------------------------------
-    private static void buildDeltaSet() {
+    private static void buildDeltaSet(boolean occupantsChanged) {
         if (slotCap == 0) {
             poseDeltaCount.set(0, 0);
             return;
@@ -5171,38 +5231,73 @@ public class GPUMoveThing {
             return;
         }
 
-        java.util.Arrays.fill(slotAlreadyDeltaed, 0, slotCap, false);
-
-        // Single-pass slot-change scan: walk slots once, packing dirty entries
-        // up to POSE_DELTA_CAP and counting the TRUE (uncapped) dirty demand
-        // alongside. The previous instrumentation did a separate O(slotCount)
-        // pass for the true count — at 1× / slotCount ≈ 300K that doubled the
-        // walk cost and showed up as a +25 % regression in ms/step. Merged
-        // here so the measurement is essentially free.
         int count = 0;
         int trueSlotChangeDirty = 0;
         boolean overflowed = false;
-        for (int s = 0; s < slotCount; s++) {
-            Thing t = Thing.theThings[gpuThingIndices[s]];
-            int curId = (t == null) ? -1 : t.thingInstanceId;
-            if (prevSlotInstanceId[s] != curId) {
-                trueSlotChangeDirty++;
-                if (count < POSE_DELTA_CAP) {
-                    if (t != null) packDelta(count, s, t);
-                    else clearDeltaSlot(count, s);
-                    count++;
-                    slotAlreadyDeltaed[s] = true;
-                } else {
-                    overflowed = true;
+
+        // A1 (2026-06-12) — gate the O(slotCount) slot-change scan on
+        // occupantsChanged. Slot occupants can only change via creation
+        // (countChanged) or removeThing swap-compaction (topologyDirty); both
+        // are folded into occupantsChanged by the caller. On the ~90% of steps
+        // with no occupant change the scan provably finds nothing
+        // (prevSlotInstanceId == current for every live slot), so skipping it
+        // produces a bit-identical empty slot-change delta — only the
+        // pendingDirty marks (in-place biochem/pin pose mutations) need
+        // packing, which always run below. This is the previously-redundant
+        // per-step host work the residency model made unnecessary. The full
+        // unconditional scan is preserved behind BOA_FULL_RECOMPUTE (the A/B
+        // oracle, via the caller OR'ing it into occupantsChanged).
+        if (occupantsChanged) {
+            // Single-pass slot-change scan: walk slots once, packing dirty
+            // entries up to POSE_DELTA_CAP and counting the TRUE (uncapped)
+            // dirty demand alongside.
+            java.util.Arrays.fill(slotAlreadyDeltaed, 0, slotCap, false);
+            for (int s = 0; s < slotCount; s++) {
+                Thing t = Thing.theThings[gpuThingIndices[s]];
+                int curId = (t == null) ? -1 : t.thingInstanceId;
+                if (prevSlotInstanceId[s] != curId) {
+                    trueSlotChangeDirty++;
+                    if (count < POSE_DELTA_CAP) {
+                        if (t != null) packDelta(count, s, t);
+                        else clearDeltaSlot(count, s);
+                        count++;
+                        slotAlreadyDeltaed[s] = true;
+                    } else {
+                        overflowed = true;
+                    }
                 }
+                prevSlotInstanceId[s] = curId;
             }
-            prevSlotInstanceId[s] = curId;
+            for (int s = slotCount; s < slotCap; s++) {
+                prevSlotInstanceId[s] = -1;
+            }
         }
-        for (int s = slotCount; s < slotCap; s++) {
-            prevSlotInstanceId[s] = -1;
+        // else: occupants identical to last step — prevSlotInstanceId already
+        // valid, no slot-change entries, slotAlreadyDeltaed not needed (the
+        // pendingDirty drain below maps each unique live Thing to its own slot,
+        // so no scan-vs-pending dedup is required when the scan didn't run).
+        else if (DELTASET_VERIFY) {
+            // Read-only proof of the skip invariant: a skipped scan must find
+            // zero slot changes. Any hit = missed invalidation = bug.
+            int missed = 0;
+            for (int s = 0; s < slotCount; s++) {
+                Thing t = Thing.theThings[gpuThingIndices[s]];
+                int curId = (t == null) ? -1 : t.thingInstanceId;
+                if (prevSlotInstanceId[s] != curId) missed++;
+            }
+            if (missed > 0) {
+                deltaSetVerifyFailSteps++;
+                deltaSetVerifyMissed += missed;
+                System.err.printf("[DELTASET_VERIFY] step=%d FAIL: skipped scan would have packed %d slot-change entries — MISSED INVALIDATION%n",
+                    stepCounter, missed);
+            }
         }
+
         int truePendingDirty = pendingDirty.size();
-        // 2. Explicit biochem marks — catches same-slot in-place mutations.
+        // 2. Explicit biochem/pin marks — catches same-slot in-place mutations.
+        //    Always drained, regardless of the scan gate (markPoseDirty can
+        //    fire without markTopologyDirty — e.g. the contractility pin
+        //    snap-back in BoxOfActin.applyBenchmarkPins).
         if (truePendingDirty > 0) {
             for (Thing t : pendingDirty) {
                 if (t == null || t.removeMe) continue;
@@ -5210,11 +5305,11 @@ public class GPUMoveThing {
                 if (idx < 0 || idx >= thingNumberToMoveSlot.length) continue;
                 int slot = thingNumberToMoveSlot[idx];
                 if (slot < 0 || slot >= slotCount) continue;
-                if (slotAlreadyDeltaed[slot]) continue;
+                if (occupantsChanged && slotAlreadyDeltaed[slot]) continue;
                 if (count >= POSE_DELTA_CAP) { overflowed = true; break; }
                 packDelta(count, slot, t);
                 count++;
-                slotAlreadyDeltaed[slot] = true;
+                if (occupantsChanged) slotAlreadyDeltaed[slot] = true;
             }
         }
         pendingDirty.clear();

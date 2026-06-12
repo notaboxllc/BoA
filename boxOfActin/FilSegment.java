@@ -568,6 +568,7 @@ public class FilSegment extends Thing {
 			// just a flag set; cheap).
 			if (Env.useGPU) {
 				GPUMoveThing.markTopologyDirty();
+				GPUMoveThing.lengthDirtyCount++;   // A1: length-only — not a structural change
 				GPUMoveThing.markPoseDirty(this);
 			}
 		}
@@ -584,10 +585,11 @@ public class FilSegment extends Thing {
 			// occupant at whatever slot classifyThings assigns to it).
 			if (Env.useGPU) {
 				GPUMoveThing.markTopologyDirty();
+				GPUMoveThing.structuralDirtyCount++;   // A1: split creates nextFil — real topology change
 				GPUMoveThing.markPoseDirty(this);
 			}
 		}
-		
+
 		//*** joining broken with branched networks right now, but who really needs it anyway
 		/*if (monomerCt <= Env.stdSegLength.getIntValue()/2) {
 			joinSegments();

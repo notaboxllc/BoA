@@ -56,6 +56,9 @@ public class BoxOfActin {
 	static long    pbRecomputeNs, pbOutputNs, pbCleanupTailNs, pbMembraneNs, pbSafepointNs, pbJointsNs;
 	static long    pbMotorColMs, pbResetMs, pbCleanup1Ms;
 	static long    pbGcMs;   // total JVM GC collection time (ms) at window start
+	// A1 — onStepStart sub-bracket baselines (GPU recompute decomposition).
+	static long    pbClassifyN, pbClassifyCalls, pbDeltaSetN, pbCapacityN,
+	               pbClassifyStructSteps, pbClassifyLenSteps;
 
 	// Sum of collection time across all GC collectors (ms). Used to attribute the
 	// share of the "other" residual that is GC pauses (not a phase bracket).
@@ -2129,6 +2132,13 @@ public class BoxOfActin {
 				tdc, tdscAvg, tdscMax, tdpAvg, tdpMax, tdTotalMax,
 				GPUMoveThing.getSlotCount(), GPUMoveThing.getSlotCap());
 			GPUMoveThing.reportDerivedCheckpointSummary();
+			if (GPUMoveThing.DELTASET_VERIFY) {
+				System.out.printf("[STATS] A1 deltaSetVerify failSteps=%d missedSlotChanges=%d  (0/0 = skip invariant holds)%n",
+					GPUMoveThing.deltaSetVerifyFailSteps, GPUMoveThing.deltaSetVerifyMissed);
+			}
+			System.out.printf("[STATS] A1 classify runs=%d (structural=%d lengthOnly=%d) classifyMs=%.1f poseAuditMs=%.1f fullRecompute=%b%n",
+				GPUMoveThing.classifyCalls, GPUMoveThing.classifyStructuralSteps, GPUMoveThing.classifyLengthOnlySteps,
+				GPUMoveThing.classifyNanos / 1.0e6, GPUMoveThing.deltaSetNanos / 1.0e6, GPUMoveThing.FULL_RECOMPUTE);
 		}
 		GPUMoveThing.reportMoveAB();
 		if (Env.useGPU && GPUMyosinJoints.getCallCount() > 0) {
@@ -2504,6 +2514,12 @@ public class BoxOfActin {
 		pbSafepointNs   = pcSafepointNs;
 		pbJointsNs      = pcJointsNs;
 		pbGcMs          = totalGcCollectionMs();
+		pbClassifyN          = GPUMoveThing.classifyNanos;
+		pbClassifyCalls      = GPUMoveThing.classifyCalls;
+		pbDeltaSetN          = GPUMoveThing.deltaSetNanos;
+		pbCapacityN          = GPUMoveThing.capacityNanos;
+		pbClassifyStructSteps = GPUMoveThing.classifyStructuralSteps;
+		pbClassifyLenSteps    = GPUMoveThing.classifyLengthOnlySteps;
 		pbBiochemFire = GPUMoveThing.biochemFireCt;
 		pbXlinkFire   = GPUMoveThing.crosslinkFireCt;
 		pbSyncCalls   = GPUMoveThing.getDemandSyncPoseCalls();
@@ -2585,6 +2601,20 @@ public class BoxOfActin {
 		System.out.printf("    %-18s %10.5f%n", "jointsCpu",     jointsCpuMs / M);
 		System.out.printf("    %-18s %10.5f%n", "motorFilCol",  motorColMs  / M);
 		System.out.printf("    %-18s %10.5f%n", "recompute",     recompMs    / M);
+		if (gpu) {
+			double classMs   = (GPUMoveThing.classifyNanos - pbClassifyN) / 1.0e6;
+			double deltaMs    = (GPUMoveThing.deltaSetNanos - pbDeltaSetN) / 1.0e6;
+			double capMs      = (GPUMoveThing.capacityNanos - pbCapacityN) / 1.0e6;
+			long   classRuns  = GPUMoveThing.classifyCalls - pbClassifyCalls;
+			long   structRuns = GPUMoveThing.classifyStructuralSteps - pbClassifyStructSteps;
+			long   lenRuns    = GPUMoveThing.classifyLengthOnlySteps  - pbClassifyLenSteps;
+			System.out.printf("      %-16s %10.5f%n", "↳classify",    classMs / M);
+			System.out.printf("      %-16s %10.5f%n", "↳poseAudit",   deltaMs / M);
+			System.out.printf("      %-16s %10.5f%n", "↳capacity",    capMs   / M);
+			System.out.printf("      ↳classifyRuns=%d/%d steps (structural=%d, lengthOnly=%d, redundant=%.1f%%)%n",
+			                  classRuns, steps, structRuns, lenRuns,
+			                  classRuns > 0 ? 100.0 * lenRuns / classRuns : 0.0);
+		}
 		System.out.printf("    %-18s %10.5f%n", "resetCt",       resetMs     / M);
 		System.out.printf("    %-18s %10.5f%s%n", "moveDrains",   moveDrainMs / M, gpu ? "" : "  (n/a CPU)");
 		System.out.printf("    %-18s %10.5f%n", "membrane",      membraneMs  / M);

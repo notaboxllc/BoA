@@ -1,5 +1,40 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — A1: gated the redundant per-step pose-audit scan in `onStepStart` (branch `benchmark-contractile-dense`)
+
+Follow-up to the copy-out fix (`V1_FINISH_LINE.md` A1). Full writeup `RECOMPUTE_RESIDENCY.md`;
+data `RUN_LOGS/2026-06-12_recompute_a1/`. Not merged.
+
+**Phase 1 refuted the hypothesis.** Sub-bracketing `onStepStart` into `classify`
+(`classifyThings`) vs `poseAudit` (`buildDeltaSet`): `classifyThings` does **not** run every
+step — only 4/360 (1×), 33/360 (8×), and **0 % length-only** (all structurally justified). It's
+superlinear because each run is a full O(N) rebuild AND the structural-event rate is ∝N → ∝N².
+The real redundancy is **`poseAudit`**, which runs every step (O(slotCount) pointer-chase scan)
+but finds nothing on ~90 % of steps — the residency-redundant work, and the larger half at 8×
+(17.4 vs 11.8 ms/step). The "classify redundant under turnover" idea IS real, but only at fast
+biochem cadence: a high-turnover stress fixture shows classify 52 % length-only; the dense
+benchmark's 100-step biochem cadence hides it (0 %).
+
+**Fix (poseAudit only).** Gate `buildDeltaSet`'s slot-change scan on `occupantsChanged`
+(=`topologyDirty || thingCt-changed`, the same signal that triggers classify — occupants change
+only via creation or `removeThing` swap). Skip the scan on non-structural steps (provably empty);
+always drain `pendingDirty` (in-place biochem/pin marks fire without topology-dirty). Old
+unconditional scan retained behind `BOA_FULL_RECOMPUTE=1` (A/B oracle).
+
+**Result.** poseAudit 1× 0.71→0.02, 8× 17.61→2.18 ms/step (the gate now pays the scan only on
+structural steps: 2.18 ≈ 44/360 × 17.6). recompute total 8× 30.95→19.37 (−37 %). GPU wall 8×
+272.3→261.7; **GPU÷CPU 8× 0.804→0.773** (CPU 8× = 338.6). Slope reduced but **not killed** —
+residual is the non-redundant ∝N² `classify`; killing it needs incremental classification
+(high cache-staleness risk, deferred).
+
+**Physics-neutral, proven 3 ways.** (1) Skip-invariant verifier (`BOA_DELTASET_VERIFY=1`,
+read-only re-scan on skipped steps): **0 misses at 1×, 8×, and high-turnover stress** — direct
+step-for-step proof of bit-identical device pose. (2) A/B oracle: `crosslinkFireCt`=6 identical;
+segs/activeLinks within the same-config run-to-run noise floor (inc activeLinks 179–249 vs full
+184–220, overlapping); overflow=0, NaN=0. (3) algebraic: a skipped scan feeds the scatter kernel
+a byte-identical empty delta. Follow-ons: incremental classify; gate classify on structural-only
+(helps fast-cadence configs); bind-map clears are fixed-1M-cap (cheap live-range win).
+
 ## 2026-06-12 — Retired the flat ~1 GB copy-out: GPU now WINS at dense (branch `benchmark-contractile-dense`)
 
 Follow-up to v4. Full writeup `COPYOUT_RESIDENCY.md`; data `RUN_LOGS/2026-06-12_copyout_fix/`. Not merged.

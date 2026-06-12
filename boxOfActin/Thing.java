@@ -1242,6 +1242,7 @@ public class Thing extends Object {
 		// moved a Thing (swapId != lastId).
 		if (Env.useGPU && swapId != lastId && !DISABLE_TOPODIRTY_ON_SWAP) {
 			GPUMoveThing.markTopologyDirty();
+			GPUMoveThing.structuralDirtyCount++;   // A1: swap-compaction moved a Thing — real topology change
 		}
 		instanceRegistry.remove(byeThing.thingInstanceId);
 		byeThing.sepaku();
