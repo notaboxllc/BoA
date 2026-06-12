@@ -1186,15 +1186,28 @@ public class BoxOfActin {
 				if (collisionCkCounter >= Thing.collisionCheckInt | Env.simulationTime == 0) {
 					 collisionMeshTimer.start();
 
-					 startAllThreadSets(Env.meshFilsStart);
-					 waitOnAllThreadSets(Env.meshFilsStop);
+					 // Fil–fil crosslink broad-phase gate (2026-06-12): on the
+					 // -gpu non-membrane crosslink path the device filFilCandidate
+					 // kernel (built into GPUMoveThing's chained graph) feeds the
+					 // host checkToLink, so the host FILSEG_MESH fill + the fil-fil
+					 // mesh walk (meshColl) are skipped. The host path is retained
+					 // for CPU runs and for membrane configs (StickyNodes need
+					 // FILSEG_MESH for membraneFilMeshCollisions). NODE_MESH fill is
+					 // unaffected. Candidates are drained after moveThings() below.
+					 if (GPUMoveThing.filFilBroadphaseActive) {
+						 GPUMoveThing.filFilFillSkipCt++;
+					 } else {
+						 startAllThreadSets(Env.meshFilsStart);
+						 waitOnAllThreadSets(Env.meshFilsStop);
+					 }
 					 startAllThreadSets(Env.meshNodesStart);
 					 waitOnAllThreadSets(Env.meshNodesStop);
-					 startAllThreadSets(Env.meshMotorsStart);
-					 waitOnAllThreadSets(Env.meshMotorsStop);
+					 // meshMotors (MYOHEADS_MESH) fill removed 2026-06-12 — write-only, no consumer.
 
-					 startAllThreadSets(Env.meshCollStart);
-					 waitOnAllThreadSets(Env.meshCollStop);
+					 if (!GPUMoveThing.filFilBroadphaseActive) {
+						 startAllThreadSets(Env.meshCollStart);
+						 waitOnAllThreadSets(Env.meshCollStop);
+					 }
 
 					 collisionCkCounter = 0;
 					 collisionMeshTimer.stopInc();
@@ -1342,6 +1355,14 @@ public class BoxOfActin {
 					// path (detectBindings already drained).
 					if (GPUMoveThing.SINGLE_GRAPH) {
 						GPUMotorBinding.drainBoundResults();
+						// Fil–fil broad-phase: the chained graph just emitted this
+						// step's proximity candidates (from the same pre-integration
+						// pose the bind kernel used). Run the host checkToLink fine
+						// check → makeLink on each. 1-step lag vs the CPU meshColl
+						// wave (which formed links pre-step), matching the bind drain.
+						if (GPUMoveThing.filFilBroadphaseActive) {
+							GPUMotorBinding.drainFilFilCandidates();
+						}
 					}
 					// Phase 4.5 scoping — poison the frame-only host mirrors
 					// (Thing.soaEnd1/End2/ZVec/TransXTox + per-FilSegment
@@ -1814,6 +1835,14 @@ public class BoxOfActin {
 		// step() per-force profile — no-op when BOA_STEP_PROFILE unset.
 		StepProfiler.report();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
+		// Fil–fil crosslink: total links formed (the parity metric, both paths) +
+		// the device broad-phase activity / FILSEG_MESH-skip confirmation.
+		System.out.printf("[STATS] filLinks=%d (active=%d inactive=%d)%n",
+			FilLink.filLinkCt, FilLink.filLinkCt, FilLink.filLinkCt_inactive);
+		System.out.printf("[STATS] filFilBroadphase active=%b filsegMeshFillSkipped=%d candPairs=%d candMaxPerSeg=%d overflowSegs=%d drainCalls=%d%n",
+			GPUMoveThing.filFilBroadphaseActive, GPUMoveThing.filFilFillSkipCt,
+			GPUMotorBinding.filFilCandPairs, GPUMotorBinding.filFilCandMaxSeg,
+			GPUMotorBinding.filFilOverflowCt, GPUMotorBinding.filFilDrainCalls);
 		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
 		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
 		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
@@ -1918,6 +1947,13 @@ public class BoxOfActin {
 			long pkDesync = GPUMoveThing.getPackRuleDesyncCount();
 			System.out.printf("[STATS] gpuMoveThing demandSyncPose=%.3fs(calls=%d) demandSyncDerived=%.3fs(calls=%d) planRebuild=%d packRuleDesync=%d%n",
 				dspN, dspC, dsdN, dsdC, prc, pkDesync);
+			// Cadence measurement (2026-06-12): realized demandSyncPose calls and
+			// biochem fires over the run vs total steps — settles whether the pose
+			// pull fires every step (biochem-active path) or at output cadence.
+			System.out.printf("[STATS] cadence steps=%d demandSyncPoseCalls=%d biochemFireCt=%d (pull/step=%.3f biochem/step=%.3f)%n",
+				Env.counter, dspC, GPUMoveThing.biochemFireCt,
+				(double) dspC / Math.max(1, Env.counter),
+				(double) GPUMoveThing.biochemFireCt / Math.max(1, Env.counter));
 			// Step 2 — per-step pose-delta scatter stats. avg=mean entries per
 			// gathered step (excludes the freshPlan steps that snapshot only);
 			// max=largest single delta; overflow=times the cap was exceeded

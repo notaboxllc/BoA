@@ -361,49 +361,10 @@ public class MyoMotor extends Thing {
 		return moveC;
 	}
 	
-	public static void meshAllMotors () {
-		MyoMotor curMotor;
-		for (int i=0;i<motorCt;i++) {
-			curMotor = theMotors[i];
-			Mesh.MYOHEADS_MESH.fillMotorMesh(curMotor);
-		}
-	}
-	
-	public static void motorFilMeshCollisions(){
-		for(int x=0;x<Mesh.nXBins;x++){
-			for(int y=0;y<Mesh.nYBins;y++) {
-				if (Mesh.MYOHEADS_MESH.timeStamps[x][y]==Env.counter && Mesh.FILSEG_MESH.timeStamps[x][y]==Env.counter) {
-					for(int i=0;i<Mesh.MYOHEADS_MESH.activeCts[x][y];i++){
-						int motorID=(int)Mesh.MYOHEADS_MESH.meshpoints[x][y][i];
-						if (!soaOnFil[motorID]) {
-							for (int j=0;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
-								int filID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
-								checkFilSegCollision(motorID, filID);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	public static void motorFilMeshCollisions(int xStart, int xStop){
-		for(int x=xStart;x<xStop;x++){
-			for(int y=0;y<Mesh.nYBins;y++) {
-				if (Mesh.MYOHEADS_MESH.timeStamps[x][y]==Mesh.lastWriteTime && Mesh.FILSEG_MESH.timeStamps[x][y]==Mesh.lastWriteTime) {
-					for(int i=0;i<Mesh.MYOHEADS_MESH.activeCts[x][y];i++){
-						int motorID=(int)Mesh.MYOHEADS_MESH.meshpoints[x][y][i];
-						if (!soaOnFil[motorID]) {
-							for (int j=0;j<Mesh.FILSEG_MESH.activeCts[x][y];j++) {
-								int filID=(int)Mesh.FILSEG_MESH.meshpoints[x][y][j];
-								checkFilSegCollision(motorID, filID);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	// meshAllMotors + motorFilMeshCollisions removed 2026-06-12: zero call sites
+	// (the MYOHEADS_MESH-based 2D motor-fil collision was superseded by
+	// MotorBindGrid3D / the device bind kernel). checkFilSegCollision (the
+	// per-pair fine check, still used by MotorBindGrid3D + GPUMotorBinding) is kept.
 
 
 	/**

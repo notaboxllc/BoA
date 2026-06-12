@@ -111,6 +111,28 @@ public class GPUMotorBinding {
     // in float32). When boundSegId[m] == -1 the value is meaningless.
     private static FloatArray arcOnFilDev;
 
+    // ---- Fil–fil crosslink proximity broad-phase (2026-06-12) ----------------
+    // A free-standing device "system" over the resident FilSegment grid: emits
+    // deduplicated proximity candidate pairs (i<j, different filaments, within
+    // crossLinkGrabDist) for the host crosslinker fine check (checkToLink). The
+    // grid is reused as-is (same CSR the bind kernel walks). makeLink/topology
+    // stays on host. See filFilCandidateKernel.
+    //
+    // Output is per-segment owned slices (no atomics — the PTX KernelContext
+    // atomicAdd returns void, so there is no fetch-add cursor; per-segment
+    // ownership is race-free and fully parallel): candPartner holds, for
+    // segment i, up to FILFIL_MAX_CAND partner indices j at [i*MAXC .. i*MAXC+cnt);
+    // candPerSegCount[i] is the realized count (may exceed MAXC → overflow,
+    // surplus partners for that segment dropped, reported).
+    static final int          FILFIL_MAX_CAND = 256;
+    private static IntArray   segFilId;        // segCap — filID per segment (different-fil test)
+    private static IntArray   candPartner;     // segCap*FILFIL_MAX_CAND
+    private static IntArray   candPerSegCount; // segCap
+    // [0]=crossLinkGrabDist (µm). Sized for future knobs.
+    private static FloatArray filFilParams;
+    // [0]=FILFIL_MAX_CAND
+    private static IntArray   filFilDims;
+
     private static ImmutableTaskGraph   itg;
     private static TornadoExecutionPlan plan;
     private static GridScheduler        gridScheduler;
@@ -944,6 +966,126 @@ public class GPUMotorBinding {
     }
 
     // -------------------------------------------------------------------------
+    // Fil–fil crosslink proximity broad-phase (2026-06-12).
+    //
+    // A free-standing device system over the resident FilSegment CSR grid
+    // (gridCellOffsets/gridCellContents, the same structure the bind kernel
+    // walks). One thread per FilSegment i. Emits deduplicated proximity
+    // candidate pairs (i < j, different filaments, centres within reach of
+    // crossLinkGrabDist) into per-segment owned output slices. The host then
+    // runs the unchanged checkToLink fine check (angle + line-segment intersect
+    // + link-state caps) on each candidate and calls makeLink — topology stays
+    // on host.
+    //
+    // CORRECTNESS — the candidate set is a superset of the host's qualifying
+    // (link-forming) pairs:
+    //   * The resident grid bins each segment by its AABB (every cell its
+    //     bounding box touches); the host FILSEG_MESH bins by Bresenham line-
+    //     raster, so AABB cells ⊇ line cells.
+    //   * crossLinkGrabDist (= 2·actinMonoDiam ≈ 0.0108 µm) ≪ CELL_SIZE
+    //     (0.2 µm). Any pair whose segments come within crossLinkGrabDist has
+    //     both segments occupying the same or an immediately-adjacent cell;
+    //     thread i scans i's AABB expanded by one cell in each direction, which
+    //     covers every such cell, so no qualifying pair is missed. The host
+    //     checkToLink rejects the (geometrically looser) extras.
+    //
+    // DEDUP (exact, race-free, no atomics) — a pair (i,j) can co-occupy several
+    // scanned cells. It is emitted exactly once, from the min-corner cell of
+    // (i's expanded region ∩ j's AABB): because j is binned by AABB into every
+    // cell of its box, that min-corner cell is guaranteed to contain j and to
+    // be scanned by thread i. Ownership is unique to thread i (the j>i guard),
+    // so thread j never re-emits it.
+    // -------------------------------------------------------------------------
+    static void filFilCandidateKernel(
+            FloatArray coord,
+            FloatArray soaLengthArr,
+            IntArray   filMoveSlot,
+            IntArray   segFilId,
+            IntArray   segBbox,
+            IntArray   gridCellOffsets,
+            IntArray   gridCellContents,
+            IntArray   gridDims,
+            IntArray   counts,
+            FloatArray filFilParams,
+            IntArray   filFilDims,
+            IntArray   candPartner,
+            IntArray   candPerSegCount) {
+
+        int S      = counts.get(1);
+        int nXBins = gridDims.get(0);
+        int nYBins = gridDims.get(1);
+        int nZBins = gridDims.get(2);
+        int nXY    = nXBins * nYBins;
+        float grab = filFilParams.get(0);
+        int   maxC = filFilDims.get(0);
+
+        for (@Parallel int i = 0; i < filMoveSlot.getSize(); i++) {
+            candPerSegCount.set(i, 0);
+            if (i >= S) { continue; }
+            int iSlot = filMoveSlot.get(i);
+            if (iSlot < 0) { continue; }
+            int iFil = segFilId.get(i);
+
+            float icx = coord.get(iSlot * 3);
+            float icy = coord.get(iSlot * 3 + 1);
+            float icz = coord.get(iSlot * 3 + 2);
+            float halfI = 0.5f * soaLengthArr.get(iSlot);
+
+            // i's AABB cells, expanded by one cell and clamped to the grid.
+            int eix0 = segBbox.get(i * 6)     - 1; if (eix0 < 0) eix0 = 0;
+            int eix1 = segBbox.get(i * 6 + 1) + 1; if (eix1 >= nXBins) eix1 = nXBins - 1;
+            int eiy0 = segBbox.get(i * 6 + 2) - 1; if (eiy0 < 0) eiy0 = 0;
+            int eiy1 = segBbox.get(i * 6 + 3) + 1; if (eiy1 >= nYBins) eiy1 = nYBins - 1;
+            int eiz0 = segBbox.get(i * 6 + 4) - 1; if (eiz0 < 0) eiz0 = 0;
+            int eiz1 = segBbox.get(i * 6 + 5) + 1; if (eiz1 >= nZBins) eiz1 = nZBins - 1;
+
+            int cnt = 0;
+            for (int cz = eiz0; cz <= eiz1; cz++) {
+                int izOff = cz * nXY;
+                for (int cy = eiy0; cy <= eiy1; cy++) {
+                    int iyOff = cy * nXBins;
+                    for (int cx = eix0; cx <= eix1; cx++) {
+                        int c     = cx + iyOff + izOff;
+                        int start = gridCellOffsets.get(c);
+                        int end   = gridCellOffsets.get(c + 1);
+                        for (int idx = start; idx < end; idx++) {
+                            int j = gridCellContents.get(idx);
+                            if (j <= i) { continue; }
+                            if (segFilId.get(j) == iFil) { continue; }
+
+                            // Canonical min-corner dedup (see header).
+                            int jx0 = segBbox.get(j * 6);
+                            int jy0 = segBbox.get(j * 6 + 2);
+                            int jz0 = segBbox.get(j * 6 + 4);
+                            int sx0 = eix0 > jx0 ? eix0 : jx0;
+                            int sy0 = eiy0 > jy0 ? eiy0 : jy0;
+                            int sz0 = eiz0 > jz0 ? eiz0 : jz0;
+                            if (cx != sx0 || cy != sy0 || cz != sz0) { continue; }
+
+                            // Bounding-sphere reject: necessary condition for the
+                            // two segments to come within crossLinkGrabDist —
+                            // never rejects a qualifying pair (the precise test is
+                            // the host line-segment intersect in checkToLink).
+                            int jSlot = filMoveSlot.get(j);
+                            if (jSlot < 0) { continue; }
+                            float dxc = icx - coord.get(jSlot * 3);
+                            float dyc = icy - coord.get(jSlot * 3 + 1);
+                            float dzc = icz - coord.get(jSlot * 3 + 2);
+                            float centerDistSq = dxc * dxc + dyc * dyc + dzc * dzc;
+                            float reach = halfI + 0.5f * soaLengthArr.get(jSlot) + grab;
+                            if (centerDistSq > reach * reach) { continue; }
+
+                            if (cnt < maxC) { candPartner.set(i * maxC + cnt, j); }
+                            cnt++;
+                        }
+                    }
+                }
+            }
+            candPerSegCount.set(i, cnt);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Phase 4.5 — resident-pose parity plan. Built lazily on first
     // parityCheck() call. Shares device-only scratch (segBbox, segCellCount,
     // cellCount, gridCellOffsets, gridCellContents) with its own device
@@ -1281,6 +1423,12 @@ public class GPUMotorBinding {
     public static FloatArray getArcOnFilDevArray()      { return arcOnFilDev; }
     public static int        totalCells()               { return totalCells; }
     public static int        contentsCap()              { return contentsCap; }
+    // Fil–fil broad-phase accessors (single-graph fold).
+    public static IntArray   getSegFilIdArray()         { return segFilId; }
+    public static IntArray   getCandPartnerArray()      { return candPartner; }
+    public static IntArray   getCandPerSegCountArray()  { return candPerSegCount; }
+    public static FloatArray getFilFilParamsArray()     { return filFilParams; }
+    public static IntArray   getFilFilDimsArray()       { return filFilDims; }
 
     // -------------------------------------------------------------------------
     // Step 3 — single-graph mode: pack only the bind-only inputs
@@ -1293,14 +1441,16 @@ public class GPUMotorBinding {
     public static void packForSingleGraph() {
         int M = MyoMotor.motorCt;
         int S = FilSegment.filSegmentCt;
-        if (M == 0 || S == 0) return;
+        if (S == 0) return;  // M==0 OK: motor loops no-op; grid+filFil need counts packed
         if (motOnFil == null) return;   // buffers not allocated yet — first call before plan build
         long packStart = System.nanoTime();
         for (int i = 0; i < M; i++) {
             motOnFil.set(i, MyoMotor.soaOnFil[i] ? 1 : 0);
         }
+        boolean packFilId = (segFilId != null) && GPUMoveThing.filFilBroadphaseActive;
         for (int s = 0; s < S; s++) {
             filNodeAtEnd2.set(s, FilSegment.soaNodeAtEnd2[s] ? 1 : 0);
+            if (packFilId) { segFilId.set(s, FilSegment.theFilSegments[s].filID); }
         }
         counts.set(0, M);
         counts.set(1, S);
@@ -1318,7 +1468,7 @@ public class GPUMotorBinding {
     public static void drainBoundResults() {
         int M = MyoMotor.motorCt;
         int S = FilSegment.filSegmentCt;
-        if (M == 0 || S == 0) return;
+        if (S == 0) return;  // M==0 OK: motor loops no-op; grid+filFil need counts packed
         if (boundSegId == null) return;
         long t0 = System.nanoTime();
         for (int i = 0; i < M; i++) {
@@ -1337,6 +1487,52 @@ public class GPUMotorBinding {
         if ((CP_STEP >= 0 && Env.counter == CP_STEP) ||
             (CP_START >= 0 && Env.counter >= CP_START && Env.counter <= CP_STOP)) {
             runCheckpoints(M, S);
+        }
+    }
+
+    // ---- Fil–fil broad-phase host drain + stats --------------------------------
+    // Walk the per-segment candidate slices the device emitted this execute and
+    // run the unchanged host checkToLink fine check (→ makeLink) on each pair.
+    // Mirrors the bind drain: single-threaded on the main loop thread (so
+    // currentScratch() resolves to the main-thread RNG/RetObj slot — safe).
+    // Replaces the host FILSEG_MESH fil-fil walk (filSegMeshCollisions) on the
+    // gated -gpu path. Topology / link-state logic is entirely inside checkToLink
+    // — this only feeds it candidate pairs.
+    public static long filFilCandPairs   = 0;  // candidate pairs handed to checkToLink (cumulative)
+    public static int  filFilCandMaxSeg  = 0;  // max realized per-segment candidate count seen
+    public static long filFilOverflowCt  = 0;  // segments whose count exceeded FILFIL_MAX_CAND (dropped surplus)
+    public static long filFilDrainCalls  = 0;
+
+    public static void drainFilFilCandidates() {
+        if (candPerSegCount == null || candPartner == null) return;
+        int S = FilSegment.filSegmentCt;
+        if (S == 0) return;
+        if (!Env.xLinks.isActive()) return;
+        filFilDrainCalls++;
+        // checkToLink reads host FilSegment end1Pt/end2Pt; on the residency path
+        // those are stale between syncs. Refresh host pose + endpoints so the
+        // host fine check matches the device candidate geometry. (Phase-1 cost;
+        // see GPUMoveThing.refreshHostPoseForFilFil — Phase 2 removes it.)
+        GPUMoveThing.refreshHostPoseForFilFil();
+        for (int i = 0; i < S; i++) {
+            int cnt = candPerSegCount.get(i);
+            if (cnt <= 0) continue;
+            if (cnt > filFilCandMaxSeg) filFilCandMaxSeg = cnt;
+            int n = cnt;
+            if (n > FILFIL_MAX_CAND) { n = FILFIL_MAX_CAND; filFilOverflowCt++; }
+            FilSegment iSeg = FilSegment.theFilSegments[i];
+            if (iSeg == null) continue;
+            int base = i * FILFIL_MAX_CAND;
+            for (int k = 0; k < n; k++) {
+                int j = candPartner.get(base + k);
+                if (j < 0 || j >= S) continue;
+                FilSegment jSeg = FilSegment.theFilSegments[j];
+                if (jSeg == null) continue;
+                // Device already excluded same-filament; checkToLink re-checks
+                // filID defensively and applies the full geometric + link-state test.
+                FilSegment.checkToLink(iSeg, jSeg);
+                filFilCandPairs++;
+            }
         }
     }
 
@@ -1381,6 +1577,15 @@ public class GPUMotorBinding {
 
         counts     = new IntArray(3);
         boundSegId = new IntArray(motorCap);
+
+        // Fil–fil crosslink broad-phase buffers (see filFilCandidateKernel).
+        segFilId        = new IntArray(segCap);
+        candPartner     = new IntArray(segCap * FILFIL_MAX_CAND);
+        candPerSegCount = new IntArray(segCap);
+        filFilParams    = new FloatArray(1);
+        filFilParams.set(0, (float) Env.crossLinkGrabDist.getValue());
+        filFilDims      = new IntArray(1);
+        filFilDims.set(0, FILFIL_MAX_CAND);
     }
 
     // -------------------------------------------------------------------------
@@ -1469,7 +1674,7 @@ public class GPUMotorBinding {
     public static void detectBindings() {
         int M = MyoMotor.motorCt;
         int S = FilSegment.filSegmentCt;
-        if (M == 0 || S == 0) return;
+        if (S == 0) return;  // M==0 OK: motor loops no-op; grid+filFil need counts packed
 
         // Step 3 (2026-06-07) — single-graph mode: bind tasks live inside
         // GPUMoveThing's chained TaskGraph. detectBindings() degenerates to a

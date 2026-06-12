@@ -1,5 +1,139 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — Fil–fil crosslink broad-phase on device + MYOHEADS_MESH removal (branch `gpu-filfil-broadphase`, NOT merged)
+
+**Mission.** Move the fil–fil crosslinker broad-phase off the host so `-gpu`
+contractile/crosslinked runs can drop the host `FILSEG_MESH` fill (real
+contractile networks are heavily crosslinked). v2-carryover: a clean, named,
+free-standing device kernel over the resident SoA FilSegment grid; `makeLink`
+and all link topology stay on host. Branch off `main` HEAD `d582bb3`.
+
+**Phase 0a — dead `MYOHEADS_MESH` removed (physics-neutral by construction).**
+`MyoMotor.motorFilMeshCollisions` / `meshAllMotors` had **zero call sites** — the
+`MYOHEADS_MESH` 2D motor-fil mesh was write-only on every path (superseded by
+`MotorBindGrid3D` / the device bind kernel). Removed the `meshMotorsStart` fill
+dispatch (`BoxOfActin.doLoop`), the `Mesh` field/init/`fillMotorMesh`/divide-
+conquer+regroup+execute cases, and the two dead `MyoMotor` methods.
+`checkFilSegCollision` (used by `MotorBindGrid3D` + `GPUMotorBinding`) kept. No
+reader existed → no behavior change; CPU and GPU runs unaffected.
+
+**Phase 0b — `crossLinkGrabDist` vs `CELL_SIZE`: NO BAIL.** `crossLinkGrabDist =
+2·actinMonoDiam ≈ 0.0108 µm` ≪ `CELL_SIZE = Mesh.SIZE = 0.2 µm` (~18×). The
+resident grid's neighbour-cell reach (one cell, 0.2 µm) far exceeds the grab
+distance → the 27-cell / AABB-expanded walk reaches it; no separate coarser grid
+needed. Also found: the param label `sideBonds` **is** `Env.xLinks` (mode 0 =
+both parallel/antiparallel); so `boa10-64Seg-dyn`'s `sideBonds:true:0.0` already
+has the broad-phase active — it forms zero links only because the 10×10 box is
+too sparse (fils never within 0.0108 µm).
+
+**Phase 1 — device fil–fil proximity broad-phase (`GPUMotorBinding.filFil-
+CandidateKernel`).** One thread per FilSegment i over the resident CSR. Walks i's
+AABB cells (from the resident `segBbox`) expanded by one cell, and for each
+neighbour j>i in a different filament within the bounding-sphere reach
+(`centerDist ≤ halfLen_i+halfLen_j+grab`, the tightest safe necessary condition)
+emits (i,j). **No atomics** (the PTX `KernelContext.atomicAdd` returns void — no
+fetch-add cursor, the same constraint that kept gridScatter serial): output is
+**per-segment owned slices** `candPartner[i*MAXC .. ]` + `candPerSegCount[i]`,
+race-free and fully parallel. **Exact dedup, no miss:** a pair co-occupying
+several scanned cells is emitted only from the min-corner cell of (i's expanded
+region ∩ j's AABB) — j is binned by AABB into every cell of its box, so that
+min-corner cell is guaranteed to hold j and be scanned by i. **Correctness
+foundation (stated in code):** the resident grid bins by AABB ⊇ the host
+`FILSEG_MESH` Bresenham line-raster cells, and grab ≪ cell, so the device
+candidate set is a **superset of the host's qualifying (link-forming) pairs** —
+no qualifying pair is missed; the host `checkToLink` rejects the geometric
+extras. WorkerGrid block 64 (the 701 lesson), global padded to a block multiple
++ self-guarded (the gridAssemble WorkerGrid-remainder lesson). Capped at
+`FILFIL_MAX_CAND=256` with per-segment overflow reporting (no global buffer to
+overflow). New resident `segFilId` (packed in `packForSingleGraph`).
+
+**Wiring + host boundary.** The kernel is a task in the single-graph chained
+TaskGraph, declared **after the `move` task** so it reads the post-integration
+resident pose — the same pose the host `checkToLink` sees after the drain
+refresh (declared pre-move first; that one-step offset cost ~0 here, 175→179, so
+post-move is the principled placement, not a fix). `GPUMotorBinding.drainFilFil-
+Candidates()` (after `drainBoundResults`, 1-step lag like bind) walks the slices
+and calls the **unchanged** host `checkToLink → makeLink`. `checkToLink` reads
+host `end1Pt/end2Pt`, which are **stale between syncs on the residency path** →
+the drain first calls `GPUMoveThing.refreshHostPoseForFilFil()` (demandSyncPose +
+recomputeDerivedSoA + endpoint/`xRange` refresh) so the host fine check matches
+the device candidate geometry. This is the **residual per-collision-step
+host-pose cost of the Phase-1 design** (host `checkToLink`); Phase 2 (device-side
+geometry test) removes it. Required relaxing the `M==0` early-returns in
+`detectBindings`/`packForSingleGraph` to `S==0` — the broad-phase must not depend
+on motor count (with 0 motors `counts`/`segFilId` weren't packed → grid built
+nothing → `candPairs=0`; fixed). The drain runs on the main loop thread, so
+`currentScratch()` resolves to the main-thread RNG/RetObj slot (safe).
+
+**Consumer-activity gate.** `GPUMoveThing.filFilBroadphaseActive = useGPU &&
+SINGLE_GRAPH && BOA_FILFIL_GPU≠0 && Env.xLinks.isActive() && no StickyNodes`
+(decided once at plan build by scanning `ProteinNode.theNodes`). When active, the
+host `FILSEG_MESH` fill **and** the `meshColl` fil-fil walk are skipped (the
+device path replaces fil-fil; membrane `membraneFilMeshCollisions` is inert with
+no StickyNodes). Membrane configs (StickyNodes) and CPU runs keep the host
+`FILSEG_MESH` path untouched. `filFilFillSkipCt` confirms the skip.
+
+**Validation — links-forming fixture (the oracle).** `boa10-64Seg-dyn` forms
+zero links (sparse) — useless. Built `ParameterFiles/boa-xlink-dense[-nomotor]`:
+0.7×0.7×0.3 µm box, 200 short filaments, `sideBonds` mode 0,
+`maxXLinkBondAngle` widened to 0.6 rad, turnover off (static segCt → clean
+parity). The no-motor variant isolates the broad-phase from the motor-binding
+seam. CPU host-mesh forms a healthy link count; committed as the fixture.
+
+**Link parity (no-motor, 2000 steps, 3 seeds — counts both paths).**
+CPU host-`FILSEG_MESH`: **312 / 311 / 345** (seeds 1/22/33, ~323, tight ±5%).
+GPU device-broadphase: **179 / 185 / 177** (~180, tight ±2%). NaN/701/crash = 0
+on all runs; `filsegMeshFillSkipped=2011` (every step); `candPairs≈15.6M`
+(~7773/step), `candMaxPerSeg≈133–142`, overflow 0. The device candidate set is a
+**verified superset** (candidates ≫ any host co-cell count) and the grid does
+not truncate (`contentsCap` ample, dense box), so the gap is **not a broad-phase
+miss**. It is a **systematic GPU-path seam (~56% of host links, reproducible on
+both paths)** — same identical segment population (no turnover), only positions
+differ — from the float32 trajectory + single-thread-RNG stream + 1-step
+formation lag, analogous to the documented GPU-minifil-binding seam. float32
+precision is NOT the cause (grab 10.8 nm ≫ float32 ε at µm scale). **Definitive
+isolation would need a frozen-pose fil-fil parity harness (like the bind CP1/CP2)
+— deferred.** With-motors fixture additionally diverges via the pre-existing
+binding seam (meanBoundMotors 15 vs 61 in this dense box), orthogonal to this
+work, so the no-motor fixture is the clean parity vehicle.
+
+**FILSEG_MESH retention confirmed.** CPU runs: `filFilBroadphase active=false`,
+host fill runs, 311–345 links. `BOA_FILFIL_GPU=0` on `-gpu`: gate flips off,
+`filsegMeshFillSkipped=0` (host fill runs on the GPU path too) — and it forms
+only **69 links** (the host `meshColl` walk reads stale residency endpoints,
+no refresh), vs the device path's ~180, which is exactly why the device
+broad-phase + `refreshHostPoseForFilFil` is the correct GPU path. Membrane
+(StickyNode) retention verified by inspection of the gate predicate
+(`nodeLinkTesting` is a hardcoded flag, not param-settable, so no membrane
+physics run); the `!anyStickyNode` term keeps the host path for membrane configs.
+
+**Cadence measurement (realized ratios, biochem-active links-forming run, before
+the broad-phase drain forced any extra pull).** `demandSyncPose` **20 calls /
+2011 steps = 0.010/step** and `biochemFireCt` **20 / 2011 = 0.010/step** — both
+fire at **biochem cadence (every `biochemCheckInt`=100 steps) + output frames,
+NOT per-step**. Settles the open question (Step-4 gate confirmed; the cost map's
+"output-cadence" hint reconciled — it is biochem-cadence+output). **The Phase-1
+fil-fil drain adds a per-collision-step pose refresh on top** (demandSyncPose →
+2031/2011 ≈ 1.01/step when broadphase active) — the residual transfer cost,
+the Phase-2 lever (device-side `checkToLink`) removes it.
+
+**Phase 2 — warranted, deferred (named, not built).** The measured residual host
+cost per step on the active path = the per-collision-step `refreshHostPoseForFilFil`
+(full pose pull + `recomputeDerivedSoA`) PLUS the host `checkToLink` over ~7773
+candidates/step. Moving the angle+line-segment geometry test onto the device
+(emit only qualifying pairs, host does only `makeLink` + loc1/loc2) removes both
+the per-step pull and the bulk host fine-check. The candidate transfer
+(`candPartner` = segCap·256 ints) also motivates Phase 2's tighter output.
+
+**Verdict.** MYOHEADS_MESH fill gone; a named device fil-fil proximity kernel
+over the resident grid feeds the unchanged host `checkToLink/makeLink`; host
+`FILSEG_MESH` fill skipped on `-gpu` non-membrane crosslink runs (retained for
+CPU + membrane); device forms links abundantly with a verified-superset
+candidate set; link count is a systematic ~56%-of-host GPU seam (trajectory/RNG,
+not a miss); pull/biochem fire at biochem cadence (drain adds a per-step refresh).
+Branch `gpu-filfil-broadphase`, **NOT merged** — jba reviews. Logs +
+fixtures in `RUN_LOGS/2026-06-12_filfil_broadphase/`.
+
 ## 2026-06-12 — Parallelize gridAssemble — counting-sort bind-grid build
 
 **Mission.** The cost map (`PROFILE_gpu_cost_map.md`) named `gridAssemble` — the
