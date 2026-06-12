@@ -12,3 +12,4 @@ gliding_assay.dat
 .claude/scheduled_tasks.lock
 RUN_LOGS/*_done
 RUN_LOGS/*-runner.log
+RUN_LOGS/2026-06-11_701_hunt/prof/*.json
