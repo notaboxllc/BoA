@@ -1,0 +1,13 @@
+[06:50] serial seed1 running
+[06:51] RESULT serial s1 rc=0 segCt_len=[0 0.0] meanBoundMotors=1.170 bindEvents=157 errCount=0
+[06:51] serial seed2 running
+[06:53] RESULT serial s2 rc=0 segCt_len=[0 0.0] meanBoundMotors=1.433 bindEvents=175 errCount=0
+[06:53] serial seed3 running
+[06:54] RESULT serial s3 rc=0 segCt_len=[0 0.0] meanBoundMotors=2.288 bindEvents=261 errCount=0
+[06:54] parallel seed1 running
+[06:56] RESULT parallel s1 rc=0 segCt_len=[0 0.0] meanBoundMotors=1.407 bindEvents=173 errCount=0
+[06:56] parallel seed2 running
+[06:57] RESULT parallel s2 rc=0 segCt_len=[0 0.0] meanBoundMotors=1.542 bindEvents=176 errCount=0
+[06:57] parallel seed3 running
+[06:59] RESULT parallel s3 rc=0 segCt_len=[0 0.0] meanBoundMotors=1.923 bindEvents=255 errCount=0
+[06:59] gridAssemble oracle DONE

@@ -1,6 +1,142 @@
 # BoxOfActin Project Journal
 
-Last updated: 2026-06-11 (**GPU cost map — the contractile step is transfer- + serial-kernel-bound, NOT kernel/bandwidth-bound; the loss is RECOVERABLE (corrects the benchmark's "kernel-bound" call).** Per-kernel × scale profile (TornadoVM profiler for attribution, instrumentation-off `exec` for absolutes; **ncu UNAVAILABLE — host has CUDA 11.5 / Nsight 2021.3.1, both predate Blackwell sm_120**, so bandwidth/occupancy are analytical+structural, labeled). Gated on the 701-hunt cohesion-correctness pass (oracle-neutral). **Component split per step (1×/4×/8×/16×):** wall 26.8/35.9/47.0/69.7 ms = **kernel 5%/23%/37%/52% + COPY_IN 59%/49%/42%/34% + COPY_OUT 26%/20%/15%/11%**. **This corrects `BENCHMARK_contractile_scaling.md` B4 ("exec 62–73%, kernel-bound, transfer ≈ 0")** — BoA's `[STATS] exec=` timer wraps the whole `plan.execute()`, which **includes the EVERY_EXECUTION host↔device transfers**; the benchmark's "transfer≈0" measured only the *pose pull* (`demandSyncPose`) and missed **~75 per-step buffer transfers**. Real 1× split = **5% kernel / 85% transfer / ~10% dispatch.** **Two recoverable walls, neither mechanics nor bandwidth:** **(1) `gridAssemble` — a SINGLE-THREADED kernel** (`@Parallel gid<1`, block [1,1,1]) doing the entire spatial bind-grid build (zero cells→count→prefix-sum→scatter) serially on one thread: **0.8 ms (1×) → 34.9 ms (16×) = 50% of the whole step, superlinear** (97% of all kernel time at 16×). Embarrassingly parallel (counting sort) — a standard atomic-count + parallel-prefix + scatter rewrite removes ~all of it. **(2) ~75 per-execute `cuMemcpy` transfers** — COPY_IN 15.7→23.6 ms + COPY_OUT ~7 ms FLAT = ~23–31 ms, **mostly FIXED (per-call latency, not bandwidth: 141 MB/15.7 ms = 9 GB/s = ~36% of PCIe peak, ~1.3% of the 672 GB/s device BW)**; many are static topology arrays (rodSlots, anchorPts, segMotorOffsets, cohSlots…) that ride EVERY_EXECUTION but change only on classifyThings → coalesce + FIRST_EXECUTION them. **The actual mechanics kernels** (joints/move/chain/cohesion/motorForce/segMotorForce/boundary) are **<1 ms combined even at 16× (<1.5% of the step)** — fast, ~linear, **NOT memory-bound → refutes both halves of the binding-efficient/mechanics-slow hypothesis** (binding is "slow" only via the one serial kernel; mechanics barely registers). `dimerCohesion` (the kernel the 701 fix made run) is flat ~0.4–0.5 ms (mostly early-out) — making it run cost nothing. **No kernel is near the memory wall** — grids of 100–1600 threads = a few blocks across 48 SMs, work-starved/latency-bound, not bandwidth-bound. **Recoverable headroom ≈ 95% of the step** (gridAssemble parallelization + transfer coalescing/residency); a v2 doing both plausibly takes the step to **a few ms at every scale → GPU÷CPU parity at 1× and GPU-FASTER at 8×–16×** (CPU 42–70 ms there). **Sharpens the 701-hunt "structural" reading: same direction (not launch, not mechanics, not bandwidth) but the loss is RECOVERABLE** — via grid-build parallelism + transfer overhead, the *opposite* of the "mechanics-bandwidth" hypothesis. **No code change** (profiler-flag-gated instrumentation, stock TornadoVM); deliverable `PROFILE_gpu_cost_map.md`, tooling `RUN_LOGS/2026-06-11_701_hunt/profile_sweep.sh` + `agg_prof.py`. Full writeup in `PROFILE_gpu_cost_map.md`.)
+## 2026-06-12 — Parallelize gridAssemble — counting-sort bind-grid build
+
+**Mission.** The cost map (`PROFILE_gpu_cost_map.md`) named `gridAssemble` — the
+spatial bind-grid build — as the single superlinear kernel in the chained move/bind
+graph: a single-threaded counting sort (`@Parallel gid<1`, block [1,1,1]) running
+**0.8 ms (1×) → 34.9 ms (16×) ≈ 50% of the whole step**. Parallelize it on the
+single-graph (production) path, keep the serial kernel as the oracle, re-measure.
+Branch `parallelize-gridassemble` off `fix-701-cohesion-launch`. **Not merged.**
+
+**Layout found — compact CSR (not fixed-capacity-per-cell).** `gridCellOffsets`
+(totalCells+1) + flat `gridCellContents` (cap `min(totalCells·BIN_DEPTH, segCap·8)`),
+`cellCount` (totalCells) scratch. Linear `cellId = ix + iy·nXBins + iz·nXBins·nYBins`.
+`gridAssemble` reads the per-segment AABB cell-ranges in `segBbox[s·6..s·6+5]`
+(produced by `segBboxKernelResident`, one thread/segment) — each segment scatters
+into *every* cell of its AABB (a triple loop), so it is a counting sort with variable
+fan-out, not one-item-per-cell. Downstream consumer `bindKernelResident` walks the
+27-cell neighbourhood reading `[offsets[c], offsets[c+1])`; **order-insensitive**
+(first qualifying candidate wins, but candidates are a set). `CELL_SIZE = 0.2 µm` and
+FilSegments are ~0.17 µm (64 mon × 0.0027 µm) **< one cell**, so each AABB spans only
+a few cells → **the O(totalCells) zero + prefix-sum dominate, not the per-segment
+histogram/scatter.** `totalCells`: **40 804 (1×, 101×101×4) → 161 604 (16×, 201×201×4)**,
+∝ box area; that O(totalCells) serial scan on one thread is the superlinear cost.
+
+**Atomics gate — PASS (with a launch-config lesson).** No GPU atomics existed anywhere
+in BoA (the design had used unique-ownership patterns). `KernelContext.atomicAdd(IntArray,
+idx, v)` is the supported PTX atomic — TornadoVM's own `testAtomic18_parallel_api_IntegerArray`
+guards only SPIRV, **not PTX** (the PTX-skipped atomic tests are all the `AtomicInteger`
+node-replacement API, not the KernelContext one). A standalone probe (1,048,576 atomic
+adds into 8 heavily-contended bins) gave **every bin exactly 131 072, sum exact, zero
+lost updates** — atomicAdd is correct on PTX under contention. The probe also surfaced a
+load-bearing rule: **a WorkerGrid drops the remainder partial block when global%local ≠ 0**
+(1,000,000 threads, block 256 → only 999 936 ran). So every new parallel task pads its
+global work UP to a multiple of the block and self-guards in-kernel.
+`atomicAdd` returns **void** — no value-returning fetch-add — which decides the scatter.
+
+**Parallel form (six device-barrier-separated tasks replace one).** In
+`GPUMotorBinding`: `gridZero` (∥ cells, =0) → `gridHist` (∥ segments, KernelContext
+`atomicAdd` per AABB cell) → `gridScanLocal` (∥ over 512-cell chunks: local exclusive
+prefix + per-chunk total) → `gridScanChunks` (1 thread: exclusive scan of the chunk
+totals, two-level scan) → `gridScanAdd` (∥ chunks: add chunk base, reset `cellCount` to
+the scatter cursor, write `offsets[totalCells]`) → `gridScatter` (**1 thread, serial**).
+The scatter stays serial because this PTX KernelContext exposes only a *void* atomicAdd
+— no fetch-add for a parallel per-cell write cursor; the prompt's atomic-fetch-add
+scatter is not expressible here. Every task gets an explicitly-registered `WorkerGrid`
+at block 64 (the 701 lesson — never default a parallel block; the two 1-thread kernels
+get block [1,1,1]). Behind `BOA_SERIAL_GRID=1` (`GPUMoveThing.PARALLEL_GRID`, default
+ON) the single serial `gridAssembleKernel` is retained as the oracle. The +5 tasks
+stayed under the existing `-Dtornado.tvm.maxbytecodesize=16384` (no bump needed).
+
+**Correctness — two oracles, both neutral.** **(1) Structural (`GridBuildParityTest`,
+device parallel build vs serial `gridAssembleKernel` on host, identical random AABB
+input, grids 1×/8×/16×, multiple seeds): `offsetMismatch=0, countMismatch=0,
+setMismatch=0, orderMismatch=0`** and device content-count == serial total — the CSR is
+**bit-identical**, not merely multiset-equal. Because the histogram counts are
+order-independent (atomic sum is commutative), the prefix-sum is deterministic, and the
+scatter is serial (walks segments 0..S in the same nested cell order as the serial
+kernel), within-cell order is preserved too. **(2) Downstream physics (`boa10-64Seg-dyn`
+1×, 3 seeds, 2500 steps, serial-grid vs parallel-grid GPU):** `meanBoundMotors` mean
+**1.630 (serial) ≈ 1.624 (parallel)**, `bindEvents` 197.7 ≈ 201.3 — neutral within the
+1.17–2.29 seed spread; **NaN/701/crash = 0, rc=0 on all 6 runs.** Per-seed serial/parallel
+differences are pre-existing GPU run-to-run nondeterminism (documented in the 701 hunt),
+not from the grid build — which is bit-deterministic.
+
+**Determinism note.** The prompt anticipated within-cell order becoming nondeterministic
+(atomic scatter). It did **not**, because the void-only atomicAdd forced a serial scatter
+— so the build is fully deterministic and bit-identical to the serial oracle. No
+per-cell sort-by-ID is needed. If a future fetch-add enables a parallel scatter, order
+would become nondeterministic (physics-neutral) and a per-cell sort would restore
+bit-exactness at a cost — flagged, not implemented.
+
+**Perf (profiler `TASK_KERNEL_TIME` + two-step-diff ms/step, same weak-scaling configs
+as the cost map; serial today reproduced the cost-map gridAssemble curve).**
+
+| scale | gridAssemble serial | parallel grid total | speedup | (serial gridScatter residual) |
+|---:|---:|---:|---:|---:|
+| 1×  | 0.80 ms  | 0.36 ms | 2.2× | 0.25 ms |
+| 8×  | 15.63 ms | 2.60 ms | 6.0× | 2.44 ms |
+| 16× | 31.25 ms | 5.14 ms | **6.1×** | 4.96 ms |
+
+The O(totalCells) zero + prefix-sum collapsed from ~26 ms to **~0.17 ms** at 16×
+(`gridScanLocal` 56 µs + `gridScanAdd` 61 µs + `gridScanChunks` 42 µs + `gridZero` 7 µs;
+`gridHist` 16 µs). The **single serial `gridScatter` (4.96 ms) is now the whole grid-build
+cost** and the only remaining serial term — it cannot be parallelized without a fetch-add.
+
+| scale | CPU ms/step | GPU serial | GPU parallel | **GPU÷CPU par** | GPU÷CPU ser |
+|---:|---:|---:|---:|---:|---:|
+| 1×  | 3.50  | 35.25  | 35.28 | **10.08×** | 10.07× |
+| 8×  | 39.45 | 69.33  | 59.24 | **1.50×**  | 1.76×  |
+| 16× | 68.66 | 107.32 | 79.72 | **1.16×**  | 1.56×  |
+
+GPU÷CPU is **unchanged at 1×** (grid build was 0.8 ms of a 35 ms step — negligible) and
+**improves at scale: 16× 1.56×→1.16×, 8× 1.76×→1.50×.** It did **not** cross below 1 at
+16×: the parallel grid build cut the *GPU exec* (profiler wall 65→40 ms) by the predicted
+~25 ms, but the two-step-diff ms/step also carries ~40 ms/step of **unchanged CPU-side
+host work** (mesh fill, slotPack, biochem, output) plus the ~30 ms transfer wall, both of
+which now dominate. So the cost map's "below 1" projection — which was a GPU-exec-only view
+— needs the **second** recoverable lever (transfer coalescing / CPU-side host-work
+reduction), out of scope here. **The grid build is no longer the dominant GPU cost.**
+
+**Verdict.** Target hit: `gridAssemble` **31→5 ms at 16× (6.1×)**, both oracles neutral,
+serial retained behind `BOA_SERIAL_GRID=1`, nothing merged. GPU÷CPU improved at scale but
+crossing parity needs the transfer/host-work lever next. Tooling + logs in
+`RUN_LOGS/2026-06-12_gridassemble/` (`oracle.sh`, `perf.sh`, `analyze.py`,
+`GridBuildParityTest` method). Branch `parallelize-gridassemble`, pushed, **not merged**.
+
+## 2026-06-12 — Contractile-network memory headroom at 16× (soft ceiling; VRAM recorded, host RSS not captured)
+
+Captures a memory finding from the 2026-06-11 contractile study
+(`BENCHMARK_contractile_scaling.md`): the host-RAM ceiling work — all done on the
+**dense gliding assay** — does not transfer to the contractile network. The two ceilings
+are different workloads, not the same wall at a different scale.
+
+The documented 16× host-heap OOM (`Mesh.<init>`/`Thing.<init>`, `-Xmx28G`) is the gliding
+assay's motor-dense graph: **1,568,000 motors at 16×**. The contractile network at 16× is
+a far smaller graph — **1,600 filaments + 1,600 minifilaments = 51,200 heads**, roughly
+**1/30th** the myosin-head count. It ran to a full 3-run steady-state profile at 16×, where
+gliding-16× cannot even initialize.
+
+**Recorded numbers (16× contractile):**
+- **GPU VRAM: 782 MiB / 12 GB** — ~6% utilized. VRAM is nowhere near the constraint; 32×
+  and 64× are VRAM-reachable. This is why the contractile ceiling is "soft."
+- **slotCap** (TornadoVM off-heap FloatArray sizing): **19,602 (1×) → 313,602 (16×)**,
+  linear in N.
+- **Host heap:** ran under `-Xmx16G`, characterized as "comfortable" — **qualitative only;
+  no RSS / used-heap figure was captured.** Only VRAM got a number.
+
+**Not pinned (deliberately, per jba):** resident host RAM (RSS / used heap) for contractile
+at 16× is the figure that actually bounds reach on the 31 GB host, and it was not measured.
+If contractile sims are planned in the 32×–64× range, CC should record peak RSS (from run
+logs or a re-run) to pin the real ceiling rather than infer it. Hypothesis (unmeasured) for
+the next limiter as N grows: the **Mesh bin grid** (∝ box area, worst-case `BIN_DEPTH`
+provisioning), not the Thing graph — the sparse-bin lever already noted in
+`PT3D_SOA_MIGRATION.md`.
+
+Last updated: 2026-06-12 (**Parallelize `gridAssemble` — counting-sort bind-grid build.** The cost map's #1 recoverable wall, the single-threaded `gridAssemble` bind-grid build (`@Parallel gid<1`, 0.8→34.9 ms over 1×→16× ≈ 50% of the step), is now a six-task parallel counting sort on the single-graph production path (behind `BOA_SERIAL_GRID=1`, default parallel). **Layout = compact CSR**; CELL_SIZE 0.2 µm > FilSegment 0.17 µm so each AABB spans few cells → **the O(totalCells) zero+prefix-sum dominate** (totalCells 40 804→161 604 ∝ box area), not the per-segment histogram/scatter. **Atomics gate PASS:** `KernelContext.atomicAdd(IntArray)` is PTX-supported (TornadoVM's own atomic18 test skips only SPIRV); a probe of 1 048 576 contended adds was exact/lossless — but it returns **void** (no fetch-add) and exposed that a **WorkerGrid drops the remainder partial block when global%local≠0** (so every new task pads global up to a block multiple + self-guards). **Form:** `gridZero` (∥cells) → `gridHist` (∥segs, atomicAdd) → `gridScanLocal` (∥512-cell chunks) → `gridScanChunks` (1 thread, two-level scan) → `gridScanAdd` (∥chunks) → **`gridScatter` (serial — void atomicAdd has no fetch-add for a parallel cursor)**; all blocks explicitly registered (the 701 lesson), +5 tasks fit under maxbytecodesize=16384. **Correctness — both oracles neutral:** structural `GridBuildParityTest` (device parallel vs host serial, 1×/8×/16×) = **bit-identical CSR** (`offset/count/set/orderMismatch=0`, not just multiset — serial scatter preserves within-cell order); downstream physics (`boa10-64Seg-dyn` 1×, 3 seeds) `meanBoundMotors` 1.630≈1.624, `bindEvents` 197.7≈201.3, **NaN/701=0 on 6/6**. **Determinism PRESERVED** (serial scatter), the prompt's atomic-scatter nondeterminism caveat does not apply. **Perf:** `gridAssemble` **31.25→5.14 ms at 16× (6.1×)**, 15.63→2.60 (8×, 6.0×), 0.80→0.36 (1×); the O(totalCells) zero+scan collapsed ~26 ms→~0.17 ms, leaving the **serial `gridScatter` (4.96 ms) as the sole grid-build cost** (un-parallelizable without fetch-add). **GPU÷CPU:** 1× 10.07→10.08× (grid negligible there), 8× 1.76→1.50×, **16× 1.56→1.16×** — improved at scale but NOT below 1: the GPU *exec* dropped ~25 ms as predicted, but the two-step-diff ms/step still carries ~40 ms/step unchanged CPU-side host work (mesh/slotPack/biochem/output) + the ~30 ms transfer wall, which now dominate → crossing parity needs the cost map's **second** lever (transfer coalescing), out of scope. Grid build is no longer the dominant GPU cost. Branch `parallelize-gridassemble`, pushed, **NOT merged** — jba's call. Tooling `RUN_LOGS/2026-06-12_gridassemble/`. Full writeup at top.)
+
+Prior update: 2026-06-11 (**GPU cost map — the contractile step is transfer- + serial-kernel-bound, NOT kernel/bandwidth-bound; the loss is RECOVERABLE (corrects the benchmark's "kernel-bound" call).** Per-kernel × scale profile (TornadoVM profiler for attribution, instrumentation-off `exec` for absolutes; **ncu UNAVAILABLE — host has CUDA 11.5 / Nsight 2021.3.1, both predate Blackwell sm_120**, so bandwidth/occupancy are analytical+structural, labeled). Gated on the 701-hunt cohesion-correctness pass (oracle-neutral). **Component split per step (1×/4×/8×/16×):** wall 26.8/35.9/47.0/69.7 ms = **kernel 5%/23%/37%/52% + COPY_IN 59%/49%/42%/34% + COPY_OUT 26%/20%/15%/11%**. **This corrects `BENCHMARK_contractile_scaling.md` B4 ("exec 62–73%, kernel-bound, transfer ≈ 0")** — BoA's `[STATS] exec=` timer wraps the whole `plan.execute()`, which **includes the EVERY_EXECUTION host↔device transfers**; the benchmark's "transfer≈0" measured only the *pose pull* (`demandSyncPose`) and missed **~75 per-step buffer transfers**. Real 1× split = **5% kernel / 85% transfer / ~10% dispatch.** **Two recoverable walls, neither mechanics nor bandwidth:** **(1) `gridAssemble` — a SINGLE-THREADED kernel** (`@Parallel gid<1`, block [1,1,1]) doing the entire spatial bind-grid build (zero cells→count→prefix-sum→scatter) serially on one thread: **0.8 ms (1×) → 34.9 ms (16×) = 50% of the whole step, superlinear** (97% of all kernel time at 16×). Embarrassingly parallel (counting sort) — a standard atomic-count + parallel-prefix + scatter rewrite removes ~all of it. **(2) ~75 per-execute `cuMemcpy` transfers** — COPY_IN 15.7→23.6 ms + COPY_OUT ~7 ms FLAT = ~23–31 ms, **mostly FIXED (per-call latency, not bandwidth: 141 MB/15.7 ms = 9 GB/s = ~36% of PCIe peak, ~1.3% of the 672 GB/s device BW)**; many are static topology arrays (rodSlots, anchorPts, segMotorOffsets, cohSlots…) that ride EVERY_EXECUTION but change only on classifyThings → coalesce + FIRST_EXECUTION them. **The actual mechanics kernels** (joints/move/chain/cohesion/motorForce/segMotorForce/boundary) are **<1 ms combined even at 16× (<1.5% of the step)** — fast, ~linear, **NOT memory-bound → refutes both halves of the binding-efficient/mechanics-slow hypothesis** (binding is "slow" only via the one serial kernel; mechanics barely registers). `dimerCohesion` (the kernel the 701 fix made run) is flat ~0.4–0.5 ms (mostly early-out) — making it run cost nothing. **No kernel is near the memory wall** — grids of 100–1600 threads = a few blocks across 48 SMs, work-starved/latency-bound, not bandwidth-bound. **Recoverable headroom ≈ 95% of the step** (gridAssemble parallelization + transfer coalescing/residency); a v2 doing both plausibly takes the step to **a few ms at every scale → GPU÷CPU parity at 1× and GPU-FASTER at 8×–16×** (CPU 42–70 ms there). **Sharpens the 701-hunt "structural" reading: same direction (not launch, not mechanics, not bandwidth) but the loss is RECOVERABLE** — via grid-build parallelism + transfer overhead, the *opposite* of the "mechanics-bandwidth" hypothesis. **No code change** (profiler-flag-gated instrumentation, stock TornadoVM); deliverable `PROFILE_gpu_cost_map.md`, tooling `RUN_LOGS/2026-06-11_701_hunt/profile_sweep.sh` + `agg_prof.py`. Full writeup in `PROFILE_gpu_cost_map.md`.)
 
 Prior update: 2026-06-11 (**The 701 hunt — move/bind launch-config fix + contractile re-measure (Outcome 3: 701 benign AND cheap; the fix is a CORRECTNESS win, not a speed win).** Hunted the `cuLaunchKernel → 701 (LAUNCH_OUT_OF_RESOURCES)` that fires on every move-execute on `boa10-64Seg-dyn`. **Root cause (proven by `-Dtornado.threadInfo=true`):** of the ~12 tasks in the chained move/bind/cohesion TaskGraph, every parallel one is pinned to a 64-thread block (segBbox 128, gridAssemble 1) **except `dimerCohesion`, which had NO registered `WorkerGrid`** → TornadoVM defaulted it to an **800-thread block** (`Blocks dimensions [800,1,1]`, the lone outlier). 800 threads × (≥82 regs/thread for the fused cohesion kernel) > the 5070's **65,536-register SM file** → the launch is rejected with 701, every execute. NOT a register-pressure-in-the-kernel problem and NOT the move kernel — a single missing launch-config line on the cohesion task. **The 701 was not pure overhead — it was silently DROPPING physics:** `MyosinDimer.cohesionOnDevice()` makes the CPU **skip** minifilament cohesion (rod↔rod, lever torque, body↔rod) on the `-gpu` path and defer to the device kernel — so a rejected launch meant **minifilament cohesion was absent on the entire GPU path** (the kernel, added 2026-06-11, had likely never executed). **Fix (one structural line):** register `WorkerGrid("chained.dimerCohesion", myoCap)` at block 64 (matching its joints/motorForce siblings). Block 800→64, **701 count 60/50-steps → 0**, clean launch every step. **Correctness (firm, vs full-CPU oracle, `boa10-64Seg-dyn` 1×, 3 seeds, 2500 steps):** the now-running kernel is **oracle-neutral** — segCt CPU 540 ≈ GPU 540, total actin length 105.8 ≈ 106.0 µm (within seed spread), `meanBoundMotors` overlaps (the documented binding seam), **NaN=0, rc=0 on every run** incl. a clean 5000-step run. **Re-measured curve (two-step-diff, same weak-scaling configs, output OFF, 3/3/1 seeds):** GPU÷CPU **9.60× (1×) / 1.64× (8×) / 1.56× (16×)** — statistically identical to the pre-fix **9.67 / 1.72 / 1.55**; `exec`/step actually ticked *up* slightly (25.4→26.3 ms at 1×) because the cohesion kernel now does real work where before it was a rejected no-op. **Verdict = Outcome 3:** clearing the 701 leaves GPU÷CPU unchanged — a rejected launch is ~free and the now-running kernel adds ~the same cost back, so the 701 was never throttling throughput. The contractile GPU-slower-than-CPU loss is **structural** (sparse workload — ~306 blocks across 48 SMs at 1× — latency/dispatch-bound, not launch- or occupancy-throttled; at block 64 the mechanics kernels can't overrun the register file, so block-size tuning can't recover it). The real win is correctness: minifilament cohesion is now actually applied on the GPU path. **Recommend MERGE** (one-line launch-config fix, correctness-positive, perf-neutral; behind the existing single-graph default). Branch `fix-701-cohesion-launch`. `RUN_LOGS/2026-06-11_701_hunt/`. Full writeup below.)
 
