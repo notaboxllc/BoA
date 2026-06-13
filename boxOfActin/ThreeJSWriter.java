@@ -210,18 +210,42 @@ public class ThreeJSWriter {
 
         // Protein nodes — spherical bodies that carry myosin singlets/dimers on
         // their surface. Emitted as {id, center, r} so the viewer can draw the
-        // sphere the node-attached myosins sit on.
+        // sphere the node-attached myosins sit on. Membrane nodes (StickyNode)
+        // carry a "membrane":true discriminator so the viewer can style them as a
+        // translucent flattened membrane surface and resolve NodeLink connectivity.
         sb.append(",\"nodes\":[");
         boolean firstNode = true;
         for (int i = 0; i < ProteinNode.nodeCt; i++) {
             ProteinNode pn = ProteinNode.theNodes[i];
             if (pn == null || pn.removeMe) continue;
             if (!firstNode) sb.append(",");
-            sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g}",
+            sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g%s}",
                     pn.thingInstanceId,
                     pn.getCoordX(), pn.getCoordY(), pn.getCoordZ(),
-                    pn.getRadius()));
+                    pn.getRadius(),
+                    (pn instanceof StickyNode) ? ",\"membrane\":true" : ""));
             firstNode = false;
+        }
+        sb.append("]");
+
+        // Membrane connectivity — one [node1Id, node2Id] pair per active NodeLink
+        // (sticky-point spring between two membrane nodes). Emitted every frame
+        // because auto-linking adds/removes links as the sheet self-assembles. The
+        // viewer resolves the IDs against the "nodes" array (centers), builds the
+        // per-node neighbour set to derive surface normals, and draws toggleable
+        // connectivity lines. Node-id pairs are emitted rather than duplicated
+        // coords so the viewer can both render lines and infer the membrane normal.
+        sb.append(",\"membraneLinks\":[");
+        boolean firstLink = true;
+        for (int i = 0; i < NodeLink.nodeLinkCt; i++) {
+            NodeLink ln = NodeLink.nodeLinks[i];
+            if (ln == null) break;
+            if (!ln.active || ln.removeMe) continue;
+            if (ln.node1 == null || ln.node2 == null) continue;
+            if (ln.node1.removeMe || ln.node2.removeMe) continue;
+            if (!firstLink) sb.append(",");
+            sb.append(String.format("[%d,%d]", ln.node1.thingInstanceId, ln.node2.thingInstanceId));
+            firstLink = false;
         }
         sb.append("]");
 

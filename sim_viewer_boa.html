@@ -693,6 +693,9 @@
   <label><span class="pLabel">Age legend</span>      <span style="display:inline-block;width:90px;height:10px;border:1px solid #555;background:linear-gradient(to right,#ff0000,#ff8800,#ffff00)"></span>&nbsp;<span style="font-size:10px;color:#aaa">ADP→ATP</span></label>
   <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
+  <label><span class="pLabel">Membrane links</span>  <input id="chkMembraneLinks" type="checkbox"></label>
+  <label><span class="pLabel">Membrane opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
+  <label><span class="pLabel">Membrane flatten</span><input id="sMembFlatten" type="range" min="0.05" max="1" step="0.05" value="0.30"><span class="pVal" id="vMembFlatten">0.30</span></label>
 </div>
 
 <button id="renderToggle">Render ▶</button>
@@ -843,6 +846,7 @@ minifilMesh.frustumCulled = false;
 scene.add(minifilMesh);
 
 // Protein nodes — grey, semi-transparent spheres the node-attached myosins sit on.
+// (Membrane / StickyNode nodes are drawn separately by membraneMesh below.)
 const MAX_NODES = 2000;
 const nodeMesh = new THREE.InstancedMesh(sphGeo,
   new THREE.MeshPhongMaterial({ color: 0x888888, transparent: true, opacity: 0.35,
@@ -851,6 +855,40 @@ nodeMesh.count = 0;
 nodeMesh.frustumCulled = false;
 nodeMesh.renderOrder = 2;   // draw after opaque geometry so transparency blends correctly
 scene.add(nodeMesh);
+
+// ── membrane (StickyNode) surface ─────────────────────────────────────────────
+// Membrane nodes render as largely-translucent, flattened (oblate) spheres whose
+// short axis lies along the locally-derived surface normal, so linked nodes tile
+// into a continuous membrane rather than a ball-pit. One InstancedMesh holds them
+// all (thousands of nodes); per-instance matrix carries position + flatten
+// orientation. NodeLink connectivity is one THREE.LineSegments, toggleable.
+//
+// Tunable knobs (also exposed as UI controls in the Display panel):
+let membraneOpacity = 0.35;   // translucency of the membrane discs
+let membraneFlatten = 0.30;   // oblate ratio: short (normal) axis / in-plane radius
+let showMembraneLinks = false; // NodeLink connectivity lines on/off
+const MEMBRANE_COLOR = 0x55bbdd;
+
+const MAX_MEMBRANE_NODES = 20000;
+const MAX_MEMBRANE_LINKS = 120000;
+const membraneMesh = new THREE.InstancedMesh(sphGeo,
+  new THREE.MeshPhongMaterial({ color: MEMBRANE_COLOR, transparent: true,
+    opacity: membraneOpacity, depthWrite: false }), MAX_MEMBRANE_NODES);
+membraneMesh.count = 0;
+membraneMesh.frustumCulled = false;
+membraneMesh.renderOrder = 2;   // draw after opaque geometry so transparency blends
+scene.add(membraneMesh);
+
+// NodeLink connectivity — a single LineSegments holding all link endpoint pairs.
+const membraneLinkGeo = new THREE.BufferGeometry();
+membraneLinkGeo.setAttribute('position',
+  new THREE.BufferAttribute(new Float32Array(MAX_MEMBRANE_LINKS * 2 * 3), 3));
+const membraneLinkMesh = new THREE.LineSegments(membraneLinkGeo,
+  new THREE.LineBasicMaterial({ color: 0x224455, transparent: true, opacity: 0.5 }));
+membraneLinkMesh.frustumCulled = false;
+membraneLinkMesh.visible = showMembraneLinks;
+membraneLinkGeo.setDrawRange(0, 0);
+scene.add(membraneLinkMesh);
 
 const motorColors = {
   'NONE':  new THREE.Color(0x4444ff),
@@ -1308,6 +1346,7 @@ function applyFrameData(data) {
   if (segMesh.instanceColor) segMesh.instanceColor.needsUpdate = true;
 
   updateMyosinData(data.myosins, data.minifilaments, data.nodes);
+  updateMembraneSurface(data.nodes, data.membraneLinks);
   updateAxisLines(data.segments);
   updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
@@ -1602,10 +1641,12 @@ function updateMyosinData(myosins, minifilaments, nodes) {
     }
   }
 
-  // Protein nodes — grey transparent spheres at {center, r}.
+  // Protein nodes — grey transparent spheres at {center, r}. Membrane nodes
+  // (nd.membrane) are excluded here and drawn by updateMembraneSurface below.
   let nodeCt = 0;
   if (nodes) {
     for (const nd of nodes) {
+      if (nd.membrane) continue;
       if (nodeCt >= MAX_NODES) break;
       dummy.position.set(nd.center[0], nd.center[1], nd.center[2]);
       dummy.quaternion.identity();
@@ -1627,6 +1668,165 @@ function updateMyosinData(myosins, minifilaments, nodes) {
   minifilMesh.instanceMatrix.needsUpdate = true;
   nodeMesh.instanceMatrix.needsUpdate = true;
   if (motorMesh.instanceColor) motorMesh.instanceColor.needsUpdate = true;
+}
+
+// ── membrane surface ──────────────────────────────────────────────────────────
+// Renders membrane (StickyNode) nodes as translucent, flattened (oblate) spheres
+// oriented so the short axis lies along the locally-derived surface normal, plus
+// toggleable NodeLink connectivity lines. Normals are derived from each node's
+// linked neighbours (best-fit-plane via PCA of neighbour displacements, sign-fixed
+// outward from the membrane centroid), falling back to radial-from-centroid for
+// under-linked nodes — correct for both the flat-sheet and closed-cortex cases.
+const _mq = new THREE.Quaternion();
+const _mn = new THREE.Vector3();
+const _mc = new THREE.Vector3();
+const _md0 = new THREE.Vector3();
+const _md1 = new THREE.Vector3();
+
+function updateMembraneSurface(nodes, membraneLinks) {
+  // Collect membrane nodes and an id -> {pos, r} map (used for both normals and links).
+  const memById = new Map();
+  const mem = [];
+  if (nodes) {
+    for (const nd of nodes) {
+      if (!nd.membrane) continue;
+      const pos = new THREE.Vector3(nd.center[0], nd.center[1], nd.center[2]);
+      const rec = { id: nd.id, pos, r: nd.r, nbrs: [] };
+      memById.set(nd.id, rec);
+      mem.push(rec);
+    }
+  }
+
+  // Build adjacency from the link pairs (only links between known membrane nodes).
+  if (membraneLinks) {
+    for (const ln of membraneLinks) {
+      const a = memById.get(ln[0]), b = memById.get(ln[1]);
+      if (a && b) { a.nbrs.push(b.pos); b.nbrs.push(a.pos); }
+    }
+  }
+
+  // Membrane centroid — sign reference so normals point consistently "outward".
+  _mc.set(0, 0, 0);
+  for (const rec of mem) _mc.add(rec.pos);
+  if (mem.length) _mc.multiplyScalar(1 / mem.length);
+
+  // Place each membrane node as a flattened disc.
+  let mCt = 0;
+  for (const rec of mem) {
+    if (mCt >= MAX_MEMBRANE_NODES) break;
+    membraneNormal(rec, _mc, _mn);   // -> _mn (unit normal)
+    dummy.position.copy(rec.pos);
+    // Map the sphere's local +Y to the normal, then flatten along Y (the short axis).
+    _mq.setFromUnitVectors(_yAxis, _mn);
+    dummy.quaternion.copy(_mq);
+    dummy.scale.set(rec.r, rec.r * membraneFlatten, rec.r);
+    dummy.updateMatrix();
+    membraneMesh.setMatrixAt(mCt, dummy.matrix);
+    mCt++;
+  }
+  membraneMesh.count = mCt;
+  membraneMesh.instanceMatrix.needsUpdate = true;
+
+  // Rebuild the connectivity line buffer (node-center to node-center).
+  const posAttr = membraneLinkMesh.geometry.getAttribute('position');
+  const arr = posAttr.array;
+  let v = 0;
+  if (membraneLinks) {
+    for (const ln of membraneLinks) {
+      if (v / 6 >= MAX_MEMBRANE_LINKS) break;
+      const a = memById.get(ln[0]), b = memById.get(ln[1]);
+      if (!a || !b) continue;
+      arr[v++] = a.pos.x; arr[v++] = a.pos.y; arr[v++] = a.pos.z;
+      arr[v++] = b.pos.x; arr[v++] = b.pos.y; arr[v++] = b.pos.z;
+    }
+  }
+  posAttr.needsUpdate = true;
+  membraneLinkMesh.geometry.setDrawRange(0, v / 3);
+  membraneLinkMesh.geometry.computeBoundingSphere();
+}
+
+// Derive a unit surface normal for one membrane node from its linked neighbours.
+// out receives the result. Falls back to radial-from-centroid when under-linked.
+function membraneNormal(rec, centroid, out) {
+  const nbrs = rec.nbrs;
+  if (nbrs.length >= 3) {
+    // PCA: smallest-variance eigenvector of the neighbour-displacement covariance
+    // is the surface normal (perpendicular to the locally-fit tangent plane).
+    let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+    for (const q of nbrs) {
+      const dx = q.x - rec.pos.x, dy = q.y - rec.pos.y, dz = q.z - rec.pos.z;
+      xx += dx * dx; xy += dx * dy; xz += dx * dz;
+      yy += dy * dy; yz += dy * dz; zz += dz * dz;
+    }
+    if (smallestEigenVec3(xx, xy, xz, yy, yz, zz, out)) {
+      orientOutward(rec.pos, centroid, out);
+      return;
+    }
+  }
+  if (nbrs.length === 2) {
+    // Two neighbours: normal is perpendicular to both displacement directions.
+    _md0.subVectors(nbrs[0], rec.pos);
+    _md1.subVectors(nbrs[1], rec.pos);
+    out.crossVectors(_md0, _md1);
+    if (out.lengthSq() > 1e-20) { out.normalize(); orientOutward(rec.pos, centroid, out); return; }
+  }
+  // Fallback: radial from the membrane centroid (correct for closed cortices;
+  // harmless for the flat sheet, where an under-linked node is an edge case).
+  out.subVectors(rec.pos, centroid);
+  if (out.lengthSq() > 1e-20) out.normalize();
+  else out.set(0, 1, 0);
+}
+
+function orientOutward(pos, centroid, n) {
+  const dot = (pos.x - centroid.x) * n.x + (pos.y - centroid.y) * n.y + (pos.z - centroid.z) * n.z;
+  if (dot < 0) n.set(-n.x, -n.y, -n.z);
+}
+
+// Smallest-eigenvalue eigenvector of a symmetric 3x3 [[xx,xy,xz],[xy,yy,yz],[xz,yz,zz]].
+// Writes the unit eigenvector into out; returns false if the matrix is degenerate.
+function smallestEigenVec3(xx, xy, xz, yy, yz, zz, out) {
+  const p1 = xy * xy + xz * xz + yz * yz;
+  if (p1 < 1e-24) {
+    // Already diagonal — normal is the axis with the smallest diagonal entry.
+    if (xx <= yy && xx <= zz) out.set(1, 0, 0);
+    else if (yy <= xx && yy <= zz) out.set(0, 1, 0);
+    else out.set(0, 0, 1);
+    return true;
+  }
+  const q = (xx + yy + zz) / 3;
+  const p2 = (xx - q) * (xx - q) + (yy - q) * (yy - q) + (zz - q) * (zz - q) + 2 * p1;
+  const p = Math.sqrt(p2 / 6);
+  if (p < 1e-20) return false;
+  const b00 = (xx - q) / p, b11 = (yy - q) / p, b22 = (zz - q) / p;
+  const b01 = xy / p, b02 = xz / p, b12 = yz / p;
+  let r = (b00 * (b11 * b22 - b12 * b12)
+         - b01 * (b01 * b22 - b12 * b02)
+         + b02 * (b01 * b12 - b11 * b02)) / 2;
+  r = Math.max(-1, Math.min(1, r));
+  const phi = Math.acos(r) / 3;
+  const eigSmall = q + 2 * p * Math.cos(phi + (2 * Math.PI / 3));  // smallest eigenvalue
+  return eigenVecFor(xx, xy, xz, yy, yz, zz, eigSmall, out);
+}
+
+// Eigenvector of symmetric 3x3 for eigenvalue lambda, via cross products of the
+// rows of (A - lambda I) (the row space is rank 2; the null space is the eigenvector).
+function eigenVecFor(xx, xy, xz, yy, yz, zz, lambda, out) {
+  const r0x = xx - lambda, r0y = xy,          r0z = xz;
+  const r1x = xy,          r1y = yy - lambda, r1z = yz;
+  const r2x = xz,          r2y = yz,          r2z = zz - lambda;
+  // Three candidate cross products; pick the longest (most numerically reliable).
+  let bx = 0, by = 0, bz = 0, best = 0;
+  let cx, cy, cz, m;
+  cx = r0y * r1z - r0z * r1y; cy = r0z * r1x - r0x * r1z; cz = r0x * r1y - r0y * r1x;
+  m = cx * cx + cy * cy + cz * cz; if (m > best) { best = m; bx = cx; by = cy; bz = cz; }
+  cx = r0y * r2z - r0z * r2y; cy = r0z * r2x - r0x * r2z; cz = r0x * r2y - r0y * r2x;
+  m = cx * cx + cy * cy + cz * cz; if (m > best) { best = m; bx = cx; by = cy; bz = cz; }
+  cx = r1y * r2z - r1z * r2y; cy = r1z * r2x - r1x * r2z; cz = r1x * r2y - r1y * r2x;
+  m = cx * cx + cy * cy + cz * cz; if (m > best) { best = m; bx = cx; by = cy; bz = cz; }
+  if (best < 1e-20) return false;
+  const inv = 1 / Math.sqrt(best);
+  out.set(bx * inv, by * inv, bz * inv);
+  return true;
 }
 
 function loadFrame(n) {
@@ -1809,6 +2009,20 @@ document.getElementById('chkSupports').addEventListener('change', e => {
 document.getElementById('chkArrow').addEventListener('change', e => {
   showForceArrow = e.target.checked;
   if (benchForceArrow) benchForceArrow.setToggleVisible(showForceArrow);
+});
+document.getElementById('chkMembraneLinks').addEventListener('change', e => {
+  showMembraneLinks = e.target.checked;
+  membraneLinkMesh.visible = showMembraneLinks;
+});
+document.getElementById('sMembOpacity').addEventListener('input', e => {
+  membraneOpacity = Number(e.target.value);
+  membraneMesh.material.opacity = membraneOpacity;
+  document.getElementById('vMembOpacity').textContent = membraneOpacity.toFixed(2);
+});
+document.getElementById('sMembFlatten').addEventListener('input', e => {
+  membraneFlatten = Number(e.target.value);
+  document.getElementById('vMembFlatten').textContent = membraneFlatten.toFixed(2);
+  if (currentFrameData) updateMembraneSurface(currentFrameData.nodes, currentFrameData.membraneLinks);
 });
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {
   showBarbedEnds = e.target.checked;
