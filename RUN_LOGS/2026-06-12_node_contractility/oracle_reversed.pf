@@ -1,0 +1,2 @@
+// reversed-polarity control on the default geometry
+contractReversePolarity:true:1.0;

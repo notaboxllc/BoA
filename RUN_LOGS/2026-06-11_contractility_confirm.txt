@@ -1,0 +1,645 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TURNOVER] global biochem cadence ON (biochem phase-aligned; GPU pose pull at biochem+output cadence)
+SLF4J: No SLF4J providers were found.
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
+LiveFrameServer: WebSocket server started on port 8081
+[TELEPORT_DIAG] enabled=false threshold=0.1
+LiveFrameServer: ready
+Loading parameter values from /tmp/contract_view.txt...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.5
+     Parameter assigned: toFileInterval set to 500
+     Parameter assigned: remoteWriteInterval set to 5000
+     Parameter assigned: fracMove set to 0.0573
+     Parameter assigned: fracR set to 1.0
+     Parameter assigned: fracMoveTorq set to 0.01
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: boxXDim set to 4.0
+     Parameter assigned: boxYDim set to 0.3
+     Parameter assigned: boxZDim set to 0.2
+     Parameter assigned: contractilityAssay set to true
+     Parameter assigned: contractFilNSegs set to 13
+     Parameter assigned: contractFilYOffset set to 0.05
+     Parameter assigned: contractNoMotor set to false
+     Parameter assigned: contractReversePolarity set to false
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: noMonomersSimd set to false
+     Parameter assigned: myoMiniLifetime set to 1.0E9
+     Parameter assigned: numMyoDimersEachEndOfMiniFil set to 8
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.3
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: kHydrolysis set to 0.0
+     Parameter assigned: kDissociation set to 0.0
+     Parameter assigned: runTime set to 0.15
+     Parameter assigned: toFileInterval set to 100
+Done... there were 5 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-8276642368982113226 (BOA_RNG_SEED unset)
+[CONTRACT] box X=4.000 µm (anchors at x=+/-1.900, 0.10 µm inset), 13-seg filaments, Lfil=2.282 µm
+[CONTRACT] yOffset=+/-0.050 µm, overlap=0.763 µm, minifilament span=0.180 µm, polarity=normal (plus ends outward), motor=ON
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 21; xBinWidth = 0.2 µm
+nYBins = 3; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 21 x 3 x 2 cells (0.2 µm each)
+[16:21] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[16:21]   ON   ThingStep Threads
+[16:21]   ON   ThingBrownian Threads
+[16:21]   ON   Myosin Threads
+[16:21]   ON   MyoDimer Threads
+[16:21]   OFF  Protein Node Threads
+[16:21]   ON   MyoMiniFil Threads
+[16:21]   OFF  Chamber Myo Threads
+[16:21]   OFF  Chamber MyoDimer Threads
+[16:21]   ON   Mesh Threads
+[16:21]   ON   Ck Mesh Threads
+[16:21]   ON   Ck Mots Threads
+[16:21]   OFF  XLink Threads
+[16:21]   OFF  Arp23 Threads
+[16:21]   OFF  NodeLink Threads
+[16:21]   OFF  Membrane Node Threads
+[16:21]   OFF  ActA Threads
+[16:21]   ON   MotorBindGrid3D Fill
+[16:21] [phase-plan] 9 active, 8 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=1, peakModel=4, safety=4x, floor=8192)
+LiveFrameServer: client connected /[0:0:0:0:0:0:0:1]:39722
+GPUMoveThing: slotCap=1024 myoCap=1024 moveBlock=64 jointBlock=64 runSeed=-586083280 nWorkers=16
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/contractility_confirm
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/contractility_confirm
+ThreeJSWriter: archived 1 source files to source.zip
+ThreeJSWriter: wrote params_input.contract_view.txt
+ThreeJSWriter: wrote params_effective.txt (243 parameters)
+[STATS] contractility step=1 t=0.0000 tensionA=0.0000 tensionB=0.0000 pN boundMotors=0 | avgBound=0.00 ewmaBound=0.00 avgTension=0.000 ewmaTension=0.000 peakTension=0.000 pN
+[STATS] contractility step=101 t=0.0010 tensionA=0.2824 tensionB=0.2824 pN boundMotors=0 | avgBound=0.00 ewmaBound=0.00 avgTension=0.279 ewmaTension=0.111 peakTension=0.283 pN
+[STATS] contractility step=201 t=0.0020 tensionA=0.2828 tensionB=0.2821 pN boundMotors=2 | avgBound=0.87 ewmaBound=0.72 avgTension=0.281 ewmaTension=0.179 peakTension=0.283 pN
+[STATS] contractility step=301 t=0.0030 tensionA=0.2967 tensionB=0.2804 pN boundMotors=3 | avgBound=1.26 ewmaBound=1.25 avgTension=0.282 ewmaTension=0.221 peakTension=0.289 pN
+[STATS] contractility step=401 t=0.0040 tensionA=0.3331 tensionB=0.2766 pN boundMotors=3 | avgBound=1.46 ewmaBound=1.57 avgTension=0.286 ewmaTension=0.251 peakTension=0.305 pN
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=501 t=0.0050 tensionA=0.3776 tensionB=0.2706 pN boundMotors=4 | avgBound=1.70 ewmaBound=2.05 avgTension=0.291 ewmaTension=0.276 peakTension=0.324 pN
+[STATS] contractility step=601 t=0.0060 tensionA=0.4252 tensionB=0.2629 pN boundMotors=3 | avgBound=1.88 ewmaBound=2.29 avgTension=0.298 ewmaTension=0.299 peakTension=0.344 pN
+[STATS] contractility step=701 t=0.0070 tensionA=0.4687 tensionB=0.2543 pN boundMotors=5 | avgBound=2.11 ewmaBound=2.78 avgTension=0.306 ewmaTension=0.321 peakTension=0.362 pN
+[STATS] contractility step=801 t=0.0080 tensionA=0.5113 tensionB=0.2450 pN boundMotors=4 | avgBound=2.32 ewmaBound=3.18 avgTension=0.314 ewmaTension=0.340 peakTension=0.378 pN
+[STATS] contractility step=901 t=0.0090 tensionA=0.5618 tensionB=0.2355 pN boundMotors=2 | avgBound=2.33 ewmaBound=2.89 avgTension=0.322 ewmaTension=0.360 peakTension=0.399 pN
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=1001 t=0.0100 tensionA=0.6091 tensionB=0.2261 pN boundMotors=3 | avgBound=2.40 ewmaBound=2.92 avgTension=0.331 ewmaTension=0.379 peakTension=0.418 pN
+[STATS] contractility step=1101 t=0.0110 tensionA=0.6438 tensionB=0.2167 pN boundMotors=3 | avgBound=2.51 ewmaBound=3.19 avgTension=0.339 ewmaTension=0.397 peakTension=0.430 pN
+[STATS] contractility step=1201 t=0.0120 tensionA=0.6789 tensionB=0.2076 pN boundMotors=4 | avgBound=2.60 ewmaBound=3.37 avgTension=0.348 ewmaTension=0.413 peakTension=0.443 pN
+[STATS] contractility step=1301 t=0.0130 tensionA=0.7221 tensionB=0.1989 pN boundMotors=1 | avgBound=2.68 ewmaBound=3.44 avgTension=0.356 ewmaTension=0.428 peakTension=0.460 pN
+[STATS] contractility step=1401 t=0.0140 tensionA=0.7774 tensionB=0.1901 pN boundMotors=3 | avgBound=2.69 ewmaBound=3.21 avgTension=0.364 ewmaTension=0.446 peakTension=0.484 pN
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=1501 t=0.0150 tensionA=0.8440 tensionB=0.1818 pN boundMotors=4 | avgBound=2.75 ewmaBound=3.37 avgTension=0.373 ewmaTension=0.467 peakTension=0.513 pN
+[STATS] contractility step=1601 t=0.0160 tensionA=0.9164 tensionB=0.1739 pN boundMotors=2 | avgBound=2.75 ewmaBound=3.11 avgTension=0.383 ewmaTension=0.492 peakTension=0.545 pN
+[STATS] contractility step=1701 t=0.0170 tensionA=0.9805 tensionB=0.1665 pN boundMotors=4 | avgBound=2.76 ewmaBound=3.07 avgTension=0.393 ewmaTension=0.519 peakTension=0.573 pN
+[STATS] contractility step=1801 t=0.0180 tensionA=1.0250 tensionB=0.1595 pN boundMotors=4 | avgBound=2.83 ewmaBound=3.44 avgTension=0.404 ewmaTension=0.545 peakTension=0.592 pN
+[STATS] contractility step=1901 t=0.0190 tensionA=1.0547 tensionB=0.1597 pN boundMotors=3 | avgBound=2.87 ewmaBound=3.49 avgTension=0.414 ewmaTension=0.567 peakTension=0.607 pN
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=2001 t=0.0200 tensionA=1.0704 tensionB=0.1708 pN boundMotors=4 | avgBound=2.94 ewmaBound=3.82 avgTension=0.424 ewmaTension=0.586 peakTension=0.621 pN
+[STATS] contractility step=2101 t=0.0210 tensionA=1.0826 tensionB=0.1832 pN boundMotors=3 | avgBound=2.99 ewmaBound=3.88 avgTension=0.433 ewmaTension=0.602 peakTension=0.633 pN
+[STATS] contractility step=2201 t=0.0220 tensionA=1.1083 tensionB=0.1934 pN boundMotors=3 | avgBound=2.99 ewmaBound=3.53 avgTension=0.443 ewmaTension=0.618 peakTension=0.651 pN
+[STATS] contractility step=2301 t=0.0230 tensionA=1.1383 tensionB=0.2044 pN boundMotors=4 | avgBound=3.03 ewmaBound=3.66 avgTension=0.452 ewmaTension=0.635 peakTension=0.671 pN
+[STATS] contractility step=2401 t=0.0240 tensionA=1.1550 tensionB=0.2195 pN boundMotors=5 | avgBound=3.10 ewmaBound=4.08 avgTension=0.462 ewmaTension=0.653 peakTension=0.687 pN
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=2501 t=0.0250 tensionA=1.1862 tensionB=0.2353 pN boundMotors=3 | avgBound=3.12 ewmaBound=3.85 avgTension=0.471 ewmaTension=0.671 peakTension=0.711 pN
+[STATS] contractility step=2601 t=0.0260 tensionA=1.2317 tensionB=0.2529 pN boundMotors=4 | avgBound=3.15 ewmaBound=3.92 avgTension=0.481 ewmaTension=0.693 peakTension=0.742 pN
+[STATS] contractility step=2701 t=0.0270 tensionA=1.2706 tensionB=0.2734 pN boundMotors=4 | avgBound=3.21 ewmaBound=4.17 avgTension=0.491 ewmaTension=0.719 peakTension=0.772 pN
+[STATS] contractility step=2801 t=0.0280 tensionA=1.2960 tensionB=0.2921 pN boundMotors=6 | avgBound=3.28 ewmaBound=4.58 avgTension=0.502 ewmaTension=0.745 peakTension=0.794 pN
+[STATS] contractility step=2901 t=0.0290 tensionA=1.3119 tensionB=0.3099 pN boundMotors=4 | avgBound=3.33 ewmaBound=4.58 avgTension=0.512 ewmaTension=0.768 peakTension=0.811 pN
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=3001 t=0.0300 tensionA=1.3321 tensionB=0.3281 pN boundMotors=5 | avgBound=3.33 ewmaBound=4.13 avgTension=0.522 ewmaTension=0.789 peakTension=0.830 pN
+[STATS] contractility step=3101 t=0.0310 tensionA=1.3567 tensionB=0.3419 pN boundMotors=2 | avgBound=3.39 ewmaBound=4.58 avgTension=0.533 ewmaTension=0.809 peakTension=0.849 pN
+[STATS] contractility step=3201 t=0.0320 tensionA=1.3812 tensionB=0.3498 pN boundMotors=6 | avgBound=3.44 ewmaBound=4.78 avgTension=0.543 ewmaTension=0.829 peakTension=0.865 pN
+[STATS] contractility step=3301 t=0.0330 tensionA=1.4055 tensionB=0.3530 pN boundMotors=5 | avgBound=3.50 ewmaBound=5.04 avgTension=0.553 ewmaTension=0.846 peakTension=0.879 pN
+[STATS] contractility step=3401 t=0.0340 tensionA=1.4282 tensionB=0.3544 pN boundMotors=3 | avgBound=3.54 ewmaBound=5.00 avgTension=0.563 ewmaTension=0.862 peakTension=0.891 pN
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=3501 t=0.0350 tensionA=1.4529 tensionB=0.3606 pN boundMotors=6 | avgBound=3.58 ewmaBound=5.00 avgTension=0.572 ewmaTension=0.877 peakTension=0.907 pN
+[STATS] contractility step=3601 t=0.0360 tensionA=1.4693 tensionB=0.3728 pN boundMotors=5 | avgBound=3.63 ewmaBound=5.13 avgTension=0.582 ewmaTension=0.892 peakTension=0.921 pN
+[STATS] contractility step=3701 t=0.0370 tensionA=1.4678 tensionB=0.3908 pN boundMotors=5 | avgBound=3.67 ewmaBound=5.15 avgTension=0.591 ewmaTension=0.905 peakTension=0.929 pN
+[STATS] contractility step=3801 t=0.0380 tensionA=1.4581 tensionB=0.4132 pN boundMotors=6 | avgBound=3.73 ewmaBound=5.40 avgTension=0.600 ewmaTension=0.916 peakTension=0.936 pN
+[STATS] contractility step=3901 t=0.0390 tensionA=1.4514 tensionB=0.4355 pN boundMotors=4 | avgBound=3.74 ewmaBound=4.82 avgTension=0.609 ewmaTension=0.925 peakTension=0.943 pN
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=4001 t=0.0400 tensionA=1.4470 tensionB=0.4739 pN boundMotors=5 | avgBound=3.77 ewmaBound=4.97 avgTension=0.617 ewmaTension=0.936 peakTension=0.960 pN
+[STATS] contractility step=4101 t=0.0410 tensionA=1.4290 tensionB=0.5205 pN boundMotors=6 | avgBound=3.81 ewmaBound=5.09 avgTension=0.626 ewmaTension=0.949 peakTension=0.975 pN
+[STATS] contractility step=4201 t=0.0420 tensionA=1.4121 tensionB=0.5666 pN boundMotors=4 | avgBound=3.83 ewmaBound=4.95 avgTension=0.634 ewmaTension=0.962 peakTension=0.989 pN
+[STATS] contractility step=4301 t=0.0430 tensionA=1.4037 tensionB=0.6034 pN boundMotors=5 | avgBound=3.86 ewmaBound=4.89 avgTension=0.643 ewmaTension=0.976 peakTension=1.004 pN
+[STATS] contractility step=4401 t=0.0440 tensionA=1.4069 tensionB=0.6282 pN boundMotors=5 | avgBound=3.88 ewmaBound=4.93 avgTension=0.651 ewmaTension=0.990 peakTension=1.018 pN
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=4501 t=0.0450 tensionA=1.4173 tensionB=0.6476 pN boundMotors=6 | avgBound=3.91 ewmaBound=5.08 avgTension=0.659 ewmaTension=1.004 peakTension=1.032 pN
+[STATS] contractility step=4601 t=0.0460 tensionA=1.4241 tensionB=0.6653 pN boundMotors=5 | avgBound=3.93 ewmaBound=4.94 avgTension=0.668 ewmaTension=1.018 peakTension=1.045 pN
+[STATS] contractility step=4701 t=0.0470 tensionA=1.4291 tensionB=0.6805 pN boundMotors=7 | avgBound=3.98 ewmaBound=5.50 avgTension=0.676 ewmaTension=1.031 peakTension=1.055 pN
+[STATS] contractility step=4801 t=0.0480 tensionA=1.4338 tensionB=0.7023 pN boundMotors=5 | avgBound=4.01 ewmaBound=5.44 avgTension=0.684 ewmaTension=1.043 peakTension=1.068 pN
+[STATS] contractility step=4901 t=0.0490 tensionA=1.4459 tensionB=0.7231 pN boundMotors=5 | avgBound=4.03 ewmaBound=5.27 avgTension=0.692 ewmaTension=1.056 peakTension=1.084 pN
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.05....~46.35 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[STATS] contractility step=5001 t=0.0500 tensionA=1.4589 tensionB=0.7360 pN boundMotors=4 | avgBound=4.06 ewmaBound=5.18 avgTension=0.700 ewmaTension=1.070 peakTension=1.097 pN
+[STATS] contractility step=5101 t=0.0510 tensionA=1.4731 tensionB=0.7365 pN boundMotors=5 | avgBound=4.09 ewmaBound=5.47 avgTension=0.708 ewmaTension=1.083 peakTension=1.105 pN
+[STATS] contractility step=5201 t=0.0520 tensionA=1.5049 tensionB=0.7307 pN boundMotors=5 | avgBound=4.12 ewmaBound=5.56 avgTension=0.715 ewmaTension=1.094 peakTension=1.118 pN
+[STATS] contractility step=5301 t=0.0530 tensionA=1.5503 tensionB=0.7348 pN boundMotors=8 | avgBound=4.16 ewmaBound=5.86 avgTension=0.723 ewmaTension=1.108 peakTension=1.143 pN
+[STATS] contractility step=5401 t=0.0540 tensionA=1.5922 tensionB=0.7613 pN boundMotors=7 | avgBound=4.23 ewmaBound=6.58 avgTension=0.731 ewmaTension=1.129 peakTension=1.177 pN
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[STATS] contractility step=5501 t=0.0550 tensionA=1.6264 tensionB=0.8071 pN boundMotors=6 | avgBound=4.27 ewmaBound=6.46 avgTension=0.740 ewmaTension=1.156 peakTension=1.217 pN
+[STATS] contractility step=5601 t=0.0560 tensionA=1.6593 tensionB=0.8568 pN boundMotors=7 | avgBound=4.31 ewmaBound=6.42 avgTension=0.749 ewmaTension=1.189 peakTension=1.258 pN
+[STATS] contractility step=5701 t=0.0570 tensionA=1.6917 tensionB=0.8930 pN boundMotors=5 | avgBound=4.33 ewmaBound=6.15 avgTension=0.758 ewmaTension=1.224 peakTension=1.292 pN
+[STATS] contractility step=5801 t=0.0580 tensionA=1.7154 tensionB=0.9261 pN boundMotors=3 | avgBound=4.35 ewmaBound=5.80 avgTension=0.767 ewmaTension=1.257 peakTension=1.321 pN
+[STATS] contractility step=5901 t=0.0590 tensionA=1.7230 tensionB=0.9620 pN boundMotors=2 | avgBound=4.34 ewmaBound=4.92 avgTension=0.777 ewmaTension=1.287 peakTension=1.343 pN
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyDtoHMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f7f09baac7f, pid=1814889, tid=1815206
+#
+# JRE version: OpenJDK Runtime Environment (21.0.11+10) (build 21.0.11+10-1-22.04.2-Ubuntu)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.11+10-1-22.04.2-Ubuntu, mixed mode, tiered, jvmci, compressed oops, compressed class ptrs, parallel gc, linux-amd64)
+# Problematic frame:
+# C  [libcuda.so.1+0x345c7f]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E" (or dumping to /home/jba/Code/BoA/core.1814889)
+#
+# An error report file with more information is saved as:
+# /home/jba/Code/BoA/hs_err_pid1814889.log
+[165.099s][warning][os] Loading hsdis library failed
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugs.launchpad.net/ubuntu/+source/openjdk-21
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#

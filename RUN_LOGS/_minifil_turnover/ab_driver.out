@@ -1,0 +1,129 @@
+=== PRE-FIX A/B Thu Jun 11 05:26:30 PM PDT 2026 ===
+[stashing fix files]
+Saved working directory and index state On main: prefix_ab
+prefix_gpu_s1 rc=0 mBM=meanBoundMotors=1.728 desync= prefix_gpu_s1                      frames=101 segCt[first=196 last=541 peak=541 mean=526] len_nm[mean=197.2 sd=42.8 n=541] nanLen=0
+[restoring fix]
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   boxOfActin/BoxOfActin.java
+	modified:   boxOfActin/FilSegment.java
+	modified:   boxOfActin/GPUMoveThing.java
+	modified:   boxOfActin/Thing.java
+	modified:   boxOfActin/ThreeJSWriter.java
+	modified:   sim_viewer_boa.html
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	ParameterFiles/_contractility_gpu_5x
+	ParameterFiles/_contractility_syncdiag
+	ParameterFiles/_tele_probe
+	ParameterFiles/boa10-100MiniFil-noactin_long
+	ParameterFiles/boa10-miniFil-staticActin
+	ParameterFiles/boa10-miniFil-staticActin_probe
+	ParameterFiles/boa10-miniFil-staticActin_t2k
+	ParameterFiles/boa10-singleMiniFil_spinlong
+	ParameterFiles/glidingAssay500_val_short
+	ParameterFiles/singleMyoDiag_free_long
+	ParameterFiles/singleMyoDiag_weakThermal
+	RUN_LOGS/2026-06-10_contractility-gpu-syncforced.txt
+	RUN_LOGS/2026-06-10_contractility-gpu-syncforced2.txt
+	RUN_LOGS/2026-06-10_gpu_minifil_binding_investigation.txt
+	RUN_LOGS/2026-06-11_contractility_confirm.txt
+	RUN_LOGS/2026-06-11_minifil_turnover_packrange_fix.txt
+	RUN_LOGS/2026-06-11_turnover_age.txt
+	RUN_LOGS/2026-06-11_turnover_confirm.txt
+	RUN_LOGS/2026-06-11_turnover_long.txt
+	RUN_LOGS/3js_readonly_test/
+	RUN_LOGS/_cohesion/baseline_cpucoh_s1.log
+	RUN_LOGS/_cohesion/baseline_devcoh_s1.log
+	RUN_LOGS/_cohesion/baseline_oracle_s1.log
+	RUN_LOGS/_cohesion/contract_cpucoh_s1.log
+	RUN_LOGS/_cohesion/contract_cpucoh_s2.log
+	RUN_LOGS/_cohesion/contract_devcoh_s1.log
+	RUN_LOGS/_cohesion/contract_devcoh_s2.log
+	RUN_LOGS/_cohesion/contract_oracle_s1.log
+	RUN_LOGS/_cohesion/contract_oracle_s2.log
+	RUN_LOGS/_cohesion/dev_smoke.log
+	RUN_LOGS/_cohesion/dev_smoke2.log
+	RUN_LOGS/_cohesion/devbody_brownoff_s1.log
+	RUN_LOGS/_cohesion/devbody_cpucoh_s1.log
+	RUN_LOGS/_cohesion/devbody_devcoh_s1.log
+	RUN_LOGS/_cohesion/devbody_oracle_s1.log
+	RUN_LOGS/_cohesion/fastacos_cpucoh_s1.log
+	RUN_LOGS/_cohesion/fastacos_devcoh_s1.log
+	RUN_LOGS/_cohesion/fastacos_oracle_s1.log
+	RUN_LOGS/_cohesion/lagdev_cpucoh_s1.log
+	RUN_LOGS/_cohesion/lagdev_devcoh_s1.log
+	RUN_LOGS/_cohesion/lagdev_oracle_s1.log
+	RUN_LOGS/_cohesion/lagset3_cpucoh_s1.log
+	RUN_LOGS/_cohesion/lagset3_cpucoh_s2.log
+	RUN_LOGS/_cohesion/lagset3_cpucoh_s3.log
+	RUN_LOGS/_cohesion/lagset3_devcoh_s1.log
+	RUN_LOGS/_cohesion/lagset3_devcoh_s2.log
+	RUN_LOGS/_cohesion/lagset3_devcoh_s3.log
+	RUN_LOGS/_cohesion/lagset3_oracle_s1.log
+	RUN_LOGS/_cohesion/lagset3_oracle_s2.log
+	RUN_LOGS/_cohesion/lagset3_oracle_s3.log
+	RUN_LOGS/_cohesion/lagset_cpucoh_s1.log
+	RUN_LOGS/_cohesion/lagset_devcoh_s1.log
+	RUN_LOGS/_cohesion/lagset_oracle_s1.log
+	RUN_LOGS/_cohesion/postgate_cpucoh_s1.log
+	RUN_LOGS/_cohesion/postgate_devcoh_s1.log
+	RUN_LOGS/_cohesion/postgate_oracle_s1.log
+	RUN_LOGS/_cohesion/retireAB_pulloff_s2.log
+	RUN_LOGS/_cohesion/retireAB_pulloff_s3.log
+	RUN_LOGS/_cohesion/retireAB_pullon_s2.log
+	RUN_LOGS/_cohesion/retireAB_pullon_s3.log
+	RUN_LOGS/_cohesion/retire_default.log
+	RUN_LOGS/_cohesion/retire_pulloff.log
+	RUN_LOGS/_cohesion/retire_pullon.log
+	RUN_LOGS/_cohesion/singleMiniFil_cpucoh_s1.log
+	RUN_LOGS/_cohesion/singleMiniFil_cpucoh_s2.log
+	RUN_LOGS/_cohesion/singleMiniFil_cpucoh_s3.log
+	RUN_LOGS/_cohesion/singleMiniFil_devcoh_s1.log
+	RUN_LOGS/_cohesion/singleMiniFil_devcoh_s2.log
+	RUN_LOGS/_cohesion/singleMiniFil_devcoh_s3.log
+	RUN_LOGS/_cohesion/singleMiniFil_oracle_s1.log
+	RUN_LOGS/_cohesion/singleMiniFil_oracle_s2.log
+	RUN_LOGS/_cohesion/singleMiniFil_oracle_s3.log
+	RUN_LOGS/_cohesion/smoke_clean.log
+	RUN_LOGS/_cohesion/verifyClean_cpucoh_s1.log
+	RUN_LOGS/_cohesion/verifyClean_devcoh_s1.log
+	RUN_LOGS/_cohesion/verifyClean_oracle_s1.log
+	RUN_LOGS/_contractility_hud_view.log
+	RUN_LOGS/_contractility_live_session.log
+	RUN_LOGS/_contractility_view.log
+	RUN_LOGS/_contractility_view_5x.log
+	RUN_LOGS/_ct_smoke.log
+	RUN_LOGS/_diag_cpu.txt
+	RUN_LOGS/_diag_cpu2.txt
+	RUN_LOGS/_diag_gpu.txt
+	RUN_LOGS/_diag_gpu2.txt
+	RUN_LOGS/_diag_gpu3.txt
+	RUN_LOGS/_f32/
+	RUN_LOGS/_fix_cpu.txt
+	RUN_LOGS/_fix_gpu.txt
+	RUN_LOGS/_fix_gpu_pinfix.txt
+	RUN_LOGS/_fix_gpu_tension.txt
+	RUN_LOGS/_minifil_turnover/
+	RUN_LOGS/_tens_cpu.txt
+	RUN_LOGS/_tens_cpu_long.txt
+	RUN_LOGS/_tens_gpu.txt
+	RUN_LOGS/_tens_gpu_v2.txt
+	RUN_LOGS/_tens_gpu_v3.txt
+	RUN_LOGS/_turnover/
+	scripts/minifil_turnover_val.sh
+	scripts/prefix_ab.sh
+	scripts/run_contractility_gpu.sh
+	scripts/run_minifil_case.sh
+	scripts/run_minifil_cfg.sh
+	scripts/sweep_run.sh
+
+no changes added to commit (use "git add" and/or "git commit -a")
+Dropped refs/stash@{0} (5ac828a611ae3a0cccf5d6a9eea0457b7edfc044)
+postfix_gpu_s1 rc=0 mBM=meanBoundMotors=2.110 desync=packRuleDesync=0 postfix_gpu_s1                     frames=101 segCt[first=198 last=547 peak=547 mean=535] len_nm[mean=196.7 sd=42.4 n=547] nanLen=0
+=== AB DONE Thu Jun 11 05:32:42 PM PDT 2026 ===

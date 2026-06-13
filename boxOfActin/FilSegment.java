@@ -257,6 +257,13 @@ public class FilSegment extends Thing {
 
 	double length;
 	double l;
+
+	// CrossProbe (A2 diagnostic) per-segment prev-state — packed AABB cell range
+	// and min-corner cell from the previous probed step. Sentinel = unset (new
+	// segment). Travels through swap-compaction with the object.
+	long probePrevAabb   = Long.MIN_VALUE;
+	int  probePrevCenter = Integer.MIN_VALUE;
+
 	double helixAng = 2*Math.PI*currentScratch().rng.nextDouble();	// keeps track of the helix angle of minusMon.. starts randomly
 	int monomerCt = 0;
 
@@ -568,6 +575,7 @@ public class FilSegment extends Thing {
 			// just a flag set; cheap).
 			if (Env.useGPU) {
 				GPUMoveThing.markTopologyDirty();
+				GPUMoveThing.lengthDirtyCount++;   // A1: length-only — not a structural change
 				GPUMoveThing.markPoseDirty(this);
 			}
 		}
@@ -584,10 +592,11 @@ public class FilSegment extends Thing {
 			// occupant at whatever slot classifyThings assigns to it).
 			if (Env.useGPU) {
 				GPUMoveThing.markTopologyDirty();
+				GPUMoveThing.structuralDirtyCount++;   // A1: split creates nextFil — real topology change
 				GPUMoveThing.markPoseDirty(this);
 			}
 		}
-		
+
 		//*** joining broken with branched networks right now, but who really needs it anyway
 		/*if (monomerCt <= Env.stdSegLength.getIntValue()/2) {
 			joinSegments();

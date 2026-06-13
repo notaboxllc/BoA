@@ -1,0 +1,5 @@
+=== GPU single minifil s11 ===
+  rc=0 crazy=0 nan=0 frames=63
+=== CPU single minifil s11 ===
+  rc=0 crazy=0 nan=0 frames=63
+SINGLE_DONE

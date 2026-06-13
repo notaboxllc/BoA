@@ -1,0 +1,658 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay500_val...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     Parameter assigned: brownianDeltaT set to 1.0E-5
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 0 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=4792130260974868260 (BOA_RNG_SEED unset)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+[07:43] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[07:43]   ON   ThingStep Threads
+[07:43]   ON   ThingBrownian Threads
+[07:43]   ON   Myosin Threads
+[07:43]   OFF  MyoDimer Threads
+[07:43]   OFF  Protein Node Threads
+[07:43]   OFF  MyoMiniFil Threads
+[07:43]   OFF  Chamber Myo Threads
+[07:43]   OFF  Chamber MyoDimer Threads
+[07:43]   ON   Mesh Threads
+[07:43]   ON   Ck Mesh Threads
+[07:43]   ON   Ck Mots Threads
+[07:43]   OFF  XLink Threads
+[07:43]   OFF  Arp23 Threads
+[07:43]   OFF  NodeLink Threads
+[07:43]   OFF  Membrane Node Threads
+[07:43]   OFF  ActA Threads
+[07:43]   ON   MotorBindGrid3D Fill
+[07:43] [phase-plan] 7 active, 10 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=8192 (initialFilaments=1, peakModel=4, safety=4x, floor=8192)
+GPUMoveThing: slotCap=84004 myoCap=28000 moveBlock=64 jointBlock=64 runSeed=1784574673 nWorkers=16
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.01....~72.82 minutes computation to simulate 1 sec, run finished in ~00.11 hours
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.02....~66.78 minutes computation to simulate 1 sec, run finished in ~00.09 hours
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.03....~69.09 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.04....~68.85 minutes computation to simulate 1 sec, run finished in ~00.07 hours
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.05....~65.80 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=0.0 cumMaxPerThread=0
+Sim. time=00.06....~64.78 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemAlloc -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemAlloc -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemAlloc -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemAlloc -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemAlloc -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsyncMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyHtoDAsync -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuStreamSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuModuleGetFunction -> Returned: 400
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventSynchronize -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventDestroy -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (beforeEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventCreate (afterEvent) -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuMemcpyDtoHMemSeg -> Returned: 709
+	[TornadoVM-PTX-JNI] ERROR : cuEventRecord -> Returned: 709
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f914f9b5c73, pid=1446163, tid=1446458
+#
+# JRE version: OpenJDK Runtime Environment (21.0.11+10) (build 21.0.11+10-1-22.04.2-Ubuntu)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.11+10-1-22.04.2-Ubuntu, mixed mode, tiered, jvmci, compressed oops, compressed class ptrs, parallel gc, linux-amd64)
+# Problematic frame:
+# C  [libcuda.so.1+0x345c73]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E" (or dumping to /home/jba/Code/BoA/core.1446163)
+#
+# An error report file with more information is saved as:
+# /home/jba/Code/BoA/hs_err_pid1446163.log
+[256.072s][warning][os] Loading hsdis library failed
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugs.launchpad.net/ubuntu/+source/openjdk-21
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#

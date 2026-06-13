@@ -1,0 +1,4 @@
+[20:12:14] === Dense point 12x N=12.0 boxXY=48.497 motors=1175979 fil=4800 ===
+[20:12:14]   gpu K1 boxXY=48.497 fil=4800 K=250 rt=0.002500 budget=3600s
+[20:12:46]     rc=137 wall=31.85s
+[20:12:46]   gpu K2 boxXY=48.497 fil=4800 K=900 rt=0.009000 budget=6000s

@@ -1,0 +1,25 @@
+[22:23:28] profiling 1x run1
+[22:23:41]   rc=0 json=1.2M
+[22:23:41] profiling 1x run2
+[22:23:55]   rc=0 json=1.2M
+[22:23:55] profiling 1x run3
+[22:24:09]   rc=0 json=1.2M
+[22:24:09] profiling 4x run1
+[22:24:28]   rc=0 json=1.2M
+[22:24:28] profiling 4x run2
+[22:24:47]   rc=0 json=1.2M
+[22:24:47] profiling 4x run3
+[22:25:05]   rc=0 json=1.2M
+[22:25:05] profiling 8x run1
+[22:25:30]   rc=0 json=1.2M
+[22:25:30] profiling 8x run2
+[22:25:54]   rc=0 json=1.2M
+[22:25:54] profiling 8x run3
+[22:26:18]   rc=0 json=1.2M
+[22:26:18] profiling 16x run1
+[22:26:55]   rc=0 json=1.2M
+[22:26:55] profiling 16x run2
+[22:27:31]   rc=0 json=1.2M
+[22:27:31] profiling 16x run3
+[22:28:07]   rc=0 json=1.2M
+[22:28:07] PROFILE SWEEP DONE

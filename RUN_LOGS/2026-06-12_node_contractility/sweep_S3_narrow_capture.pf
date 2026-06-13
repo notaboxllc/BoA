@@ -1,0 +1,6 @@
+// S3: narrow the filament Y offset + widen capture tolerance (binding circles into a band)
+contractFilYOffset:true:0.02;
+myoColTol:true:0.02;
+numNodeMyos:true:40;
+numNodeMyoDimers:true:20;
+runTime:true:0.1;

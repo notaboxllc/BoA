@@ -1,0 +1,93 @@
+GPU MINIFILAMENT BINDING INVESTIGATION — readout artifact vs aberrant stiffness
+Date: 2026-06-10   Branch: gpu-minifil-sync-diag (throwaway, NOT for merge)   No committed fix.
+
+QUESTION: the merged cohesion fix stopped the GPU minifilament explosion (it holds). But the
+contractility assay on GPU reported boundMotors=0 / tension=0, while the viewer frames look like the
+motors ARE binding (filament deforms in the overlap). Symptom (A) readout zeros, symptom (B)
+aberrant stiffness (kink vs CPU's smooth ~2 pN). Hypothesis: the noMonomersSimd sync-gating drives
+both. CPU oracle (contractilityAssay, same seed 12345): boundMotors 4-9, tension ~2.0/2.1 pN,
+minifilament span 0.18 µm, smooth contraction.
+
+================================================================================
+STEP 1 — READ-SOURCE / GATE TRACE
+================================================================================
+- boundMotors = MyoMiniFilament.countBoundMotors() counts MyoMotor.onFil (host bool). onFil is set
+  by MyoMotor.ontoFilament(), fired from the device bind drain (GPUMotorBinding.drainBoundResults /
+  detectBindings) on the HOST every step. **onFil is host-authoritative and NOT pose-sync-gated** —
+  if the device decided a bind, the drain sets onFil=true regardless of the pose pull. So
+  boundMotors=0 means the device bind decision produced no hits for the minifilament motors.
+- tension = Dot(anchorSeg.getForceSum*, buildDir), reading host Thing.soaForceSum. On GPU the
+  integration force = host cpuForceSum (CPU-phase gather) + device jointForceSum (F3/F4 chain +
+  F8/F9/F10 joints, written by device kernels; GPUMoveThing.java:399-401). The anchor's force is the
+  CHAIN LINK force → it lives in **device jointForceSum, which is never gathered into host
+  soaForceSum**. demandSyncPoseToHost() transfers ONLY pose (coord/uVec/yVec; line 3548), not force.
+  ⇒ **tension=0 is a force-plumbing artifact: the readout reads a host array the device force never
+  reaches**, independent of any pose sync.
+- Minifilament motor cross-bridge force: gpuMotorHandled() (MyoFilLink.java:146-154) scopes the
+  device motor-force kernel to **MyosinFixed only** → minifilament (dimer) motor binding force is
+  CPU-computed (MyoFilLink.addForces), but addForces returns early unless onFil. With onFil=0, no
+  binding force is applied from EITHER path.
+- Gates: per-step demandSyncPoseToHost() is gated `!noMonomersSimd` (GPUMoveThing.java:5363); the
+  output-readonly snapshot guard (beginOutputSnapshot) is ALSO gated `!noMonomersSimd` (line 3712).
+  So noMonomersSimd:true turns off BOTH the per-step pose pull AND the blow-apart guard.
+
+================================================================================
+STEP 2 — MEASUREMENTS (all seed 12345, vs CPU oracle)
+================================================================================
+| run                                              | minifil      | boundMotors      | tension |
+|--------------------------------------------------|--------------|------------------|---------|
+| CPU oracle (noMonomersSimd:true)                 | holds 0.18   | 4-9              | ~2 pN   |
+| GPU noMonomersSimd:FALSE (sync+guard naturally ON| holds 0.18   | 0 (101/102 frm)  | 0       |
+|   = contractility_gpu_fixed_short)               |              |                  |         |
+| GPU noMonomersSimd:true + forced pose-sync       | EXPLODES     | 0                | 0       |
+|   (guard still off) = syncforced                 | (1e17, t=.10)|                  |         |
+| GPU noMonomersSimd:true + forced pose-sync       | EXPLODES     | 0                | 0       |
+|   + forced snapshot guard = syncforced2          | (1e17, t=.006)|                 |         |
+
+Filament shape, GPU noMonomersSimd:false (the clean sync-ON run), frame 80: the ANCHOR half of each
+filament (x>0.6) is straight and clean (y≈0.05, z≈0); the INNER/overlap segments (x<0) are mildly
+disordered — pushed ~0.08 µm off-axis in y and z, NOT a catastrophic fold. The "170° kink" reported
+by a sort-by-x angle detector is an ARTIFACT (it reports 180° on the CPU oracle too — the known-good
+smooth run — because sorting a loaded/bent chain by x scrambles the chain order). So the visual
+"kink at the motor site" is detector/visualization artifact + non-productive myosin-actin jostling,
+not productive contractile binding.
+
+================================================================================
+STEP 3 — VERDICT:  DEEPER DEVICE-SIDE BINDING ISSUE, *not* sync-gating
+================================================================================
+The hypothesis is REFUTED. Decisive evidence: the noMonomersSimd:FALSE path already runs the
+per-step pose sync AND the snapshot guard every step (both gated `!noMonomersSimd`), the minifilament
+HOLDS there — and binding is STILL 0 / tension STILL 0. Fresh host pose does not produce binding.
+Corroborated by the documented seam (JOURNAL 2026-06-09: GPU minifilament binding ~270 vs CPU ~710
+on boa_dyn, also noMonomersSimd:false). So:
+
+- (A) Readout zeros are NOT a single sync artifact. boundMotors=0 is GENUINE — onFil is
+  host-authoritative and unset, i.e. the device bind decision does not bind the minifilament
+  (dimer) motors. tension=0 is a SEPARATE force-plumbing artifact (device jointForceSum never
+  gathered to host soaForceSum).
+- (B) Aberrant stiffness is NOT productive binding gone wrong — there is essentially no stable
+  binding (boundMotors≈0). The deformation is non-productive jostling; the sharp "kink" is a
+  detector artifact.
+- Forcing the per-step sync ON under noMonomersSimd:true BLOWS THE MINIFILAMENT UP (both with and
+  without the guard forced on). The rigid-rod (noMonomersSimd) path's protections are entangled —
+  you cannot piecemeal-retrofit the sync onto it. The assay's GPU path must stay noMonomersSimd:false
+  (which holds), and even there binding does not occur.
+
+jba viewer observation (corroborating): in every run the INDIVIDUAL myosins stay coherent — their
+internal rod→lever→motor joints are intact. Consistent with Path-B Phase 1 (internal joints are
+on-device and hold). So the forced-sync blow-up under noMonomersSimd:true is the myosins separating
+from each other / the body (assembly cohesion), NOT internal-joint failure; and in the holding
+(noMonomersSimd:false) run the myosins are well-formed but simply do not bind the actin.
+
+REMAINING WORK (for jba to scope — this is the BAIL, not a small targeted fix):
+ 1. **Device-side minifilament binding** — the real blocker. The device bind decision / cross-bridge
+    force is scoped to gliding MyosinFixed; minifilament dimer motors are not bound/forced on device
+    (gpuMotorHandled() MyosinFixed gate; the documented binding seam). Porting MyosinDimer/
+    MyoMiniFilament motor binding + cross-bridge force to the device is multi-subsystem.
+ 2. **Tension readout plumbing** (separate, small, but moot until #1) — the anchor force lives in
+    device jointForceSum; the host soaForceSum readout never sees it. A device→host gather of the
+    anchor segment's force-sum (or read jointForceSum) would be needed for any GPU tension readout.
+
+Net: the GPU contractility *measurement* is gated on a deeper device-binding effort, NOT a sync fix.
+Throwaway diagnostic toggle BOA_FORCE_POSE_SYNC (GPUMoveThing.java, branch gpu-minifil-sync-diag) is
+NOT a fix and is not for merge.

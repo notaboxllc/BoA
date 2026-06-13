@@ -1,0 +1,28 @@
+### 1x-shape (51x51x4 S=6000) chunk=64, seeds 1/2/3
+[PARITY] grid=51x51x4 totalCells=10404 S=6000 chunks=21 cap=162016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+[PARITY] grid=51x51x4 totalCells=10404 S=6000 chunks=21 cap=162016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+[PARITY] grid=51x51x4 totalCells=10404 S=6000 chunks=21 cap=162016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+### 8x-shape (143x143x4 S=48000) chunk=64, seeds 1/2
+[PARITY] grid=143x143x4 totalCells=81796 S=48000 chunks=160 cap=1296016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+[PARITY] grid=143x143x4 totalCells=81796 S=48000 chunks=160 cap=1296016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+### 8x-shape chunk sweep seed1: 32 / 512
+[PARITY] grid=143x143x4 totalCells=81796 S=48000 chunks=160 cap=1296016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+[PARITY] grid=143x143x4 totalCells=81796 S=48000 chunks=160 cap=1296016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS
+### regression: serial scatter (chunk=0) 8x seed1
+[PARITY] grid=143x143x4 totalCells=81796 S=48000 chunks=160 cap=1296016
+[PARITY] offsetMismatch=0 countMismatch=0 setMismatch=0 orderMismatch=0 firstBadOffsetCell=-1
+[PARITY] RESULT: PASS

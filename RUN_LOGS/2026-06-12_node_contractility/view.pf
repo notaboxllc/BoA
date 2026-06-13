@@ -1,0 +1,3 @@
+// extend run + frame cadence for smooth -3js playback
+runTime:true:0.3;
+toFileInterval:true:100.0;

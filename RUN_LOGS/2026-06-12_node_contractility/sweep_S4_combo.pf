@@ -1,0 +1,8 @@
+// S4: combine all levers — many heads, moderate thermal search, narrow yOff, small node, wider capture
+numNodeMyos:true:80;
+numNodeMyoDimers:true:40;
+myoBrownianAttn:true:0.5;
+contractFilYOffset:true:0.03;
+contractNodeRadius:true:0.06;
+myoColTol:true:0.015;
+runTime:true:0.1;

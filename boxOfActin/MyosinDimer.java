@@ -3,6 +3,9 @@ package boxOfActin;
 public class MyosinDimer {
 	static MyosinDimer [] theMyoDimers = new MyosinDimer[300000];  // was 100000; raised for 8x weak-scaling (8000 minifils x 16 dimers = 128k > old cap). benchmark-contractile-dense.
 	static int myoDimerCt = 0;
+	// A3 diagnostic (BOA_STEP_PROFILE): per-step accumulated dimer cohesion dispatch
+	// counts — device (gated no-op CPU) vs CPU (real force work). Whole-run sums.
+	public static long DIAG_COHESION_DEVICE_CT = 0, DIAG_COHESION_CPU_CT = 0;
 	static double leverAngle = 160; // degrees
 	int myMyoDimerNumber;
 	Pt3D myCM = new Pt3D(); // center of mass
@@ -10,6 +13,7 @@ public class MyosinDimer {
 	boolean parallel = true;
 	boolean removeMe = false; // flag for taking this myosin out of the simulation
 	MyoMiniFilament ownerMiniFil = null; // set when this dimer belongs to a minifilament (cohesion-on-device gate)
+	ProteinNode ownerNode = null; // set when this dimer is a node surface dimer (node-cohesion-on-device gate)
 
 	// True iff this dimer's cohesion (rod↔rod + lever torque + body↔rod) is computed
 	// on-device this step. Must EXACTLY match GPUMoveThing.packCohesion's pack condition:
@@ -296,7 +300,12 @@ public class MyosinDimer {
 			removeMe = true; 
 		} else if (cohesionOnDevice()) {
 			// device dimerCohesionKernel handles rod↔rod + lever torque this step
+			if (StepProfiler.ENABLED) DIAG_COHESION_DEVICE_CT++;
+		} else if (nodeCohesionOnDevice()) {
+			// device nodeTether kernel handles this node-dimer's rod↔rod + lever torque
+			if (StepProfiler.ENABLED) DIAG_COHESION_DEVICE_CT++;
 		} else {
+			if (StepProfiler.ENABLED) DIAG_COHESION_CPU_CT++;
 			if (parallel) {
 				enforceParallel();
 			} else {
@@ -327,8 +336,24 @@ public class MyosinDimer {
 	}
 	
 	public void setOwnerNode (ProteinNode node) {
+		ownerNode = node;
 		myo1.setOwnerNode(node);
 		myo2.setOwnerNode(node);
+	}
+
+	// Node-path Stage 2 (2026-06-12): true iff this node-owned dimer's internal cohesion
+	// (rod↔rod End1/End2 + lever align) is computed on-device this step by the nodeTether
+	// kernel. Must match GPUMoveThing.packNodeTethers' pack condition: node residency on,
+	// parallel, owned by a device-classified ProteinNode whose tethers run on device, and
+	// all four rod/lever sub-Things GPU-handled. When true the CPU enforceParallel is
+	// skipped so the rod-coupling forces apply exactly once.
+	boolean nodeCohesionOnDevice () {
+		if (!Env.useGPU || !GPUMoveThing.NODE_GPU_ENABLED) return false;
+		if (!parallel) return false;
+		if (ownerNode == null || ownerNode.removeMe || !ownerNode.tethersOnDevice()) return false;
+		if (myo1 == null || myo2 == null || myo1.removeMe || myo2.removeMe) return false;
+		return myo1.myoRod.gpuHandled && myo2.myoRod.gpuHandled
+		    && myo1.myoLever.gpuHandled && myo2.myoLever.gpuHandled;
 	}
 	
 	public static void makeTestDimer () {

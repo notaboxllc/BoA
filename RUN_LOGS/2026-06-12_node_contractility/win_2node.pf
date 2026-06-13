@@ -1,0 +1,8 @@
+// W + 2-node variant
+numNodeMyos:true:60;
+numNodeMyoDimers:true:30;
+myoBrownianAttn:true:0.5;
+contractNodeRadius:true:0.06;
+runTime:true:0.2;
+contractNodeCount:true:2;
+contractNodeYOffset:true:0.04;

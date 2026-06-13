@@ -1,0 +1,9 @@
+=== GPU main finished; final ===
+[STATS] contractility step=20001 t=0.2000 tensionA=1.7563 tensionB=1.6492 pN boundMotors=8 | avgBound=7.08 ewmaBound=8.33 avgTension=1.279 ewmaTension=1.727 peakTension=2.010 pN
+=== running noMotor control ===
+noMotor exit=0
+[STATS] contractility step=15001 t=0.1500 tensionA=0.0014 tensionB=0.0014 pN boundMotors=0 | avgBound=0.00 ewmaBound=0.00 avgTension=0.052 ewmaTension=0.001 peakTension=0.283 pN
+=== running reversed control ===
+reversed exit=0
+[STATS] contractility step=15001 t=0.1500 tensionA=-0.5499 tensionB=-0.6664 pN boundMotors=6 | avgBound=5.92 ewmaBound=5.75 avgTension=0.599 ewmaTension=0.613 peakTension=0.965 pN
+=== ALL CONTROLS DONE ===

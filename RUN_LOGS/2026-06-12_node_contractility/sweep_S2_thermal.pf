@@ -1,0 +1,5 @@
+// S2: restore myosin thermal so heads actively SEARCH for filaments (vs frozen at 0.1)
+myoBrownianAttn:true:1.0;
+numNodeMyos:true:40;
+numNodeMyoDimers:true:20;
+runTime:true:0.1;

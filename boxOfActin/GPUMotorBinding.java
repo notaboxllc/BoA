@@ -548,6 +548,82 @@ public class GPUMotorBinding {
         }
     }
 
+    // =========================================================================
+    // A2 (2026-06-12, GRIDSCATTER_RESIDENCY) — PARALLEL chunk scatter.
+    //
+    // Replaces the single-thread gridScatterKernel. The linear cell-ID space
+    // [0, totalCells) is partitioned into fixed-size chunks; one thread owns
+    // each chunk's contiguous range [lo, hi). A chunk-thread walks ALL segments
+    // in index order and, for every AABB cell of a segment that falls in its
+    // owned range, writes the segment ID at offsets[cellId] + cellCount[cellId]
+    // and bumps cellCount[cellId]. Because cells in [lo, hi) are touched by
+    // exactly one thread, cellCount[cellId] is a PRIVATE write cursor — no race,
+    // no atomics needed (which is what blocked parallelizing the original
+    // scatter: the void-only PTX atomicAdd has no fetch-add). And because the
+    // owning thread visits segments in increasing s order, each cell's contents
+    // land in the SAME order as the serial scatter, so the CSR is BIT-IDENTICAL
+    // (offsets and within-cell order), not merely multiset-equal.
+    //
+    // Early-out: a segment's AABB spans linear cell IDs [minCell, maxCell]; if
+    // that span misses [lo, hi) the segment cannot touch this chunk and is
+    // skipped before the triple loop. (The span is a superset of the actual
+    // AABB cells, so the skip is conservative-correct.) chunk size = gridDims[4].
+    // -------------------------------------------------------------------------
+    static void gridScatterChunkKernel(
+            IntArray segBbox,
+            IntArray gridDims,
+            IntArray counts,
+            IntArray gridCellOffsets,
+            IntArray gridCellContents,
+            IntArray cellCount) {
+
+        int totalCells = gridDims.get(3);
+        int chunk      = gridDims.get(4);
+        int numChunks  = (totalCells + chunk - 1) / chunk;
+
+        for (@Parallel int ch = 0; ch < numChunks; ch++) {
+            int lo = ch * chunk;
+            int hi = lo + chunk;
+            if (hi > totalCells) { hi = totalCells; }
+
+            int S           = counts.get(1);
+            int nXBins      = gridDims.get(0);
+            int nYBins      = gridDims.get(1);
+            int nXY         = nXBins * nYBins;
+            int contentsCap = gridCellContents.getSize();
+
+            for (int s = 0; s < S; s++) {
+                int ix0 = segBbox.get(s * 6);
+                int ix1 = segBbox.get(s * 6 + 1);
+                int iy0 = segBbox.get(s * 6 + 2);
+                int iy1 = segBbox.get(s * 6 + 3);
+                int iz0 = segBbox.get(s * 6 + 4);
+                int iz1 = segBbox.get(s * 6 + 5);
+
+                int minCell = ix0 + iy0 * nXBins + iz0 * nXY;
+                int maxCell = ix1 + iy1 * nXBins + iz1 * nXY;
+                if (maxCell < lo || minCell >= hi) { continue; }
+
+                for (int iz = iz0; iz <= iz1; iz++) {
+                    int izOff = iz * nXY;
+                    for (int iy = iy0; iy <= iy1; iy++) {
+                        int iyOff = iy * nXBins;
+                        for (int ix = ix0; ix <= ix1; ix++) {
+                            int cellId = ix + iyOff + izOff;
+                            if (cellId >= lo && cellId < hi) {
+                                int writePos = gridCellOffsets.get(cellId) + cellCount.get(cellId);
+                                if (writePos < contentsCap) {
+                                    gridCellContents.set(writePos, s);
+                                }
+                                cellCount.set(cellId, cellCount.get(cellId) + 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // GPU kernel — fused broad+narrow phase
     //
@@ -1580,11 +1656,12 @@ public class GPUMotorBinding {
         gridParams.set(6, myoColTol * myoColTol);
         gridParams.set(7, (float) Env.myoMotorLength.getValue());
 
-        gridDims = new IntArray(4);
+        gridDims = new IntArray(5);
         gridDims.set(0, grid.nXBins);
         gridDims.set(1, grid.nYBins);
         gridDims.set(2, grid.nZBins);
         gridDims.set(3, totalCells);
+        gridDims.set(4, GPUMoveThing.SCATTER_CHUNK);   // A2 parallel-chunk scatter chunk size
 
         // counts: [0]=M motors, [1]=S segments, [2]=Env.counter, [3]=crosslink
         // formation cadence gate (1 on crosslink-check steps, else 0 — read by

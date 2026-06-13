@@ -1,0 +1,18 @@
+[21:36:23] === 1x (after) box=10.000 fil=100 seeds=3 ===
+[21:36:36]   cpu s1 ms/step=3.58
+[21:38:31]   gpu s1 ms/step=35.64 exec=66.688s 701=0
+[21:38:44]   cpu s2 ms/step=3.75
+[21:40:38]   gpu s2 ms/step=35.65 exec=65.493s 701=0
+[21:40:51]   cpu s3 ms/step=3.67
+[21:42:45]   gpu s3 ms/step=34.38 exec=65.234s 701=0
+[21:42:45] === 8x (after) box=28.284 fil=800 seeds=3 ===
+[21:43:54]   cpu s1 ms/step=41.20
+[21:46:00]   gpu s1 ms/step=69.54 exec=59.460s 701=0
+[21:47:10]   cpu s2 ms/step=41.49
+[21:49:16]   gpu s2 ms/step=71.03 exec=60.356s 701=0
+[21:50:32]   cpu s3 ms/step=45.59
+[21:52:36]   gpu s3 ms/step=69.86 exec=59.094s 701=0
+[21:52:36] === 16x (after) box=40.000 fil=1600 seeds=1 ===
+[21:53:45]   cpu s1 ms/step=70.36
+[21:55:40]   gpu s1 ms/step=109.96 exec=47.941s 701=0
+[21:55:40] DONE after -> /home/jba/Code/BoA/RUN_LOGS/2026-06-11_701_hunt/raw_after.tsv

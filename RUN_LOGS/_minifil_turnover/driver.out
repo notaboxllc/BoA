@@ -1,0 +1,8 @@
+=== minifil-ON turnover validation Thu Jun 11 05:08:03 PM PDT 2026 pf=ParameterFiles/boa10-64Seg-dyn ===
+gpu_s1     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=1.864 filSegInitFireCt=3792 | gpu_s1                             frames= 97 segCt[first=194 last=542 peak=542 mean=529] len_nm[mean=196.7 sd=42.4 n=542] nanLen=0
+cpu_s1     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=6.930 filSegInitFireCt=0 | cpu_s1                             frames=101 segCt[first=194 last=568 peak=568 mean=557] len_nm[mean=197.4 sd=43.1 n=568] nanLen=0
+gpu_s2     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=0.852 filSegInitFireCt=3959 | gpu_s2                             frames=101 segCt[first=195 last=564 peak=564 mean=545] len_nm[mean=195.2 sd=40.7 n=564] nanLen=0
+cpu_s2     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=2.261 filSegInitFireCt=0 | cpu_s2                             frames=101 segCt[first=193 last=535 peak=535 mean=517] len_nm[mean=196.2 sd=45.9 n=535] nanLen=0
+gpu_s3     rc=0 cast=0 crazyOrNaN=0 packRuleDesync=0 calls=151 overflow=0 planRebuild=1 meanBoundMotors=1.742 filSegInitFireCt=4059 | gpu_s3                             frames=101 segCt[first=194 last=530 peak=530 mean=515] len_nm[mean=198.7 sd=42.7 n=530] nanLen=0
+cpu_s3     rc=0 cast=0 crazyOrNaN=0 desync=? calls=? overflow=? planRebuild=? meanBoundMotors=1.997 filSegInitFireCt=0 | cpu_s3                             frames=101 segCt[first=197 last=567 peak=567 mean=550] len_nm[mean=194.4 sd=42.2 n=567] nanLen=0
+=== DONE Thu Jun 11 05:18:36 PM PDT 2026 ===

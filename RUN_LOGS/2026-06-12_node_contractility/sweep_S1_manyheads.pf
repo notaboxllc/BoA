@@ -1,0 +1,4 @@
+// S1: many heads, default geometry — does sheer head count overcome the small acceptance cone?
+numNodeMyos:true:60;
+numNodeMyoDimers:true:30;
+runTime:true:0.1;
