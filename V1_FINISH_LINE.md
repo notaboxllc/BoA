@@ -1,14 +1,17 @@
-# BoA v1 — Finish Line (pre-v2 checklist) — *rev. 2026-06-12*
+# BoA v1 — Finish Line (pre-v2 checklist) — *rev. 2026-06-13*
 
 **Purpose.** Define the bounded work that takes BoA v1 as far as it usefully goes — fast,
 trustworthy, and carrying the capabilities the assays need — so it can be **tagged as the
 biology-production release** and left to run science while the v2 SoA/ECS port proceeds on
 its own branch.
 
-**Status at this revision:** the **speed sweep is complete** (v1 speed wall reached) and the
-**protein-node minimal assay + GPU residency are complete**. What remains: **consolidate to
-main**, the **biology-readiness gates** (Parts B/C), the **full-ring couplings** for
-whole-cell work, then **freeze**.
+**Status at this revision:** the **speed sweep is complete** (v1 speed wall reached), the
+**protein-node minimal assay + GPU residency are complete**, and the **consolidation to main
+is done** (the `benchmark-contractile-dense` block is merged). The **membrane subsystem was
+revived and CPU-verified** (2026-06-13) and is now a tracked finish-line subsystem (Part M).
+What remains: the **membrane StickyNode GPU port** (Part M — the new pre-v2 gate), the
+**biology-readiness gates** (Parts B/C), the **full-ring couplings** for whole-cell work,
+then **freeze**.
 
 ## Guiding principle (unchanged)
 Do the contained levers; stop at the architectural wall. Ready = speed **and** calibration
@@ -37,7 +40,8 @@ is v2-structural. GPU/CPU **0.699 at 8x** (dense contractile), **all forces devi
 
 ## Part N — Protein-node path — minimal assay + GPU residency DONE
 The biology-readiness capability for the **whole-cell contractile-ring** work (nodes, not
-minifilaments — the experimentally-observed ring architecture).
+minifilaments — the experimentally-observed ring architecture). NB: these are `ProteinNode`
+myosin-cluster nodes — **distinct from the membrane `StickyNode`s in Part M.**
 
 - [x] **N1 . CPU node contractile assay** (Stage 1) — single-sphere bridge; **thermal search
   is essential and load-bearing** (= the real search-capture: heads diffuse to find
@@ -58,6 +62,50 @@ minifilaments — the experimentally-observed ring architecture).
 
 ---
 
+## Part M — Membrane subsystem — REVIVED + CPU-verified; GPU port is the pre-v2 gate
+Revived and scoped 2026-06-13 (`MEMBRANE_SCOPING.md`). A **particle–spring network**
+(`StickyNode`/`ProteinNode` bodies + zero-rest-length contractile `NodeLink` springs, solved
+by an iterative relaxation loop), necessary to both the whole-cell cortex/ring work in v1 and
+as a v2 deformable-boundary library entry. **The StickyNode-onto-device port (M2) is the
+stated pre-v2 gate** ("v2 migration does not begin until the membrane runs on GPU").
+
+- [x] **M0 . Revive + no-regression verify** — three CPU runs on the post-SoA / post-RNG /
+  post-`taForce` tree: the hex sheet holds, the NodeLink spring wave (phase 14) + iterative
+  relaxation loop (≤30 sub-passes) + `StickyNode.membraneNodesMove` (phase 15) + free-body
+  integration + `gatherThreadAccumulators` + `membraneFilMeshCollisions` all functional. The
+  only failure was a self-inflicted 500×-nucleation over-drive (integrator stability, not
+  bit-rot). All code edits reverted; tree pristine. (`RUN_LOGS/2026-06-13_membrane_revive/`.)
+- [ ] **M1 . Closed-cortex confirming run** — exercise a closed surface (start from
+  `makeSphereLikeCylinderOfNodes` — fixed polar caps + a `constrictingRing` marker), confirm
+  it **self-wires by auto-linking** and **holds under turgor** like the flat sheet does. No
+  link code to write; the open item is tuning `membraneCellPackingFactor` so neighbours fall
+  within binding range. *Smallest, highest-value first step; prerequisite workload for M2.*
+- [ ] **M2 . StickyNode GPU residency port** — **THE pre-v2 gate.** StickyNode body rides the
+  shared `moveThingKernel` (it *is* a `ProteinNode`, so the body half follows the `RULE_NODE`
+  template from N2); the pairwise `NodeLink` springs map to a one-thread-per-node device
+  kernel reading resident pose. **The genuine wrinkle** (not covered by N2's single-eval
+  `nodeTetherKernel`): the ≤30-pass iterative relaxation loop needs either an on-device
+  fixed-iteration sub-loop or a single-pass stiffness reformulation. **Net-new — no StickyNode
+  device work has started.** Today the chained move plan routes any sticky-node config back to
+  CPU (`filFilBroadphaseActive = !anyStickyNode`).
+- [ ] **M3 . Membrane↔ring coupling** (for whole-cell ring; parallels N3) — today only
+  *steric* (`membraneFilMeshCollisions` pushes filament tips off nodes; no tether). Either
+  tether ring filaments to the nearest membrane nodes (a node↔filament `NodeLink` analog — new
+  connector) or transmit ring contractile force to `iAmConstricting` nodes, replacing the
+  hardcoded 1e-20 N `fakeConstrictingRing()` fake with measured ring tension. **May ride v1 or
+  v2** like N4.
+- [ ] **M4 . Membrane-node stability clamp** — runs show the explicit integrator tolerates
+  sane loads but not a 37k over-driven thicket; a constricting ring concentrates force on few
+  nodes. Add a per-step displacement clamp (or substep) before the ring drives them hard.
+- [ ] **M5 . (small) Render NodeLinks in `ThreeJSWriter`** — connectivity is currently
+  invisible in the viewer; needed to make membrane/ring work visually debuggable.
+
+> **Latent (pre-existing, non-migration) bug, noted not fixed:** the hex link loop guards the
+> `j+1` neighbour with `(j!=nodeCols-1)` where it should be `(j!=nodeRows-1)` — harmless only
+> while `nodeCols==nodeRows`. Keep sheets square or fix the guard before non-square sheets.
+
+---
+
 ## Part B — Long-run stability (biology runs are long) — PENDING
 - [ ] **B1 . `POSE_DELTA_CAP` overflow / host leak** — fatal in a long assay, invisible in a
   300-step benchmark. Measure dirty-slot demand -> startup-size the cap -> non-leaky fallback.
@@ -70,8 +118,9 @@ minifilaments — the experimentally-observed ring architecture).
 - [x] **C1 . GPU minifilament cohesion** — **already solved** (the 701-hunt `WorkerGrid`
   fix); `keepMyosinsOnSurface` reclassified from "dead" to **load-bearing for nodes** and now
   device-ported in N2.
-- [ ] **C2 . gliding-assay IC** — confirm the +x-end inward pad didn't revert (folds into the
-  consolidation gliding run).
+- [ ] **C2 . gliding-assay IC** — confirm the +x-end inward pad didn't revert. The
+  consolidation gliding regression was the intended check; **confirm it actually verified the
+  pad** now that the merge has happened.
 - [ ] **C3 . F-actin units convention** — reconcile the 8x `boxVolume` before any uM target.
 - [ ] **C4 . gliding baseline + phalloidin regime** — switch for biological gliding; keep
   current defaults for port validation.
@@ -80,23 +129,28 @@ minifilaments — the experimentally-observed ring architecture).
 
 ---
 
-## Consolidation — PRESSING
-Speed sweep + node assay + node GPU port are **all on `benchmark-contractile-dense`,
-unmerged** — a large block of validated work. Cross-config gliding regression (the merge
-gate, also covers C2) -> merge to main -> journal cleanup. Confirm the actual branch/merge
-state first (some things may already be merged). Do this before the freeze.
+## Consolidation — DONE
+- [x] Speed sweep + node assay + node GPU port — the `benchmark-contractile-dense` block —
+  **merged to main.** (Cross-config gliding regression was the merge gate and also the
+  intended C2 check — see C2.) Branch-state cleanliness + journal cleanup to confirm against
+  the freeze criteria in Part D.
 
 ---
 
 ## v2-deferred lever set (recorded)
 Incremental `classify`; incremental grid; CPU-shell elimination; full-ring node couplings
-(N3); the data-model redesign. The biology lability enhancements (N4) can ride v1 or v2.
+(N3); membrane↔ring coupling (M3) and membrane stability (M4) may ride v1 or v2; the
+data-model redesign. The biology lability enhancements (N4) can ride v1 or v2. The membrane
+closed-cortex becomes a v2 deformable-boundary library entry regardless — but its **v1 GPU
+port (M2) is the gate**, not the v2 entry.
 
 ---
 
 ## Part D — Freeze criteria (tag `biology-production-v1`)
 - [x] Part A landed (or deferred-to-v2); node minimal assay + GPU residency landed.
-- [ ] Consolidated to main; branch state clean.
+- [x] Consolidated to main (Consolidation section). Confirm branch state clean before tag.
+- [ ] Membrane StickyNode GPU residency ported + verified (M2) — the stated pre-v2 gate (or
+  explicitly scoped to v2 if jba defers).
 - [ ] Part B soak passes on the production path.
 - [ ] Part C closed (C2/C3 minimum; C4/C5 for whichever assay runs first).
 - [ ] `JOURNAL.md`/`CLAUDE.md` updated with the frozen state + validation numbers.
@@ -106,5 +160,6 @@ Incremental `classify`; incremental grid; CPU-shell elimination; full-ring node 
 
 ## What this unlocks
 Gliding assay (motor velocity), minimal contractile assay (minifilament), **node contractile
-assay (CPU+GPU, done)**, laser-tweezers force readouts — and the path to **whole-cell ring
-formation** (needs N3). Each is a regression target v2 must reproduce.
+assay (CPU+GPU, done)**, laser-tweezers force readouts, the deformable **membrane cortex
+(CPU-verified; GPU port pending)** — and the path to **whole-cell ring formation** (needs N3
++ the membrane↔ring coupling M3). Each is a regression target v2 must reproduce.

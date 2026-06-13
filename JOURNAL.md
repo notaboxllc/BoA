@@ -1,5 +1,54 @@
 # BoxOfActin Project Journal
 
+## 2026-06-13 — Membrane subsystem revived + CPU-verified; V1_FINISH_LINE updated
+
+**Membrane is a working subsystem, no bit-rot on the post-SoA/post-RNG/post-`taForce` tree.**
+A particle–spring network (`StickyNode`/`ProteinNode` bodies + zero-rest-length contractile
+`NodeLink` springs, solved by a ≤30-pass iterative relaxation loop). Three CPU runs
+(`RUN_LOGS/2026-06-13_membrane_revive/`): (1) sheet-only 500 steps — holds, no NaN, pinned
+edges identical across frames, interior z-ripple ±0.076 µm; (2) sheet + nucRate 50/s → 37.8k
+fils — `membraneFilMeshCollisions` engages (152.8M pair-checks, 353k collision forces), sheet
+bulges +z monotonically then a few massively-overloaded nodes overshoot the explicit
+integrator → NaN (over-driven load artifact, **not** bit-rot; segments never NaN); (3) sheet +
+nucRate 5/s → 3.3k fils — badNodes=0 every frame, bulges 0→0.37 µm and holds. No-regression
+mechanism confirmed: membrane nodes inherit the consolidated per-worker RNG via base
+`calcRandomForces`; `calculateProperties()` already calls `pushDragToSoa()`; post-gather
+`incForceSumSlot()` lands because membraneMove runs after `gatherThreadAccumulators`. All code
+edits reverted — tree pristine; the `nodeLinkTesting=true` flip (+ optional manual NodeLink
+loop; with `collideProteinNodes` on the sheet self-wires 2,581 links by proximity) is
+enablement, not a fix. Param files `membraneRevive{,Fils,FilsMod}` kept as artifacts. Full
+scope in `MEMBRANE_SCOPING.md`.
+
+**Whole-cell ring gap (build, not repair):** closed-surface factories + auto-linking + turgor
+hook + fake-constriction hook all exist; missing = membrane↔ring *tether* (today steric
+collision only) and *ring-driven* constriction (today a hardcoded 1e-20 N `fakeConstrictingRing`).
+
+**`V1_FINISH_LINE.md` rev 2026-06-13.** Added **Part M (membrane)**: M0 revive+verify (done);
+M1 closed-cortex confirming run; **M2 StickyNode GPU residency port = the stated pre-v2 gate**
+(StickyNode body rides the shared `moveThingKernel` via the `RULE_NODE` template, but the
+≤30-pass relaxation loop needs an on-device fixed-iteration sub-loop or single-pass stiffness
+reformulation — not covered by N2's single-eval `nodeTetherKernel`; **StickyNode device work
+unstarted**, distinct from the done `ProteinNode` port N2); M3 ring coupling; M4 stability
+clamp; M5 render NodeLinks. Marked **Consolidation DONE** (`benchmark-contractile-dense`
+merged to main). Latent hex-link guard bug noted (`j!=nodeCols-1` should be `nodeRows-1`;
+harmless while square).
+
+## 2026-06-13 — Viewer: render the membrane (translucent flattened nodes + NodeLink connectivity)
+
+Viewer + emitter only (`ThreeJSWriter.java` + `sim_viewer_boa.html`; no sim-core/physics changes).
+Closes the MEMBRANE_SCOPING.md §5 "render NodeLinks" follow-on. **Emitter:** membrane nodes
+(`StickyNode`) now carry `"membrane":true` in the existing `"nodes"` array; a per-frame
+`"membraneLinks"` array emits one `[node1Id,node2Id]` pair per active `NodeLink` (IDs resolve
+against `nodes`, so links are drawn *and* used to infer normals — emitted every frame since
+auto-linking mutates topology). **Viewer:** membrane nodes render as a separate translucent,
+flattened (oblate) `InstancedMesh`, short axis along a **derived** surface normal — PCA
+smallest-eigenvector of linked-neighbour displacements (sign-fixed outward from the membrane
+centroid), 2-neighbour cross-product, radial-from-centroid fallback for under-linked nodes; correct
+for both the flat sheet and a closed cortex. `NodeLink`s draw as one toggleable `THREE.LineSegments`.
+Display-panel knobs: Membrane links (on/off), opacity, flatten. **Validated:** `membraneRevive` (CPU,
+`-Xmx2G`, `nodeLinkTesting=true` enablement only — reverted) → 900 membrane nodes, 2581 links, all
+IDs resolve; viewer passes `node --check`. Tracked changes limited to the two render files.
+
 ## 2026-06-13 — Viewer: active run-folder browsing (no more server restarts)
 
 Tooling-only (`sim_server.py` + `sim_viewer_boa.html`; no sim-core/JSON/render changes). Decoupled
