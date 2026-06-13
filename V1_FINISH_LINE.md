@@ -1,146 +1,110 @@
-# BoA v1 — Finish Line (pre-v2 checklist)
+# BoA v1 — Finish Line (pre-v2 checklist) — *rev. 2026-06-12*
 
-**Purpose.** Define the bounded set of work that takes BoA v1 as far as it usefully
-goes — fast *and* trustworthy — so it can be **tagged as the biology-production
-release** and left to run assays while the v2 SoA/ECS port proceeds on its own
-branch. This is the explicit definition of "done with v1."
+**Purpose.** Define the bounded work that takes BoA v1 as far as it usefully goes — fast,
+trustworthy, and carrying the capabilities the assays need — so it can be **tagged as the
+biology-production release** and left to run science while the v2 SoA/ECS port proceeds on
+its own branch.
 
-## Guiding principle
+**Status at this revision:** the **speed sweep is complete** (v1 speed wall reached) and the
+**protein-node minimal assay + GPU residency are complete**. What remains: **consolidate to
+main**, the **biology-readiness gates** (Parts B/C), the **full-ring couplings** for
+whole-cell work, then **freeze**.
 
-- **Do the contained levers; stop at the architectural wall.** The copy-out fix
-  (`COPYOUT_RESIDENCY.md`) landed us right at the v1/v2 seam. The remaining v1 speed
-  work is a *finite, enumerable* list. Past it, the costs are OOP-graph structural
-  (`pack`, host allocation ceiling) — that's v2's job, not v1's. Grinding past the
-  wall is gold-plating a codebase we're about to replace.
-- **Ready = speed AND calibration AND long-run stability.** A fast sim that's
-  miscalibrated or leaks over a long run just produces wrong answers faster. The
-  benchmarks stressed *per-step* cost over short windows; biology runs are *long*, so
-  stability gets its own section.
-- **The biology runs become v2's regression suite.** Assays on frozen-v1 generate the
-  ground-truth (velocities, contractile rates, force curves) that v2 must reproduce.
-  Sequencing them first serves the port, it isn't a detour from it.
+## Guiding principle (unchanged)
+Do the contained levers; stop at the architectural wall. Ready = speed **and** calibration
+**and** long-run stability **and** the capabilities the assays need. The biology runs on
+frozen-v1 become v2's regression suite.
 
 ---
 
-## Part A — Speed (bounded list, ranked by scaling shape)
+## Part A — Speed — DONE (v1 speed wall reached)
+All three superlinear/large levers landed their contained v1 win or bailed; everything left
+is v2-structural. GPU/CPU **0.699 at 8x** (dense contractile), **all forces device-resident**.
 
-*Rank by how a term scales, not its current size: superlinear terms dominate at
-research scale and are the real ceiling.*
-
-- [ ] **A1 · `recompute` incremental classification** — *P1, superlinear, highest value.*
-  `GPUMoveThing.onStepStart` (Thing reclassification + pose delta-audit) re-runs in
-  full every step because biochem turnover keeps topology dirty: 1.2 → 27.7 ms/step
-  over 1×→8× (**~23×**, worse-than-∝N). Cache/incrementally update classification when
-  the topology delta is small; only re-audit changed slots.
-  *Done when:* recompute slope drops toward ∝N and 8× GPU÷CPU improves, physics-neutral
-  (oracle: segs, activeLinks, crosslinkFireCt, NaN, overflow). *Prompt: needs drafting.*
-
-- [ ] **A2 · `gridScatter` restructure** — *P2, superlinear.* The remaining superlinear
-  bind-grid kernel: ~3.1 → 29.9 ms over 1×→8× (v4 Part E). Diagnose the superlinear
-  factor first (cheap probe), then parallelize/restructure as we did for `gridAssemble`.
-  *Done when:* gridScatter slope is ∝N or better, CSR bit-identical to the serial
-  oracle, physics-neutral. *Prompt: needs scoping after a diagnostic probe.*
-
-- [ ] **A3 · Force-offload of the un-offloaded CPU work** — *P3, ∝N, large absolute.*
-  On the `-gpu` path, `step` (13.5) + `brownian` (5.5) + `jointsCpu` (11.8) ≈ **31
-  ms/step at 8×** still runs on CPU — now larger than the retired copy-out. `jointsCpu`
-  is the MyosinDimer / MyoMiniFilament / ProteinNode / Chamber joint pools.
-  *Done when:* these phases dispatch on device, physics-neutral. *Note:* sequence after
-  A1/A2 — it's a constant-factor win, not a scaling-shape change. May share scope with
-  the v2 design; if porting them cleanly requires SoA, **stop and defer to v2**.
-
-- [ ] **A4 · Live-subrange fil-fil transfer (the (c) follow-on)** — *P4, optional polish.*
-  Shrinks each fire-step `ffCandPartner` pull from 1.024 GB to `filSegmentCt×256`
-  (~6–50 MB) via a partial-range `transferToHost`. The cadence gate already amortizes
-  this to <2 ms/step, so **only do it if it falls out cheaply.** Otherwise skip.
-
-**Stop criterion for Part A:** once A1–A3 land, the dominant residual is `pack` + the
-host object-graph allocation ceiling. That is the v2 boundary — **do not re-architect
-v1 to chase it.**
+- [x] **A1 . `recompute`/`onStepStart`** — `poseAudit` scan gated on `occupantsChanged`
+  (-37% recompute @8x), proven byte-identical via the skip-invariant verifier. The residual
+  `classify` ~N^2 is non-redundant -> **incremental classification deferred to v2**.
+- [x] **A2 . `gridScatter`** — serial scatter parallelized via per-cell-chunk ownership
+  (atomic-free, CSR bit-identical), 3.45x @8x, slope 9.5->5.8x. The incremental-grid
+  slope-kill needs a different data structure -> **v2**.
+- [x] **A3 . force-offload** — clean **bail**: diagnosis proved **every resident-state force
+  is already a device kernel** (all CPU fire-counts = 0). The ~30 ms residual is OOP-graph
+  dispatch shell + dead bookkeeping, not force -> **CPU-shell elimination is a v2 lever**.
+- [x] **A4 . live-subrange fil-fil** — **skipped** (sub-2 ms amortized polish; not worth a
+  session at the wall).
 
 ---
 
-## Part B — Long-run stability (biology runs are long, not short benchmarks)
+## Part N — Protein-node path — minimal assay + GPU residency DONE
+The biology-readiness capability for the **whole-cell contractile-ring** work (nodes, not
+minifilaments — the experimentally-observed ring architecture).
 
-- [ ] **B1 · `POSE_DELTA_CAP` overflow / host-memory leak** — *P1 for long runs.*
-  Overflow forces per-step plan rebuilds that leak host memory at 8× — tolerable in a
-  300-step benchmark, fatal in a long assay. Measure true dirty-slot demand →
-  startup-size the cap → defuse the fallback to a non-leaky full-pose upload.
-  *Done when:* a long soak at the assay scale shows flat host RSS. *Prompt: drafted earlier.*
-
-- [ ] **B2 · Long-run soak test** — *P2.* Run the actual assay configs (gliding,
-  contractile) for full biological duration on both CPU and GPU paths; watch for host
-  RSS growth, VRAM creep, NaN-over-time, and determinism drift. This is the gate that
-  short per-step benchmarks never exercised.
-  *Done when:* a full-length run completes clean on the production path.
-
----
-
-## Part C — Biology calibration & correctness (trustworthy instrument)
-
-*These gate whether v1 produces the* right *answers — independent of speed. Several are
-cheap checks that gate everything downstream; do those early.*
-
-- [ ] **C1 · GPU minifilament cohesion bug** — *P1, gates contractile/minifil assays on GPU.*
-  Dimer Myosins are GPU-classified and device-integrated but receive **zero anchor
-  force** (the GPU anchor kernel recognizes only `MyosinFixed`) → bundles blow apart.
-  Cheap CPU-fallback: exclude dimer Myosins from GPU classification. The moving-body-
-  anchor device port is **deferred to v2**.
-  *Done when:* a no-actin single-minifilament repro stays cohesive on the GPU path.
-  *Prompt: drafted earlier.*
-
-- [ ] **C2 · Gliding-assay IC fix verification** — *P1, cheap.* Confirm the barbed/+x-end
-  inward pad (`end2.x` 7.00035 → 6.91395, ~½ a std filSegment length) didn't revert
-  during the motor-port sessions — a frame-0 viewer image showed a filament end at/through
-  the +x wall. Check the pad term at `FilSegment.makeGlidingAssayFilament`; re-apply if lost.
-  *Done when:* frame-0 viewer shows all filament ends inside the box.
-
-- [ ] **C3 · F-actin units convention** — *P1, gates any µM claim.* `Chamber.makeABox`
-  uses `boxVolume = 8·dimX·dimY·dimZ` (~400 µm³) vs the occupied ~50 µm³, so reported µM
-  is 8× off geometric (geometric ~13.7 µM vs sim-internal ~1.7 µM). Reconcile and pick a
-  single convention before any concentration target is meaningful.
-  *Done when:* one documented convention; reported µM matches it.
-
-- [ ] **C4 · Gliding baseline + phalloidin regime** — *P2, for biological gliding.*
-  Keep current defaults (fracMove 0.5 / fracR 0.1 / fracMoveTorq 0.2) **for GPU-port
-  validation**. For biology, switch to the phalloidin-stabilized regime (fracMove
-  0.05725, fracR 1.0, fracMoveTorq 0.1, 64-mon segments, ~2× stiffer), regenerate the
-  gliding baseline, and re-validate the published-velocity match.
-  *Done when:* phalloidin-regime gliding velocity matches the published target.
-
-- [ ] **C5 · Contractile density / bundling-vs-bridging decision** — *P2, science decision.*
-  At runnable densities crosslinks bundle adjacent pairs (components ~2) rather than
-  percolate; percolation needs ~40× density (≈4000 filaments) or a model change. Decide,
-  before designing the minimal contractile assay, whether the target regime is bundling
-  or percolation — and if percolation, how to reach it.
-  *Done when:* the contractile assay's intended regime + density are specified.
+- [x] **N1 . CPU node contractile assay** (Stage 1) — single-sphere bridge; **thermal search
+  is essential and load-bearing** (= the real search-capture: heads diffuse to find
+  filaments). Oracle: avgBound ~5-7, avgTension ~2.0 pN, controls clean.
+- [x] **N2 . GPU residency port** (Stage 2, `RULE_NODE`) — search reproduces on device
+  (avgBound 7.08 vs 6.64; `boundMotors` 0->6-10), tension band matched, controls clean,
+  force-exactly-once (`cpuNodeTetherApplyCt=0`), no regression to the minifilament GPU path.
+  `xToX` surface rotation + 1-step-lagged reaction, CPU path behind `BOA_NODE_GPU=0`.
+- [ ] **N3 . full-ring couplings** (for whole-cell ring, beyond the minimal assay) —
+  **deferred**: node birth/death (`nodeLifetime`), formin nucleation (`kNodeNuc`),
+  body-frame `bYMove`, membrane node subclasses. Needed for the flagship ring sim; scope
+  later (some may be v2).
+- [ ] **N4 . myosin turnover / lability** (biology enhancement, optional) — the
+  experimentally-supported lability is **exchange with the cytosolic pool** (on/off
+  turnover), **not** free surface diffusion; plus **node-on-membrane diffusion** (~20 nm^2/s)
+  for ring condensation. A `nodeLifetime`-style per-myosin exchange rate is the grounded
+  version. Pairs with N3 toward the full ring.
 
 ---
 
-## Part D — Freeze criteria (when to tag `biology-production-v1`)
+## Part B — Long-run stability (biology runs are long) — PENDING
+- [ ] **B1 . `POSE_DELTA_CAP` overflow / host leak** — fatal in a long assay, invisible in a
+  300-step benchmark. Measure dirty-slot demand -> startup-size the cap -> non-leaky fallback.
+- [ ] **B2 . long-run soak** — run the actual assay configs full-length on CPU+GPU; watch
+  host RSS, VRAM creep, NaN-over-time, determinism drift.
 
-- [ ] All Part A items landed or explicitly deferred-to-v2, merged to `main`.
-- [ ] Part B long-run soak passes on the production path.
-- [ ] Part C correctness items (C1–C3 at minimum) closed; C4/C5 closed for whichever
-  assay runs first.
-- [ ] `JOURNAL.md` / `CLAUDE.md` updated with the frozen state and the validation numbers.
-- [ ] **Tag the release** (e.g. `git tag v1-biology-production`) and branch the pre-v2
-  snapshot. From here, assays run on the tag; v2 develops on its own branch.
+---
+
+## Part C — Calibration (trustworthy instrument) — PENDING
+- [x] **C1 . GPU minifilament cohesion** — **already solved** (the 701-hunt `WorkerGrid`
+  fix); `keepMyosinsOnSurface` reclassified from "dead" to **load-bearing for nodes** and now
+  device-ported in N2.
+- [ ] **C2 . gliding-assay IC** — confirm the +x-end inward pad didn't revert (folds into the
+  consolidation gliding run).
+- [ ] **C3 . F-actin units convention** — reconcile the 8x `boxVolume` before any uM target.
+- [ ] **C4 . gliding baseline + phalloidin regime** — switch for biological gliding; keep
+  current defaults for port validation.
+- [ ] **C5 . contractile density / regime** — bundling vs percolation; specify before the
+  assay design (applies to the node ring too).
+
+---
+
+## Consolidation — PRESSING
+Speed sweep + node assay + node GPU port are **all on `benchmark-contractile-dense`,
+unmerged** — a large block of validated work. Cross-config gliding regression (the merge
+gate, also covers C2) -> merge to main -> journal cleanup. Confirm the actual branch/merge
+state first (some things may already be merged). Do this before the freeze.
+
+---
+
+## v2-deferred lever set (recorded)
+Incremental `classify`; incremental grid; CPU-shell elimination; full-ring node couplings
+(N3); the data-model redesign. The biology lability enhancements (N4) can ride v1 or v2.
+
+---
+
+## Part D — Freeze criteria (tag `biology-production-v1`)
+- [x] Part A landed (or deferred-to-v2); node minimal assay + GPU residency landed.
+- [ ] Consolidated to main; branch state clean.
+- [ ] Part B soak passes on the production path.
+- [ ] Part C closed (C2/C3 minimum; C4/C5 for whichever assay runs first).
+- [ ] `JOURNAL.md`/`CLAUDE.md` updated with the frozen state + validation numbers.
+- [ ] **Tag** the release; branch the pre-v2 snapshot. Assays run on the tag; v2 on its own.
 
 ---
 
 ## What this unlocks
-
-- **Gliding assay** — motor velocity validation/tuning (phalloidin regime).
-- **Minimal contractile assay** — minifilament contractile behavior.
-- **Laser-tweezers-type in silico** — single-molecule / small-ensemble force readouts.
-
-Each produces a **regression target** the v2 port must reproduce — so the science done
-on frozen-v1 is also the acceptance test for v2.
-
----
-
-*Sequence is flexible. A reasonable order: the cheap correctness checks first (C2, C3),
-then the superlinear speed wins (A1, A2), the GPU minifilament fix (C1) before any
-contractile run, stability (B1/B2) before long assays, and A3/A4 as final polish — but
-reprioritize per whichever assay you want to run first.*
+Gliding assay (motor velocity), minimal contractile assay (minifilament), **node contractile
+assay (CPU+GPU, done)**, laser-tweezers force readouts — and the path to **whole-cell ring
+formation** (needs N3). Each is a regression target v2 must reproduce.
