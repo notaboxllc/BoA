@@ -898,6 +898,8 @@ public class GPUMoveThing {
     private static int[]   jointSlotToMyoIdx;      // joint slot -> Myosin.theMyosins[] index
     private static Thing[] cpuFallback;
     private static int     cpuFallbackCt = 0;
+    // A3 diagnostic: cpuFallback type histogram snapshot (last classify).
+    public static int cpuFbFilSeg, cpuFbMyoMini, cpuFbProteinNode, cpuFbChamber, cpuFbOther, cpuFbThingCt;
     private static int     lastThingCt   = -1;
     private static boolean topologyDirty = true;
     private static boolean coordsDirty   = true;
@@ -4978,6 +4980,25 @@ public class GPUMoveThing {
         lastThingCt   = tc;
         topologyDirty = false;
         coordsDirty   = true;
+
+        // A3 diagnostic (2026-06-12): snapshot the cpuFallback type histogram —
+        // these are the ONLY Things that still run CPU calcRandomForces (brownian
+        // phase) and CPU step() force work on the -gpu path. Steady-state snapshot
+        // (overwritten each classify); read at end of run. No-op cost (a scan of
+        // the already-built fallback list, only on classify-fire steps).
+        if (StepProfiler.ENABLED) {
+            int fbFil = 0, fbMini = 0, fbNode = 0, fbCham = 0, fbOther = 0;
+            for (int k = 0; k < cn; k++) {
+                Thing t = cpuFallback[k];
+                if (t instanceof FilSegment)            fbFil++;
+                else if (t instanceof MyoMiniFilament)  fbMini++;
+                else if (t instanceof ProteinNode)      fbNode++;
+                else if (t instanceof Crucible || t instanceof Chamber) fbCham++;
+                else fbOther++;
+            }
+            cpuFbFilSeg = fbFil; cpuFbMyoMini = fbMini; cpuFbProteinNode = fbNode;
+            cpuFbChamber = fbCham; cpuFbOther = fbOther; cpuFbThingCt = tc;
+        }
 
         // Build the Myosin joint slot list. Each Myosin whose rod/lever/motor
         // are ALL GPU-handled gets entries at index [0..myoJointCt) in

@@ -1,5 +1,46 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — A3: un-offloaded CPU force work is already offloaded → clean BAIL (branch `benchmark-contractile-dense`)
+
+`V1_FINISH_LINE.md` item **A3**. Full writeup `FORCE_OFFLOAD_RESIDENCY.md`; data
+`RUN_LOGS/2026-06-12_a3_diag/`. **Diagnostic + bail — no port, no physics change, not merged.**
+
+**Premise refuted.** A3 targeted the residual `step` (13.5) / `jointsCpu` (11.8) /
+`brownian` (5.5 ms/step @8×) CPU force/integrate work to port the already-device-resident
+subset. The decomposition (new A3 sub-brackets + `[A3]` stats line, dense `boa10-64Seg-dyn-dense-{1,8}x`,
+window [300,660)) shows there is **no un-offloaded resident-state *force* to port** —
+every force reading resident state is *already* a device kernel. Proof, both scales:
+`addLinkForcesFireCt = addTorsionFireCt = checkBugInsideFireCt = updatePosFromStepFireCt =
+anchorFireCt = 0` (F1/F3/F4/F8-10 never fire on CPU); dimer cohesion + body↔rod constrain
+`cpu(work)=0` (joints 100 % device); `cpuFallback = 1` (just the Chamber) out of 823 684
+Things at 8×. The ~30.5 ms/step residual is **(1) ∝N CPU dispatch/iteration over
+GPU-handled Things doing gated no-ops** (`step`; `brownian` iterates 823k, computes for 1;
+`myoJoints1` dispatches over ~100k+ dimers whose cohesion is device-gated) **+ (2) host
+pose-derived bookkeeping** (`MyoMiniFilament.updateMyosins` recomputing world-frame
+myosin/dimer positions — a dead-host-work candidate; `refreshHostMirrorsForOutput` does
+not recompute them and the device cohesion kernel reads only the body-frame constant
+offset). Not force computation.
+
+**Stronger bail than the prompt scoped.** The PORTABLE category (resident force → device
+kernel) is empty (already kernels); the anticipated bail (needs SoA residency) doesn't
+apply (the Things ARE resident — there's just no force left on them). **The v1 force-offload
+is complete; the wall is reached.** Per the bail boundary, committed nothing but the
+reusable physics-neutral instrumentation (`StepProfiler.ENABLED`-gated): jointsCpu
+membraneLinks/myoJoints1/myoJoints2 sub-brackets, cpuFallback type histogram, dimer/body↔rod
+cohesion device-vs-cpu counters.
+
+**v2 lever documented (different optimization class — shell elimination, all ∝N
+constant-factor, not slope):** (1) `brownian` → dispatch over the existing `cpuFallback`
+list, not all 823k Things (~5.3 ms; provably force-identical; keep ThreadSet fan-out, only
+change the partition — do NOT main-thread `incForceSum`, that's the `taForce` race); (2)
+gate `updateMyosins` off on `-gpu` after a pose-consumer liveness audit (~5.8 ms; caveat:
+`keepMyosinsOnSurface` may apply a real boundary force — add a fire-counter; if nonzero it's
+the one genuine resident-force port candidate, mirror of the device F1 box kernel); (3)
+per-force-gated `step` dispatch skip (~13.5 ms; Lesson-1 silent-drop risk on un-gated F5/F6);
+(4) skip the `myoJoints1` dimer wave when all dimers `cohesionOnDevice` (~6.0 ms). GPU÷CPU
+8× unchanged at 0.699 (A3 is a no-op port); retiring all of (1)–(4) in v2 would move it to
+≈0.61.
+
 ## 2026-06-12 — A2: parallelized the serial `gridScatter` bind-grid kernel (branch `benchmark-contractile-dense`)
 
 `V1_FINISH_LINE.md` item **A2**. Full writeup `GRIDSCATTER_RESIDENCY.md`; data

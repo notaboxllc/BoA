@@ -3,6 +3,9 @@ package boxOfActin;
 public class MyosinDimer {
 	static MyosinDimer [] theMyoDimers = new MyosinDimer[300000];  // was 100000; raised for 8x weak-scaling (8000 minifils x 16 dimers = 128k > old cap). benchmark-contractile-dense.
 	static int myoDimerCt = 0;
+	// A3 diagnostic (BOA_STEP_PROFILE): per-step accumulated dimer cohesion dispatch
+	// counts — device (gated no-op CPU) vs CPU (real force work). Whole-run sums.
+	public static long DIAG_COHESION_DEVICE_CT = 0, DIAG_COHESION_CPU_CT = 0;
 	static double leverAngle = 160; // degrees
 	int myMyoDimerNumber;
 	Pt3D myCM = new Pt3D(); // center of mass
@@ -296,7 +299,9 @@ public class MyosinDimer {
 			removeMe = true; 
 		} else if (cohesionOnDevice()) {
 			// device dimerCohesionKernel handles rod↔rod + lever torque this step
+			if (StepProfiler.ENABLED) DIAG_COHESION_DEVICE_CT++;
 		} else {
+			if (StepProfiler.ENABLED) DIAG_COHESION_CPU_CT++;
 			if (parallel) {
 				enforceParallel();
 			} else {

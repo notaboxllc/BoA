@@ -53,6 +53,9 @@ public class BoxOfActin {
 	// resetCt / cleanup1 phases already have ms RunTimers — surfaced via their
 	// own pb* ms baselines below.
 	static long    pcRecomputeNs, pcOutputNs, pcCleanupTailNs, pcMembraneNs, pcSafepointNs, pcJointsNs;
+	// A3 jointsCpu sub-attribution (membraneLinks / myoJoints1 / myoJoints2).
+	static long    pcMembraneLinksNs, pcJoints1Ns, pcJoints2Ns;
+	static long    pbMembraneLinksNs, pbJoints1Ns, pbJoints2Ns;
 	static long    pbRecomputeNs, pbOutputNs, pbCleanupTailNs, pbMembraneNs, pbSafepointNs, pbJointsNs;
 	static long    pbMotorColMs, pbResetMs, pbCleanup1Ms;
 	static long    pbGcMs;   // total JVM GC collection time (ms) at window start
@@ -1353,6 +1356,10 @@ public class BoxOfActin {
 				// Membrane links
 				startAllThreadSets(Env.membraneLinksStart);
 				waitOnAllThreadSets(Env.membraneLinksStop);
+				// A3 sub-attribution: split jointsCpu into membraneLinks / myoJoints1 /
+				// myoJoints2 so the by-Thing-type decomposition can attribute the residual.
+				long _joints1T0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
+				if (StepProfiler.ENABLED) { pcMembraneLinksNs += _joints1T0 - _jointsT0; }
 
 				// actual myosin joints. On the GPU path, the per-Myosin
 				// jointConstraints() kernel is the first task of the chained
@@ -1366,11 +1373,17 @@ public class BoxOfActin {
 				// myoJoints1: Myosin (internal joints) + MyosinDimer (rod coupling +
 				// lever alignment) — 2 force-writing pools → serialize (taForce race fix).
 				runForceWave(Env.myoJoints1Start, Env.myoJoints1Stop);
+				long _joints2T0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
+				if (StepProfiler.ENABLED) { pcJoints1Ns += _joints2T0 - _joints1T0; }
 
 				// connections to other things. myoJoints2: ProteinNode + MyoMiniFilament
 				// + ChamberMyo + ChamberMyoD — 4 force-writing pools → serialize.
 				runForceWave(Env.myoJoints2Start, Env.myoJoints2Stop);
-				if (StepProfiler.ENABLED) { pcJointsNs += System.nanoTime() - _jointsT0; }
+				if (StepProfiler.ENABLED) {
+					long _now = System.nanoTime();
+					pcJoints2Ns += _now - _joints2T0;
+					pcJointsNs  += _now - _jointsT0;
+				}
 
 				// Thing.step() calls
 				stepTimer.start();
@@ -1997,6 +2010,17 @@ public class BoxOfActin {
 		PercolationProbe.report();
 		// Windowed host-phase decomposition report (Part C). No-op unless BOA_STEP_PROFILE set.
 		reportStepPhaseProfile();
+		// A3 residency diagnostic (2026-06-12): cpuFallback type histogram (the only
+		// Things still running CPU brownian/step force work on -gpu) + dimer/minifil
+		// cohesion device-vs-CPU dispatch counts (device = gated no-op, CPU = real work).
+		System.out.printf("[A3] cpuFallback histogram (last classify): thingCt=%d cpuFb total=%d { FilSeg=%d MyoMini=%d ProteinNode=%d Chamber=%d other=%d }%n",
+			GPUMoveThing.cpuFbThingCt, GPUMoveThing.getCpuFallbackCt(),
+			GPUMoveThing.cpuFbFilSeg, GPUMoveThing.cpuFbMyoMini, GPUMoveThing.cpuFbProteinNode,
+			GPUMoveThing.cpuFbChamber, GPUMoveThing.cpuFbOther);
+		System.out.printf("[A3] dimer cohesion dispatch: device(noop)=%d cpu(work)=%d  | body↔rod constrain: device(noop)=%d cpu(work)=%d  | updateMyosins(host-bookkeeping)=%d%n",
+			MyosinDimer.DIAG_COHESION_DEVICE_CT, MyosinDimer.DIAG_COHESION_CPU_CT,
+			MyoMiniFilament.DIAG_BODYROD_DEVICE_CT, MyoMiniFilament.DIAG_BODYROD_CPU_CT,
+			MyoMiniFilament.DIAG_UPDATEMYOSINS_CT);
 		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
 		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
 		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
@@ -2518,6 +2542,9 @@ public class BoxOfActin {
 		pbMembraneNs    = pcMembraneNs;
 		pbSafepointNs   = pcSafepointNs;
 		pbJointsNs      = pcJointsNs;
+		pbMembraneLinksNs = pcMembraneLinksNs;
+		pbJoints1Ns       = pcJoints1Ns;
+		pbJoints2Ns       = pcJoints2Ns;
 		pbGcMs          = totalGcCollectionMs();
 		pbClassifyN          = GPUMoveThing.classifyNanos;
 		pbClassifyCalls      = GPUMoveThing.classifyCalls;
@@ -2601,9 +2628,15 @@ public class BoxOfActin {
 		double membraneMs  = (pcMembraneNs    - pbMembraneNs)    / 1.0e6;
 		double safepointMs = (pcSafepointNs   - pbSafepointNs)   / 1.0e6;
 		double jointsCpuMs = (pcJointsNs      - pbJointsNs)      / 1.0e6;
+		double membLinksMs = (pcMembraneLinksNs - pbMembraneLinksNs) / 1.0e6;
+		double joints1Ms   = (pcJoints1Ns       - pbJoints1Ns)       / 1.0e6;
+		double joints2Ms   = (pcJoints2Ns       - pbJoints2Ns)       / 1.0e6;
 		double moveDrainMs = gpu ? Math.max(0.0, moveMs - execMs - packMs - formMs) : 0.0;
 		System.out.println("  --- 'other' decomposition (ms/step) ---");
 		System.out.printf("    %-18s %10.5f%n", "jointsCpu",     jointsCpuMs / M);
+		System.out.printf("    %-18s %10.5f%n", "  membraneLinks", membLinksMs / M);
+		System.out.printf("    %-18s %10.5f%n", "  myoJoints1",    joints1Ms / M);
+		System.out.printf("    %-18s %10.5f%n", "  myoJoints2",    joints2Ms / M);
 		System.out.printf("    %-18s %10.5f%n", "motorFilCol",  motorColMs  / M);
 		System.out.printf("    %-18s %10.5f%n", "recompute",     recompMs    / M);
 		if (gpu) {

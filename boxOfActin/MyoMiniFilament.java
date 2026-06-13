@@ -14,6 +14,10 @@ import java.lang.Math.*;
 
 public class MyoMiniFilament extends Thing {
 	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [10000];	// array holding all protein nodes
+	// A3 diagnostic (BOA_STEP_PROFILE): body↔rod constrain dispatch counts — device
+	// (gated no-op) vs CPU (real spring force). And updateMyosins host-bookkeeping
+	// calls (always run on CPU: pose-derived position recompute, NOT a force).
+	public static long DIAG_BODYROD_DEVICE_CT = 0, DIAG_BODYROD_CPU_CT = 0, DIAG_UPDATEMYOSINS_CT = 0;
 	static int myoMiniFilCt = 0; //
 	int myMyoMiniNumber;
 	static double length = 0.180;	// �m
@@ -436,7 +440,8 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			// force to keep two points together
 			curMyoD = myoDimersEnd1[i];
-			if (curMyoD != null && curMyoD.cohesionOnDevice()) continue; // device handles body↔rod
+			if (curMyoD != null && curMyoD.cohesionOnDevice()) { if (StepProfiler.ENABLED) DIAG_BODYROD_DEVICE_CT++; continue; } // device handles body↔rod
+			if (StepProfiler.ENABLED) DIAG_BODYROD_CPU_CT++;
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd1InX[i];
 			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a)
@@ -482,7 +487,8 @@ public class MyoMiniFilament extends Thing {
 		for (int i=0;i<numMyoDimersEachEnd;i++) {
 			// force to keep two points together
 			curMyoD = myoDimersEnd2[i];
-			if (curMyoD != null && curMyoD.cohesionOnDevice()) continue; // device handles body↔rod
+			if (curMyoD != null && curMyoD.cohesionOnDevice()) { if (StepProfiler.ENABLED) DIAG_BODYROD_DEVICE_CT++; continue; } // device handles body↔rod
+			if (StepProfiler.ENABLED) DIAG_BODYROD_CPU_CT++;
 			curMyoRod = curMyoD.myo1.myoRod;
 			curAttPt = myoDimerPtsEnd2InX[i];
 			Pt3D curRodEnd1 = curMyoRod.freshEnd1AsPt3D();  // fresh, not stale soaEnd1 (Phase 2a; end1 by design here)
@@ -528,6 +534,7 @@ public class MyoMiniFilament extends Thing {
 	}
 	
 	public void updateMyosins() {
+		if (StepProfiler.ENABLED) DIAG_UPDATEMYOSINS_CT++;
 		updateMyosinPositions();
 		keepMyosinsOnSurface();
 		
