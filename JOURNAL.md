@@ -1,5 +1,20 @@
 # BoxOfActin Project Journal
 
+## 2026-06-13 — Viewer: active run-folder browsing (no more server restarts)
+
+Tooling-only (`sim_server.py` + `sim_viewer_boa.html`; no sim-core/JSON/render changes). Decoupled
+the server from its launch dir. Server now serves from a **configurable root** (CLI arg `argv[2]`,
+`SIM_ROOT` env, or default = launch dir/cwd — run from `~/Code` → root `~/Code`, viewer at the
+familiar `/sim_viewer_boa.html`) and exposes `GET /api/runs` — a
+recursive scan (depth ≤ 4, skips `.git`/`node_modules`/`removeMe`/etc.) for run folders (dir with
+`frame_000000.json`), returning `{path, name, frameCount, modified}` newest-first. `/api/simulations`
+kept as alias. Viewer's `Recent ▾` picker is populated from `/api/runs` (path + frames + mtime), a
+new **↻ Refresh** button rescans without a restart, and `frameUrl` is now root-absolute so frames
+resolve regardless of where the viewer HTML is served (`/BoA/sim_viewer_boa.html` under root `~/Code`).
+`?dir=<path>` loads a specific run. **Validated:** one server from `~/Code` discovered runs in both
+`BoA/` and `threejs_output/` (279 total, newest-first, frames serve 200 from each); a run created
+mid-session appeared on rescan without restart; live mode (`?live=`) untouched (separate code path).
+
 ## 2026-06-12 — Node-path Stage 2: GPU residency port for the protein-node path (branch `benchmark-contractile-dense`)
 
 `NODE_PATH_SCOPING.md` Stage 2. Full writeup `NODE_GPU_PORT_RESIDENCY.md`; data

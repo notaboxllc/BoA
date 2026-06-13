@@ -608,9 +608,10 @@
 <div id="dirBar">
   <span class="label">Dir:</span>
   <input id="dirInput" type="text" value="." spellcheck="false" autocomplete="off">
-  <select id="recentSel" title="Recent directories">
+  <select id="recentSel" title="Available runs">
     <option value="">Recent ▾</option>
   </select>
+  <button id="btnRefresh" title="Rescan root for new run folders">↻ Refresh</button>
   <button id="btnLoad">Load</button>
 </div>
 
@@ -1083,6 +1084,7 @@ const hud          = document.getElementById('hud');
 const errorDiv     = document.getElementById('error');
 const dirInput     = document.getElementById('dirInput');
 const recentSel    = document.getElementById('recentSel');
+const btnRefresh   = document.getElementById('btnRefresh');
 const btnLoad      = document.getElementById('btnLoad');
 const btnPlay      = document.getElementById('btnPlay');
 const slider       = document.getElementById('slider');
@@ -1139,7 +1141,11 @@ function normalizeDir(d) {
 
 function frameUrl(n) {
   const name = 'frame_' + String(n).padStart(6, '0') + '.json';
-  return simDir === '.' ? name : simDir + '/' + name;
+  // Root-absolute so frame paths resolve against the server root regardless of
+  // where the viewer HTML itself is served from (e.g. /BoA/sim_viewer_boa.html).
+  // simDir is a path relative to root, '.' when the run is root itself.
+  if (!simDir || simDir === '.') return '/' + name;
+  return '/' + simDir.replace(/^\/+/, '') + '/' + name;
 }
 
 function updateUI() {
@@ -1178,6 +1184,54 @@ function addToRecent(dir) {
   recentSel.selectedIndex = 0;
 }
 
+// ── run discovery (/api/runs) ──────────────────────────────────────────────────
+function fmtRunTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Fill the picker from a /api/runs list (newest-first). Keeps the currently
+// loaded run selected if it's still present, so a Refresh never yanks the view.
+function populateRunList(runs) {
+  apiPopulated = true;
+  recentSel.title = 'Available runs';
+  recentSel.options[0].text = runs.length ? `${runs.length} runs ▾` : 'no runs ▾';
+  while (recentSel.options.length > 1) recentSel.remove(1);
+  runs.forEach(r => {
+    const label = `${r.path}  (${r.frameCount} frames)  [${fmtRunTime(r.modified)}]`;
+    recentSel.add(new Option(label, r.path));
+  });
+  // Re-select the run currently shown, if it survived the rescan.
+  const cur = simDir;
+  const match = Array.from(recentSel.options).findIndex(o => o.value === cur);
+  recentSel.selectedIndex = match >= 0 ? match : 0;
+}
+
+// Fetch the run list. On boot (autoLoad) loads the newest run, or the ?dir=
+// override if present. On Refresh (autoLoad=false) just repopulates the picker.
+async function refreshRuns({ autoLoad = false } = {}) {
+  try {
+    const r = await fetch('/api/runs');
+    if (!r.ok) throw new Error('no API');
+    const runs = await r.json();
+    populateRunList(runs);
+    if (autoLoad) {
+      const wanted = new URL(location.href).searchParams.get('dir');
+      if (wanted) loadDirectory(wanted);
+      else if (runs.length > 0) loadDirectory(runs[0].path);
+      else discoverFrames();
+    }
+    return true;
+  } catch (_) {
+    if (autoLoad) discoverFrames();
+    return false;
+  }
+}
+
 // ── directory loading ─────────────────────────────────────────────────────────
 function loadDirectory(dir) {
   dir = normalizeDir(dir);
@@ -1188,6 +1242,12 @@ function loadDirectory(dir) {
   document.title = 'BoxOfActin — ' + label;
 
   addToRecent(dir);
+
+  // Reflect the loaded run in the picker (when it's API-populated).
+  if (apiPopulated) {
+    const i = Array.from(recentSel.options).findIndex(o => o.value === dir);
+    if (i >= 0) recentSel.selectedIndex = i;
+  }
 
   if (boundsObj) {
     scene.remove(boundsObj);
@@ -1704,6 +1764,8 @@ recentSel.addEventListener('change', () => {
   if (recentSel.value) loadDirectory(recentSel.value);
 });
 
+btnRefresh.addEventListener('click', () => refreshRuns({ autoLoad: false }));
+
 btnPlay.addEventListener('click', togglePlay);
 
 slider.addEventListener('input', () => {
@@ -1986,26 +2048,7 @@ requestAnimationFrame(animate);
 setSpeed(2);
 
 if (!LIVE_MODE) {
-  (async () => {
-    try {
-      const r = await fetch('/api/simulations');
-      if (!r.ok) throw new Error('no API');
-      const sims = await r.json();
-
-      if (sims.length > 0) {
-        apiPopulated = true;
-        recentSel.title = 'Available simulations';
-        recentSel.options[0].text = `${sims.length} found ▾`;
-        sims.forEach(s =>
-          recentSel.add(new Option(`${s.name}  (${s.frameCount} frames)`, s.name)));
-        loadDirectory(sims[0].name);
-      } else {
-        discoverFrames();
-      }
-    } catch (_) {
-      discoverFrames();
-    }
-  })();
+  refreshRuns({ autoLoad: true });
 }
 
 // ── WebSocket live streaming (LIVE_MODE only) ─────────────────────────────────

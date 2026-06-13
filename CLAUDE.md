@@ -127,13 +127,14 @@ Progress messages and status reports should be prefixed with [HH:MM] timestamps 
 
 ### Viewing Three.js output
 
-**File-based (existing):** In the directory containing the `-3js` output folder:
+**File-based:** Launch one server from a high-level root. The root **defaults to the launch dir (cwd)** — so run it from `~/Code` and one server covers both `~/Code/BoA/` and `~/Code/threejs_output/`:
 
 ```
-python3 sim_server.py 8000
+python3 sim_server.py 8000                  # from ~/Code → root=~/Code, viewer at /sim_viewer_boa.html
+python3 sim_server.py 8000 ~/Code           # or pass the root explicitly (also: SIM_ROOT env)
 ```
 
-Then open `http://localhost:8000/sim_viewer_boa.html`. The viewer auto-discovers run directories via `/api/simulations`.
+(Both a copy kept in `~/Code` and `python3 BoA/sim_server.py 8000` run from `~/Code` resolve root to `~/Code`; the script works wherever the file lives.) The startup banner prints the exact viewer URL. The viewer's `Recent ▾` picker lists every run folder discovered anywhere under root (recursively; a "run folder" is any dir containing `frame_000000.json`), **newest-first** with frame count + mtime, and loads the newest on open. The **↻ Refresh** button rescans for newly-written runs **without restarting the server** — so where a sim writes its JSONs no longer dictates where the server must launch. `GET /api/runs` is the listing endpoint (`/api/simulations` remains as an alias); `?dir=<path>` loads a specific run (path relative to root). Frame fetches are root-absolute, independent of where the viewer HTML is served.
 
 **Live WebSocket (Session 12):** Start the sim with `-3jsLive <port>` (e.g. `8081`), then open the viewer with:
 
