@@ -1,0 +1,47 @@
+=== Part B: speed (ms/step) + GPU/CPU ===
+ scale        CPU        GPU  GPU/CPU  activeLinks(cpu/gpu)
+   0p5     117.23      86.35     0.74             2901/1693
+     1     215.05     134.55     0.63             5534/3363
+     2     434.30     246.39     0.57            11204/6575
+     4     865.57     494.28     0.57           21819/12579
+     8    1777.22    1030.23     0.58           43968/25136
+
+=== Part C: host-phase ms/step (GPU path) ===
+ scale     exec    pack  xlinkF   mesh   step gather  brown biochem   sync    host   other
+   0p5    40.28   15.44    1.04   0.01   3.94   1.32   1.79    2.89   0.86   46.08      NA
+     1    53.78   30.51    1.43   0.01   6.97   1.44   2.94    4.63   0.04   80.77      NA
+     2    82.58   62.98    2.46   0.01  13.42   2.05   5.33    8.42   0.09  163.81      NA
+     4   136.25  125.69    4.39   0.00  25.52   2.98   9.92   15.74   0.17  358.03      NA
+     8   252.13  266.83    8.84   0.01  55.97   5.09  20.99   32.67   0.33  778.10      NA
+
+=== Part C: host-phase ms/step (CPU path) ===
+   0p5 cpuIntegrate=13.71 step=10.72 gather=7.14 brown=7.38 xlinkF=1.19 mesh=3.49 biochem=2.98 other=NA
+     1 cpuIntegrate=26.13 step=20.36 gather=13.38 brown=12.87 xlinkF=1.77 mesh=4.52 biochem=4.74 other=NA
+     2 cpuIntegrate=52.55 step=40.98 gather=26.42 brown=25.54 xlinkF=3.16 mesh=6.73 biochem=8.61 other=NA
+     4 cpuIntegrate=104.87 step=82.36 gather=51.97 brown=50.36 xlinkF=6.17 mesh=11.12 biochem=16.11 other=NA
+     8 cpuIntegrate=211.22 step=167.79 gather=105.32 brown=100.15 xlinkF=12.79 mesh=20.64 biochem=31.15 other=NA
+
+=== Part D: memory ===
+ scale path   RSS_MB usedHeapMB  VRAM_MB  slotCap   myoCap devBufEstMB overflow planReb
+   0p5  cpu     3814       2563       NA     None     None          NA        0    None
+   0p5  gpu     5426       2331     1748   392002   128000       168.4        0       1
+     1  cpu     4971       3803       NA     None     None          NA        0    None
+     1  gpu     6614       3160     1891   784002   256000       228.9        0       1
+     2  cpu     8730       8781       NA     None     None          NA        0    None
+     2  gpu     9247       4806     2203  1568002   512000       349.8        0       1
+     4  cpu    14141      13253       NA     None     None          NA        0    None
+     4  gpu    14722       9660     2727  3136002  1024000       591.6        0       1
+     8  cpu    20840      15302       NA     None     None          NA        0    None
+     8  gpu    25553      15867     3785  6272002  2048000      1075.2        0       1
+
+=== sanity: rc/clean per run ===
+  0p5 cpu: active=2901 linkSettled=3678.99 fActin=6.89 segs=11873 overflow=0 nan?=False
+  0p5 gpu: active=1693 linkSettled=2162.62 fActin=6.90 segs=11901 overflow=0 nan?=False
+  1 cpu: active=5534 linkSettled=6937.04 fActin=6.89 segs=23718 overflow=0 nan?=False
+  1 gpu: active=3363 linkSettled=4298.10 fActin=6.89 segs=23779 overflow=0 nan?=False
+  2 cpu: active=11204 linkSettled=13844.38 fActin=6.90 segs=47587 overflow=0 nan?=False
+  2 gpu: active=6575 linkSettled=8467.84 fActin=6.90 segs=47639 overflow=0 nan?=False
+  4 cpu: active=21819 linkSettled=26796.35 fActin=6.90 segs=95068 overflow=0 nan?=False
+  4 gpu: active=12579 linkSettled=16261.90 fActin=6.89 segs=95035 overflow=0 nan?=False
+  8 cpu: active=43968 linkSettled=54074.39 fActin=6.90 segs=190563 overflow=0 nan?=False
+  8 gpu: active=25136 linkSettled=31916.24 fActin=6.90 segs=190254 overflow=0 nan?=False

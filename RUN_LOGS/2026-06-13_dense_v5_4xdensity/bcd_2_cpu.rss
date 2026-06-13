@@ -1,0 +1,23 @@
+	Command being timed: "java --enable-preview -Xmx26G -cp /home/jba/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado/tornado-api-4.0.1-dev.jar:libs/*:. BoxOfActin -r -pf ParameterFiles/boa10-64Seg-dyn-dense-2x"
+	User time (seconds): 3240.45
+	System time (seconds): 7.81
+	Percent of CPU this job got: 1128%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:47.83
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 8939068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 210
+	Minor (reclaiming a frame) page faults: 2244970
+	Voluntary context switches: 646307
+	Involuntary context switches: 83614
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 1720
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

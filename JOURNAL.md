@@ -1,5 +1,31 @@
 # BoxOfActin Project Journal
 
+## 2026-06-13 — Dense contractile benchmark v5: 4× density (40× areal) — GPU now wins
+
+Re-ran the v4 dense weak-scaling sweep with the assumed 1× density dialed up 4× ("add particles":
+counts quadrupled to 2k/4k/8k/16k/32k fils + matching minifils, v4 box schedule held → 40× areal
+density). Harness/data: `RUN_LOGS/2026-06-13_dense_v5_4xdensity/` (reuses v4's run_bcd/gen_fixture/
+analyze). Enablement: `MyoMiniFilament` cap 10k→40k and `MyosinDimer` cap 300k→600k (32k minifils ×
+16 dimers = 512k at 8×) — uncommitted, like the v4 dimer-cap precedent. All 5 scales clean both paths
+(no NaN/overflow); 8× (32k fils, 190k segs) fit in `-Xmx26G` (GPU RSS 25.5 GB, VRAM 3.8 GB).
+
+**Headline — the GPU/CPU verdict flips vs v4.** At 10× density (v4) GPU *lost* everywhere
+(GPU/CPU 1.1–5.0). At 40× density GPU *wins* at every scale:
+
+| scale | fils | CPU ms/step | GPU ms/step | GPU/CPU |
+|---|---|---|---|---|
+| 0.5× | 2 000 | 117.2 | 86.4 | 0.74 |
+| 1× | 4 000 | 215.0 | 134.5 | 0.63 |
+| 2× | 8 000 | 434.3 | 246.4 | 0.57 |
+| 4× | 16 000 | 865.6 | 494.3 | 0.57 |
+| 8× | 32 000 | 1777.2 | 1030.2 | 0.58 |
+
+GPU advantage saturates at ~1.75× (GPU/CPU≈0.57) for 2×–8×. Denser network → more force/integrate
+compute/step → GPU amortizes its fixed exec+sync overhead. CPU is dominated by cpuIntegrate+step+
+gather+brownian (all ~linear in particle count); GPU host time is exec+pack-bound. Percolation: at
+40× links/fil≈1.4 (CPU) but only 1× crosses the spanning threshold — dense bundling, still mostly
+non-spanning in 650 steps (consistent with the percolation-density-wall finding).
+
 ## 2026-06-13 — Membrane subsystem revived + CPU-verified; V1_FINISH_LINE updated
 
 **Membrane is a working subsystem, no bit-rot on the post-SoA/post-RNG/post-`taForce` tree.**

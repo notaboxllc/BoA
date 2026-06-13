@@ -1,0 +1,3 @@
+*.out
+.last_run_status
+.stop_*

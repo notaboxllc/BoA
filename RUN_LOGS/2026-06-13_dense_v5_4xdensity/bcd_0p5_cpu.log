@@ -1,0 +1,233 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/boa10-64Seg-dyn-dense-0p5x...
+     Parameter assigned: deltaT set to 1.0E-4
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.065
+     Parameter assigned: fracMove set to 0.4
+     Parameter assigned: fracR set to 0.134
+     Parameter assigned: fracMoveTorq set to 0.013685
+     Parameter assigned: drawInterval set to 100
+     Parameter assigned: toFileInterval set to 1000000000
+     No match found for parameter label toQKFileInterval ... you best check that out!
+     Parameter assigned: jpegQuality set to 1.0
+     Parameter assigned: remoteWriteInterval set to 100000
+     Parameter assigned: frameWidth set to 800
+     Parameter assigned: frameHeight set to 800
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 2000
+     Parameter assigned: initialMyoMiniFils set to 2000
+     Parameter assigned: minFilLength set to 0.9
+     Parameter assigned: maxFilLength set to 1.3
+     Parameter assigned: stdDevActinDist set to 0.5
+     Parameter assigned: boxXDim set to 7.0711
+     Parameter assigned: boxYDim set to 7.0711
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: actinConc set to 20.0
+     Parameter assigned: actinConcNonHydro set to 15.0
+     Parameter assigned: aeta set to 1.0
+     Parameter assigned: capConc set to 2.0
+     Parameter assigned: nodeZone set to 0.9
+     Parameter assigned: nodeRadius set to 0.025
+     Parameter assigned: forminsPerNode set to 0
+     No match found for parameter label myosPerNode ... you best check that out!
+     Parameter assigned: nodeTransDiff set to 1.0E-16
+     Parameter assigned: nodeRotDiff set to 0.001
+     Parameter assigned: actinSeed set to 3
+     Parameter assigned: actinOnCortex set to true
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: filTorqSpring set to 1.0E-20
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.5
+     Parameter assigned: maxSegAngle set to 22.5
+     Parameter assigned: maxSegDist set to 0.0108
+     Parameter assigned: nodeTorqSpring set to 1.0E-20
+     Parameter assigned: maxNodeTetherStrainDist set to 0.0108
+     Parameter assigned: nodeTetherDetachRate set to 0.001
+     Parameter assigned: forminMoves set to false
+     Parameter assigned: forminRelease set to 1.0
+     Parameter assigned: noMonomersSimd set to false
+     Parameter assigned: filamentsAnneal set to false
+     Parameter assigned: annealDist set to 0.054
+     Parameter assigned: annealAngleCosine set to 0.9
+     Parameter assigned: maxLinksOnSeg set to 10.0
+     Parameter assigned: sideBonds set to 0
+     Parameter assigned: sideBondsRelax set to false
+     Parameter assigned: sideBondsStabilize set to 1.0
+     Parameter assigned: bundleStableFactor set to 2.0
+     Parameter assigned: filLinkSpring set to 1.0E-9
+     Parameter assigned: filLinkTorqSpring set to 1.0E-19
+     Parameter assigned: xLinkTransAttn set to 1.0
+     Parameter assigned: xLinkRotAttn set to 1.0
+     No match found for parameter label maxFilLinkDist ... you best check that out!
+     No match found for parameter label linkDissolveRate ... you best check that out!
+     Parameter assigned: kATPOn1 set to 1.3
+     Parameter assigned: kATPOff1 set to 0.8
+     Parameter assigned: kADPOff1 set to 2.7
+     Parameter assigned: kATPOn1NonHydro set to 0.0
+     Parameter assigned: kATPOff1NonHydro set to 0.0
+     Parameter assigned: kATPOn2 set to 11.6
+     Parameter assigned: kATPOff2 set to 1.4
+     Parameter assigned: kADPOff2 set to 7.2
+     Parameter assigned: kATPOn2WithFormin set to 0.0
+     Parameter assigned: kATPOff2WithFormin set to 0.0
+     Parameter assigned: kADPOff2WithFormin set to 0.0
+     Parameter assigned: kATPOn2NonHydro set to 0.0
+     Parameter assigned: kATPOff2NonHydro set to 0.0
+     Parameter assigned: kATPOn2NonHydroWithFormin set to 0.0
+     Parameter assigned: kATPOff2NonHydroWithFormin set to 0.0
+     Parameter assigned: capRate set to 3.0
+     Parameter assigned: cofilinRate set to 0.4
+     Parameter assigned: cofilinConc set to 3.0
+     Parameter assigned: cofilinRatio set to 1.1
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     Parameter assigned: capNumEnd1 set to 3
+     Parameter assigned: capNumEnd2 set to 3
+     Parameter assigned: capNumEnd1WithNode set to 3
+     Parameter assigned: capNumEnd2WithNode set to 3
+     Parameter assigned: polyCompressionCutoff set to 0.0
+     Parameter assigned: kRdmNuc set to 0.001
+     Parameter assigned: kNodeNuc set to 10.0
+     Parameter assigned: kHydrolysis set to 1.0
+     Parameter assigned: kDissociation set to 1.0
+     Parameter assigned: showTime set to true
+     Parameter assigned: showConc set to true
+     Parameter assigned: showNonHydroConc set to false
+     Parameter assigned: showFilCt set to true
+     Parameter assigned: showFilLinkCt set to true
+     Parameter assigned: showFilSegCt set to false
+     Parameter assigned: showMonCt set to true
+     Parameter assigned: fixedHistScale set to 100.0
+     Parameter assigned: showHistBox set to true
+     Parameter assigned: showYHistTics set to true
+     Parameter assigned: flatTops set to true
+     Parameter assigned: maxXLinkBondAngle set to 0.6
+     Parameter assigned: xLinkOnRate set to 400.0
+     Parameter assigned: xLinkConc set to 1.0
+     Parameter assigned: linkOffConst set to 1.0
+     Parameter assigned: linkOffCoeff set to 1.0
+     Parameter assigned: linkOffExp set to 2.0
+     Parameter assigned: crossLinkGrabDist set to 0.05
+Done... there were 9 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=5517756529479935349 (BOA_RNG_SEED unset)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 37; xBinWidth = 0.2 µm
+nYBins = 37; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 37 x 37 x 4 cells (0.2 µm each)
+[09:22] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[09:22]   ON   ThingStep Threads
+[09:22]   ON   ThingBrownian Threads
+[09:22]   ON   Myosin Threads
+[09:22]   ON   MyoDimer Threads
+[09:22]   OFF  Protein Node Threads
+[09:22]   ON   MyoMiniFil Threads
+[09:22]   OFF  Chamber Myo Threads
+[09:22]   OFF  Chamber MyoDimer Threads
+[09:22]   ON   Mesh Threads
+[09:22]   ON   Ck Mesh Threads
+[09:22]   ON   Ck Mots Threads
+[09:22]   OFF  XLink Threads
+[09:22]   OFF  Arp23 Threads
+[09:22]   OFF  NodeLink Threads
+[09:22]   OFF  Membrane Node Threads
+[09:22]   OFF  ActA Threads
+[09:22]   ON   MotorBindGrid3D Fill
+[09:22] [phase-plan] 9 active, 8 inert (will skip dispatch)
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=106152.2 cumMaxPerThread=21980
+collisionTime = 0.0
+myosinTime = 0.0
+
+*** step() per-force profile (BOA_STEP_PROFILE=1) ***
+  Force                                     sec    pct          calls      ns/call
+  F1/F2  FilSeg boundary collision        1.207   7.2%        7798129          155
+  F3     FilSeg chain link spring         4.215  25.1%        7798129          541
+  F4     FilSeg chain torsion spring      1.231   7.3%        7798129          158
+  F5/F6  FilSeg node tether               0.174   1.0%        7798129           22
+  F7     MyoMini boundary collision       0.487   2.9%        1320000          369
+  F8-F10 MyoMotor tipLink (motor-fil)     9.454  56.4%       42240000          224
+  TOTAL (sum of buckets)                 16.767
+  Note: bucket sums are wall × thread-count (each worker accumulates its own time).
+[STATS] bindEvents=55108
+[STATS] filLinks=3747 (active=3747 inactive=846)
+[STATS] linkCtMean=2824.65 (samples=660) linkCtMeanSettled=3678.99 (samples=335) finalActive=3747
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=11873 monomers=829265 fActinUM=6.89 meanSegLenUM=0.191 freePoolUM=13.11
+[STATS] mem usedHeapMB=2562.9 maxHeapMB=27917.3
+[STATS] percolation filaments=2000 activeLinks=2901 linksPerFil=1.451 largestComp=177 (8.9% of fils) spanX=0.75 spanY=0.42 spanZ=0.96 spanFrac=0.75 percolates=false
+
+*** [STEP_PROFILE] window=[300,660) steps=360 path=CPU wall=42201.5ms (117.2264 ms/step) ***
+  --- every-step phases (ms/step) ---
+    exec                  0.00000  (n/a CPU)
+    pack                  0.00000  (n/a CPU)
+    crosslinkForce        1.19444
+    meshFill              3.48611
+    cpuIntegrate         13.71111
+      step               10.71667
+      gatherForces        7.13889
+      brownian            7.37500
+  --- biochem-cadence phases (amortized ms/step | per-fire ms | fires) ---
+    crosslinkFormation    0.00000 |   0.0000 | 3
+    biochem               2.98333 |   2.9833 | 360
+    sync                  0.00000 |   0.0000 | 0
+  --- 'other' decomposition (ms/step) ---
+    jointsCpu            16.63345
+      membraneLinks       0.00187
+      myoJoints1         13.61161
+      myoJoints2          3.01996
+    motorFilCol          37.95833
+    recompute             5.09528
+    resetCt               5.51667
+    moveDrains            0.00000  (n/a CPU)
+    membrane              1.33303
+    safepoint             0.00494
+    output                0.00090
+    cleanup               3.48333
+    cleanupTail           0.00511
+    gc(of residual)       0.00833  [subset of otherResidual: JVM GC pauses]
+  --- totals (ms/step) ---
+    total(wall)         117.22636
+    host(=tot-exec)     117.22636
+    otherResidual         0.58976  (of which gc=0.0083, non-gc=0.5814)
+
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=18385433  | body↔rod constrain: device(noop)=0 cpu(work)=14643269  | updateMyosins(host-bookkeeping)=1289832
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=1629.309
+ThingStep Threads took 25.758000 seconds.
+ThingBrownian Threads took 4.656000 seconds.
+Myosin Threads took 5.366000 seconds.
+MyoDimer Threads took 3.247000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 1.757000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 0.951000 seconds.
+Ck Mesh Threads took 0.859000 seconds.
+Ck Mots Threads took 23.444000 seconds.
+XLink Threads took 0.436000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 1.523000 seconds.
+Finished closing JSON plots!

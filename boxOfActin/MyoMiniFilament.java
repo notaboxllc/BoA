@@ -13,7 +13,7 @@ import java.lang.Math.*;
 
 
 public class MyoMiniFilament extends Thing {
-	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [10000];	// array holding all protein nodes
+	static MyoMiniFilament [] myoMiniFils = new MyoMiniFilament [40000];	// was 10000; raised for 4x-density dense sweep (32000 minifils at 8x). benchmark-contractile-dense.
 	// A3 diagnostic (BOA_STEP_PROFILE): body↔rod constrain dispatch counts — device
 	// (gated no-op) vs CPU (real spring force). And updateMyosins host-bookkeeping
 	// calls (always run on CPU: pose-derived position recompute, NOT a force).
