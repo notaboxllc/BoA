@@ -1,0 +1,61 @@
+<BOA> Minifilaments + STATIC actin filaments (0.5-2um), no turnover. For visual: do the
+// minifilament myosins coexist/bind a fixed actin field while the bundles stay coherent (taForce race fix).
+// CPU (omit -gpu). noMonomersSimd:true => filaments are rigid static rods (no poly/depoly/aging);
+// all turnover rates off. Length range 0.5-2um (no very-short filaments).
+deltaT:true:1.0E-4;                     // Time Step
+biochemDeltaT:true:0.01;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:0.2;                       // sized for ~10-15 min wall (tuned after probe)
+toFileInterval:true:100.0;              // ~200 frames
+remoteWriteInterval:true:100000.0;
+fracMove:true:0.4;
+fracR:true:0.134;
+fracMoveTorq:true:0.013685;
+bugOff:true:1.0;
+simOutsideBug:false:0.0;
+initialFilaments:true:100.0;            // 100 static actin filaments
+initialMyoMiniFils:true:50.0;           // 50 myosin minifilaments
+minFilLength:true:0.5;                  // Min filament length (um) — no very short fils
+maxFilLength:true:2.0;                  // Max filament length (um)
+stdDevActinDist:true:0.5;
+boxXDim:true:10.0;
+boxYDim:true:10.0;
+boxZDim:true:0.5;
+filSegLength:true:64.0;
+noMonomersSimd:true:1.0;                // STATIC filaments (rigid rods, no monomer dynamics)
+actinConc:false:0.0;                    // no free actin pool
+actinConcNonHydro:false:0.0;
+nodeZone:true:0.9;
+nodeRadius:true:0.025;
+forminsPerNode:true:0.0;
+myosPerNode:true:4.0;
+actinSeed:true:3.0;
+aeta:true:1.0;
+BTransCoeff:true:1.0;
+BRotCoeff:true:0.5;
+// --- all actin turnover OFF (static field) ---
+kATPOn1:false:0.0;
+kATPOff1:false:0.0;
+kADPOff1:false:0.0;
+kATPOn2:false:0.0;
+kATPOff2:false:0.0;
+kADPOff2:false:0.0;
+capRate:false:0.0;
+cofilinRate:false:0.0;
+cofilinConc:false:0.0;
+kRdmNuc:false:0.0;
+kNodeNuc:false:0.0;
+kHydrolysis:false:0.0;
+kDissociation:false:0.0;
+// --- myosin motor params (binding active so myosins can engage the actin) ---
+myosinStallForce:true:2.0;
+myosinReleaseRate:true:10.0;
+myoFBRBase:true:0.1;
+myoFBRExp:true:0.4;
+filTorqSpring:false:1.0E-20;
+nodeTorqSpring:true:1.0E-20;
+maxFilLinkDist:true:0.02;
+filLinkSpring:true:1.0E-9;
+filLinkTorqSpring:true:1.0E-19;
+linkDissolveRate:true:1.0;

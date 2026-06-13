@@ -1,0 +1,13 @@
+===== SEED 11  NO-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=26 [STATS] meanBoundMotors=0.051 
+===== SEED 11  WITH-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=28 [STATS] meanBoundMotors=0.055 
+===== SEED 22  NO-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=18 [STATS] meanBoundMotors=0.035 
+===== SEED 22  WITH-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=17 [STATS] meanBoundMotors=0.033 
+===== SEED 33  NO-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=18 [STATS] meanBoundMotors=0.035 
+===== SEED 33  WITH-3js =====
+  rc=0 crazy=0 nan=0 [STATS] bindEvents=29 [STATS] meanBoundMotors=0.057 
+ALL DONE

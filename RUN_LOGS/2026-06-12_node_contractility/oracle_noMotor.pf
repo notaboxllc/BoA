@@ -1,0 +1,3 @@
+// no-motor control on the default geometry
+contractNoMotor:true:1.0;
+runtime_note:false:0;

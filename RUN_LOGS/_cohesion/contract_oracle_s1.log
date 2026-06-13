@@ -1,0 +1,241 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/contractilityAssay_gpu_short...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.1
+     Parameter assigned: toFileInterval set to 100
+     Parameter assigned: remoteWriteInterval set to 5000
+     Parameter assigned: fracMove set to 0.0573
+     Parameter assigned: fracR set to 1.0
+     Parameter assigned: fracMoveTorq set to 0.01
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: boxXDim set to 4.0
+     Parameter assigned: boxYDim set to 0.3
+     Parameter assigned: boxZDim set to 0.2
+     Parameter assigned: contractilityAssay set to true
+     Parameter assigned: contractFilNSegs set to 13
+     Parameter assigned: contractFilYOffset set to 0.05
+     Parameter assigned: contractNoMotor set to false
+     Parameter assigned: contractReversePolarity set to false
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: noMonomersSimd set to false
+     Parameter assigned: myoMiniLifetime set to 1.0E9
+     Parameter assigned: numMyoDimersEachEndOfMiniFil set to 8
+     Parameter assigned: BTransCoeff set to 1.0
+     Parameter assigned: BRotCoeff set to 0.3
+     Parameter assigned: myosinStallForce set to 2.0
+     No match found for parameter label myosinReleaseRate ... you best check that out!
+     No match found for parameter label myoFBRBase ... you best check that out!
+     No match found for parameter label myoFBRExp ... you best check that out!
+     No match found for parameter label bugOff ... you best check that out!
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: kATPOn1 set to 0.0
+     Parameter assigned: kATPOff1 set to 0.0
+     Parameter assigned: kADPOff1 set to 0.0
+     Parameter assigned: kATPOn2 set to 0.0
+     Parameter assigned: kATPOff2 set to 0.0
+     Parameter assigned: kADPOff2 set to 0.0
+     Parameter assigned: capRate set to 0.0
+     Parameter assigned: cofilinRate set to 0.0
+     Parameter assigned: cofilinConc set to 0.0
+     Parameter assigned: kHydrolysis set to 0.0
+     Parameter assigned: kDissociation set to 0.0
+Done... there were 5 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=413462310853033040 (BOA_RNG_SEED unset)
+[CONTRACT] box X=4.000 µm (anchors at x=+/-1.900, 0.10 µm inset), 13-seg filaments, Lfil=2.282 µm
+[CONTRACT] yOffset=+/-0.050 µm, overlap=0.763 µm, minifilament span=0.180 µm, polarity=normal (plus ends outward), motor=ON
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 21; xBinWidth = 0.2 µm
+nYBins = 3; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 21 x 3 x 2 cells (0.2 µm each)
+[14:12] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[14:12]   ON   ThingStep Threads
+[14:12]   ON   ThingBrownian Threads
+[14:12]   ON   Myosin Threads
+[14:12]   ON   MyoDimer Threads
+[14:12]   OFF  Protein Node Threads
+[14:12]   ON   MyoMiniFil Threads
+[14:12]   OFF  Chamber Myo Threads
+[14:12]   OFF  Chamber MyoDimer Threads
+[14:12]   ON   Mesh Threads
+[14:12]   ON   Ck Mesh Threads
+[14:12]   ON   Ck Mots Threads
+[14:12]   OFF  XLink Threads
+[14:12]   OFF  Arp23 Threads
+[14:12]   OFF  NodeLink Threads
+[14:12]   OFF  Membrane Node Threads
+[14:12]   OFF  ActA Threads
+[14:12]   ON   MotorBindGrid3D Fill
+[14:12] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/coh_contract_oracle_s1.001
+ThreeJSWriter: archived 1 source files to source.zip
+ThreeJSWriter: wrote params_input.contractilityAssay_gpu_short
+ThreeJSWriter: wrote params_effective.txt (243 parameters)
+[STATS] contractility step=1 t=0.0000 tensionA=0.2823 tensionB=0.2823 pN boundMotors=0 | avgBound=0.00 ewmaBound=0.00 avgTension=0.282 ewmaTension=0.282 peakTension=0.282 pN
+[STATS] contractility step=101 t=0.0010 tensionA=0.2823 tensionB=0.2818 pN boundMotors=0 | avgBound=0.00 ewmaBound=0.00 avgTension=0.283 ewmaTension=0.282 peakTension=0.423 pN
+[STATS] contractility step=201 t=0.0020 tensionA=0.2822 tensionB=0.2816 pN boundMotors=1 | avgBound=0.31 ewmaBound=0.27 avgTension=0.283 ewmaTension=0.282 peakTension=0.423 pN
+[STATS] contractility step=301 t=0.0030 tensionA=0.2807 tensionB=0.2798 pN boundMotors=2 | avgBound=0.91 ewmaBound=1.00 avgTension=0.283 ewmaTension=0.283 peakTension=0.424 pN
+[STATS] contractility step=401 t=0.0040 tensionA=0.2768 tensionB=0.3023 pN boundMotors=4 | avgBound=1.33 ewmaBound=1.67 avgTension=0.286 ewmaTension=0.288 peakTension=0.434 pN
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=72.2 cumMaxPerThread=22
+[STATS] contractility step=501 t=0.0050 tensionA=0.2724 tensionB=0.3349 pN boundMotors=4 | avgBound=2.00 ewmaBound=2.88 avgTension=0.291 ewmaTension=0.297 peakTension=0.489 pN
+[STATS] contractility step=601 t=0.0060 tensionA=0.2809 tensionB=0.3507 pN boundMotors=5 | avgBound=2.40 ewmaBound=3.50 avgTension=0.299 ewmaTension=0.316 peakTension=0.529 pN
+[STATS] contractility step=701 t=0.0070 tensionA=0.3034 tensionB=0.4456 pN boundMotors=5 | avgBound=2.77 ewmaBound=4.08 avgTension=0.307 ewmaTension=0.332 peakTension=0.529 pN
+[STATS] contractility step=801 t=0.0080 tensionA=0.3254 tensionB=0.4836 pN boundMotors=7 | avgBound=3.16 ewmaBound=4.80 avgTension=0.317 ewmaTension=0.355 peakTension=0.529 pN
+[STATS] contractility step=901 t=0.0090 tensionA=0.3416 tensionB=0.5145 pN boundMotors=3 | avgBound=3.25 ewmaBound=4.42 avgTension=0.328 ewmaTension=0.380 peakTension=0.529 pN
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=73.6 cumMaxPerThread=22
+[STATS] contractility step=1001 t=0.0100 tensionA=0.3609 tensionB=0.5443 pN boundMotors=5 | avgBound=3.36 ewmaBound=4.41 avgTension=0.339 ewmaTension=0.404 peakTension=0.529 pN
+[STATS] contractility step=1101 t=0.0110 tensionA=0.3814 tensionB=0.5732 pN boundMotors=6 | avgBound=3.55 ewmaBound=4.86 avgTension=0.351 ewmaTension=0.428 peakTension=0.529 pN
+[STATS] contractility step=1201 t=0.0120 tensionA=0.4069 tensionB=0.6233 pN boundMotors=7 | avgBound=3.81 ewmaBound=5.54 avgTension=0.363 ewmaTension=0.455 peakTension=0.529 pN
+[STATS] contractility step=1301 t=0.0130 tensionA=0.4374 tensionB=0.5913 pN boundMotors=6 | avgBound=3.99 ewmaBound=5.79 avgTension=0.380 ewmaTension=0.505 peakTension=0.838 pN
+[STATS] contractility step=1401 t=0.0140 tensionA=0.4678 tensionB=0.7322 pN boundMotors=8 | avgBound=4.20 ewmaBound=6.25 avgTension=0.395 ewmaTension=0.541 peakTension=0.924 pN
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=74.4 cumMaxPerThread=22
+[STATS] contractility step=1501 t=0.0150 tensionA=0.5048 tensionB=0.8295 pN boundMotors=6 | avgBound=4.40 ewmaBound=6.59 avgTension=0.412 ewmaTension=0.581 peakTension=1.010 pN
+[STATS] contractility step=1601 t=0.0160 tensionA=0.5453 tensionB=0.8872 pN boundMotors=7 | avgBound=4.53 ewmaBound=6.58 avgTension=0.429 ewmaTension=0.626 peakTension=1.010 pN
+[STATS] contractility step=1701 t=0.0170 tensionA=0.5879 tensionB=0.9354 pN boundMotors=7 | avgBound=4.66 ewmaBound=6.62 avgTension=0.447 ewmaTension=0.671 peakTension=1.010 pN
+[STATS] contractility step=1801 t=0.0180 tensionA=0.6291 tensionB=0.9910 pN boundMotors=6 | avgBound=4.78 ewmaBound=6.67 avgTension=0.466 ewmaTension=0.717 peakTension=1.010 pN
+[STATS] contractility step=1901 t=0.0190 tensionA=0.6675 tensionB=1.0466 pN boundMotors=7 | avgBound=4.84 ewmaBound=6.38 avgTension=0.485 ewmaTension=0.764 peakTension=1.010 pN
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=74.8 cumMaxPerThread=22
+[STATS] contractility step=2001 t=0.0200 tensionA=0.7064 tensionB=1.1055 pN boundMotors=8 | avgBound=4.92 ewmaBound=6.41 avgTension=0.505 ewmaTension=0.811 peakTension=1.010 pN
+[STATS] contractility step=2101 t=0.0210 tensionA=0.7454 tensionB=1.1559 pN boundMotors=7 | avgBound=5.01 ewmaBound=6.60 avgTension=0.526 ewmaTension=0.859 peakTension=1.464 pN
+[STATS] contractility step=2201 t=0.0220 tensionA=0.7757 tensionB=1.2058 pN boundMotors=5 | avgBound=5.06 ewmaBound=6.32 avgTension=0.546 ewmaTension=0.905 peakTension=1.548 pN
+[STATS] contractility step=2301 t=0.0230 tensionA=0.8076 tensionB=1.2494 pN boundMotors=7 | avgBound=5.07 ewmaBound=5.99 avgTension=0.566 ewmaTension=0.947 peakTension=1.548 pN
+[STATS] contractility step=2401 t=0.0240 tensionA=0.8500 tensionB=1.2672 pN boundMotors=6 | avgBound=5.16 ewmaBound=6.44 avgTension=0.586 ewmaTension=0.987 peakTension=1.676 pN
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=75.1 cumMaxPerThread=22
+[STATS] contractility step=2501 t=0.0250 tensionA=0.9030 tensionB=1.2906 pN boundMotors=6 | avgBound=5.20 ewmaBound=6.31 avgTension=0.606 ewmaTension=1.024 peakTension=1.676 pN
+[STATS] contractility step=2601 t=0.0260 tensionA=0.9578 tensionB=1.3040 pN boundMotors=6 | avgBound=5.23 ewmaBound=6.16 avgTension=0.625 ewmaTension=1.060 peakTension=1.676 pN
+[STATS] contractility step=2701 t=0.0270 tensionA=0.9988 tensionB=1.3176 pN boundMotors=6 | avgBound=5.29 ewmaBound=6.43 avgTension=0.645 ewmaTension=1.094 peakTension=1.676 pN
+[STATS] contractility step=2801 t=0.0280 tensionA=1.0219 tensionB=1.2991 pN boundMotors=7 | avgBound=5.34 ewmaBound=6.56 avgTension=0.664 ewmaTension=1.130 peakTension=1.845 pN
+[STATS] contractility step=2901 t=0.0290 tensionA=1.0325 tensionB=1.3335 pN boundMotors=6 | avgBound=5.38 ewmaBound=6.52 avgTension=0.683 ewmaTension=1.161 peakTension=1.865 pN
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=75.3 cumMaxPerThread=23
+[STATS] contractility step=3001 t=0.0300 tensionA=1.0466 tensionB=1.3964 pN boundMotors=9 | avgBound=5.42 ewmaBound=6.58 avgTension=0.701 ewmaTension=1.184 peakTension=1.930 pN
+[STATS] contractility step=3101 t=0.0310 tensionA=1.0606 tensionB=1.3028 pN boundMotors=8 | avgBound=5.51 ewmaBound=7.15 avgTension=0.719 ewmaTension=1.227 peakTension=1.950 pN
+[STATS] contractility step=3201 t=0.0320 tensionA=1.0729 tensionB=1.4542 pN boundMotors=7 | avgBound=5.57 ewmaBound=7.32 avgTension=0.736 ewmaTension=1.240 peakTension=1.981 pN
+[STATS] contractility step=3301 t=0.0330 tensionA=1.0880 tensionB=1.5055 pN boundMotors=8 | avgBound=5.63 ewmaBound=7.37 avgTension=0.753 ewmaTension=1.258 peakTension=1.995 pN
+[STATS] contractility step=3401 t=0.0340 tensionA=1.1269 tensionB=1.4695 pN boundMotors=5 | avgBound=5.67 ewmaBound=7.18 avgTension=0.770 ewmaTension=1.291 peakTension=2.054 pN
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=75.5 cumMaxPerThread=23
+[STATS] contractility step=3501 t=0.0350 tensionA=1.1950 tensionB=1.5504 pN boundMotors=7 | avgBound=5.66 ewmaBound=6.48 avgTension=0.787 ewmaTension=1.311 peakTension=2.054 pN
+[STATS] contractility step=3601 t=0.0360 tensionA=1.2720 tensionB=1.5509 pN boundMotors=10 | avgBound=5.69 ewmaBound=6.59 avgTension=0.804 ewmaTension=1.357 peakTension=2.213 pN
+[STATS] contractility step=3701 t=0.0370 tensionA=1.3467 tensionB=1.6232 pN boundMotors=7 | avgBound=5.70 ewmaBound=6.31 avgTension=0.822 ewmaTension=1.406 peakTension=2.309 pN
+[STATS] contractility step=3801 t=0.0380 tensionA=1.4274 tensionB=1.7198 pN boundMotors=7 | avgBound=5.70 ewmaBound=6.09 avgTension=0.841 ewmaTension=1.459 peakTension=2.329 pN
+[STATS] contractility step=3901 t=0.0390 tensionA=1.5077 tensionB=1.7692 pN boundMotors=6 | avgBound=5.69 ewmaBound=5.82 avgTension=0.861 ewmaTension=1.519 peakTension=2.329 pN
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=75.6 cumMaxPerThread=23
+[STATS] contractility step=4001 t=0.0400 tensionA=1.5790 tensionB=1.5551 pN boundMotors=5 | avgBound=5.68 ewmaBound=5.58 avgTension=0.883 ewmaTension=1.607 peakTension=2.562 pN
+[STATS] contractility step=4101 t=0.0410 tensionA=1.6347 tensionB=1.7739 pN boundMotors=5 | avgBound=5.65 ewmaBound=5.17 avgTension=0.902 ewmaTension=1.639 peakTension=2.562 pN
+[STATS] contractility step=4201 t=0.0420 tensionA=1.6682 tensionB=1.7535 pN boundMotors=7 | avgBound=5.67 ewmaBound=5.56 avgTension=0.923 ewmaTension=1.682 peakTension=2.607 pN
+[STATS] contractility step=4301 t=0.0430 tensionA=1.6927 tensionB=1.7536 pN boundMotors=5 | avgBound=5.66 ewmaBound=5.50 avgTension=0.942 ewmaTension=1.707 peakTension=2.633 pN
+[STATS] contractility step=4401 t=0.0440 tensionA=1.7332 tensionB=1.5915 pN boundMotors=6 | avgBound=5.66 ewmaBound=5.55 avgTension=0.961 ewmaTension=1.742 peakTension=2.643 pN
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=75.5 cumMaxPerThread=23
+[STATS] contractility step=4501 t=0.0450 tensionA=1.7827 tensionB=1.6592 pN boundMotors=5 | avgBound=5.67 ewmaBound=5.70 avgTension=0.979 ewmaTension=1.758 peakTension=2.643 pN
+[STATS] contractility step=4601 t=0.0460 tensionA=1.8173 tensionB=1.6482 pN boundMotors=4 | avgBound=5.65 ewmaBound=5.38 avgTension=0.997 ewmaTension=1.776 peakTension=2.654 pN
+[STATS] contractility step=4701 t=0.0470 tensionA=1.8370 tensionB=1.7660 pN boundMotors=5 | avgBound=5.65 ewmaBound=5.43 avgTension=1.014 ewmaTension=1.779 peakTension=2.654 pN
+[STATS] contractility step=4801 t=0.0480 tensionA=1.8465 tensionB=1.6719 pN boundMotors=6 | avgBound=5.64 ewmaBound=5.29 avgTension=1.031 ewmaTension=1.809 peakTension=2.691 pN
+[STATS] contractility step=4901 t=0.0490 tensionA=1.8424 tensionB=1.7653 pN boundMotors=5 | avgBound=5.62 ewmaBound=5.22 avgTension=1.047 ewmaTension=1.812 peakTension=2.718 pN
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=75.5 cumMaxPerThread=23
+Sim. time=00.05....~03.93 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] contractility step=5001 t=0.0500 tensionA=1.8316 tensionB=1.7310 pN boundMotors=6 | avgBound=5.62 ewmaBound=5.23 avgTension=1.063 ewmaTension=1.825 peakTension=2.739 pN
+[STATS] contractility step=5101 t=0.0510 tensionA=1.8262 tensionB=1.7060 pN boundMotors=5 | avgBound=5.62 ewmaBound=5.46 avgTension=1.078 ewmaTension=1.836 peakTension=2.739 pN
+[STATS] contractility step=5201 t=0.0520 tensionA=1.8318 tensionB=1.7650 pN boundMotors=6 | avgBound=5.60 ewmaBound=5.08 avgTension=1.093 ewmaTension=1.830 peakTension=2.739 pN
+[STATS] contractility step=5301 t=0.0530 tensionA=1.8447 tensionB=3.2884 pN boundMotors=5 | avgBound=5.61 ewmaBound=5.50 avgTension=1.107 ewmaTension=1.838 peakTension=2.739 pN
+[STATS] contractility step=5401 t=0.0540 tensionA=1.8551 tensionB=1.7191 pN boundMotors=5 | avgBound=5.60 ewmaBound=5.36 avgTension=1.120 ewmaTension=1.824 peakTension=2.739 pN
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=75.5 cumMaxPerThread=23
+[STATS] contractility step=5501 t=0.0550 tensionA=1.8664 tensionB=1.7391 pN boundMotors=5 | avgBound=5.59 ewmaBound=5.25 avgTension=1.132 ewmaTension=1.817 peakTension=2.739 pN
+[STATS] contractility step=5601 t=0.0560 tensionA=1.8802 tensionB=1.7167 pN boundMotors=5 | avgBound=5.59 ewmaBound=5.42 avgTension=1.144 ewmaTension=1.815 peakTension=2.739 pN
+[STATS] contractility step=5701 t=0.0570 tensionA=1.8919 tensionB=1.6446 pN boundMotors=4 | avgBound=5.60 ewmaBound=5.64 avgTension=1.156 ewmaTension=1.819 peakTension=2.739 pN
+[STATS] contractility step=5801 t=0.0580 tensionA=1.8914 tensionB=1.6763 pN boundMotors=4 | avgBound=5.58 ewmaBound=5.18 avgTension=1.167 ewmaTension=1.812 peakTension=2.739 pN
+[STATS] contractility step=5901 t=0.0590 tensionA=1.8819 tensionB=1.6853 pN boundMotors=4 | avgBound=5.55 ewmaBound=4.61 avgTension=1.178 ewmaTension=1.813 peakTension=2.739 pN
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=6001 t=0.0600 tensionA=1.8732 tensionB=3.3844 pN boundMotors=5 | avgBound=5.54 ewmaBound=4.66 avgTension=1.189 ewmaTension=1.823 peakTension=2.739 pN
+[STATS] contractility step=6101 t=0.0610 tensionA=1.8709 tensionB=3.6180 pN boundMotors=5 | avgBound=5.53 ewmaBound=4.77 avgTension=1.200 ewmaTension=1.830 peakTension=2.744 pN
+[STATS] contractility step=6201 t=0.0620 tensionA=1.8816 tensionB=1.6795 pN boundMotors=5 | avgBound=5.51 ewmaBound=4.75 avgTension=1.211 ewmaTension=1.857 peakTension=2.774 pN
+[STATS] contractility step=6301 t=0.0630 tensionA=1.9002 tensionB=1.8381 pN boundMotors=6 | avgBound=5.50 ewmaBound=4.79 avgTension=1.221 ewmaTension=1.857 peakTension=2.774 pN
+[STATS] contractility step=6401 t=0.0640 tensionA=1.9116 tensionB=1.6970 pN boundMotors=6 | avgBound=5.51 ewmaBound=5.15 avgTension=1.232 ewmaTension=1.883 peakTension=2.792 pN
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=6501 t=0.0650 tensionA=1.9174 tensionB=1.7900 pN boundMotors=6 | avgBound=5.51 ewmaBound=5.46 avgTension=1.242 ewmaTension=1.872 peakTension=2.792 pN
+[STATS] contractility step=6601 t=0.0660 tensionA=1.9164 tensionB=1.6006 pN boundMotors=7 | avgBound=5.52 ewmaBound=5.75 avgTension=1.252 ewmaTension=1.886 peakTension=2.792 pN
+[STATS] contractility step=6701 t=0.0670 tensionA=1.9177 tensionB=1.5670 pN boundMotors=6 | avgBound=5.53 ewmaBound=5.85 avgTension=1.262 ewmaTension=1.891 peakTension=2.792 pN
+[STATS] contractility step=6801 t=0.0680 tensionA=1.9277 tensionB=1.6609 pN boundMotors=5 | avgBound=5.52 ewmaBound=5.35 avgTension=1.270 ewmaTension=1.878 peakTension=2.792 pN
+[STATS] contractility step=6901 t=0.0690 tensionA=1.9449 tensionB=1.7683 pN boundMotors=7 | avgBound=5.51 ewmaBound=5.15 avgTension=1.279 ewmaTension=1.863 peakTension=2.792 pN
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=7001 t=0.0700 tensionA=1.9528 tensionB=1.7891 pN boundMotors=6 | avgBound=5.50 ewmaBound=5.09 avgTension=1.287 ewmaTension=1.870 peakTension=2.792 pN
+[STATS] contractility step=7101 t=0.0710 tensionA=1.9569 tensionB=1.7840 pN boundMotors=6 | avgBound=5.50 ewmaBound=5.26 avgTension=1.296 ewmaTension=1.880 peakTension=2.792 pN
+[STATS] contractility step=7201 t=0.0720 tensionA=1.9541 tensionB=1.7986 pN boundMotors=6 | avgBound=5.50 ewmaBound=5.31 avgTension=1.304 ewmaTension=1.882 peakTension=2.792 pN
+[STATS] contractility step=7301 t=0.0730 tensionA=1.9445 tensionB=1.8153 pN boundMotors=5 | avgBound=5.50 ewmaBound=5.54 avgTension=1.312 ewmaTension=1.882 peakTension=2.792 pN
+[STATS] contractility step=7401 t=0.0740 tensionA=1.9270 tensionB=1.5718 pN boundMotors=6 | avgBound=5.51 ewmaBound=5.54 avgTension=1.320 ewmaTension=1.905 peakTension=2.792 pN
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=7501 t=0.0750 tensionA=1.9014 tensionB=1.7207 pN boundMotors=6 | avgBound=5.52 ewmaBound=5.84 avgTension=1.328 ewmaTension=1.892 peakTension=2.792 pN
+[STATS] contractility step=7601 t=0.0760 tensionA=1.8795 tensionB=1.7429 pN boundMotors=5 | avgBound=5.52 ewmaBound=5.72 avgTension=1.335 ewmaTension=1.882 peakTension=2.792 pN
+[STATS] contractility step=7701 t=0.0770 tensionA=1.8723 tensionB=1.8102 pN boundMotors=6 | avgBound=5.53 ewmaBound=5.98 avgTension=1.341 ewmaTension=1.863 peakTension=2.792 pN
+[STATS] contractility step=7801 t=0.0780 tensionA=1.8733 tensionB=1.5892 pN boundMotors=4 | avgBound=5.52 ewmaBound=5.57 avgTension=1.349 ewmaTension=1.889 peakTension=2.792 pN
+[STATS] contractility step=7901 t=0.0790 tensionA=1.8744 tensionB=1.7389 pN boundMotors=5 | avgBound=5.51 ewmaBound=5.32 avgTension=1.355 ewmaTension=1.865 peakTension=2.792 pN
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=8001 t=0.0800 tensionA=1.8759 tensionB=1.7827 pN boundMotors=5 | avgBound=5.51 ewmaBound=5.29 avgTension=1.361 ewmaTension=1.857 peakTension=2.792 pN
+[STATS] contractility step=8101 t=0.0810 tensionA=1.8864 tensionB=1.8035 pN boundMotors=7 | avgBound=5.52 ewmaBound=5.70 avgTension=1.367 ewmaTension=1.857 peakTension=2.792 pN
+[STATS] contractility step=8201 t=0.0820 tensionA=1.9041 tensionB=1.8233 pN boundMotors=5 | avgBound=5.51 ewmaBound=5.19 avgTension=1.373 ewmaTension=1.857 peakTension=2.792 pN
+[STATS] contractility step=8301 t=0.0830 tensionA=1.9179 tensionB=1.8125 pN boundMotors=5 | avgBound=5.50 ewmaBound=5.11 avgTension=1.379 ewmaTension=1.862 peakTension=2.792 pN
+[STATS] contractility step=8401 t=0.0840 tensionA=1.9222 tensionB=1.7507 pN boundMotors=6 | avgBound=5.50 ewmaBound=5.15 avgTension=1.385 ewmaTension=1.876 peakTension=2.792 pN
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=8501 t=0.0850 tensionA=1.9269 tensionB=1.6536 pN boundMotors=4 | avgBound=5.50 ewmaBound=5.21 avgTension=1.391 ewmaTension=1.882 peakTension=2.792 pN
+[STATS] contractility step=8601 t=0.0860 tensionA=1.9286 tensionB=1.7724 pN boundMotors=4 | avgBound=5.49 ewmaBound=5.09 avgTension=1.397 ewmaTension=1.877 peakTension=2.792 pN
+[STATS] contractility step=8701 t=0.0870 tensionA=1.9268 tensionB=1.8262 pN boundMotors=5 | avgBound=5.49 ewmaBound=5.23 avgTension=1.402 ewmaTension=1.874 peakTension=2.792 pN
+[STATS] contractility step=8801 t=0.0880 tensionA=1.9186 tensionB=1.7238 pN boundMotors=5 | avgBound=5.49 ewmaBound=5.41 avgTension=1.408 ewmaTension=1.887 peakTension=2.792 pN
+[STATS] contractility step=8901 t=0.0890 tensionA=1.9081 tensionB=1.8160 pN boundMotors=5 | avgBound=5.49 ewmaBound=5.27 avgTension=1.413 ewmaTension=1.876 peakTension=2.792 pN
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+[STATS] contractility step=9001 t=0.0900 tensionA=1.8916 tensionB=1.6549 pN boundMotors=5 | avgBound=5.48 ewmaBound=5.17 avgTension=1.419 ewmaTension=1.894 peakTension=2.792 pN
+[STATS] contractility step=9101 t=0.0910 tensionA=1.8812 tensionB=1.7629 pN boundMotors=5 | avgBound=5.48 ewmaBound=5.23 avgTension=1.424 ewmaTension=1.888 peakTension=2.792 pN
+[STATS] contractility step=9201 t=0.0920 tensionA=1.8758 tensionB=1.6091 pN boundMotors=5 | avgBound=5.48 ewmaBound=5.40 avgTension=1.429 ewmaTension=1.903 peakTension=2.792 pN
+[STATS] contractility step=9301 t=0.0930 tensionA=1.8665 tensionB=1.7922 pN boundMotors=5 | avgBound=5.48 ewmaBound=5.45 avgTension=1.433 ewmaTension=1.874 peakTension=2.792 pN
+[STATS] contractility step=9401 t=0.0940 tensionA=1.8616 tensionB=1.8086 pN boundMotors=4 | avgBound=5.47 ewmaBound=4.99 avgTension=1.438 ewmaTension=1.858 peakTension=2.792 pN
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=75.3 cumMaxPerThread=23
+[STATS] contractility step=9501 t=0.0950 tensionA=1.8706 tensionB=1.8101 pN boundMotors=4 | avgBound=5.46 ewmaBound=4.60 avgTension=1.442 ewmaTension=1.850 peakTension=2.792 pN
+[STATS] contractility step=9601 t=0.0960 tensionA=1.8737 tensionB=1.8093 pN boundMotors=6 | avgBound=5.45 ewmaBound=4.84 avgTension=1.446 ewmaTension=1.847 peakTension=2.792 pN
+[STATS] contractility step=9701 t=0.0970 tensionA=1.8680 tensionB=1.8124 pN boundMotors=7 | avgBound=5.46 ewmaBound=5.28 avgTension=1.450 ewmaTension=1.844 peakTension=2.792 pN
+[STATS] contractility step=9801 t=0.0980 tensionA=1.8770 tensionB=1.8259 pN boundMotors=7 | avgBound=5.46 ewmaBound=5.60 avgTension=1.454 ewmaTension=1.845 peakTension=2.792 pN
+[STATS] contractility step=9901 t=0.0990 tensionA=1.8959 tensionB=1.8408 pN boundMotors=5 | avgBound=5.46 ewmaBound=5.35 avgTension=1.458 ewmaTension=1.851 peakTension=2.792 pN
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=75.4 cumMaxPerThread=23
+Sim. time=00.10....~03.49 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[STATS] contractility step=10001 t=0.1000 tensionA=1.9153 tensionB=1.8549 pN boundMotors=8 | avgBound=5.46 ewmaBound=5.60 avgTension=1.462 ewmaTension=1.861 peakTension=2.792 pN
+[STATS] contractility step=10101 t=0.1010 tensionA=1.9451 tensionB=1.7001 pN boundMotors=7 | avgBound=5.47 ewmaBound=5.95 avgTension=1.467 ewmaTension=1.902 peakTension=2.813 pN
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=1205
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=5.591
+ThingStep Threads took 5.669000 seconds.
+ThingBrownian Threads took 1.101000 seconds.
+Myosin Threads took 1.133000 seconds.
+MyoDimer Threads took 1.145000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 1.033000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 2.081000 seconds.
+Ck Mesh Threads took 1.148000 seconds.
+Ck Mots Threads took 0.996000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 1.016000 seconds.
+Finished closing JSON plots!

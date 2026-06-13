@@ -281,6 +281,16 @@ public class Env {
 	static final Parameter contractFilNSegs = new Parameter("contractFilNSegs"," Contractility: segments per filament", 13, " ", Parameter.INT);
 	static final Parameter contractFilYOffset = new Parameter("contractFilYOffset"," Contractility: filament +/- Y offset from minifilament axis", 0.05, "microns", Parameter.DOUBLE);
 
+	// ── Node-based contractility assay (the node analog of the minifilament assay above) ──
+	// Same two anti-parallel pinned filaments and the same pin/tension/stats readout, but the
+	// load source is protein node(s) carrying surface myosins (numNodeMyos / numNodeMyoDimers)
+	// instead of a bipolar minifilament. See BoxOfActin.makeNodeContractilityAssay(). Reuses the
+	// contractNoMotor / contractReversePolarity / contractFilNSegs / contractFilYOffset controls.
+	static final Parameter nodeContractilityAssay = new Parameter("nodeContractilityAssay"," Node-based contractility assay (myosins on protein nodes)", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter contractNodeRadius = new Parameter("contractNodeRadius"," Node contractility: carrier-node sphere radius", 0.1, "microns", Parameter.DOUBLE);
+	static final Parameter contractNodeCount = new Parameter("contractNodeCount"," Node contractility: number of carrier nodes (1 bridging sphere default, 2 allowed)", 1, " ", Parameter.INT);
+	static final Parameter contractNodeYOffset = new Parameter("contractNodeYOffset"," Node contractility: +/- Y placement of carrier nodes (2-node config only)", 0.05, "microns", Parameter.DOUBLE);
+
 	// F1 static-deflection benchmark — gated by Env.benchmarkFilament (set by -bm flag)
 	static boolean benchmarkFilament = false;
 	static int benchmarkNSegs = 11;       // odd → midpoint segment is exactly at midspan

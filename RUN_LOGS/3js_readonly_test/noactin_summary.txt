@@ -1,0 +1,5 @@
+=== GPU noactin s11 ===
+  rc=0 crazy=0 nan=0 frames=63
+=== CPU noactin s11 ===
+  rc=0 crazy=0 nan=0 frames=63
+NOACTIN_DONE

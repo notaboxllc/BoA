@@ -1,0 +1,58 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_scaling_study/12x_cpu_K1.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.0025
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 48.497
+     Parameter assigned: boxYDim set to 48.497
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 4800
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-6259160120675679380 (BOA_RNG_SEED unset)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 244; xBinWidth = 0.2 µm
+nYBins = 244; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 244 x 244 x 4 cells (0.2 µm each)
+[20:06] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[20:06]   ON   ThingStep Threads
+[20:06]   ON   ThingBrownian Threads
+[20:06]   ON   Myosin Threads
+[20:06]   OFF  MyoDimer Threads
+[20:06]   OFF  Protein Node Threads
+[20:06]   OFF  MyoMiniFil Threads
+[20:06]   OFF  Chamber Myo Threads
+[20:06]   OFF  Chamber MyoDimer Threads
+[20:06]   ON   Mesh Threads
+[20:06]   ON   Ck Mesh Threads
+[20:06]   ON   Ck Mots Threads
+[20:06]   OFF  XLink Threads
+[20:06]   OFF  Arp23 Threads
+[20:06]   OFF  NodeLink Threads
+[20:06]   OFF  Membrane Node Threads
+[20:06]   OFF  ActA Threads
+[20:06]   ON   MotorBindGrid3D Fill
+[20:06] [phase-plan] 7 active, 10 inert (will skip dispatch)

@@ -1,5 +1,80 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — Node-path Stage 2: GPU residency port for the protein-node path (branch `benchmark-contractile-dense`)
+
+`NODE_PATH_SCOPING.md` Stage 2. Full writeup `NODE_GPU_PORT_RESIDENCY.md`; data
+`RUN_LOGS/2026-06-12_node_gpu_port/`. **Validated against the Stage-1 CPU oracle — NOT merged, hold for jba.**
+
+Ported the protein-node path to GPU residency (`RULE_NODE`) following the `RULE_MINIFIL`
+playbook. The node BODY integrates on device via the shared `moveThingKernel` (per-axis
+`xMove/yMove/zMove` honored through `velMask`; raw free-body Brownian `tScale=rScale=1.0`
+matching CPU `ProteinNode.moveThing`). The surface tethers + node-dimer internal cohesion run
+as ONE device kernel `nodeTetherKernel` (one thread per node) reading the resident pose:
+singlet tether (`keepMyosinsOnSurface`), dimer tether (`keepMyosinDimersOnSurface`), and
+node-dimer `enforceParallel` (rod↔rod End1/End2 + lever align — byte-identical to
+`dimerCohesionKernel`'s blocks; node dimers have `ownerMiniFil==null` so the minifil cohesion
+kernel never touched them — a 2nd stale-pose gap closed in the same kernel since the thread
+holds both rods). Adopted the single-writer + **1-step-lagged device-resident reaction buffer**
+(`nodeBodyReact`, FIRST_EXECUTION, SET) from the start — the minifil stiff-stability lesson.
+The surface attach point needs the **full `xToX` body→world rotation**
+(`coord + o.x·uVec + o.y·yVec + o.z·zVec`, kernel rebuilds `zVec=uVec×yVec`) — the one
+genuinely new cost vs the minifil's axial offset. CPU node path retained behind `BOA_NODE_GPU=0`
+(A/B oracle); plain-`ProteinNode`-only eligibility (StickyNode/FillNode/AnchorNode + `fixedNode`
++ `kNodeNuc` nodes stay host-OOP).
+
+**THE hazard, confirmed then cleared.** Node myosins start at random radial surface points and
+must thermally diffuse to find the filaments (Stage-1 finding). Running the assay on `-gpu`
+*before* the port (node=cpuFallback, CPU tethers reading STALE device pose on the
+`noMonomersSimd` residency path) **silently failed: boundMotors=0, tension→0.16 pN** — exactly
+the thermal-search failure the scoping doc flagged. After the port the device kernel computes
+the tether from FRESH resident pose and the search reproduces: **boundMotors 6–10/step**.
+
+**Validation (vs the CPU oracle band: avgBound 5–7, tension ~2 pN, controls clean).** GPU main
+20k: **avgBound 7.08, ewmaTension 1.73, peak 2.01, A/B +1.76/+1.65** (CPU same-fixture 20k:
+6.64 / 1.94 / 2.02 / +2.24/+1.66 — clean behavioral match within the documented threaded
+run-to-run variance). noMotor control → boundMotors=0, tension ~0.001 (✓); reversed control →
+strongly negative (GPU A/B −0.55/−0.67 vs CPU −0.55/−0.47, avgBound 5.92 vs 6.24 — extension ✓). **Force-exactly-once:**
+`cpuNodeTetherApplyCt=0` on GPU (vs 20100 on CPU), `ProteinNode=0` in the cpuFallback histogram
+(node device-classified), node-dimer cohesion gated to device via `nodeCohesionOnDevice()`.
+No 701 / NaN / overflow on any run; tolerated the documented float32 binding seam (behavioral
+compare). **Deferred (production-ring):** body-frame `bYMove`, node birth/death (`nodeLifetime`),
+formin nucleation (`kNodeNuc`) — all off in the assay.
+
+## 2026-06-12 — Node-path Stage 1: CPU node-based contractility assay (branch `benchmark-contractile-dense`)
+
+`NODE_PATH_SCOPING.md` Stage 1. Full writeup `NODE_CONTRACTILE_ASSAY.md`; data
+`RUN_LOGS/2026-06-12_node_contractility/`. **CPU oracle for the later GPU port — not merged, hold for jba.**
+
+Node analog of the minifilament `contractilityAssay`: same two anti-parallel pinned filaments +
+the same pin/tension/stats/JSON/HUD scaffold (reused unchanged — the readout projects the anchor
+`forceSum` onto the inward `buildDir`, indifferent to the load source), with the bipolar
+minifilament swapped for **protein node(s) carrying surface myosins**. New code is small and
+localized: `makeNodeContractilityAssay()`, `applyNodeContractilityDefaults()`,
+`ProteinNode.countBoundMotors()`, a load-source-agnostic `contractBoundMotors()`/`contractHasMotor()`,
+a `ContractAssay.nodes` field, the `-contractilityNode` flag (+ `nodeContractilityAssay`,
+`contractNodeRadius/Count/YOffset` params), and three `ParameterFiles/nodeContractilityAssay{,_noMotor,_reversed}`
+fixtures. Routes through the shared plumbing by also activating `contractilityAssay`; the node
+builder dispatches first so the minifilament path is never hit.
+
+**The geometry finding (the open design question): a single radial-myosin sphere DOES bridge —
+but ONLY with myosin thermal search ON.** Unlike the minifilament (end dimers pre-positioned ON
+the filaments), node myosins start at random radial surface points; a head binds only if it
+lands within `myoColTol` (0.006 µm) of a filament (≈1e-3 solid-angle fraction). With thermal
+dialed down (`myoBrownianAttn=0.1`, borrowed from `singleNode_myosins`) the heads freeze →
+`boundMotors=0` regardless of head count or capture width (sweeps S1/S3). Restoring full thermal
+(`myoBrownianAttn=1.0`) lets heads diffuse and find the filaments → binding. Chosen default: 1
+sphere r=0.06 µm, 60 singlets + 30 dimers, full thermal, default yOff=0.05. (A 2-node variant
+also works but binds asymmetrically; single sphere preferred.)
+
+**Validation (success pattern, all ✓):** contractile signal — tension 0→positive, both anchors
+positive/inward, `boundMotors>0`; no-motor control ≈0 (avgTension 0.02–0.04 pN, 0 heads);
+reversed-polarity control **negative** (extension). **Oracle band:** avgBound ≈ 5–7, avgTension
+≈ 2.0 pN, peak ≈ 3–4.8 pN. **Determinism caveat:** the threaded CPU path is NOT bit-reproducible
+(same seed → final A/B 1.73/2.72 vs 3.87/4.56; multithread sum order + non-master-seeded scratch
+RNGs, pre-existing). Time-averaged metrics are the stable oracle, not instantaneous tension —
+so Stage 2 compares behaviorally, as the minifilament GPU port did. **Gotchas:** needs `-Xmx4G`
+(MyoMotor statics ~640 MB OOM at 800M); needs `tornado-api` jar on the classpath even on CPU.
+
 ## 2026-06-12 — A3: un-offloaded CPU force work is already offloaded → clean BAIL (branch `benchmark-contractile-dense`)
 
 `V1_FINISH_LINE.md` item **A3**. Full writeup `FORCE_OFFLOAD_RESIDENCY.md`; data

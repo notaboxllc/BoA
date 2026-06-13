@@ -1,0 +1,7 @@
+[22:08:29] cpu s1 segCt=515 len=101.695um mb=1.472 nan=0 rc=0
+[22:10:05] gpudev s1 segCt=534 len=105.07um mb=1.148 nan=0 rc=0
+[22:10:18] cpu s2 segCt=560 len=109.408um mb=2.149 nan=0 rc=0
+[22:11:51] gpudev s2 segCt=548 len=107.796um mb=1.967 nan=0 rc=0
+[22:12:01] cpu s3 segCt=544 len=106.328um mb=2.442 nan=0 rc=0
+[22:13:33] gpudev s3 segCt=538 len=105.011um mb=3.390 nan=0 rc=0
+[22:13:33] DONE2 -> /home/jba/Code/BoA/RUN_LOGS/2026-06-11_701_hunt/correctness2.tsv

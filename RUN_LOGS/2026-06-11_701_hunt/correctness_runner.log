@@ -1,0 +1,10 @@
+[21:56:39] cpu s1: segCt=0 len=0um meanBound=1.648 nan=0 rc=0
+[21:58:11] gpudev s1: segCt=0 len=0um meanBound=1.974 nan=0 rc=0
+[21:59:51] gpucpu s1: segCt=0 len=0um meanBound=0.021 nan=0 rc=0
+[22:00:02] cpu s2: segCt=0 len=0um meanBound=1.658 nan=0 rc=0
+[22:01:33] gpudev s2: segCt=0 len=0um meanBound=3.040 nan=0 rc=0
+[22:03:15] gpucpu s2: segCt=0 len=0um meanBound=0.124 nan=0 rc=0
+[22:03:26] cpu s3: segCt=0 len=0um meanBound=0.358 nan=0 rc=0
+[22:05:00] gpudev s3: segCt=0 len=0um meanBound=1.198 nan=0 rc=0
+[22:06:42] gpucpu s3: segCt=0 len=0um meanBound=0.100 nan=0 rc=0
+[22:06:42] correctness DONE -> /home/jba/Code/BoA/RUN_LOGS/2026-06-11_701_hunt/correctness.tsv

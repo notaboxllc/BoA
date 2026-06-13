@@ -1,0 +1,6 @@
+// W: winning node-bridge geometry
+numNodeMyos:true:60;
+numNodeMyoDimers:true:30;
+myoBrownianAttn:true:0.5;
+contractNodeRadius:true:0.06;
+runTime:true:0.2;

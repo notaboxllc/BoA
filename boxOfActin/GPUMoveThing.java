@@ -450,6 +450,32 @@ public class GPUMoveThing {
     private static final int RULE_MYO     = 1;
     private static final int RULE_LEVER   = 2;
     private static final int RULE_MINIFIL = 3;   // MyoMiniFilament body — device-integrated rigid rod
+    private static final int RULE_NODE    = 4;   // ProteinNode body — device-integrated free sphere (Node-path Stage 2)
+
+    // Node-path Stage 2 (2026-06-12): device residency for the protein-node body
+    // + its surface tethers. Opt-out via BOA_NODE_GPU=0 (the CPU node path is the
+    // permanent A/B oracle). Mirror of FILFIL_GPU_ENABLED.
+    static final boolean NODE_GPU_ENABLED = !"0".equals(System.getenv("BOA_NODE_GPU"));
+
+    // A plain ProteinNode is device-eligible (RULE_NODE) only when:
+    //  - node residency is enabled (BOA_NODE_GPU),
+    //  - it is exactly a ProteinNode (NOT a StickyNode/FillNode/AnchorNode subclass —
+    //    those carry membrane-link / fill-volume machinery that stays host-OOP),
+    //  - it is not pinned in space (fixedNode — handled by the host path), and
+    //  - the run has no formin nucleation (kNodeNuc) — node↔FilSegment birth/death
+    //    coupling is a deferred production-ring concern (NODE_PATH_SCOPING §4), off
+    //    in the assay. When kNodeNuc is active the node stays host-OOP.
+    // The surface tethers + dimer internal cohesion for an eligible node move to the
+    // device nodeTether kernel; its CPU keepMyosin*OnSurface / node-dimer enforceParallel
+    // are gated off in lockstep (ProteinNode.tethersOnDevice / MyosinDimer.nodeCohesionOnDevice).
+    static boolean nodeDeviceEligible(Thing t) {
+        if (!NODE_GPU_ENABLED || !SINGLE_GRAPH) return false;   // tether kernel rides the single chained graph
+        if (t == null || t.getClass() != ProteinNode.class) return false;
+        ProteinNode p = (ProteinNode) t;
+        if (p.fixedNode) return false;
+        if (Env.kNodeNuc.isActive()) return false;
+        return true;
+    }
 
     // Live type -> Brownian rule for a GPU-handled slot occupant. Mirrors the
     // rule assignment in classifyThings() (the only difference being that
@@ -463,6 +489,7 @@ public class GPUMoveThing {
         if (t instanceof MyoMiniFilament) return RULE_MINIFIL;   // before MyoRod/Lever checks (distinct type)
         if (t instanceof MyoMotor || t instanceof MyoRod) return RULE_MYO;
         if (t instanceof MyoLever)        return RULE_LEVER;
+        if (nodeDeviceEligible(t))        return RULE_NODE;       // plain ProteinNode body (Node-path Stage 2)
         return -1;
     }
 
@@ -747,6 +774,34 @@ public class GPUMoveThing {
     private static FloatArray cohParams;      // 8: dt, rodLen, leverAngle, fracMD, fracLT, fracMF, alignMF, (spare)
     private static IntArray   cohCounts;      // 3: dimerCohCt, slotCount, bodyCohCt
     private static int        dimerCohCt = 0; // packed parallel GPU-handled dimers this step
+
+    // -------------------------------------------------------------------------
+    // Node-path Stage 2 (2026-06-12) — protein-node surface tethers + node-dimer
+    // internal cohesion on device. ONE thread per packed node. Each thread loops
+    // its singlet records (rod tether, body−F) and dimer records (rod↔rod End1/End2
+    // coupling + lever align + tether, body−F/−τ), RMW-ing each myosin's UNIQUE rod/
+    // lever slot (race-free across nodes) and writing the node body slot EXACTLY ONCE
+    // with the same device-resident 1-step-lagged reaction buffer (nodeBodyReact, SET)
+    // the minifilament cohesion proved necessary. The world attach point needs the
+    // FULL body→world rotation (xToX: o.x·uVec + o.y·yVec + o.z·zVec) — the new
+    // arithmetic vs the minifilament's purely axial offset. See nodeTetherKernel /
+    // packNodeTethers.
+    // Per-node CSR over flat singlet + dimer record arrays. Arrays consolidated to
+    // keep the kernel within TornadoVM's 15-array task() limit (CSR + dim records
+    // strided, the per-node count carried in nodeParams[7]).
+    private static IntArray   nodeCsr;         // nodeCap*5 — per node b: [bodySlot, singStart, singCount, dimStart, dimCount]
+    private static IntArray   nodeSingRod;     // singCap — rod move-slot per singlet record
+    private static FloatArray nodeSingOff;     // singCap*3 — body-frame surface attach offset (µm)
+    private static IntArray   nodeDimSlots;    // dimCap*5 — rod1,rod2,lever1,lever2,flags(bit1=bothOnFil)
+    private static FloatArray nodeDimOff;      // dimCap*3 — body-frame surface attach offset (µm)
+    private static FloatArray nodeBodyReact;   // nodeCap*6 — DEVICE-RESIDENT (FIRST_EXECUTION) per-node
+                                               // reaction carry [Fx,Fy,Fz,Tx,Ty,Tz], 1-step lag, SET.
+    private static FloatArray nodeParams;      // 8: dt, attnForce, numNodeMyos, fracMD(myoDimerFracMove),
+                                               //    fracLT(myoDimerLeverFracMoveTorq), leverAngle, rodLen, nodeTetherCt
+    private static int        nodeTetherCt = 0;// packed device-eligible nodes this step
+    // Force-exactly-once instrumentation (force-offload audit): incremented when the
+    // CPU node-surface tether actually applies force. Reads 0 on the device path.
+    public static long cpuNodeTetherApplyCt = 0;
     // Cohesion forces computed on-device this run unless gated off via
     // BOA_MINIFIL_COHESION_CPU=1 (the A/B control), mirroring DIAG_CPU_MOTOR. Set in
     // BoxOfActin.begin() from the env var.
@@ -2772,6 +2827,259 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Node-path Stage 2 (2026-06-12) — protein-node surface tethers + node-dimer
+    // internal cohesion. ONE thread per packed node. Reproduces, from device-
+    // resident pose:
+    //   • ProteinNode.keepMyosinsOnSurface       (singlet rod tether, body −F)
+    //   • ProteinNode.keepMyosinDimersOnSurface   (dimer rod1.end1 tether, body −F/−τ)
+    //   • MyosinDimer.enforceParallel for node-owned dimers (applyRodCouplingEnd1/
+    //     End2 + conditional alignUVecLeversTorque) — node dimers have ownerMiniFil
+    //     == null so the minifilament cohesion kernel never touches them; their
+    //     rod↔rod coupling would otherwise read stale host pose on the residency path.
+    // The rod-coupling + lever-align blocks are byte-identical to dimerCohesionKernel
+    // (same MyosinDimer methods, same fracMD/fracLT/leverAngle). The tether replaces
+    // the minifilament's axial body↔rod constraint and needs the FULL body→world
+    // rotation for the surface attach point (xToX: o.x·uVec + o.y·yVec + o.z·zVec).
+    // Each rod/lever slot belongs to exactly one node → RMW is race-free; the node
+    // body slot is single-writer with the same 1-step-lagged device-resident reaction
+    // buffer (nodeBodyReact, SET) the minifilament cohesion proved stiff-stable.
+    // -------------------------------------------------------------------------
+    private static void nodeTetherKernel(
+            FloatArray coord,
+            FloatArray uVec,
+            FloatArray yVec,
+            FloatArray soaLengthArr,
+            IntArray   nodeCsr,
+            IntArray   nodeSingRod,
+            FloatArray nodeSingOff,
+            IntArray   nodeDimSlots,
+            FloatArray nodeDimOff,
+            FloatArray bTransGam,
+            FloatArray bRotGam,
+            FloatArray jointForceSum,
+            FloatArray jointTorqueSum,
+            FloatArray nodeBodyReact,
+            FloatArray nodeParams) {
+
+        double dt        = (double) nodeParams.get(0);
+        double attnForce = (double) nodeParams.get(1);
+        double numNodeMyos = (double) nodeParams.get(2);
+        double fracMD    = (double) nodeParams.get(3);
+        double fracLT    = (double) nodeParams.get(4);
+        double leverAng  = (double) nodeParams.get(5);
+        double rodLen    = (double) nodeParams.get(6);
+        int    B         = (int) nodeParams.get(7);
+        double DEG2RAD = Math.PI / 180.0;
+        double RAD2DEG = 180.0 / Math.PI;
+        double lSq = 1.0e-12 * rodLen * rodLen;
+        double halfArm = 0.5e-6 * rodLen;
+
+        for (@Parallel int b = 0; b < nodeCsr.getSize() / 5; b++) {
+            if (b >= B) { return; }
+            int c5 = b * 5;
+            int bs = nodeCsr.get(c5);
+            if (bs < 0) { return; }
+            int b3 = bs * 3;
+            double bcx = coord.get(b3), bcy = coord.get(b3 + 1), bcz = coord.get(b3 + 2);
+            double bux = uVec.get(b3),  buy = uVec.get(b3 + 1),  buz = uVec.get(b3 + 2);
+            double byx = yVec.get(b3),  byy = yVec.get(b3 + 1),  byz = yVec.get(b3 + 2);
+            // zVec = uVec × yVec (normalized) — full orientation frame for xToX.
+            double bzx = buy * byz - buz * byy;
+            double bzy = buz * byx - bux * byz;
+            double bzz = bux * byy - buy * byx;
+            double zinv = 1.0 / Math.sqrt(bzx*bzx + bzy*bzy + bzz*bzz);
+            bzx *= zinv; bzy *= zinv; bzz *= zinv;
+            double bBTy = (double) bTransGam.get(b3 + 1);
+
+            double accBFx = 0, accBFy = 0, accBFz = 0, accBTx = 0, accBTy = 0, accBTz = 0;
+
+            // ===== singlet tethers (keepMyosinsOnSurface): rod += F, body −F, no torque =====
+            int ss = nodeCsr.get(c5 + 1);
+            int sn = nodeCsr.get(c5 + 2);
+            for (int k = 0; k < sn; k++) {
+                int sj = ss + k;
+                int rs = nodeSingRod.get(sj);
+                int rs3 = rs * 3;
+                int o3 = sj * 3;
+                double ox = (double) nodeSingOff.get(o3), oy = (double) nodeSingOff.get(o3 + 1), oz = (double) nodeSingOff.get(o3 + 2);
+                // world surface attach = node.coord + xToX(offset)
+                double ax = bcx + ox*bux + oy*byx + oz*bzx;
+                double ay = bcy + ox*buy + oy*byy + oz*bzy;
+                double az = bcz + ox*buz + oy*byz + oz*bzz;
+                // rod.end1 = rod.coord − half·rod.uVec
+                double rcx = coord.get(rs3), rcy = coord.get(rs3 + 1), rcz = coord.get(rs3 + 2);
+                double rux = uVec.get(rs3),  ruy = uVec.get(rs3 + 1),  ruz = uVec.get(rs3 + 2);
+                double half = 0.5 * (double) soaLengthArr.get(rs);
+                double e1x = rcx - half*rux, e1y = rcy - half*ruy, e1z = rcz - half*ruz;
+                double dx = ax - e1x, dy = ay - e1y, dz = az - e1z;   // unitVec(attach, end1) = attach − end1
+                double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                double ux = dx*inv, uy = dy*inv, uz = dz*inv;
+                double rBTy = (double) bTransGam.get(rs3 + 1);
+                double fmag = attnForce * (1.0e-6*dist/numNodeMyos) / (dt*(1.0/rBTy + 1.0/bBTy));
+                double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                jointForceSum.set(rs3,     (float)((double) jointForceSum.get(rs3)     + Fx));
+                jointForceSum.set(rs3 + 1, (float)((double) jointForceSum.get(rs3 + 1) + Fy));
+                jointForceSum.set(rs3 + 2, (float)((double) jointForceSum.get(rs3 + 2) + Fz));
+                accBFx -= Fx; accBFy -= Fy; accBFz -= Fz;
+            }
+
+            // ===== dimers: rod↔rod coupling + lever align + tether =====
+            int ds = nodeCsr.get(c5 + 3);
+            int dn = nodeCsr.get(c5 + 4);
+            for (int k = 0; k < dn; k++) {
+                int dj = ds + k;
+                int d5 = dj * 5;
+                int r1 = nodeDimSlots.get(d5);
+                int r2 = nodeDimSlots.get(d5 + 1);
+                int flags = nodeDimSlots.get(d5 + 4);
+                boolean bothOnFil = (flags & 2) != 0;
+
+                int r1_3 = r1 * 3, r2_3 = r2 * 3;
+                double r1cx = coord.get(r1_3), r1cy = coord.get(r1_3 + 1), r1cz = coord.get(r1_3 + 2);
+                double r1ux = uVec.get(r1_3),  r1uy = uVec.get(r1_3 + 1),  r1uz = uVec.get(r1_3 + 2);
+                double r2cx = coord.get(r2_3), r2cy = coord.get(r2_3 + 1), r2cz = coord.get(r2_3 + 2);
+                double r2ux = uVec.get(r2_3),  r2uy = uVec.get(r2_3 + 1),  r2uz = uVec.get(r2_3 + 2);
+                double half1 = 0.5 * (double) soaLengthArr.get(r1);
+                double half2 = 0.5 * (double) soaLengthArr.get(r2);
+
+                double r1BTx = (double) bTransGam.get(r1_3), r1BTy = (double) bTransGam.get(r1_3 + 1);
+                double r1BRy = (double) bRotGam.get(r1_3 + 1);
+                double r2BTx = (double) bTransGam.get(r2_3), r2BTy = (double) bTransGam.get(r2_3 + 1);
+                double r2BRy = (double) bRotGam.get(r2_3 + 1);
+
+                double f1x = 0, f1y = 0, f1z = 0, t1x = 0, t1y = 0, t1z = 0;
+                double f2x = 0, f2y = 0, f2z = 0, t2x = 0, t2y = 0, t2z = 0;
+
+                // ----- applyRodCouplingEnd1 (rod1.end1 <-> rod2.end1; arm = −uVec) -----
+                {
+                    double p1x = r1cx - half1*r1ux, p1y = r1cy - half1*r1uy, p1z = r1cz - half1*r1uz;
+                    double p2x = r2cx - half2*r2ux, p2y = r2cy - half2*r2uy, p2z = r2cz - half2*r2uz;
+                    double dx = p1x - p2x, dy = p1y - p2y, dz = p1z - p2z;
+                    double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                    double ux = -dx*inv, uy = -dy*inv, uz = -dz*inv;
+                    double mc1 = moveCoeffDev(false, r1ux,r1uy,r1uz, ux,uy,uz, r1BTx,r1BTy,r1BRy, lSq);
+                    double mc2 = moveCoeffDev(false, r2ux,r2uy,r2uz, -ux,-uy,-uz, r2BTx,r2BTy,r2BRy, lSq);
+                    double fmag = (fracMD*1.0e-6*dist) / (dt*(mc1 + mc2));
+                    double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                    f1x += Fx; f1y += Fy; f1z += Fz;
+                    double R1x = -halfArm*r1ux, R1y = -halfArm*r1uy, R1z = -halfArm*r1uz;
+                    t1x += R1y*Fz - R1z*Fy; t1y += R1z*Fx - R1x*Fz; t1z += R1x*Fy - R1y*Fx;
+                    f2x -= Fx; f2y -= Fy; f2z -= Fz;
+                    double R2x = -halfArm*r2ux, R2y = -halfArm*r2uy, R2z = -halfArm*r2uz;
+                    double nFx = -Fx, nFy = -Fy, nFz = -Fz;
+                    t2x += R2y*nFz - R2z*nFy; t2y += R2z*nFx - R2x*nFz; t2z += R2x*nFy - R2y*nFx;
+                }
+                // ----- applyRodCouplingEnd2 (rod1.end2 <-> rod2.end2; arm = +uVec) -----
+                {
+                    double p1x = r1cx + half1*r1ux, p1y = r1cy + half1*r1uy, p1z = r1cz + half1*r1uz;
+                    double p2x = r2cx + half2*r2ux, p2y = r2cy + half2*r2uy, p2z = r2cz + half2*r2uz;
+                    double dx = p1x - p2x, dy = p1y - p2y, dz = p1z - p2z;
+                    double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                    double ux = -dx*inv, uy = -dy*inv, uz = -dz*inv;
+                    double mc1 = moveCoeffDev(true, r1ux,r1uy,r1uz, ux,uy,uz, r1BTx,r1BTy,r1BRy, lSq);
+                    double mc2 = moveCoeffDev(true, r2ux,r2uy,r2uz, -ux,-uy,-uz, r2BTx,r2BTy,r2BRy, lSq);
+                    double fmag = (fracMD*1.0e-6*dist) / (dt*(mc1 + mc2));
+                    double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                    f1x += Fx; f1y += Fy; f1z += Fz;
+                    double R1x = halfArm*r1ux, R1y = halfArm*r1uy, R1z = halfArm*r1uz;
+                    t1x += R1y*Fz - R1z*Fy; t1y += R1z*Fx - R1x*Fz; t1z += R1x*Fy - R1y*Fx;
+                    f2x -= Fx; f2y -= Fy; f2z -= Fz;
+                    double R2x = halfArm*r2ux, R2y = halfArm*r2uy, R2z = halfArm*r2uz;
+                    double nFx = -Fx, nFy = -Fy, nFz = -Fz;
+                    t2x += R2y*nFz - R2z*nFy; t2y += R2z*nFx - R2x*nFz; t2z += R2x*nFy - R2y*nFx;
+                }
+                // ----- tether (keepMyosinDimersOnSurface): rod1.end1 ↔ node surface attach -----
+                {
+                    int o3 = dj * 3;
+                    double ox = (double) nodeDimOff.get(o3), oy = (double) nodeDimOff.get(o3 + 1), oz = (double) nodeDimOff.get(o3 + 2);
+                    double ax = bcx + ox*bux + oy*byx + oz*bzx;
+                    double ay = bcy + ox*buy + oy*byy + oz*bzy;
+                    double az = bcz + ox*buz + oy*byz + oz*bzz;
+                    double e1x = r1cx - half1*r1ux, e1y = r1cy - half1*r1uy, e1z = r1cz - half1*r1uz;
+                    double dx = ax - e1x, dy = ay - e1y, dz = az - e1z;   // unitVec(attach, end1)
+                    double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    double inv = (dist > 0.0) ? (1.0/dist) : 0.0;
+                    double ux = dx*inv, uy = dy*inv, uz = dz*inv;
+                    double fmag = attnForce * (fracMD*1.0e-6*dist) / (dt*(1.0/r1BTy + 1.0/bBTy));
+                    double Fx = fmag*ux, Fy = fmag*uy, Fz = fmag*uz;
+                    // rod1 incForceSum(F, end1): force + torque (arm = (end1−rodCoord)·1e-6 = −half1·1e-6·rodUVec)
+                    f1x += Fx; f1y += Fy; f1z += Fz;
+                    double rArmX = (e1x - r1cx)*1.0e-6, rArmY = (e1y - r1cy)*1.0e-6, rArmZ = (e1z - r1cz)*1.0e-6;
+                    t1x += rArmY*Fz - rArmZ*Fy; t1y += rArmZ*Fx - rArmX*Fz; t1z += rArmX*Fy - rArmY*Fx;
+                    // node incForceSum(−F, attach): −F + torque (arm = (attach−nodeCoord)·1e-6 = xToX(o)·1e-6)
+                    accBFx -= Fx; accBFy -= Fy; accBFz -= Fz;
+                    double nArmX = (ax - bcx)*1.0e-6, nArmY = (ay - bcy)*1.0e-6, nArmZ = (az - bcz)*1.0e-6;
+                    double nFx = -Fx, nFy = -Fy, nFz = -Fz;
+                    accBTx += nArmY*nFz - nArmZ*nFy; accBTy += nArmZ*nFx - nArmX*nFz; accBTz += nArmX*nFy - nArmY*nFx;
+                }
+
+                // RMW rod1 / rod2 (unique slots — race-free across nodes)
+                jointForceSum.set(r1_3,     (float)((double) jointForceSum.get(r1_3)     + f1x));
+                jointForceSum.set(r1_3 + 1, (float)((double) jointForceSum.get(r1_3 + 1) + f1y));
+                jointForceSum.set(r1_3 + 2, (float)((double) jointForceSum.get(r1_3 + 2) + f1z));
+                jointTorqueSum.set(r1_3,     (float)((double) jointTorqueSum.get(r1_3)     + t1x));
+                jointTorqueSum.set(r1_3 + 1, (float)((double) jointTorqueSum.get(r1_3 + 1) + t1y));
+                jointTorqueSum.set(r1_3 + 2, (float)((double) jointTorqueSum.get(r1_3 + 2) + t1z));
+                jointForceSum.set(r2_3,     (float)((double) jointForceSum.get(r2_3)     + f2x));
+                jointForceSum.set(r2_3 + 1, (float)((double) jointForceSum.get(r2_3 + 1) + f2y));
+                jointForceSum.set(r2_3 + 2, (float)((double) jointForceSum.get(r2_3 + 2) + f2z));
+                jointTorqueSum.set(r2_3,     (float)((double) jointTorqueSum.get(r2_3)     + t2x));
+                jointTorqueSum.set(r2_3 + 1, (float)((double) jointTorqueSum.get(r2_3 + 1) + t2y));
+                jointTorqueSum.set(r2_3 + 2, (float)((double) jointTorqueSum.get(r2_3 + 2) + t2z));
+
+                // ----- alignUVecLeversTorque (only if NOT both heads on filament) -----
+                if (!bothOnFil) {
+                    int l1 = nodeDimSlots.get(d5 + 2), l2 = nodeDimSlots.get(d5 + 3);
+                    int l1_3 = l1 * 3, l2_3 = l2 * 3;
+                    double l1ux = uVec.get(l1_3), l1uy = uVec.get(l1_3 + 1), l1uz = uVec.get(l1_3 + 2);
+                    double l2ux = uVec.get(l2_3), l2uy = uVec.get(l2_3 + 1), l2uz = uVec.get(l2_3 + 2);
+                    double l1BRy = (double) bRotGam.get(l1_3 + 1), l2BRy = (double) bRotGam.get(l2_3 + 1);
+                    double tvx = l1uy*l2uz - l1uz*l2uy;
+                    double tvy = l1uz*l2ux - l1ux*l2uz;
+                    double tvz = l1ux*l2uy - l1uy*l2ux;
+                    double tvm2 = tvx*tvx + tvy*tvy + tvz*tvz;
+                    if (tvm2 > 0.0) {
+                        double invm = 1.0 / Math.sqrt(tvm2);
+                        tvx *= invm; tvy *= invm; tvz *= invm;
+                        double dot = l1ux*l2ux + l1uy*l2uy + l1uz*l2uz;
+                        if (dot > 1.0) dot = 1.0;
+                        if (dot < -1.0) dot = -1.0;
+                        double angD = fastAcosDev(dot)*RAD2DEG - leverAng;
+                        double tmag = fracLT * DEG2RAD * angD / ((1.0/l1BRy + 1.0/l2BRy) * dt);
+                        jointTorqueSum.set(l1_3,     (float)((double) jointTorqueSum.get(l1_3)     + tvx*tmag));
+                        jointTorqueSum.set(l1_3 + 1, (float)((double) jointTorqueSum.get(l1_3 + 1) + tvy*tmag));
+                        jointTorqueSum.set(l1_3 + 2, (float)((double) jointTorqueSum.get(l1_3 + 2) + tvz*tmag));
+                        jointTorqueSum.set(l2_3,     (float)((double) jointTorqueSum.get(l2_3)     - tvx*tmag));
+                        jointTorqueSum.set(l2_3 + 1, (float)((double) jointTorqueSum.get(l2_3 + 1) - tvy*tmag));
+                        jointTorqueSum.set(l2_3 + 2, (float)((double) jointTorqueSum.get(l2_3 + 2) - tvz*tmag));
+                    }
+                }
+            }
+
+            // Body reaction — 1-step lag in device-resident nodeBodyReact (SET, not RMW;
+            // the node body slot is single-writer here and host-zeroed by packRange each
+            // step). Apply PREVIOUS step's value, store THIS step's. Same stiff-stability
+            // measure as dimerCohesionKernel.
+            int rb = b * 6;
+            jointForceSum.set(b3,     nodeBodyReact.get(rb));
+            jointForceSum.set(b3 + 1, nodeBodyReact.get(rb + 1));
+            jointForceSum.set(b3 + 2, nodeBodyReact.get(rb + 2));
+            jointTorqueSum.set(b3,     nodeBodyReact.get(rb + 3));
+            jointTorqueSum.set(b3 + 1, nodeBodyReact.get(rb + 4));
+            jointTorqueSum.set(b3 + 2, nodeBodyReact.get(rb + 5));
+            nodeBodyReact.set(rb,     (float) accBFx);
+            nodeBodyReact.set(rb + 1, (float) accBFy);
+            nodeBodyReact.set(rb + 2, (float) accBFz);
+            nodeBodyReact.set(rb + 3, (float) accBTx);
+            nodeBodyReact.set(rb + 4, (float) accBTy);
+            nodeBodyReact.set(rb + 5, (float) accBTz);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Move kernel — sums the CPU-contributed forceSum and the device-side
     // joint-delta buffer to get the complete per-Thing force/torque, then
     // generates Brownian inline via Wang hash and integrates pose.
@@ -3391,6 +3699,16 @@ public class GPUMoveThing {
         cohParams        = ensureFloatArray(cohParams, 8);
         cohCounts        = ensureIntArray(cohCounts, 3);
 
+        // Node-path Stage 2 — per-node CSR (nodeCap = slotCap; nodes ≤ thingCt) +
+        // flat singlet/dimer records (singCap = dimCap = myoCap; node myosins ≤ myoCt).
+        nodeCsr        = ensureIntArray(nodeCsr,        slotCap * 5);
+        nodeSingRod    = ensureIntArray(nodeSingRod,    myoCap);
+        nodeSingOff    = ensureFloatArray(nodeSingOff,  myoCap * 3);
+        nodeDimSlots   = ensureIntArray(nodeDimSlots,   myoCap * 5);
+        nodeDimOff     = ensureFloatArray(nodeDimOff,   myoCap * 3);
+        nodeBodyReact  = ensureFloatArray(nodeBodyReact, slotCap * 6);
+        nodeParams     = ensureFloatArray(nodeParams, 8);
+
         params      = ensureFloatArray(params, 2);
         jointParams = ensureFloatArray(jointParams, 13);
         chainParams = ensureFloatArray(chainParams, 7);
@@ -3518,7 +3836,7 @@ public class GPUMoveThing {
         }
         TaskGraph tg = new TaskGraph("chained")
             .transferToDevice(DataTransferMode.FIRST_EXECUTION,
-                              coord, uVec, yVec, soaLengthArr, cohBodyReact)
+                              coord, uVec, yVec, soaLengthArr, cohBodyReact, nodeBodyReact)
             .transferToDevice(DataTransferMode.EVERY_EXECUTION,
                               poseDeltaIdx, poseDeltaCount,
                               poseDeltaCoord, poseDeltaUVec, poseDeltaYVec, poseDeltaLength,
@@ -3538,6 +3856,8 @@ public class GPUMoveThing {
                               motorWriteback, motorForceParams,
                               cohSlots, cohFlags, cohOffsetX,
                               cohBodyDimStart, cohBodyDimCount, cohParams, cohCounts,
+                              nodeCsr, nodeSingRod, nodeSingOff,
+                              nodeDimSlots, nodeDimOff, nodeParams,
                               derivedEnd1, derivedEnd2, derivedZVec,
                               derivedYVecOrtho, derivedTransXTox,
                               jointParams, chainParams, params, counts);
@@ -3756,6 +4076,19 @@ public class GPUMoveThing {
         // across that body's dimers, and writes the body's jointForce/Torque slot exactly
         // once (single writer → no race). The earlier host bridge (cohBodyForce/Torque +
         // packCohesion gather, 1-step lagged) is retired.
+
+        // Node-path Stage 2 (2026-06-12): protein-node surface tethers + node-dimer
+        // internal cohesion, from resident pose. AFTER dimerCohesion (rod-slot writes
+        // visible), BEFORE move (rod/lever/node-body-slot writes land before integration).
+        // No-op when nodeTetherCt==0 (no device-eligible nodes / BOA_NODE_GPU=0).
+        tg = tg.task("nodeTether",
+                  GPUMoveThing::nodeTetherKernel,
+                  coord, uVec, yVec, soaLengthArr,
+                  nodeCsr, nodeSingRod, nodeSingOff,
+                  nodeDimSlots, nodeDimOff,
+                  bTransGam, bRotGam,
+                  jointForceSum, jointTorqueSum,
+                  nodeBodyReact, nodeParams);
 
         tg = tg.task("move",
                   SOA_POSE ? GPUMoveThing::moveThingKernelSoA
@@ -3991,6 +4324,13 @@ public class GPUMoveThing {
         WorkerGrid cohesionWorker = new WorkerGrid1D(myoCap);
         cohesionWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
         gridScheduler.addWorkerGrid("chained.dimerCohesion", cohesionWorker);
+
+        // Node-path Stage 2: one thread per node-body slot (range = nodeCsr.getSize()/5
+        // = slotCap). Block pinned to 64 (the 701 register-overrun lesson — never leave a
+        // parallel task's block defaulted).
+        WorkerGrid nodeTetherWorker = new WorkerGrid1D(slotCap);
+        nodeTetherWorker.setLocalWork(JOINTS_KERNEL_BLOCK_SIZE, 1, 1);
+        gridScheduler.addWorkerGrid("chained.nodeTether", nodeTetherWorker);
 
         // Phase 4 prep — derived-field kernel: one thread per move slot.
         WorkerGrid derivedWorker = new WorkerGrid1D(slotCap);
@@ -4946,6 +5286,16 @@ public class GPUMoveThing {
                     continue;
                 }
                 rule = RULE_MINIFIL;
+            } else if (nodeDeviceEligible(t)) {
+                // Node-path Stage 2 (2026-06-12) — the ProteinNode BODY is a device-
+                // integrated free sphere, same move/derived kernel path as the rods.
+                // Its per-axis fixed-frame movement restriction (xMove/yMove/zMove)
+                // is honored via velMask below; its surface tethers + node-dimer
+                // internal cohesion move to the nodeTether kernel (with the CPU
+                // keepMyosin*OnSurface / enforceParallel gated off in lockstep).
+                // Body-frame restriction (bYMove) and node birth/death are deferred
+                // (NODE_PATH_SCOPING §4); both are absent in the contractility assay.
+                rule = RULE_NODE;
             } else {
                 if (cn < cpuFallback.length) cpuFallback[cn++] = t;
                 continue;
@@ -4961,15 +5311,27 @@ public class GPUMoveThing {
             t.gpuHandled       = true;
             thingNumberToMoveSlot[t.myThingNumber] = n;
 
+            // velMask = per-axis fixed-frame movement enable. 1 for all but a
+            // RULE_NODE whose xMove/yMove/zMove restrict motion (the move kernel
+            // applies velMask in the fixed frame, exactly where ProteinNode.moveThing
+            // applies the xMove/yMove/zMove gates). Body-frame bYMove is NOT expressible
+            // here (deferred; the assay node is fully mobile).
+            float vmX = 1.0f, vmY = 1.0f, vmZ = 1.0f;
+            if (rule == RULE_NODE) {
+                ProteinNode pn = (ProteinNode) t;
+                vmX = pn.xMove ? 1.0f : 0.0f;
+                vmY = pn.yMove ? 1.0f : 0.0f;
+                vmZ = pn.zMove ? 1.0f : 0.0f;
+            }
             if (SOA_POSE) {
-                velMask.set(n,                1.0f);
-                velMask.set(n + slotCap,      1.0f);
-                velMask.set(n + 2 * slotCap,  1.0f);
+                velMask.set(n,                vmX);
+                velMask.set(n + slotCap,      vmY);
+                velMask.set(n + 2 * slotCap,  vmZ);
             } else {
                 int i3 = n * 3;
-                velMask.set(i3,     1.0f);
-                velMask.set(i3 + 1, 1.0f);
-                velMask.set(i3 + 2, 1.0f);
+                velMask.set(i3,     vmX);
+                velMask.set(i3 + 1, vmY);
+                velMask.set(i3 + 2, vmZ);
             }
 
             n++;
@@ -5695,6 +6057,100 @@ public class GPUMoveThing {
     }
 
     // -------------------------------------------------------------------------
+    // Node-path Stage 2 (2026-06-12) — pack per-node surface-tether + node-dimer
+    // records for the nodeTether kernel. One per-node CSR over flat singlet/dimer
+    // record arrays. A node is packed only when its body is GPU-handled (RULE_NODE,
+    // = device-eligible); its myosins'/dimers' rod/lever sub-Things must also be
+    // GPU-handled (slots ≥ 0) or the record is skipped (that myosin's tether stays
+    // CPU — but in the assay all node myosins are device-handled). The body-frame
+    // attach offsets (myoPtsInx / myoDimerPtsInx) are packed as constants; the kernel
+    // applies the full body→world rotation each step. The CPU tethers + node-dimer
+    // enforceParallel are gated off in lockstep (ProteinNode.tethersOnDevice /
+    // MyosinDimer.nodeCohesionOnDevice), so each force is applied exactly once.
+    // -------------------------------------------------------------------------
+    private static void packNodeTethers() {
+        int N = slotCount;
+        int sj = 0;   // flat singlet record cursor
+        int dj = 0;   // flat dimer record cursor
+        int b  = 0;   // packed-node cursor
+        int nodeCap = nodeCsr.getSize() / 5;
+        int singCap = nodeSingRod.getSize();
+        int dimCap  = nodeDimSlots.getSize() / 5;
+        if (NODE_GPU_ENABLED) {
+            ProteinNode[] nodes = ProteinNode.theNodes;
+            int nodeCt = ProteinNode.nodeCt;
+            for (int m = 0; m < nodeCt && b < nodeCap; m++) {
+                ProteinNode node = nodes[m];
+                if (node == null || node.removeMe || !node.gpuHandled) continue;
+                int bIdx = node.myThingNumber;
+                if (bIdx < 0 || bIdx >= thingNumberToMoveSlot.length) continue;
+                int bs = thingNumberToMoveSlot[bIdx];
+                if (bs < 0 || bs >= N) continue;   // node body not GPU-handled this step
+
+                int singStart = sj;
+                for (int i = 0; i < node.myoCt && sj < singCap; i++) {
+                    Myosin myo = node.myosins[i];
+                    if (myo == null || myo.removeMe || myo.myoRod == null) continue;
+                    int rs = cohSlotOf(myo.myoRod);
+                    if (rs < 0) continue;          // rod not GPU-handled
+                    nodeSingRod.set(sj, rs);
+                    Pt3D off = node.myoPtsInx[i];
+                    int o3 = sj * 3;
+                    nodeSingOff.set(o3,     (float) off.x);
+                    nodeSingOff.set(o3 + 1, (float) off.y);
+                    nodeSingOff.set(o3 + 2, (float) off.z);
+                    sj++;
+                }
+                int singCount = sj - singStart;
+
+                int dimStart = dj;
+                for (int i = 0; i < node.myoDimerCt && dj < dimCap; i++) {
+                    MyosinDimer dimer = node.myodimers[i];
+                    if (dimer == null || dimer.removeMe || !dimer.parallel) continue;
+                    Myosin myo1 = dimer.myo1, myo2 = dimer.myo2;
+                    if (myo1 == null || myo2 == null || myo1.removeMe || myo2.removeMe) continue;
+                    int r1s = cohSlotOf(myo1.myoRod);
+                    int r2s = cohSlotOf(myo2.myoRod);
+                    int l1s = cohSlotOf(myo1.myoLever);
+                    int l2s = cohSlotOf(myo2.myoLever);
+                    if (r1s < 0 || r2s < 0 || l1s < 0 || l2s < 0) continue;
+                    int d5 = dj * 5;
+                    nodeDimSlots.set(d5, r1s); nodeDimSlots.set(d5 + 1, r2s);
+                    nodeDimSlots.set(d5 + 2, l1s); nodeDimSlots.set(d5 + 3, l2s);
+                    int flags = (myo1.myoMotor.onFil && myo2.myoMotor.onFil) ? 2 : 0;
+                    nodeDimSlots.set(d5 + 4, flags);
+                    Pt3D off = node.myoDimerPtsInx[i];
+                    int o3 = dj * 3;
+                    nodeDimOff.set(o3,     (float) off.x);
+                    nodeDimOff.set(o3 + 1, (float) off.y);
+                    nodeDimOff.set(o3 + 2, (float) off.z);
+                    dj++;
+                }
+                int dimCount = dj - dimStart;
+
+                if (singCount > 0 || dimCount > 0) {
+                    int c5 = b * 5;
+                    nodeCsr.set(c5,     bs);
+                    nodeCsr.set(c5 + 1, singStart);
+                    nodeCsr.set(c5 + 2, singCount);
+                    nodeCsr.set(c5 + 3, dimStart);
+                    nodeCsr.set(c5 + 4, dimCount);
+                    // Zero this node's jointForce/Torque body slot host-side (defensive;
+                    // packRange already zeros every packed slot — the kernel SET-writes
+                    // the lagged reaction here, so a stray nonzero would be overwritten,
+                    // but keep parity with packCohesion).
+                    int bs3 = bs * 3;
+                    jointForceSum.set(bs3, 0f); jointForceSum.set(bs3 + 1, 0f); jointForceSum.set(bs3 + 2, 0f);
+                    jointTorqueSum.set(bs3, 0f); jointTorqueSum.set(bs3 + 1, 0f); jointTorqueSum.set(bs3 + 2, 0f);
+                    b++;
+                }
+            }
+        }
+        nodeTetherCt = b;
+        nodeParams.set(7, (float) nodeTetherCt);   // B for the kernel (count carried in params)
+    }
+
+    // -------------------------------------------------------------------------
     // Motor-force writeback bridge (Phase 2 F8/F9/F10, 2026-06-03).
     //
     // Drains motorWriteback (per-Myosin forceMag, forceDotFil) into the
@@ -5963,6 +6419,12 @@ public class GPUMoveThing {
                 // MyoMiniFilament.moveThing() bForceSum.inc(scale, randForces).
                 if (sMiniFilBrownianOff) { tScale = 0f; rScale = 0f; }
                 else { tScale = sMiniFilBrownian; rScale = sMiniFilBrownian; }
+            } else if (rule == RULE_NODE) {
+                // Node body Brownian = raw free-body (coefficient 1.0), matching the
+                // CPU ProteinNode.moveThing() bForceSum.inc(randForces) (no extra
+                // scale), hard-off via Env.nodeBrownianMotionOff.
+                if (Env.nodeBrownianMotionOff) { tScale = 0f; rScale = 0f; }
+                else { tScale = 1.0f; rScale = 1.0f; }
             } else {  // RULE_LEVER
                 tScale = 0f;
                 rScale = 0f;
@@ -6067,6 +6529,9 @@ public class GPUMoveThing {
             } else if (rule == RULE_MINIFIL) {
                 if (sMiniFilBrownianOff) { tScale = 0f; rScale = 0f; }
                 else { tScale = sMiniFilBrownian; rScale = sMiniFilBrownian; }
+            } else if (rule == RULE_NODE) {
+                if (Env.nodeBrownianMotionOff) { tScale = 0f; rScale = 0f; }
+                else { tScale = 1.0f; rScale = 1.0f; }
             } else {  // RULE_LEVER
                 tScale = 0f;
                 rScale = 0f;
@@ -6393,6 +6858,19 @@ public class GPUMoveThing {
         cohParams.set(6, (float) Env.myoMiniFilAlign.getValue());
         cohParams.set(7, 0.0f);
         packCohesion();
+
+        // Node-path Stage 2 — surface-tether + node-dimer params + per-node pack.
+        // attnForce = 0.4 (the hard-coded ProteinNode.keepMyosin*OnSurface constant);
+        // numNodeMyos is the singlet-force divisor (the Parameter value, as on CPU).
+        nodeParams.set(0, (float) Env.deltaT.getValue());
+        nodeParams.set(1, 0.4f);
+        nodeParams.set(2, (float) Env.numNodeMyos.getValue());
+        nodeParams.set(3, (float) Env.myoDimerFracMove.getValue());
+        nodeParams.set(4, (float) Env.myoDimerLeverFracMoveTorq.getValue());
+        nodeParams.set(5, (float) MyosinDimer.leverAngle);
+        nodeParams.set(6, (float) Env.myoRodLength.getValue());
+        nodeParams.set(7, 0.0f);
+        packNodeTethers();
 
         counts.set(0, slotCount);
         counts.set(1, stepCounter);

@@ -143,7 +143,8 @@ public class BoxOfActin {
 		FilSegment anchorSegA, anchorSegB;  // outer (pinned) terminal segment of each
 		Pt3D buildDirA = new Pt3D(), buildDirB = new Pt3D(); // unit vector pointing INWARD from each anchor
 		Pt3D anchorPtA = new Pt3D(), anchorPtB = new Pt3D();  // pinned endpoint locations (box walls, inset)
-		MyoMiniFilament mini;               // null in the no-motor control
+		MyoMiniFilament mini;               // null in the no-motor control (and in the node assay)
+		ProteinNode[] nodes;                // node load source (node contractility assay); null in the minifilament assay
 		// Axial force at each anchor, projected onto the inward buildDir: positive = contractile.
 		double tensionA_pN = 0, tensionB_pN = 0;
 		Pt3D forceA = new Pt3D(), forceB = new Pt3D(); // raw lab-frame net force on each anchor segment (N)
@@ -275,8 +276,17 @@ public class BoxOfActin {
 		// so it launches stand-alone like -bmManual (no param file required). Runs
 		// only when the flag activated the assay (param-file activation happens
 		// later in loadParamConfig, which then overrides any of these defaults).
-		if (Env.contractilityAssay.isActive()) {
+		if (Env.contractilityAssay.isActive() || Env.nodeContractilityAssay.isActive()) {
 			applyContractilityDefaults();
+			if (Env.nodeContractilityAssay.isActive()) {
+				applyNodeContractilityDefaults();
+				// Route the node assay through the shared contractility plumbing
+				// (per-step capture/accumulate, frame-output trigger, HUD/JSON,
+				// reporter). makeInitialThings dispatches the NODE builder first
+				// so makeContractilityAssay (the minifilament path) is never called.
+				Env.contractilityAssay.setActive(true);
+				Env.contractilityAssay.setValue(1.0);
+			}
 			Env.remote = true;
 			Env.paused = false;                  // headless: no client to send resume
 			Env.simOutsideBug.setActive(false);  // suppress Listeria bug + ActA
@@ -512,6 +522,16 @@ public class BoxOfActin {
 		if (Env.paramFile != null) { FileOps.loadParamConfig(Env.paramFile, false); }
 		if (Env.logFiles) { FileOps.remoteParamConfigSave(); }
 
+		// Node contractility assay activated via param file (rather than the -contractilityNode
+		// flag, which is parsed before this and handled in the begin() block above): ensure the
+		// shared contractility plumbing is on. A param-file config is self-contained, so the
+		// applyContractility*Defaults() are intentionally NOT re-run here (the file supplies the
+		// box/dt/turnover and node-myosin params itself), matching the minifilament assay.
+		if (Env.nodeContractilityAssay.isActive()) {
+			Env.contractilityAssay.setActive(true);
+			Env.contractilityAssay.setValue(1.0);
+		}
+
 		// Benchmark mode: zero all population parameters after param file (overrides whatever it set).
 		// makeInitialThings() already returns early in benchmark mode, so makeInitialFilaments /
 		// makeInitialMyoMiniFils / makeInitialProteinNodes are never reached.
@@ -692,6 +712,16 @@ public class BoxOfActin {
 					Env.numMyoDimersEachEndOfMiniFil.setValue(nd);
 					Env.numMyoDimersEachEndOfMiniFil.setActive(true);
 				}
+			}
+			if (args[i].equals("-contractilityNode") || args[i].equals("-bmContractileNode")) {
+				// Node analog of -contractility: the load source is protein node(s)
+				// carrying surface myosins instead of a bipolar minifilament. The flag
+				// activates the node assay; begin() then applies the shared contractility
+				// defaults + node-myosin defaults (applyNodeContractilityDefaults) and routes
+				// it through the shared stats/JSON/HUD/output plumbing. A -pf overrides
+				// individual params (loaded after, in begin()).
+				Env.nodeContractilityAssay.setActive(true);
+				Env.nodeContractilityAssay.setValue(1.0);
 			}
 			if (args[i].equals("-singleFilDiag")) {
 				// Phase 2 F3/F4 SingleFilDiag probe: pinned-ends bench chain
@@ -2021,6 +2051,10 @@ public class BoxOfActin {
 			MyosinDimer.DIAG_COHESION_DEVICE_CT, MyosinDimer.DIAG_COHESION_CPU_CT,
 			MyoMiniFilament.DIAG_BODYROD_DEVICE_CT, MyoMiniFilament.DIAG_BODYROD_CPU_CT,
 			MyoMiniFilament.DIAG_UPDATEMYOSINS_CT);
+		// Node-path Stage 2 force-exactly-once: the CPU node-surface tether must NOT
+		// run for device-classified nodes (reads 0 on the GPU node path).
+		System.out.printf("[NODE] cpuNodeTetherApplyCt=%d (must be 0 on GPU node path)%n",
+			GPUMoveThing.cpuNodeTetherApplyCt);
 		System.out.printf("[STATS] checkBugInsideFireCt=%d%n", FilSegment.DIAG_BUG_INSIDE_FIRE_CT);
 		System.out.printf("[STATS] addLinkForcesFireCt=%d%n", FilSegment.DIAG_ADDLINK_FIRE_CT);
 		System.out.printf("[STATS] addTorsionFireCt=%d%n", FilSegment.DIAG_ADDTORSION_FIRE_CT);
@@ -3118,6 +3152,10 @@ public class BoxOfActin {
 				Env.fracMove.getValue(), Env.fracR.getValue(), Env.fracMoveTorq.getValue(), deflFil.analyticDefl);
 			return;
 		}
+		if (Env.nodeContractilityAssay.isActive()) {
+				makeNodeContractilityAssay();
+				return;
+			}
 		if (Env.contractilityAssay.isActive()) {
 				makeContractilityAssay();
 				return;
@@ -3306,6 +3344,108 @@ public class BoxOfActin {
 		}
 	}
 
+	// Node-assay defaults (applied on a stand-alone -contractilityNode launch, on top of
+	// applyContractilityDefaults). Sets the carrier-node myosin population, radius, an
+	// effectively-infinite node lifetime (no stochastic death — clean isometric oracle), a
+	// dialed-down myosin thermal (avoid twirl, per the production prefs), and a still carrier
+	// body. Each value is overridden if a -pf supplies it (this runs before loadParamConfig).
+	private static void applyNodeContractilityDefaults() {
+		java.util.function.BiConsumer<Parameter,Double> force = (p, v) -> { p.setValue(v); p.setActive(true); };
+		force.accept(Env.numNodeMyos, 60.0);        // singlet myosins per carrier node (generous — see note)
+		force.accept(Env.numNodeMyoDimers, 30.0);   // dimers per carrier node
+		force.accept(Env.contractNodeRadius, 0.06); // bridging sphere, slightly above the default nodeRadius
+		force.accept(Env.contractNodeCount, 1.0);   // one sphere centred in the overlap bridges both filaments
+		force.accept(Env.contractNodeYOffset, 0.05);
+		force.accept(Env.nodeLifetime, 1.0e9);      // effectively immortal — no node death over the run
+		// CRITICAL: keep FULL myosin thermal (the global 1.0 default). Unlike the minifilament,
+		// whose end dimers are pre-positioned ON the two filaments, the node's surface myosins start
+		// at random radial points and must DIFFUSE to find the filaments. With the thermal dialed
+		// down (e.g. myoBrownianAttn=0.1) the heads freeze in place and NEVER bind -> zero tension.
+		// Thermal search is the essential enabler of the node bridge (validated empirically).
+		force.accept(Env.myoBrownianAttn, 1.0);
+		Env.nodeBrownianMotionOff = true;           // keep the carrier node BODY still (isometric); heads still search
+		System.out.println("[CONTRACT] -contractilityNode: node-assay defaults applied "
+			+ "(numNodeMyos=60, numNodeMyoDimers=30, contractNodeRadius=0.06 µm, 1 node, nodeLifetime=inf, "
+			+ "myoBrownianAttn=1.0 [thermal search ON — required for binding], node body Brownian OFF). Pass -pf to override.");
+	}
+
+	// Node analog of makeContractilityAssay(). The anti-parallel pinned-filament scaffold and
+	// the Pin registry are reused VERBATIM; only the load source differs — protein node(s)
+	// carrying surface myosins (numNodeMyos singlets + numNodeMyoDimers dimers) replace the
+	// bipolar minifilament. A single sphere centred in the overlap bridges both filaments: its
+	// +Y-side surface myosins capture filament A (at +yOff) and its -Y-side ones capture filament
+	// B (at -yOff); each head power-strokes toward its filament's plus end, pulling both anchors
+	// inward = contraction. Tension is read identically via captureContractilityTension().
+	public static void makeNodeContractilityAssay() {
+		contract = new ContractAssay();
+		pinRegistry.clear();
+
+		int n = Env.contractFilNSegs.getIntValue();
+		int monCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
+		double segLen = (monCt + 1) * FilSegment.halfmono; // µm
+		double Lfil = n * segLen;
+		double Lx = Env.boxXDim.getValue() / 2.0;
+		double margin = 0.10; // µm: inset the pinned plus end from the box wall (clean axial readout)
+		double anchorX = Lx - margin;
+		double yOff = Env.contractFilYOffset.getValue();
+		boolean rev = Env.contractReversePolarity.isActive();
+
+		// Filament A: body on +X side, pinned at +X wall, +yOff in Y. buildDir points inward (-X).
+		contract.buildDirA.setVals(-1, 0, 0);
+		Pt3D uVecA = rev ? new Pt3D(-1, 0, 0) : new Pt3D(1, 0, 0);
+		contract.anchorPtA.setVals(anchorX, yOff, 0);
+		contract.filA = FilSegment.makeStraightChain(n, contract.anchorPtA, contract.buildDirA, uVecA, true);
+		contract.anchorSegA = contract.filA[0];
+		int pinEndA = (Pt3D.Dot(contract.buildDirA, uVecA) > 0) ? 1 : 2;
+		pinRegistry.add(new Pin(contract.anchorSegA, pinEndA, contract.anchorPtA));
+
+		// Filament B: body on -X side, pinned at -X wall, -yOff in Y. buildDir points inward (+X).
+		contract.buildDirB.setVals(1, 0, 0);
+		Pt3D uVecB = rev ? new Pt3D(1, 0, 0) : new Pt3D(-1, 0, 0);
+		contract.anchorPtB.setVals(-anchorX, -yOff, 0);
+		contract.filB = FilSegment.makeStraightChain(n, contract.anchorPtB, contract.buildDirB, uVecB, true);
+		contract.anchorSegB = contract.filB[0];
+		int pinEndB = (Pt3D.Dot(contract.buildDirB, uVecB) > 0) ? 1 : 2;
+		pinRegistry.add(new Pin(contract.anchorSegB, pinEndB, contract.anchorPtB));
+
+		// Load source: protein node(s) carrying surface myosins, centred in the overlap (omitted
+		// in the no-motor control). numNodeMyos / numNodeMyoDimers are read at ProteinNode
+		// construction, so they must already be set (applyNodeContractilityDefaults or the -pf).
+		double r = Env.contractNodeRadius.getValue();
+		if (!Env.contractNoMotor.isActive()) {
+			int nodeCount = Math.max(1, Env.contractNodeCount.getIntValue());
+			double nodeYOff = Env.contractNodeYOffset.getValue();
+			contract.nodes = new ProteinNode[nodeCount];
+			if (nodeCount == 1) {
+				// One sphere at the overlap centre — bridges both filaments.
+				contract.nodes[0] = new ProteinNode(new Pt3D(0, 0, 0), r);
+			} else {
+				// Two (or more) spheres staggered in Y toward each filament (exploratory).
+				for (int k = 0; k < nodeCount; k++) {
+					double yc = (k % 2 == 0) ? nodeYOff : -nodeYOff;
+					contract.nodes[k] = new ProteinNode(new Pt3D(0, yc, 0), r);
+				}
+			}
+			Env.equilNodes.setValue(ProteinNode.nodeCt);  // freeze node number (no spurious add/remove)
+		}
+
+		double overlap = 2.0 * Lfil - 2.0 * anchorX; // central x-extent shared by both filaments
+		double nodeReach = r + Env.myoRodLength.getValue() + Env.myoLeverLength.getValue(); // surface myosin radial reach
+		int totalMyos = Env.numNodeMyos.getIntValue() + 2 * Env.numNodeMyoDimers.getIntValue();
+		System.out.printf("[CONTRACT][NODE] box X=%.3f µm (anchors at x=+/-%.3f, %.2f µm inset), %d-seg filaments, Lfil=%.3f µm%n",
+			Env.boxXDim.getValue(), anchorX, margin, n, Lfil);
+		System.out.printf("[CONTRACT][NODE] yOffset=+/-%.3f µm, overlap=%.3f µm, nodes=%d radius=%.3f µm, myo heads/node=%d, reach=%.3f µm, polarity=%s, motor=%s%n",
+			yOff, overlap, Env.contractNoMotor.isActive() ? 0 : Math.max(1, Env.contractNodeCount.getIntValue()),
+			r, totalMyos, nodeReach,
+			rev ? "REVERSED (plus ends inward)" : "normal (plus ends outward)",
+			Env.contractNoMotor.isActive() ? "OFF (control)" : "ON");
+		if (!Env.contractNoMotor.isActive() && nodeReach < yOff) {
+			System.out.printf("[CONTRACT][NODE][WARN] surface-myosin reach (%.3f µm) < filament Y offset (%.3f µm): "
+				+ "node myosins cannot reach the filaments. Increase contractNodeRadius or shrink contractFilYOffset.%n",
+				nodeReach, yOff);
+		}
+	}
+
 	// Read the net force on each pinned anchor segment, projected onto the inward buildDir
 	// (positive = contractile). Called after the per-step force gather, before the pin snaps the
 	// endpoint back: at that point forceSum on the anchor segment is exactly the reaction the pin
@@ -3344,7 +3484,7 @@ public class BoxOfActin {
 	// captureContractilityTension), so the averages are true time-averages.
 	private static void accumulateContractilityStats() {
 		if (contract == null) return;
-		contract.instBound = (contract.mini != null) ? contract.mini.countBoundMotors() : 0;
+		contract.instBound = contractBoundMotors();
 		double meanTension = 0.5 * (Math.abs(contract.tensionA_pN) + Math.abs(contract.tensionB_pN));
 
 		contract.statSamples++;
@@ -3364,6 +3504,25 @@ public class BoxOfActin {
 		if (meanTension > contract.peakTension) contract.peakTension = meanTension;
 		if (contract.instBound > contract.peakBound) contract.peakBound = contract.instBound;
 		if (contract.firstBindStep < 0 && contract.instBound > 0) contract.firstBindStep = Env.counter;
+	}
+
+	// Heads currently bound to actin, summed across whichever load source the assay uses
+	// (the minifilament's dimers, or the node(s)' singlets + dimers). Indifferent to the source.
+	private static int contractBoundMotors() {
+		if (contract == null) return 0;
+		if (contract.mini != null) return contract.mini.countBoundMotors();
+		if (contract.nodes != null) {
+			int c = 0;
+			for (ProteinNode nd : contract.nodes) if (nd != null && !nd.removeMe) c += nd.countBoundMotors();
+			return c;
+		}
+		return 0;
+	}
+
+	// True when the assay has a motor load source present (minifilament OR node(s)); false in
+	// the no-motor control. Used by ThreeJSWriter's hasMotor stats flag.
+	static boolean contractHasMotor() {
+		return contract != null && (contract.mini != null || contract.nodes != null);
 	}
 
 	// Cumulative mean helpers (used by the reporter and the frame writer).

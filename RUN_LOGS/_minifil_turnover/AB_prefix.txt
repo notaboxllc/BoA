@@ -1,0 +1,4 @@
+=== PRE-FIX A/B Thu Jun 11 05:26:30 PM PDT 2026 ===
+prefix_gpu_s1 rc=0 mBM=meanBoundMotors=1.728 desync= prefix_gpu_s1                      frames=101 segCt[first=196 last=541 peak=541 mean=526] len_nm[mean=197.2 sd=42.8 n=541] nanLen=0
+postfix_gpu_s1 rc=0 mBM=meanBoundMotors=2.110 desync=packRuleDesync=0 postfix_gpu_s1                     frames=101 segCt[first=198 last=547 peak=547 mean=535] len_nm[mean=196.7 sd=42.4 n=547] nanLen=0
+=== AB DONE Thu Jun 11 05:32:42 PM PDT 2026 ===

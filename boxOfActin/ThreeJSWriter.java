@@ -274,7 +274,7 @@ public class ThreeJSWriter {
                 BoxOfActin.contractAvgBound(), c.ewmaBound,
                 0.5 * (Math.abs(c.tensionA_pN) + Math.abs(c.tensionB_pN)),
                 BoxOfActin.contractAvgTension(), c.ewmaTension, c.peakTension,
-                c.firstBindStep, c.mini != null));
+                c.firstBindStep, BoxOfActin.contractHasMotor()));
             sb.append("}");
         }
 

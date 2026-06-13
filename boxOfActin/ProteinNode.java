@@ -323,6 +323,28 @@ public class ProteinNode extends Thing {
 		return null;
 	}
 	
+	// Number of this node's surface myosin heads currently bound to actin (onFil). Counts both
+	// the singlet myosins[] and the two heads of each dimer in myodimers[]. Mirror of
+	// MyoMiniFilament.countBoundMotors for the node contractility assay's boundMotors readout.
+	public int countBoundMotors () {
+		int count = 0;
+		for (int i=0;i<myoCt;i++) {
+			Myosin myo = myosins[i];
+			if (myo == null || myo.removeMe || myo.myoMotor == null) continue;
+			if (myo.myoMotor.onFil) count++;
+		}
+		for (int i=0;i<myoDimerCt;i++) {
+			MyosinDimer dimer = myodimers[i];
+			if (dimer == null || dimer.removeMe) continue;
+			Myosin[] myos = { dimer.myo1, dimer.myo2 };
+			for (Myosin myo : myos) {
+				if (myo == null || myo.removeMe || myo.myoMotor == null) continue;
+				if (myo.myoMotor.onFil) count++;
+			}
+		}
+		return count;
+	}
+
 	public void makeMyosinSinglets () {
 		for (int i=0;i<myoCt;i++) {
 			myoPtsInx[i] = Pt3D.RandomUnitVec(currentScratch().rng);
@@ -371,6 +393,9 @@ public class ProteinNode extends Thing {
 		Pt3D curAttPt;
 		Myosin curMyo;
 		Pt3D myoAttPt;
+		// Force-exactly-once audit: this CPU tether must NOT run for device-classified
+		// nodes (gated off in updateMyosins). Reads 0 on the GPU node path.
+		if (myoCt > 0) GPUMoveThing.cpuNodeTetherApplyCt++;
 		for (int i=0;i<myoCt;i++) {
 			curMyo = myosins[i];
 			curAttPt = myoPtsInX[i];
@@ -395,10 +420,22 @@ public class ProteinNode extends Thing {
 		}
 	}
 	
+	// Node-path Stage 2 (2026-06-12): true iff this node's surface tethers (+ its
+	// node-dimer internal cohesion) run on the device nodeTether kernel this step.
+	// Matches GPUMoveThing.nodeDeviceEligible's outcome: the node is device-classified
+	// (gpuHandled set by classifyThings → RULE_NODE). When true the CPU tethers below
+	// are skipped so each force is applied exactly once (the device kernel reads FRESH
+	// resident pose; the CPU path would read stale host pose on the residency path).
+	public boolean tethersOnDevice () {
+		return Env.useGPU && GPUMoveThing.NODE_GPU_ENABLED && gpuHandled
+		    && getClass() == ProteinNode.class;
+	}
+
 	public void updateMyosins () {
+		if (tethersOnDevice()) { return; }   // device nodeTether kernel handles tethers + dimer cohesion
 		updateMyosinPositions();
 		keepMyosinsOnSurface();
-		
+
 		updateMyosinDimerPositions();
 		keepMyosinDimersOnSurface();
 	}

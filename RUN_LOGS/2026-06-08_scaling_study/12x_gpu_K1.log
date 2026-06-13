@@ -1,0 +1,63 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+[TURNOVER] global biochem cadence ON (biochem phase-aligned; GPU pose pull at biochem+output cadence)
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/RUN_LOGS/2026-06-08_scaling_study/12x_gpu_K1.pf...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.0025
+     Parameter assigned: toFileInterval set to 5000
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 48.497
+     Parameter assigned: boxYDim set to 48.497
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 4800
+     Parameter assigned: minFilLength set to 1.0
+     Parameter assigned: maxFilLength set to 3.0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 500.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=2775050663472773974 (BOA_RNG_SEED unset)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 244; xBinWidth = 0.2 µm
+nYBins = 244; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 244 x 244 x 4 cells (0.2 µm each)
+[20:12] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[20:12]   ON   ThingStep Threads
+[20:12]   ON   ThingBrownian Threads
+[20:12]   ON   Myosin Threads
+[20:12]   OFF  MyoDimer Threads
+[20:12]   OFF  Protein Node Threads
+[20:12]   OFF  MyoMiniFil Threads
+[20:12]   OFF  Chamber Myo Threads
+[20:12]   OFF  Chamber MyoDimer Threads
+[20:12]   ON   Mesh Threads
+[20:12]   ON   Ck Mesh Threads
+[20:12]   ON   Ck Mots Threads
+[20:12]   OFF  XLink Threads
+[20:12]   OFF  Arp23 Threads
+[20:12]   OFF  NodeLink Threads
+[20:12]   OFF  Membrane Node Threads
+[20:12]   OFF  ActA Threads
+[20:12]   ON   MotorBindGrid3D Fill
+[20:12] [phase-plan] 7 active, 10 inert (will skip dispatch)
+[POSE_CHURN] sized POSE_DELTA_CAP=38408 (initialFilaments=4800, peakModel=9602, safety=4x, floor=8192)
+GPUMoveThing: slotCap=7065478 myoCap=2351958 moveBlock=64 jointBlock=64 runSeed=-586083280 nWorkers=16
+	[TornadoVM-PTX-JNI] ERROR : cuLaunchKernel -> Returned: 701
