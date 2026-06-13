@@ -134,6 +134,30 @@ public class GPUMoveThing {
         if (fp != null) { try { v = Integer.parseInt(fp.trim()); } catch (NumberFormatException e) { v = -1; } }
         FILFIL_PARITY_STEP = v;
     }
+    // A2 (2026-06-12, GRIDSCATTER_RESIDENCY) — parallel chunk scatter for the
+    // bind-grid build. gridScatter was the residual SERIAL kernel left by the
+    // gridAssemble parallelization (a single device thread — the void-only PTX
+    // atomicAdd has no fetch-add for a parallel per-cell write cursor). It is
+    // the only superlinear kernel (3.1→29.9 ms over 1×→8×) and ~90% of device
+    // kernel time at 8×; a single GPU thread pays full, unhidden memory latency
+    // on every scattered write. PARALLEL_SCATTER replaces it with a per-cell-
+    // chunk-owned parallel scatter: each thread owns a disjoint linear cell
+    // range and uses cellCount[cellId] as a private (race-free, atomic-free)
+    // write cursor, visiting segments in index order so the CSR is BIT-IDENTICAL
+    // to the serial scatter (offsets + within-cell order). Force the serial
+    // scatter (the A/B oracle) with BOA_SERIAL_SCATTER=1; tune the cell-chunk
+    // size with BOA_SCATTER_CHUNK (default 64 — occupancy vs early-out tradeoff).
+    public static final boolean PARALLEL_SCATTER;
+    public static final int     SCATTER_CHUNK;
+    static {
+        String ss = System.getenv("BOA_SERIAL_SCATTER");
+        PARALLEL_SCATTER = !(ss != null && (ss.equals("1") || ss.equalsIgnoreCase("true")));
+        int sc = 64;
+        String scs = System.getenv("BOA_SCATTER_CHUNK");
+        if (scs != null) { try { sc = Integer.parseInt(scs.trim()); } catch (NumberFormatException e) {} }
+        if (sc < 1) sc = 1;
+        SCATTER_CHUNK = sc;
+    }
     static {
         String sgr = System.getenv("BOA_SERIAL_GRID");
         PARALLEL_GRID = !(sgr != null && (sgr.equals("1") || sgr.equalsIgnoreCase("true")));
@@ -3633,11 +3657,18 @@ public class GPUMoveThing {
                     .task("gridScanAdd",
                           GPUMotorBinding::gridScanAddKernel,
                           bindGridDims, bindGridCellOffsets,
-                          bindGridCellContents, bindCellCount, bindChunkSum)
-                    .task("gridScatter",
+                          bindGridCellContents, bindCellCount, bindChunkSum);
+                if (PARALLEL_SCATTER) {
+                    tg = tg.task("gridScatter",
+                          GPUMotorBinding::gridScatterChunkKernel,
+                          bindSegBbox, bindGridDims, bindCounts,
+                          bindGridCellOffsets, bindGridCellContents, bindCellCount);
+                } else {
+                    tg = tg.task("gridScatter",
                           GPUMotorBinding::gridScatterKernel,
                           bindSegBbox, bindGridDims, bindCounts,
                           bindGridCellOffsets, bindGridCellContents, bindCellCount);
+                }
             } else {
                 tg = tg
                     .task("gridAssemble",
@@ -4030,9 +4061,21 @@ public class GPUMoveThing {
                 gridScanAddWorker.setLocalWork(B, 1, 1);
                 gridScheduler.addWorkerGrid("chained.gridScanAdd", gridScanAddWorker);
 
-                WorkerGrid gridScatterWorker = new WorkerGrid1D(1);
-                gridScatterWorker.setLocalWork(1, 1, 1);
-                gridScheduler.addWorkerGrid("chained.gridScatter", gridScatterWorker);
+                if (PARALLEL_SCATTER) {
+                    // A2 parallel chunk scatter: one thread per cell-chunk. Pad
+                    // global up to a block multiple (the WorkerGrid drops the
+                    // remainder partial block); the @Parallel ch<numChunks bound
+                    // self-guards the padding threads.
+                    int gNumScatterChunks = (gTotalCells + SCATTER_CHUNK - 1) / SCATTER_CHUNK;
+                    int scatterGlobal = ((gNumScatterChunks + B - 1) / B) * B;
+                    WorkerGrid gridScatterWorker = new WorkerGrid1D(scatterGlobal);
+                    gridScatterWorker.setLocalWork(B, 1, 1);
+                    gridScheduler.addWorkerGrid("chained.gridScatter", gridScatterWorker);
+                } else {
+                    WorkerGrid gridScatterWorker = new WorkerGrid1D(1);
+                    gridScatterWorker.setLocalWork(1, 1, 1);
+                    gridScheduler.addWorkerGrid("chained.gridScatter", gridScatterWorker);
+                }
             }
         }
 

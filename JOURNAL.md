@@ -1,5 +1,52 @@
 # BoxOfActin Project Journal
 
+## 2026-06-12 — A2: parallelized the serial `gridScatter` bind-grid kernel (branch `benchmark-contractile-dense`)
+
+`V1_FINISH_LINE.md` item **A2**. Full writeup `GRIDSCATTER_RESIDENCY.md`; data
+`RUN_LOGS/2026-06-12_gridscatter_a2/`. Not merged.
+
+**Target.** `gridScatter` was the last serial device kernel and the only superlinear
+one (v4 Part E: 3.13→14.70→29.91 ms over 1×/4×/8×, ~90 % of kernel time at 8×) — the
+counting-sort scatter the `gridAssemble` parallelization left on a single thread
+(`WorkerGrid1D(1)`) because the void-only PTX `atomicAdd` has no fetch-add for a
+parallel write cursor.
+
+**Phase 1 (diagnose-first).** Superlinear driver = **single-thread memory latency,
+not work**: ~200 ns/scattered-write (a lone GPU thread can't hide global-memory
+latency) over a cache footprint growing ∝ box area. The key probe — **cell-crossing
+rate** (new host `CrossProbe`, CPU run, AABB→cell replica of `segBboxKernelResident`)
+— shows the rebuild is ~97 % redundant: only **3.1 % of segments change their AABB
+cell-set per step** (3.14 % @1×, 3.17 % @8× — scale-invariant; center-cell 1.6 %; avg
+2.82 cells/seg; 0.3 % of steps have 0 crossers). Low crossing ⇒ the prompt's
+incremental signal — **but incremental is NOT expressible bit-identically here**:
+compact-CSR offsets shift globally on any cell-count change (a single crosser
+invalidates ~half the contents array → no win), and the only locally-updatable layout
+(fixed-cap-per-cell bins) reintroduces the exact fetch-add insertion race that forced
+serial in the first place. So the expressible driver is the serial one → **parallelize**.
+
+**Phase 2 (fix).** `gridScatterChunkKernel` — per-cell-chunk-owned parallel scatter:
+the linear cell-ID space is partitioned into fixed-size chunks, one thread per chunk
+owning a disjoint range `[lo,hi)`. Each thread walks all segments **in index order**,
+writing a seg's ID into every AABB cell in its range via `cellCount[cellId]` as a
+**private** cursor — cells in `[lo,hi)` are touched by exactly one thread → race-free
+**without atomics**. In-order traversal ⇒ within-cell order matches serial ⇒ CSR is
+**bit-identical**. Linear-cell-span early-out skips far segments. Default chunk 64
+(`BOA_SCATTER_CHUNK`); serial scatter retained as A/B oracle behind
+`BOA_SERIAL_SCATTER=1`. Mirrors the `gridAssemble` atomic-free per-owner-partition
+playbook; +0 tasks, no new buffers (chunk size carried in `gridDims[4]`).
+
+**Validation.** (1) **CSR bit-identical** (`GridBuildParityTest`, device chunk-scatter
+vs serial host oracle): `offset/count/set/orderMismatch=0` at 1× (51×51×4, S=6000,
+seeds 1/2/3) and 8× (143×143×4, S=48000, seeds 1/2), chunks 32/64/512. (2)
+**Physics-neutral** (GPU serial vs parallel, same fixture): segs +0.10 %/+0.14 %,
+activeLinks 267→271 / 2169→2224 (within the documented run-to-run spread),
+`crosslinkFireCt`=6 identical, overflow=0, NaN=0. (3) **Re-measure**: gridScatter
+**8× 26.66→7.73 ms (3.45×)**, 1× 2.80→1.34 (2.08×); slope 9.5×→5.8× (reduced, not
+killed — residual is the chunk scan's ∝N² with early-out). End-to-end **8× ms/step
+251.3→226.8 (−24.6); GPU÷CPU 8× 0.777→0.701** (CPU 8× = 323.6) — GPU wins wider at
+dense. 1× GPU÷CPU 1.218→1.195 (scatter is a small fraction there; GPU still loses 1×).
+8× chunk sweep flat near 32–64 (par32 7.60 best, par256 10.59). Nothing merged.
+
 ## 2026-06-12 — A1: gated the redundant per-step pose-audit scan in `onStepStart` (branch `benchmark-contractile-dense`)
 
 Follow-up to the copy-out fix (`V1_FINISH_LINE.md` A1). Full writeup `RECOMPUTE_RESIDENCY.md`;

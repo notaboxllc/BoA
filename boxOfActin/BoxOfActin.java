@@ -1534,6 +1534,10 @@ public class BoxOfActin {
 				// 2026-06-02 Phase 2 F3/F4 — single-filament chain straightness
 				// probe — no-op when -singleFilDiag / BOA_DIAG_SINGLE_FIL unset.
 				SingleFilDiag.sample();
+				// A2 cell-crossing diagnostic — no-op unless BOA_CROSS_PROBE set.
+				// Fresh host pose (CPU run) -> measures the per-step grid
+				// cell-crossing rate that drives the gridScatter rebuild.
+				CrossProbe.sample();
 
 				// C3: safe-point — pause check (with inspect drain while waiting),
 				// kill check, then final inspect drain. Order: pause > kill > inspect.
@@ -1943,6 +1947,7 @@ public class BoxOfActin {
 		SingleMyoDiag.dump();
 		// step() per-force profile — no-op when BOA_STEP_PROFILE unset.
 		StepProfiler.report();
+		CrossProbe.report();
 		System.out.printf("[STATS] bindEvents=%d%n", MyoMotor.totalBindEvents);
 		// Fil–fil crosslink: total links formed (the parity metric, both paths) +
 		// the device broad-phase activity / FILSEG_MESH-skip confirmation.
