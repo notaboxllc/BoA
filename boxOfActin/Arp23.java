@@ -147,6 +147,7 @@ public class Arp23 {
 		motherFil = mFil;
 		daughterFil = dFil;
 		daughterFil.motherFil = motherFil;  // need this if want to connect brownian motion
+		daughterFil.calculateProperties();  // refresh drag now that it's a daughter (applies the daughter-only drag floor immediately, no 1-step lag)
 		momLoc = bLoc;
 		
 		updatePts();

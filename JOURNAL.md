@@ -1,5 +1,40 @@
 # BoxOfActin Project Journal
 
+## 2026-06-14 — Arp2/3 branch spin fixed via daughter-scoped drag floor
+
+Branched filaments spun / overshot at `dt=1e-5` (explicit-Euler stiffness of the Arp2/3
+junction); only `dt=1e-6` was stable (10× cost). Root cause: the translational
+(`applyTransForce`) and torsional (`applyTorsionForce`) constraints are solved sequentially as
+explicit forces and fight each other → sustained rotation (a coupled-constraint pathology;
+deep-research confirmed the rigorous fix is a *simultaneous* implicit/Lagrange solve — Cytosim/
+aLENS — deferred as Path B).
+
+**What worked (the fix): a daughter-scoped drag floor.** New `Env.filDragMinMonomers` (INT,
+mutable, **default 30 = production unchanged**). In `FilSegment.calculateProperties` the effective
+rod length floor is raised **only for Arp2/3 daughters** (`motherFil != null`); `Arp23.set` now
+calls `daughterFil.calculateProperties()` so it applies immediately. Because `bRotGam ∝ L³`,
+raising the floor over-damps daughter *rotation* (the spin mode) far more than translation — the
+viscous-blob mechanism, scoped to branches. At `filDragMinMonomers=200`, `dt=1e-5`: spin drops
+~48→0.6 °/2ms (low thermal) and 32→2.5 (full thermal), branches locked at ~70°, beating the
+`dt=1e-6` floor (14) at 1/10 the cost. Unbranched/free filaments keep correct slender-body drag.
+FDT preserved (`D=kT/γ` from the floored γ) → equilibrium statistics unchanged, only short-daughter
+kinetics slowed. Physically defensible: a brushy branch genuinely has much higher (rotation-heavy)
+drag than an isolated rod (hydrodynamic screening + steric/entanglement coupling). Magnitude is a
+free parameter (calibrate vs an assay later); a future refinement could scale it with local branch
+density.
+
+**With the drag floor, `arpTransFracMove` (the translational correction fraction, default 1.0,
+committed earlier replacing the hardcoded 2.0) becomes nearly moot** — daughters are over-damped
+enough that 0.5/1.0/1.5/**2.0** all run stable (spin ~0.6–1.0, branches held) and grow cleanly
+(test tree 0.41→1.07 µm). So the original `fracMove=2.0` tightness is recoverable. Recommended for
+branched/Listeria runs: `filDragMinMonomers≈200` + `arpTransFracMove` 1.0–2.0 + `dt=1e-5`.
+
+**Negative results (reverted — don't re-try):** point-mobility normalization of the translational
+constraint (didn't reduce spin, loosened branches); critically-damping the torsion (over-stiff,
+destroyed branches); applying the inherited Brownian "at the branch point" (the existing rigid-
+co-motion inheritance — daughter gets parent's force *and* torque, drag-scaled — is better and
+already holds branches at 70°). Diagnostic runs in `threejs_output/branch_*`.
+
 ## 2026-06-13 — Dense contractile benchmark v5: 4× density (40× areal) — GPU now wins
 
 Re-ran the v4 dense weak-scaling sweep with the assumed 1× density dialed up 4× ("add particles":

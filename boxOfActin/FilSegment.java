@@ -407,10 +407,15 @@ public class FilSegment extends Thing {
 		// Remember that the dimensions we've been using are in micrometers so....
 		// **WARNING** below a certain number of monomers, depending on values like aParallel, etc
 		// the rod approximation will give NaN... hence the IF statement below
-		int minMonomerCt = 30;
+		// Elevated drag floor applies ONLY to Arp2/3 daughters (motherFil != null), so
+		// unbranched/free filaments keep correct slender-body drag. Daughters get drag as if
+		// at least filDragMinMonomers long; rotational drag (~L^3) is over-damped, stabilizing
+		// the stiff branch constraint at larger dt (viscous-blob-style, scoped to branches).
+		final int baseFloor = 30;  // original interior-segment floor (rod-approx NaN guard)
+		int minMonomerCt = (motherFil != null) ? Math.max(baseFloor, Env.filDragMinMonomers.getIntValue()) : baseFloor;
 		double minLength;
-		if (filAtEnd1 | filAtEnd2) { 
-			minLength = Env.stdSegLength.getIntValue()*halfmono; 
+		if (filAtEnd1 | filAtEnd2) {
+			minLength = Math.max(Env.stdSegLength.getIntValue(), minMonomerCt)*halfmono;  // never below the end-filament rod-approx floor
 		} else {
 			minLength = minMonomerCt*halfmono;
 		}

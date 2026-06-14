@@ -575,6 +575,8 @@ public class Env {
 	static final double EI = Boltz * tempK * (persistenceLength * 1e-6); // EI = kTLp from worm-like chain theory															
 	static private final int stdSegLength_init = 32; // number of monomers per segment
 	static final Parameter stdSegLength = new Parameter("filSegLength"," Std. segment length", stdSegLength_init, " monomers",Parameter.INT);
+	static private final int filDragMinMonomers_init = 30; // minimum effective length (monomers) used for FilSegment drag
+	static final Parameter filDragMinMonomers = new Parameter("filDragMinMonomers"," Min Effective Monomers For Filament Drag", filDragMinMonomers_init, " monomers", Parameter.INT).setMutableAtRuntime().setDescription("Floor on the effective rod length used when computing a FilSegment's drag (FilSegment.calculateProperties): short/nascent filaments get drag as if at least this many monomers long. Because rotational drag scales as length^3 (vs length for translation), raising this strongly over-damps the rotation of short filaments (e.g. nascent Arp2/3 daughters) -> stabilizes the stiff branch constraint at larger dt, viscous-blob style. Coarse approximation of a short filament being embedded/locked in the surrounding network. Raising it slows the real dynamics of short filaments; default 30 (~0.08um). Takes effect when a filament's drag is next recomputed (construction / length change).");
 	static private final double filTorqSpring_init = 1e-20; // N/radian If using elastic springs for torque to keep filaments aligned
 															
 	static final Parameter filTorqSpring = new Parameter("filTorqSpring"," Filament Torsional Spring", filTorqSpring_init, " N/radian",Parameter.DOUBLE, false);
