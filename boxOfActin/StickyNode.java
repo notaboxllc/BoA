@@ -309,6 +309,11 @@ public class StickyNode extends ProteinNode {
 		return (boundCt == valence);
 	}
 	
+	public boolean isLinkedTo (StickyNode other) {  // is this node directly NodeLink-bound to other? (for membrane face/triangle lookup)
+		for (int k=0; k<maxStickies; k++) { if (boundTo[k] == other) { return true; } }
+		return false;
+	}
+
 	public boolean canBind (int loc, StickyNode bNode) {
 		if (boundCt == valence) { return false; }
 		if (isBound[loc]) { return false; }		// can't bind if this location is already bound

@@ -1098,19 +1098,23 @@ public class FilSegment extends Thing {
 			checkCapping();
 			checkBranching();
 			
-			if ((capConditionOKEnd2()) && (!stericHindranceEnd2())) {
+			if (capConditionOKEnd2()) {
+				// Soft steric attenuation: when the barbed end is sterically blocked, scale the poly
+				// rate by stericPolyFactor (0 = hard stop = original behavior; 0<f<1 = Brownian-ratchet-
+				// like reduced growth; 1 = no steric effect) instead of skipping polymerization entirely.
+				double sterFac = stericHindranceEnd2() ? Env.stericPolyFactor.getValue() : 1.0;
 				// normal actin polymerization
-				double rate = getPolyRateEnd2();
+				double rate = getPolyRateEnd2()*sterFac;
 				boolean monomerAdded = addMonomerSim(rate);
-				if (monomerAdded) { 
+				if (monomerAdded) {
 					//talkln ("end2Pt norm poly");
-					incCoord(halfmono/2,uVecAsPt3D()); 
+					incCoord(halfmono/2,uVecAsPt3D());
 					Monomer.polymerize(plusMon,this,Monomer.PLUSEND, true);
 					plusEndDelta++;
 					Env.registerPlusMon(end2TipC);
 			    }
 				// non-hydrolyzable actin polymerization
-				rate = getNonHydroPolyRateEnd2();
+				rate = getNonHydroPolyRateEnd2()*sterFac;
 				monomerAdded = addNonHydroMonomerSim(rate);
 				if (monomerAdded) { 
 					//talkln ("end2Pt non-hydro poly");
@@ -1153,9 +1157,17 @@ public class FilSegment extends Thing {
 	}
 			
 	public void checkCapping() {
-		if (filAtEnd2) { return; } 	// no capping if interior
-		if (end2Capped) { return; } // already capped
+		if (filAtEnd2) { return; } 	// no capping if interior (filament continues past end2)
 		if (nodeAtEnd2) { return; }  // no capping if formin at end2Pt
+		// Membrane-localized capping (lamellipodium rule): barbed ends at the cortex are uncapped and
+		// free to grow/push; any barbed end away from the membrane is aggressively (deterministically)
+		// capped, so growth stays a thin layer tracking the membrane. Overrides stochastic capping.
+		double memCapDist = Env.membraneCapDist.getValue();
+		if (memCapDist > 0) {
+			end2Capped = (end2TipC >= memCapDist);   // capped iff away from membrane; uncapped on contact/proximity
+			return;
+		}
+		if (end2Capped) { return; } // already capped
 		if (end2TipC < 2*Env.actinMonoDiam && end2NearArpFactor) { return; }  // steric conditions for end capping (replace with capping protein dimension!)
 		if (currentScratch().rng.nextDouble() < Env.capRate.getValue()*Env.capConc.getValue()*Env.biochemDeltaT.getValue()) {
 			end2Capped = true;
@@ -1177,9 +1189,16 @@ public class FilSegment extends Thing {
 	}
 	
 	public void checkBranching() {
-		if (!end2NearArpFactor) { return; }
+		// Eligible if near a hot Arp activator (original mesh trigger) OR — when branchMembraneDist>0 —
+		// anywhere within that distance below the membrane plane (z=0). The latter lets the dendritic
+		// network self-amplify (daughters, not just membrane-proximal mothers, keep branching).
+		double memDist = Env.branchMembraneDist.getValue();
+		boolean nearMembrane = memDist > 0 && getEnd2Z() > -memDist;
+		if (!end2NearArpFactor && !nearMembrane) { return; }
 		if (currentScratch().rng.nextDouble() < Env.branchRateNearArpFactors.getValue()*Env.arpConc.getValue()*Env.biochemDeltaT.getValue()) {
-			double bLoc = length - Math.random()*Env.branchZone.getValue();
+			// branch in the upper (barbed) region; cap the offset at 0.8*length so bLoc never goes
+			// negative (a bLoc<0 branch is marked inactive immediately).
+			double bLoc = length - Math.random()*Math.min(Env.branchZone.getValue(), 0.8*length);
 			makeArpBranch(bLoc);
 		}
 	}
@@ -2114,8 +2133,17 @@ public class FilSegment extends Thing {
 	public static void checkNodeFilTipsCollision (ProteinNode node, FilSegment fil) {
 		// store tip clearance part
 		fil.registerATipClearance(Pt3D.ptDist(node.coordAsPt3D(), fil.end2Pt) - node.getRadius(),node.iAmHotRho);  // register tip clearance for polymerization / capping
-		
-		// collision part
+
+		// FACE (triangulated-surface) collision: the membrane is an impermeable sheet of triangles
+		// (a node + two of its mutually-linked neighbours). Colliding the filament tip with the FACES
+		// (not just the point-nodes) keeps the sheet impermeable even when stretched — a tip can no
+		// longer slip through the open interior of a triangle. Replaces the point-node collision when on.
+		if (Env.membraneFaceCollideOn.getValue() != 0 && node instanceof StickyNode) {
+			faceCollideTipVsNodeTriangles((StickyNode)node, fil);
+			// fall through: keep the point-node sphere collision too (covers triangle vertices/edges)
+		}
+
+		// collision part (point-node sphere collision)
 		double attnFactor = 0.3;
 		double filTipR = Env.filTipRadiusForCollisions.getValue();
 		Pt3D filTipCenter = Pt3D.Add(fil.end2Pt,filTipR,fil.uVecRAsPt3D());
@@ -2134,6 +2162,61 @@ public class FilSegment extends Thing {
 			node.collision();
 			fil.collision();
 		}
+	}
+
+	// Collide a filament tip with the membrane TRIANGLES incident to `node` (node + two of its
+	// mutually-linked neighbours). For the closest such face within the collision radius, push the
+	// tip out along (tip - closestPointOnFace) and push the three face nodes back (1/3 each) — a soft
+	// steric repulsion off the membrane SURFACE, so the tip cannot cross an open face. Reuses the
+	// existing tip-near-node mesh pairing; each face is tested from whichever of its nodes the tip is
+	// paired with (mild double-count near shared faces is harmless for a steric push).
+	static void faceCollideTipVsNodeTriangles (StickyNode node, FilSegment fil) {
+		double filTipR = Env.filTipRadiusForCollisions.getValue();
+		double colThresh = node.getRadius() + filTipR;          // membrane "thickness" ~ node radius
+		Pt3D tip = fil.end2Pt;
+		Pt3D base = fil.end1AsPt3D();                            // filament minus end = cytoplasmic (inner) side reference
+		Pt3D nC = node.coordAsPt3D();
+		// Find the incident face the tip most violates, ONE-SIDED: the tip must stay on the inner
+		// (base) side. Orient each face normal AWAY from the base (outward); if the tip is within
+		// colThresh of the face plane on the inner side OR has crossed to the outer side, that's a
+		// violation, and we push the tip back toward the inner side (never further through).
+		StickyNode bestA=null, bestB=null; Pt3D bestN=null; double bestViol=0;
+		Pt3D nrm = new Pt3D();
+		for (int i=0; i<node.valence; i++) {
+			if (!node.isBound[i] || node.boundTo[i]==null) continue;
+			StickyNode A = node.boundTo[i];
+			for (int j=i+1; j<node.valence; j++) {
+				if (!node.isBound[j] || node.boundTo[j]==null) continue;
+				StickyNode B = node.boundTo[j];
+				if (!A.isLinkedTo(B)) continue;                 // (node, A, B) is a membrane triangle
+				Pt3D Ac = A.coordAsPt3D(), Bc = B.coordAsPt3D();
+				nrm.cross(Pt3D.Sub(Ac,nC), Pt3D.Sub(Bc,nC));    // face normal (arbitrary sign)
+				double nl2 = Pt3D.Dot(nrm,nrm); if (nl2 < 1e-24) continue;
+				Pt3D n = Pt3D.Scale(1.0/Math.sqrt(nl2), nrm);
+				if (Pt3D.Dot(Pt3D.Sub(base,nC), n) > 0) { n = Pt3D.Scale(-1.0, n); }  // orient outward (away from base)
+				double s = Pt3D.Dot(Pt3D.Sub(tip,nC), n);       // signed distance of tip from face plane, outward +
+				if (s <= -colThresh) continue;                  // tip safely on the inner side
+				Pt3D proj = Pt3D.Add(tip, -s, n);               // tip projected onto the face plane
+				if (!pointInTriangle(proj, nC, Ac, Bc)) continue;  // tip isn't actually over this face
+				double viol = s + colThresh;                    // >0 (grows as tip nears / crosses the face)
+				if (viol > bestViol) { bestViol=viol; bestA=A; bestB=B; bestN=new Pt3D(n.x,n.y,n.z); }
+			}
+		}
+		if (bestA == null) return;                               // no face barrier here (vertex/edge handled by node-sphere)
+		double mag = (0.3*1.0e-6*bestViol/Env.collisionDeltaT.getValue())/(1.0/fil.bTransGam.y + 1.0/node.bTransGam.x);
+		fil.incForceSum(Pt3D.Scale(-mag, bestN), tip);          // push tip toward inner side (never further out)
+		Pt3D back = Pt3D.Scale(mag/3.0, bestN);                 // reaction: membrane nodes pushed outward (sheet deflects = compliant)
+		node.incForceSum(back); bestA.incForceSum(back); bestB.incForceSum(back);
+		node.collision(); fil.collision();
+	}
+
+	// Is point p (assumed on the triangle's plane) inside triangle (a,b,c)? Barycentric test.
+	static boolean pointInTriangle (Pt3D p, Pt3D a, Pt3D b, Pt3D c) {
+		Pt3D v0 = Pt3D.Sub(c,a), v1 = Pt3D.Sub(b,a), v2 = Pt3D.Sub(p,a);
+		double d00=Pt3D.Dot(v0,v0), d01=Pt3D.Dot(v0,v1), d02=Pt3D.Dot(v0,v2), d11=Pt3D.Dot(v1,v1), d12=Pt3D.Dot(v1,v2);
+		double den = d00*d11 - d01*d01; if (Math.abs(den) < 1e-24) return false;
+		double inv = 1.0/den; double u = (d11*d02 - d01*d12)*inv, v = (d00*d12 - d01*d02)*inv;
+		return u >= -1e-6 && v >= -1e-6 && u+v <= 1.0+1e-6;
 	}
 
 	
@@ -3111,6 +3194,32 @@ public class FilSegment extends Thing {
 		}
 	}
 	
+	// Seed several LONG mother filaments just under the membrane sheet (z=0), barbed ends
+	// pointing UP (+z) into it, each with a few DETERMINISTIC Arp2/3 branches. With de-novo
+	// nucleation off, this gives a legible branched network deforming the cortex (instead of
+	// the hot-Rho swarm), and the daughter drag floor keeps the branches stable. Gated by
+	// (xLinkTesting && nodeLinkTesting) in makeInitialThings; test scaffold, not production.
+	public static void makeMembraneBranchedMothers() {
+		int nMothers = 5;
+		int momMonomers = 80;                                  // ~0.22 um mother (visible)
+		double momLen = (momMonomers+1)*Env.actinMonoRadius;
+		double barbedZ = -0.04;                                // barbed tip just below the sheet (z=0)
+		double cz = barbedZ - 0.5*momLen;                      // centre z so end2 (barbed, +z) sits at barbedZ
+		// place mothers in a small ring near the hot-patch centre so the branched tufts are distinct
+		double[][] xy = { {0.0,0.0}, {0.22,0.0}, {-0.22,0.0}, {0.0,0.22}, {0.0,-0.22} };
+		Pt3D up = new Pt3D(0,0,1);                             // grow +z toward the membrane (barbed end up)
+		double filLen = momMonomers*Env.actinMonoRadius;
+		double[] branchFracs = {0.45, 0.65, 0.85};             // deterministic branches along the upper (near-membrane) part
+		for (int m=0; m<nMothers; m++) {
+			Pt3D loc = new Pt3D(xy[m][0], xy[m][1], cz);
+			FilSegment mom = new FilSegment(loc, up, -1, momMonomers, false);
+			for (double fr : branchFracs) {
+				double bLoc = fr*filLen;
+				if (mom.canAddArpHere(bLoc)) { mom.makeArpBranch(bLoc); }
+			}
+		}
+	}
+
 	public static void makeTestBranchedFilament() {
 		Pt3D coordForBoth = new Pt3D(0,0,0);
 		Pt3D fil1UVec = new Pt3D(0,0,-1);

@@ -200,7 +200,7 @@ public class NodeLink {
 		double curStretchDist = linkLength;
 		
 		//forces and accompanying torques
-		double fracMove = 2;
+		double fracMove = Env.membraneLinkFracMove.getValue();  // membrane in-plane stiffness; lower = more compliant/stretchy (was hardcoded 2.0)
 		double curForceMag= (fracMove*1.0e-6*curStretchDist/Env.deltaT.getValue())/(1/node1.bTransGam.x+1/node2.bTransGam.x);
 		forceVec.scale(curForceMag,linkVec);
 		node1.incForceSum(forceVec,pt1);

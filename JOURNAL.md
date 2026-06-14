@@ -1,5 +1,71 @@
 # BoxOfActin Project Journal
 
+## 2026-06-14 — Membrane-localized dendritic branching: exploratory lamellipodium kit (all default-off)
+
+**Status: EXPLORATORY, subject to change.** How filaments interact with the membrane, and how the
+membrane itself works, are both still in flux. Everything here is gated behind new parameters that
+**default to off / legacy behavior**, plus the `xLinkTesting`/`nodeLinkTesting` build flags (left
+`false`), so production paths are untouched. Committed so the work isn't lost and the hacks are
+documented — not as settled physics. The working demo recipe (CPU, `dt=1e-5`): a hex sticky-node
+sheet, a few seeded mother filaments under it (`makeMembraneBranchedMothers`, gated by
+`xLinkTesting && nodeLinkTesting`), Arp2/3 branching, growing into and deforming the cortex. Runs in
+`threejs_output/membrane_*`.
+
+**The knobs (new Env params, all live-tunable, all default-off):**
+- `branchMembraneDist` — branch-eligible when the barbed end is within this distance below the
+  membrane plane, *in addition* to the original near-hot-node trigger → the dendritic network
+  self-amplifies (daughters branch, not just membrane-proximal mothers).
+- `stericPolyFactor` — soft steric attenuation: a barbed end blocked by the membrane keeps
+  polymerizing at this fraction of its rate instead of hard-stopping (0=legacy hard stop).
+- `membraneCapDist` — lamellipodial capping: barbed ends are uncapped within this distance of the
+  cortex and aggressively capped beyond it → growth localizes to a thin layer tracking the membrane.
+- `membraneLinkFracMove` — membrane in-plane stiffness (NodeLink correction fraction; was hardcoded
+  2.0). Lower = more compliant/floppy sheet. `0.1` gave ~2× the bulge of the stiff sheet.
+- `membraneFaceCollideOn` — collide filament tips with the membrane's triangular FACES (point-vs-
+  triangle, one-sided, reaction split over the 3 nodes) instead of only the point-nodes, so a
+  stretched sheet stays impermeable. Triangles enumerated per-node from `boundTo[]` 3-cliques.
+- (`filDragMinMonomers` — the daughter drag floor from the entry below.)
+
+**Hacks — the good:**
+- *Membrane-localized capping* (`membraneCapDist`): genuinely the lamellipodium mechanism (cap away
+  from the cortex, uncap on contact). Keeps growth a thin membrane-hugging mat — physically honest.
+- *Face/triangle collision*: the correct primitive (the membrane is a triangulated surface; edges
+  alone are measure-zero and miss open faces — jba caught that). Closest-point-on-triangle subsumes
+  face/edge/vertex. Decouples compliance from coverage.
+- *Daughter drag floor*: brush-drag, FDT-preserved (see entry below).
+
+**Hacks — the bad / coarse / caveats (READ BEFORE TRUSTING):**
+- *`branchMembraneDist` and `membraneCapDist` reference a FIXED z=0 membrane plane*, not the actual
+  (bulging) membrane surface. Fine for a flat sheet near z=0; wrong once the cortex curves/closes.
+  Should be re-keyed to a local membrane height / the bulge front.
+- *`stericPolyFactor` is ad-hoc*, not a derived force–velocity / Brownian-ratchet law. Worse:
+  polymerization advances the barbed-end coordinate directly (`incCoord`), so with eased steric the
+  tip can poly *through* the membrane faster than the (one-sided) face collision pushes it back —
+  poly-driven penetration, distinct from gap poke-through. The one-sided push mitigates but does not
+  fully solve it; tunneling is possible at high poly rate / large `dt`. Keep `stericPolyFactor` modest.
+- *Face collision is static point-vs-triangle* (no swept/CCD test), and tested per the existing tip-
+  near-node mesh pairing, so a face can be double-counted near shared vertices (harmless for a steric
+  push) and a fast tip could tunnel a large face in one step.
+- *The membrane node-sphere barrier is actually decent on its own*: nodes (r=0.05) overlap at the
+  default spacing (~0.07), so legacy collision blocks tips until the sheet stretches enough to open
+  >0.1 µm gaps — which the seeded-mother push didn't reach. So face collision's payoff is unproven in
+  this regime (0% poke-through with OR without it); it matters in the heavily-stretched / dense-swarm
+  regime. It's in as correct, available robustness, not a demonstrated necessity here.
+- *`makeMembraneBranchedMothers` hardcodes 5 seed mothers* under the sheet — pure test scaffold.
+- *Membrane integrator over-drives at high filament load*: a dense, fast-growing network on a small/
+  stiff sheet NaN'd the membrane nodes (~5–6k segments; the "run-2" overshoot mode). Mitigations:
+  larger/more-compliant sheet (load spreads), fewer active pushers (capping helps). Real fix deferred:
+  a per-step displacement clamp / substep on membrane nodes.
+- *The sticky-point membrane has no area growth / remodeling*: the rigid valence-6 sticky-point model
+  makes node insertion (edge-split) painful. The right structure for compliant + remodeling +
+  impermeable is a dynamically-triangulated surface (topological neighbor lists, edge-split/collapse,
+  face collision, bending energy) — a deferred refactor, not done here.
+- `Parameter` array cap bumped 256→512 (the new params overflowed it).
+
+Recommended lamellipodium settings (CPU, dt=1e-5): `filDragMinMonomers≈200`, `arpTransFracMove 1.5`,
+`branchMembraneDist 0.3`, `stericPolyFactor 0.3`, `membraneCapDist 0.1`, `membraneLinkFracMove 0.1–0.5`,
+`membraneFaceCollideOn 1`, `kATPOn2 60`, plus the seeded mothers (`xLinkTesting && nodeLinkTesting`).
+
 ## 2026-06-14 — Arp2/3 branch spin fixed via daughter-scoped drag floor
 
 Branched filaments spun / overshot at `dt=1e-5` (explicit-Euler stiffness of the Arp2/3

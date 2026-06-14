@@ -3192,13 +3192,17 @@ public class BoxOfActin {
 				return;
 			}
 			
-			if (Env.xLinkTesting) {
-				FilSegment.makeTestBranchedFilament();
-				//FilSegment.makeXLinkFromNodePair();
-			}
-			
 			if (Env.nodeLinkTesting) {
 				StickyNode.makeSheetHexPackedNodes();
+				//FilSegment.makeXLinkFromNodePair();
+			}
+
+			if (Env.xLinkTesting) {
+				if (Env.nodeLinkTesting) {
+					FilSegment.makeMembraneBranchedMothers();  // deterministic branched mothers seeded under the membrane
+				} else {
+					FilSegment.makeTestBranchedFilament();     // free-space single branched filament
+				}
 				//FilSegment.makeXLinkFromNodePair();
 			}
 			

@@ -775,6 +775,26 @@ public class Env {
 	static final Parameter arpConc = new Parameter ("arpConc", " Arp2/3 Concentration", 0, concUnits);
 	static final Parameter branchZone = new Parameter("branchZone"," Arp2/3 Branch Zone Near Arp Factors", 0.05, distUnits);
 	static final Parameter nucRateNearArpFactors = new Parameter("nucRateNearArpFactors"," Arp2/3 Nuc Rate Near Arp Factors", 0.1, "/second");
+	// Extended branching: branch-eligible when the barbed end is within this distance BELOW the
+	// membrane plane (z=0), in addition to the original near-hot-node trigger. >0 lets the dendritic
+	// network self-amplify (daughters branch too) into a thick lamellipodium-like layer. 0 = disabled.
+	static final Parameter branchMembraneDist = new Parameter("branchMembraneDist"," Arp2/3 Branch Zone Below Membrane (z)", 0.0, distUnits).setMutableAtRuntime().setDescription("If >0, a filament is Arp2/3 branch-eligible whenever its barbed end is within this distance below the membrane plane (z=0), ADDED to the original near-hot-node trigger. Extends branching away from the membrane surface so the network self-amplifies into a thick dendritic layer instead of only branching right at the cortex. 0 = disabled (original behavior). Live-tunable.");
+	// Soft steric attenuation of polymerization: when a barbed end is sterically blocked (within a
+	// half-monomer of a node/obstacle) its poly rate is *multiplied* by this instead of hard-stopped.
+	static final Parameter stericPolyFactor = new Parameter("stericPolyFactor"," Steric Poly Attenuation Factor", 0.0, "").setMutableAtRuntime().setDescription("Polymerization-rate multiplier applied at a sterically blocked barbed end (within ~a half-monomer of a membrane node/obstacle). 0.0 = original hard stop (no growth into the obstacle); 0<f<1 = growth continues at reduced (Brownian-ratchet-like) rate; 1.0 = no steric effect on growth. Raise to let filaments keep polymerizing as they push the membrane. Live-tunable.");
+	// Membrane-localized capping (lamellipodium rule): if >0, a barbed end is UNCAPPED whenever its
+	// tip clearance to a membrane node is below this distance (at/colliding with the membrane), and
+	// AGGRESSIVELY CAPPED whenever it is farther — so only barbed ends at the cortex keep growing,
+	// keeping the dendritic network a thin layer tracking the membrane. 0 = disabled (stochastic
+	// capping protein, original behavior).
+	static final Parameter membraneCapDist = new Parameter("membraneCapDist"," Membrane Uncapping Distance", 0.0, distUnits).setMutableAtRuntime().setDescription("Lamellipodial capping rule. If >0: a filament barbed end is uncapped (free to grow/branch) when its clearance to the nearest membrane node is below this distance (touching/near the cortex), and is capped otherwise. This localizes growth to the membrane — filaments that fall behind the advancing cortex get capped and stop, those reaching it get uncapped. 0 = disabled (original stochastic capProtein capping). Live-tunable.");
+	// Membrane FACE collision: collide filament tips with the membrane's triangular FACES (node + two
+	// mutually-linked neighbours) instead of just the point-nodes, so a stretched sheet stays
+	// impermeable (tips can't slip through open triangle interiors). 0 = legacy point-node collision.
+	static final Parameter membraneFaceCollideOn = new Parameter("membraneFaceCollideOn"," Membrane Face (Triangle) Collision On", 0.0, "").setMutableAtRuntime().setDescription("If !=0, filament tips collide with the membrane's triangular faces (point-vs-triangle, soft steric push distributed to the 3 face nodes) rather than only the point-nodes. This makes the sheet an impermeable surface even when stretched, decoupling compliance (soft NodeLink springs) from coverage. 0 = legacy point-node sphere collision. Live-tunable.");
+	// Membrane in-plane stiffness: the NodeLink (zero-rest-length contractile spring) correction
+	// fraction. Lower = softer/more compliant sheet (stretches more under load); was hardcoded 2.0.
+	static final Parameter membraneLinkFracMove = new Parameter("membraneLinkFracMove"," Membrane Link Stiffness (Correction Fraction)", 2.0, "").setMutableAtRuntime().setDescription("Per-step correction fraction of the NodeLink membrane springs (NodeLink.applyTransForce). 2.0 = original stiff sheet; lower (e.g. 0.5) makes the membrane more compliant/stretchy so it billows under filament load. Pair with membraneFaceCollideOn so the stretched sheet stays impermeable. Live-tunable.");
 
 	// ** Myosin
 	static final Parameter myoRodLength = new Parameter("myoRodLength"," Myosin rod length", 0.080, distUnits);
