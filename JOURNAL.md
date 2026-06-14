@@ -1,5 +1,17 @@
 # BoxOfActin Project Journal
 
+## 2026-06-14 — Membrane nodes no longer randomly turn over
+
+Diagnosed apparent "nodes separating from the sheet" in the compliant-membrane runs: it was NOT
+instability — no NaN, NodeLink lengths never stretched (median 0.08 µm, max <0.15, none >0.2), the
+farthest node stayed at the pinned edges. The membrane node *count* was dropping (400→386 over 0.3 s):
+`StickyNode.biochemStep` calls `super.biochemStep()`, and `ProteinNode.biochemStep` deletes any node
+at rate `deltaT/nodeLifetime` (default 10 s). So the structural cortex inherited myosin-cluster node
+turnover and was eroding (~3%/0.3 s, time-proportional → disintegration over seconds), leaving
+permanent holes (no replacement). Fix: `ProteinNode.biochemStep` now early-returns for `StickyNode`
+(membrane nodes are structural). Verified: node count holds constant at 400 across a run. Directed
+node flow in/out remains a future deliberate mechanism, distinct from this random turnover.
+
 ## 2026-06-14 — Membrane-localized dendritic branching: exploratory lamellipodium kit (all default-off)
 
 **Status: EXPLORATORY, subject to change.** How filaments interact with the membrane, and how the

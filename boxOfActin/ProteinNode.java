@@ -280,6 +280,7 @@ public class ProteinNode extends Thing {
 	}
 	
 	public void biochemStep () {
+		if (this instanceof StickyNode) { return; }  // membrane nodes are STRUCTURAL: no random lifetime turnover (it just erodes the sheet, leaving permanent holes). Directed flow in/out is a future, deliberate mechanism — not this.
 		if (Env.mtRNG.nextDouble() < Env.deltaT.getValue()/Env.nodeLifetime.getValue()) {
 			removeMe = true;
 		}
