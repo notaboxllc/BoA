@@ -213,7 +213,7 @@ public class Arp23 {
 		//if (curStretchDist < 0) { curStretchDist = 0; }
 		
 		//forces and accompanying torques
-		double fracMove = 2.0;
+		double fracMove = Env.arpTransFracMove.getValue();  // live-tunable; 1.0=critically damped, was hardcoded 2.0 (overshoot)
 		double curForceMag= (fracMove*1.0e-6*endDisplacement/Env.deltaT.getValue())/(1/motherFil.bTransGam.y+1/daughterFil.bTransGam.x);
 		//forceMag.registerValue(curForceMag);
 		forceVec.scale(curForceMag,displacementVec);

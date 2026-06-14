@@ -3117,17 +3117,18 @@ public class FilSegment extends Thing {
 		int numMonomers = 128;
 		FilSegment mFil = new FilSegment (coordForBoth,fil1UVec,0,numMonomers,false);
 
-		double bLoc;
-		for (int i=0;i<10;i++) {
-			bLoc = Math.random()*(double)numMonomers*Env.actinMonoRadius;
-			//bLoc = Math.random()*(double)(numMonomers/4)*Env.actinMonoRadius;
+		// Deterministic branches: fixed count, evenly spaced along the mother
+		// (minimal-system Arp2/3 constraint test — no stochastic/membrane trigger).
+		double filLen = (double)numMonomers*Env.actinMonoRadius;
+		double[] branchFracs = {0.2, 0.35, 0.5, 0.65, 0.8};
+		for (double fr : branchFracs) {
+			double bLoc = fr*filLen;
 			if (mFil.canAddArpHere(bLoc)) {
 				mFil.makeArpBranch(bLoc);
-				//Arp23.makeBranch(mFil,bLoc);
 			} else {
-				talkln("Didn't make an Arp2/3 too close to another!");
+				talkln("Skipped Arp2/3 branch (too close to another) at frac " + fr);
 			}
-		} 
+		}
 		//new FilSegment (coordForBoth,fil2UVec,1,600,false);
 		
 		// make test myosin minifilament

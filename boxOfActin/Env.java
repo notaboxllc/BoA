@@ -544,8 +544,10 @@ public class Env {
 	static final double arp23AlphaAngle = 70*Math.PI/180;	// radians
 	static final double cosArp23Alpha = Math.cos(arp23AlphaAngle);
 	static final double sinArp23Alpha = Math.sin(arp23AlphaAngle);
-	static private final double arpTorqSpring_init = 1e-18; // N/radian, elastic torque spring for Arp2/3 branches														
+	static private final double arpTorqSpring_init = 1e-18; // N/radian, elastic torque spring for Arp2/3 branches
 	static final Parameter arpTorqSpring = new Parameter("arpTorqSpring", " Torque Spring To Constrain Mother/Daughter Arp2/3 Relationship",arpTorqSpring_init, " N/rad", Parameter.DOUBLE, true);
+	static private final double arpTransFracMove_init = 1.0; // fraction of mother/daughter branch-point gap closed per step
+	static final Parameter arpTransFracMove = new Parameter("arpTransFracMove"," Arp2/3 Branch Translational Correction Fraction", arpTransFracMove_init, "").setMutableAtRuntime().setDescription("Fraction of the Arp2/3 mother-daughter branch-point gap closed per timestep by the translational constraint (Arp23.applyTransForce). 1.0 = close the gap exactly (critically damped); >1 over-corrects and overshoots (the original 2.0 caused visible spin/overshoot); <1 under-corrects, giving looser branches whose daughters can drift off the branch point. Lower if the branched network spins/overshoots; raise for tighter coupling. Live-tunable.");
 	
 	// **** Viscous Blobs — removed 2026-05-17 (Round 7); see JOURNAL.md. ****
 	// Listeria-specific hack: filaments accumulate sphere-drag blobs to simulate implicit
