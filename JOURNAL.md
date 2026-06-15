@@ -1,5 +1,61 @@
 # BoxOfActin Project Journal
 
+## 2026-06-15 — Dendritic lamellipodium P1–P3: NPF-surface branching + debranching + bulk capping (exploratory)
+
+Implemented the P1–P3 recommendations from the membrane-dendritic literature review (see
+`MEMBRANE_DENDRITIC_REVIEW.pdf/.html`) and tuned them to a **bounded, treadmilling lamellipodium**.
+
+**Code (all default-off / additive):**
+- **P1 — branch at the real surface, not a z-plane.** `ProteinNode.permanentHotRho` marks a stable NPF
+  (Rac/Cdc42/PIP2) activator patch; `StickyNode.biochemStep` keeps it hot for the whole run (no
+  `rhoHotLifetime` expiry) and `makeSheetHexPackedNodes` flags the central patch permanent. Branch
+  eligibility was already wired to hot-node proximity (`registerATipClearance(..., node.iAmHotRho)` →
+  `end2NearArpFactor`); P1 just makes the patch persistent and turns OFF the `branchMembraneDist`
+  z-plane so branching is gated purely on NPF proximity.
+- **P2 — Arp2/3 debranching** (`Env.arpDebranchRate`, `FilSegment.checkDebranch`): per-branch
+  stochastic dissociation, freed daughter depolymerizes (`Arp23.active=false` → `setInactiveArp23s`
+  releases it). **Gate must be junction-ADP** (`FilSegment.junctionADPFraction`, oldest ~8 monomers at
+  the pointed end), NOT the whole-filament `notADPFraction` — a growing daughter keeps adding fresh ATP
+  so its whole-filament average never ages and never debranches.
+- **P3 — bulk stochastic capping** (`capConc`, `membraneCapDist=0`): off-surface tips cap; tips at the
+  hot patch are capping-exempt (protected front). Already how `mem_lam10` worked; P3 just keeps it.
+- Diagnostics/viewer: per-frame `[LAM] segs=… activeArps=…` (in `remoteLog` AND `logAndDraw` — `-r` runs
+  use `remoteLog`). `ThreeJSWriter` emits `"hotRho":true`; viewer renders hot-Rho nodes **bright pink**
+  (per-instance `instanceColor`), default **30 fps**, and **auto-fits the camera to the box** on load.
+
+**The key finding (v1→v4 sweep, `RUN_LOGS/2026-06-15_lamellipodium_p1p3/`, runs in
+`threejs_output/lam_p1p3_v{2,3,4}`):**
+- **De-novo nucleation is a fog generator.** v1 used `nucRateNearArpFactors=5` → the ~49 hot nodes each
+  spawn independent stubs → a haze, not a branched tree. `mem_lam10` had it at **0**; growth must come
+  from seeded mothers branching. Fixed.
+- **The `branchMembraneDist` z-plane causes autocatalytic runaway.** It makes every barbed end within
+  0.3 µm of z=0 branch-eligible = a *volume* source. v2/v3 grew super-linearly (segs 25→8525) with
+  **activeArps in lockstep with segs** (ratio ~0.65) — branching ∝ network size. Raising `capConc`
+  10× (v3) did NOT tame it (a volumetric source can't be capped away). `mem_lam10` only looked OK
+  because it stopped at 0.15 s, before the runaway.
+- **NPF-surface gating (`branchMembraneDist=0`, v4) is bounded.** Branching ∝ membrane *surface*
+  (the patch), a fixed source → debranching balances it: **`activeArps` plateaus at ~50** (flat
+  t=0.22→0.49), segs settle ~213, membrane protrudes 0.79 µm, only ~6 tips left pointing away from the
+  membrane. A thin, forward-oriented, treadmilling dendritic array — the lamellipodium. This vindicates
+  P1's core claim: real-surface NPF gating > fixed z-plane.
+
+**Config:** `ParameterFiles/lamellipodiumP1P3` (= v4: `nucRate=0`, `arpConc=20`, `branchRate=0.7`,
+`branchMembraneDist=0`, `capConc=3.0`, `arpDebranchRate=2.0`, `kHydrolysis/kDissociation=3` to age
+junctions within the run, full `mem_lam10` stability stack). CPU; needs `xLinkTesting=nodeLinkTesting=true`.
+
+**IC-by-param refactor (fixes the long-standing wart).** The compile-time `xLinkTesting`/`nodeLinkTesting`
+flags were promoted to runtime BOOLEAN params **`buildMembraneSheet`** (hex StickyNode sheet + hot-Rho
+patch) and **`buildBranchedFils`** (Arp2/3 branched fils; +sheet = membrane-branched mothers, alone =
+free-space junction test). Both default OFF, so the IC is selected per-run from the param file — no
+recompile, no cross-run contamination. Verified: selectors on → 900 nodes/49 hot-Rho; off → 0 nodes.
+`ParameterFiles/lamellipodiumP1P3` sets both true.
+
+**Open / caveats:** (a) — resolved (IC-by-param refactor above). (b) Hydrolysis accelerated 10–30× for
+debranch observability; at physiological rates turnover is a ~seconds process. (c) No membrane
+tension/area limit — the protrusion is bounded here only because turnover bounds the *network*; a
+stronger push would still balloon to the box ceiling (`MEMBRANE_MODEL_NOTES` §3). (d) `branchMembraneDist`
+z-plane still references fixed z=0, not the bulging surface — now moot at 0, but the param remains.
+
 ## 2026-06-15 — Lamellipodium tuning: orthogonal knobs + three throttles (exploratory)
 
 Working recipe for a sparse dendritic network pushing the membrane (membrane IC, both sub-cycles

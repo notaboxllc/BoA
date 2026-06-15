@@ -263,8 +263,15 @@ public class Env {
 	static final double tstNodeOffset = 0.2;
 	static boolean compressionCritOff = true;
 	static boolean octopusMode = false;
-	static boolean xLinkTesting = false;
-	static boolean nodeLinkTesting = false;
+	// Initial-condition selectors (promoted 2026-06-15 from the compile-time test flags xLinkTesting/
+	// nodeLinkTesting to runtime params — set in a param file, no recompile, no cross-run contamination).
+	// buildMembraneSheet -> hex StickyNode sheet + hot-Rho NPF patch (makeSheetHexPackedNodes).
+	// buildBranchedFils  -> Arp2/3 branched filaments: WITH a sheet = membrane-branched mothers
+	//                       (lamellipodium, makeMembraneBranchedMothers); ALONE = free-space branched
+	//                       filament / junction-relaxation diagnostic (makeTestBranchedFilament).
+	// Both default OFF, so production/gliding/contractility runs are unaffected.
+	static final Parameter buildMembraneSheet = new Parameter("buildMembraneSheet", " Build membrane StickyNode sheet IC", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter buildBranchedFils  = new Parameter("buildBranchedFils", " Build Arp2/3 branched-filament IC", 0, "", Parameter.BOOLEAN, false);
 	static boolean myosinsOff = false;
 	static boolean randomNodesOn = false;
 	static final Parameter fixedMyosinClusters = new Parameter("fixedMyosinClusters", " Fixed Myosin Cluster Test", 0, "", Parameter.BOOLEAN, false);
@@ -549,7 +556,7 @@ public class Env {
 	static private final double arpTransFracMove_init = 1.0; // fraction of mother/daughter branch-point gap closed per step
 	static final Parameter arpTransFracMove = new Parameter("arpTransFracMove"," Arp2/3 Branch Translational Correction Fraction", arpTransFracMove_init, "").setMutableAtRuntime().setDescription("Fraction of the Arp2/3 mother-daughter branch-point gap closed per timestep by the translational constraint (Arp23.applyTransForce). 1.0 = close the gap exactly (critically damped); >1 over-corrects and overshoots (the original 2.0 caused visible spin/overshoot); <1 under-corrects, giving looser branches whose daughters can drift off the branch point. Lower if the branched network spins/overshoots; raise for tighter coupling. Live-tunable.");
 
-	// Controlled single-junction relaxation test (diagnostic IC). When on, the xLinkTesting
+	// Controlled single-junction relaxation test (diagnostic IC). When on, the buildBranchedFils
 	// initial-condition builds ONE mother + ONE daughter Arp2/3 branch, perturbs the daughter
 	// off its constraint by junctionPerturbDeg, and the Arp23 logs "JCT <step> <gap_um> <angle_rad>"
 	// every step so the constraint relaxation can be inspected for overshoot/ringing in isolation
@@ -814,6 +821,10 @@ public class Env {
 	static final Parameter arpConc = new Parameter ("arpConc", " Arp2/3 Concentration", 0, concUnits);
 	static final Parameter branchZone = new Parameter("branchZone"," Arp2/3 Branch Zone Near Arp Factors", 0.05, distUnits);
 	static final Parameter nucRateNearArpFactors = new Parameter("nucRateNearArpFactors"," Arp2/3 Nuc Rate Near Arp Factors", 0.1, "/second");
+	// P2: stochastic Arp2/3 debranching. Per-branch dissociation rate, scaled by the daughter's aged
+	// (ADP) fraction so newly-polymerized ATP/ADP-Pi branches are stable and old ones release (GMF-like).
+	// On debranch the daughter becomes a free filament and depolymerizes. 0 = disabled (no turnover).
+	static final Parameter arpDebranchRate = new Parameter("arpDebranchRate"," Arp2/3 Debranch Rate", 0.0, "/second").setMutableAtRuntime().setDescription("P2 debranching: stochastic dissociation rate of an Arp2/3 branch, scaled by the daughter filament's aged (ADP) fraction so new ATP/ADP-Pi branches are stable and old ones release (GMF-like turnover). On debranch the daughter is freed and depolymerizes. 0 = disabled (network only accretes, never treadmills). Live-tunable.");
 	// Extended branching: branch-eligible when the barbed end is within this distance BELOW the
 	// membrane plane (z=0), in addition to the original near-hot-node trigger. >0 lets the dendritic
 	// network self-amplify (daughters branch too) into a thick lamellipodium-like layer. 0 = disabled.

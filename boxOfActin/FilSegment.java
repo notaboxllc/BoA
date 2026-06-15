@@ -562,7 +562,8 @@ public class FilSegment extends Thing {
 			
 			if (!filAtEnd1) { end1BiochemSim (); }			// catastrophy, polymerization, and depolymerization simulations for end1Pt
 			if (!filAtEnd2) { end2BiochemSim (); }			// and for end2Pt, both use lengthChanged flag
-			
+			checkDebranch();								// P2: stochastic Arp2/3 debranching (releases aged daughters → array turnover)
+
 			biochemCheckCt = 0;
 		}
 		
@@ -1215,7 +1216,30 @@ public class FilSegment extends Thing {
 			makeArpBranch(bLoc);
 		}
 	}
-	  
+
+	// P2: stochastic Arp2/3 debranching. A mother rolls each of its active branches for dissociation,
+	// at a rate scaled by the DAUGHTER's aged (ADP) fraction — GMF-like: fresh ATP/ADP-Pi branches are
+	// stable, branches whose daughter has hydrolyzed to ADP release. On debranch the Arp23 is marked
+	// inactive; the single-threaded Arp23.setInactiveArp23s() pass then frees the daughter
+	// (daughterFil.motherFil -> null, so its drag floor lifts) and recycles the Arp23. The freed
+	// daughter, no longer fed at a hot node and subject to normal depoly, shrinks away → array turnover.
+	public void checkDebranch () {
+		double rate = Env.arpDebranchRate.getValue();
+		if (rate <= 0 || arpChildCt == 0) return;
+		double dt = Env.biochemDeltaT.getValue();
+		for (int i=0; i<arpChildCt; i++) {
+			if (!arpActive[i]) continue;
+			FilSegment d = arpChildren[i];
+			Arp23 a = arp23s[i];
+			if (d == null || a == null || !a.active) continue;
+			double aged = d.junctionADPFraction();   // 0 = junction fresh (ATP/ADP-Pi), 1 = junction fully ADP — ages even while the barbed end grows
+			if (currentScratch().rng.nextDouble() < rate*aged*dt) {
+				a.active = false;       // setInactiveArp23s() (single-threaded) releases the daughter + recycles the Arp23
+				arpActive[i] = false;   // stop the mother counting it immediately (and free the branch location)
+			}
+		}
+	}
+
 	public FilSegment makeArpBranch(double bLoc) {
 		double theta = getHelixAngleAtLoc(bLoc); // assume helixAng is angle with mother filament's body-fixed y-axis
 		double yPart = Math.cos(theta)*Env.sinArp23Alpha;
@@ -2284,7 +2308,7 @@ public class FilSegment extends Thing {
 			break;
 		case -1:
 			angTweenR = Pt3D.fastAcos(Pt3D.Dot(fil1.uVecAsPt3D(), fil2.uVecRAsPt3D()));
-			//if (Env.xLinkTesting) { System.out.println("Angle between test filaments is " + angTween + " radians"); }
+			//if (Env.buildBranchedFils.isActive()) { System.out.println("Angle between test filaments is " + angTween + " radians"); }
 			if (angTweenR > maxAngle) { return; }
 			break;
 		}
@@ -3218,7 +3242,7 @@ public class FilSegment extends Thing {
 	// pointing UP (+z) into it, each with a few DETERMINISTIC Arp2/3 branches. With de-novo
 	// nucleation off, this gives a legible branched network deforming the cortex (instead of
 	// the hot-Rho swarm), and the daughter drag floor keeps the branches stable. Gated by
-	// (xLinkTesting && nodeLinkTesting) in makeInitialThings; test scaffold, not production.
+	// (buildBranchedFils && buildMembraneSheet) in makeInitialThings; test scaffold, not production.
 	public static void makeMembraneBranchedMothers() {
 		int nMothers = 5;
 		int momMonomers = 80;                                  // ~0.22 um mother (visible)
@@ -3904,6 +3928,24 @@ public class FilSegment extends Thing {
 				curMon = curMon.frontMon;
 			}
 			return n > 0 ? ((double) notAdp) / n : 1.0;
+		}
+
+		// ADP fraction of the monomers AT THE POINTED END (the Arp2/3 junction region). Unlike the
+		// whole-filament notADPFraction(), this ages even while the barbed end keeps adding fresh ATP
+		// monomers — so a continuously-elongating daughter still ages at its junction. Drives P2
+		// debranching (GMF-like: ADP at the junction destabilizes the branch). 0 = junction all fresh
+		// (ATP/ADP-Pi), 1 = junction fully ADP. Returns 0 when monomers aren't individually tracked.
+		public double junctionADPFraction () {
+			if (Env.noMonomersSimd.isActive() || minusMon == null || monomerCt <= 0) return 0.0;
+			int span = Math.min(monomerCt, 8);   // the oldest ~8 monomers nearest the branch junction
+			int n = 0, adp = 0;
+			Monomer curMon = minusMon;
+			while (curMon != Monomer.plusGhost && curMon != null && n < span) {
+				if (curMon.nucleotideState == Monomer.ADPstate) adp++;
+				n++;
+				curMon = curMon.frontMon;
+			}
+			return n > 0 ? ((double) adp) / n : 0.0;
 		}
 	public void checkCofilinDissolve () {
 		double curCofilinRatio = ((double)cofilinCt)/((double)monomerCt);

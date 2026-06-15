@@ -21,6 +21,7 @@ public class ProteinNode extends Thing {
 	double radius = Env.nodeRadius.getValue();
 	boolean iAmArpActivator = false;
 	boolean iAmHotRho = false;
+	boolean permanentHotRho = false; // P1: a stable NPF (Rac/Cdc42/PIP2) activator patch that never expires — localizes branching at the real membrane surface
 	boolean fixedNode = false; // use to fix a node in space
 
 	

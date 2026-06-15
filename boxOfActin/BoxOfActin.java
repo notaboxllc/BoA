@@ -2794,6 +2794,13 @@ public class BoxOfActin {
 
 		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive() || Env.contractilityAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
+			// P1-P3 lamellipodium diagnostic: total segments vs ACTIVE Arp2/3 branches. A bounded,
+			// turning-over network shows segs AND activeArps plateauing (P2/P3); runaway shows both
+			// climbing linearly. Cheap, only at frame cadence.
+			if (Env.buildMembraneSheet.isActive()) {
+				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
+					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
+			}
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
@@ -2882,6 +2889,11 @@ public class BoxOfActin {
 		if ((Env.threeJSOutputDir != null || LiveFrameServer.isRunning() || Env.glidingAssay.isActive() || Env.contractilityAssay.isActive()) && threeJSCounter >= Env.toFileInterval.getIntValue()) {
 			ThreeJSWriter.writeFrame();
 			reportContractilityStats();
+			// P1-P3 lamellipodium diagnostic: total segments vs ACTIVE Arp2/3 branches (turnover signature).
+			if (Env.buildMembraneSheet.isActive()) {
+				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
+					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
+			}
 			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
@@ -3203,13 +3215,13 @@ public class BoxOfActin {
 				return;
 			}
 			
-			if (Env.nodeLinkTesting) {
+			if (Env.buildMembraneSheet.isActive()) {
 				StickyNode.makeSheetHexPackedNodes();
 				//FilSegment.makeXLinkFromNodePair();
 			}
 
-			if (Env.xLinkTesting) {
-				if (Env.nodeLinkTesting) {
+			if (Env.buildBranchedFils.isActive()) {
+				if (Env.buildMembraneSheet.isActive()) {
 					FilSegment.makeMembraneBranchedMothers();  // deterministic branched mothers seeded under the membrane
 				} else {
 					FilSegment.makeTestBranchedFilament();     // free-space single branched filament

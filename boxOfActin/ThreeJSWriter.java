@@ -219,11 +219,18 @@ public class ThreeJSWriter {
             ProteinNode pn = ProteinNode.theNodes[i];
             if (pn == null || pn.removeMe) continue;
             if (!firstNode) sb.append(",");
+            // Hot-Rho (NPF/Arp2/3 activator) membrane nodes carry "hotRho":true so the viewer can
+            // highlight the activated patch where branching is localized.
+            String memberFlags = "";
+            if (pn instanceof StickyNode) {
+                memberFlags = ",\"membrane\":true";
+                if (pn.iAmHotRho) memberFlags += ",\"hotRho\":true";
+            }
             sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g%s}",
                     pn.thingInstanceId,
                     pn.getCoordX(), pn.getCoordY(), pn.getCoordZ(),
                     pn.getRadius(),
-                    (pn instanceof StickyNode) ? ",\"membrane\":true" : ""));
+                    memberFlags));
             firstNode = false;
         }
         sb.append("]");

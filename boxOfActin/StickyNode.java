@@ -185,9 +185,18 @@ public class StickyNode extends ProteinNode {
 	
 	public void biochemStep () {
 		super.biochemStep();
-		if (fixedNode) { return; }  // not letting unmovable modes get Rho Hot 
+		if (fixedNode) { return; }  // not letting unmovable modes get Rho Hot
+		// P1: a permanent NPF activator patch (Rac/Cdc42/PIP2 leading-edge zone). Stays hot for the whole
+		// run — does NOT expire on rhoHotLifetime — so branching stays localized at the real membrane
+		// surface. Barbed ends within branchZone of these nodes get end2NearArpFactor (via the membrane
+		// collision wiring) and become branch-eligible; the node also seeds de-novo Arp2/3 filaments here.
+		if (permanentHotRho) {
+			iAmHotRho = true;
+			deNovoNucleate();
+			return;
+		}
 		if (Math.abs(getCoordX()) > .4*Env.membraneCellRadius.getValue()) { return; }
-		
+
 		// hot spot origination
 		double getHotProb = 0;//2e-3*Env.biochemDeltaT.getValue();
 		if (hotSpotCt < maxHotSpots && !iAmHotRho) { 
@@ -227,12 +236,19 @@ public class StickyNode extends ProteinNode {
 		}  
 		
 		if (iAmHotRho) {
-			double nucFilProb = Env.nucRateNearArpFactors.getValue()*Env.biochemDeltaT.getValue();
-			if (currentScratch().rng.nextDouble() < nucFilProb) {  // testing only...
-				Pt3D nucVec = zVecAsPt3D();
-				Pt3D nucPt = Pt3D.Add(coordAsPt3D(), -1.3*Env.membraneNodeRadius.getValue(),nucVec);
-				FilSegment.makeArp23NucFilament(nucPt, nucVec);
-			}
+			deNovoNucleate();
+		}
+	}
+
+	// De-novo Arp2/3 nucleation at an activated (hot-Rho/NPF) membrane node: seed a filament just
+	// inside the cortex, growing along the node's inward normal. Shared by the transient hot-spot path
+	// and the P1 permanent-patch path.
+	public void deNovoNucleate () {
+		double nucFilProb = Env.nucRateNearArpFactors.getValue()*Env.biochemDeltaT.getValue();
+		if (currentScratch().rng.nextDouble() < nucFilProb) {
+			Pt3D nucVec = zVecAsPt3D();
+			Pt3D nucPt = Pt3D.Add(coordAsPt3D(), -1.3*Env.membraneNodeRadius.getValue(), nucVec);
+			FilSegment.makeArp23NucFilament(nucPt, nucVec);
 		}
 	}
 	
@@ -702,8 +718,9 @@ public class StickyNode extends ProteinNode {
 				sheetONodes[i][j] = new StickyNode(curCoord,sheetNodeR,6);
 				String ij = String.valueOf(i) + "," + String.valueOf(j);
 				sheetONodes[i][j].setIJ(ij);
-				if ((arpActivatorImin < i && i < arpActivatorImax) && (arpActivatorJmin < j && j < arpActivatorJmax)) { 
-					sheetONodes[i][j].iAmHotRho = true; 
+				if ((arpActivatorImin < i && i < arpActivatorImax) && (arpActivatorJmin < j && j < arpActivatorJmax)) {
+					sheetONodes[i][j].iAmHotRho = true;
+					sheetONodes[i][j].permanentHotRho = true;  // P1: stable NPF patch — does not expire on rhoHotLifetime
 					sheetONodes[i][j].myHotSpotOriginator = sheetONodes[i][j];  // point to self, hack for this kind of hot spot creation
 				}
 				

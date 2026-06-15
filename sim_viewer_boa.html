@@ -868,12 +868,18 @@ let membraneOpacity = 0.35;   // translucency of the membrane discs
 let membraneFlatten = 0.30;   // oblate ratio: short (normal) axis / in-plane radius
 let showMembraneLinks = false; // NodeLink connectivity lines on/off
 const MEMBRANE_COLOR = 0x55bbdd;
+// Per-instance membrane colors: ordinary cortex vs hot-Rho (NPF/Arp2/3 activator) patch.
+const MEMBRANE_COL  = new THREE.Color(MEMBRANE_COLOR);
+const HOTRHO_COL    = new THREE.Color(0xff3399);  // bright pink — the activated branching patch
 
 const MAX_MEMBRANE_NODES = 20000;
 const MAX_MEMBRANE_LINKS = 120000;
+// Material color is white so the per-instance instanceColor drives the actual hue cleanly.
 const membraneMesh = new THREE.InstancedMesh(sphGeo,
-  new THREE.MeshPhongMaterial({ color: MEMBRANE_COLOR, transparent: true,
+  new THREE.MeshPhongMaterial({ color: 0xffffff, transparent: true,
     opacity: membraneOpacity, depthWrite: false }), MAX_MEMBRANE_NODES);
+membraneMesh.instanceColor = new THREE.InstancedBufferAttribute(
+  new Float32Array(MAX_MEMBRANE_NODES * 3), 3);
 membraneMesh.count = 0;
 membraneMesh.frustumCulled = false;
 membraneMesh.renderOrder = 2;   // draw after opaque geometry so transparency blends
@@ -1162,7 +1168,7 @@ let simDir        = '.';
 let totalFrames   = 0;
 let currentFrame  = 0;
 let isPlaying     = false;
-let playbackFps   = 2;
+let playbackFps   = 30;
 let lastAdvanceMs = 0;
 let loading          = false;
 let boundsObj        = null;
@@ -1316,6 +1322,23 @@ function loadDirectory(dir) {
 }
 
 // ── frame loading ─────────────────────────────────────────────────────────────
+// Scale the initial camera distance to the simulation box so a freshly-loaded run fills the view
+// without manual re-zoom. Box is centered at the origin. Runs once per run load (when the box
+// wireframe is first built), so it never fights the user's subsequent manual orbit/zoom.
+function fitCameraToBox(xDim, yDim, zDim) {
+  const r = 0.5 * Math.sqrt(xDim*xDim + yDim*yDim + zDim*zDim);  // bounding-sphere radius
+  const fov = camera.fov * Math.PI / 180;
+  const dist = (r / Math.sin(fov / 2)) * 1.15;                    // 15% padding so edges aren't clipped
+  // Slightly oblique default so a +z membrane protrusion reads as 3D rather than face-on flat.
+  const dir = new THREE.Vector3(0.0, -0.45, 1.0).normalize();
+  camera.position.copy(dir.multiplyScalar(dist));
+  camera.near = Math.max(dist / 1000, 0.0001);
+  camera.far  = dist * 20;
+  camera.updateProjectionMatrix();
+  orbitControls.target.set(0, 0, 0);
+  orbitControls.update();
+}
+
 function applyFrameData(data) {
   // Build box wireframe from first frame; absent in benchmark mode.
   if (!boundsObj && data.bounds) {
@@ -1326,6 +1349,7 @@ function applyFrameData(data) {
     boundsObj = new THREE.LineSegments(edgesGeo,
       new THREE.LineBasicMaterial({ color: 0x336633 }));
     scene.add(boundsObj);
+    fitCameraToBox(xDim, yDim, zDim);
   }
 
   // Segments — identity-keyed; maps rebuilt from scratch each frame
@@ -1691,7 +1715,7 @@ function updateMembraneSurface(nodes, membraneLinks) {
     for (const nd of nodes) {
       if (!nd.membrane) continue;
       const pos = new THREE.Vector3(nd.center[0], nd.center[1], nd.center[2]);
-      const rec = { id: nd.id, pos, r: nd.r, nbrs: [] };
+      const rec = { id: nd.id, pos, r: nd.r, nbrs: [], hot: !!nd.hotRho };
       memById.set(nd.id, rec);
       mem.push(rec);
     }
@@ -1722,10 +1746,12 @@ function updateMembraneSurface(nodes, membraneLinks) {
     dummy.scale.set(rec.r, rec.r * membraneFlatten, rec.r);
     dummy.updateMatrix();
     membraneMesh.setMatrixAt(mCt, dummy.matrix);
+    membraneMesh.setColorAt(mCt, rec.hot ? HOTRHO_COL : MEMBRANE_COL);
     mCt++;
   }
   membraneMesh.count = mCt;
   membraneMesh.instanceMatrix.needsUpdate = true;
+  if (membraneMesh.instanceColor) membraneMesh.instanceColor.needsUpdate = true;
 
   // Rebuild the connectivity line buffer (node-center to node-center).
   const posAttr = membraneLinkMesh.geometry.getAttribute('position');
@@ -2259,7 +2285,7 @@ function animate(ts) {
 requestAnimationFrame(animate);
 
 // ── boot ──────────────────────────────────────────────────────────────────────
-setSpeed(2);
+setSpeed(30);
 
 if (!LIVE_MODE) {
   refreshRuns({ autoLoad: true });

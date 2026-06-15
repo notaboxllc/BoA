@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dendritic actin growth near the membrane — code vs. biology</title>
+<style>
+  @page { size: letter; margin: 18mm 16mm 20mm 16mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Charter", "Georgia", "Times New Roman", serif;
+    font-size: 10.6pt; line-height: 1.5; color: #1a1a1a; max-width: 100%;
+  }
+  h1 {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 19pt; line-height: 1.2; margin: 0 0 2pt 0; color: #14223a;
+  }
+  .subtitle {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.5pt; color: #5a6472; margin: 0 0 4pt 0; font-weight: 400;
+  }
+  .meta {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 8.5pt; color: #8a93a0; border-bottom: 2px solid #14223a;
+    padding-bottom: 8pt; margin-bottom: 14pt;
+  }
+  h2 {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 13pt; color: #14223a; margin: 20pt 0 6pt 0;
+    padding-bottom: 3pt; border-bottom: 1px solid #c7d0db;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 11pt; color: #1f3a5f; margin: 13pt 0 3pt 0;
+    page-break-after: avoid;
+  }
+  p { margin: 5pt 0; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 8.8pt; background: #eef1f5; padding: 0.5pt 3pt;
+    border-radius: 3px; color: #1b3a2b;
+  }
+  strong { color: #0d1b30; }
+  ul { margin: 5pt 0 5pt 0; padding-left: 18pt; }
+  li { margin: 3pt 0; }
+  table {
+    border-collapse: collapse; width: 100%; margin: 8pt 0 10pt 0;
+    font-size: 9pt; page-break-inside: avoid;
+  }
+  th {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8.5pt;
+    background: #14223a; color: #fff; text-align: left;
+    padding: 5pt 7pt; vertical-align: top;
+  }
+  td { padding: 5pt 7pt; border-bottom: 1px solid #d8dee6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f6f8fa; }
+  .v-ok   { color: #1a7a3a; font-weight: 700; white-space: nowrap; }
+  .v-warn { color: #b06a00; font-weight: 700; white-space: nowrap; }
+  .v-bad  { color: #b02020; font-weight: 700; white-space: nowrap; }
+  .callout {
+    background: #f3f6fa; border-left: 3px solid #3a6ea5;
+    padding: 7pt 11pt; margin: 9pt 0; font-size: 9.8pt;
+  }
+  .prio {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8pt;
+    font-weight: 700; color: #fff; background: #3a6ea5;
+    padding: 1.5pt 6pt; border-radius: 3px; margin-right: 6pt;
+    vertical-align: middle; letter-spacing: 0.3px;
+  }
+  .prio.p1 { background: #b02020; }
+  .prio.p2 { background: #c4561a; }
+  .prio.p3 { background: #b06a00; }
+  .prio.p4 { background: #3a7a3a; }
+  .prio.p5 { background: #3a6ea5; }
+  .prio.p6 { background: #5a6472; }
+  .prio.opt { background: #8a93a0; }
+  .seq { background: #eaf2ea; border-left: 3px solid #3a7a3a; }
+  h2.nobreak, h3 { page-break-after: avoid; }
+  .ps { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>Dendritic actin growth near the membrane</h1>
+<p class="subtitle">Current simulation scheme vs. the dendritic-nucleation model — analysis &amp; recommendations</p>
+<p class="meta">BoxOfActin &nbsp;·&nbsp; branch <code>membrane-render-and-dense-v5</code> &nbsp;·&nbsp; 2026-06-15 &nbsp;·&nbsp; sources: <code>FilSegment.java</code>, <code>Arp23.java</code>, <code>StickyNode.java</code>, <code>Env.java</code>; <code>JOURNAL.md</code> 2026-06-14/15; <code>MEMBRANE_MODEL_NOTES.md</code></p>
+
+<h2>Part 1 — What the code actually does today</h2>
+
+<p>The "dendritic branching kit" (commits <code>58b35ae</code>, <code>9f7ad66</code>) is an exploratory, default-off layer on top of the existing Arp2/3 machinery. The mechanism, end to end:</p>
+
+<p class="ps"><strong>Branch nucleation</strong> (<code>FilSegment.checkBranching()</code>, ~line 1204). A filament's barbed end (<code>end2</code>) becomes branch-<em>eligible</em> if either:</p>
+<ul>
+  <li>it is near a "hot Arp activator" mesh node (<code>end2NearArpFactor</code>), <strong>or</strong></li>
+  <li>(new) its barbed end sits within <code>branchMembraneDist</code> below a <strong>fixed z = 0 plane</strong> (<code>getEnd2Z() &gt; -memDist</code>).</li>
+</ul>
+<p>If eligible, it fires with probability <code>branchRateNearArpFactors · arpConc · biochemDeltaT</code> per biochem tick, placing a daughter at a uniformly random spot within <code>branchZone</code> (50&nbsp;nm) of the barbed end. The daughter is nucleated at a hard-coded <strong>70°</strong> (<code>arp23AlphaAngle</code>) at a random azimuth around the mother — geometrically correct Arp2/3.</p>
+
+<p><strong>Membrane localization</strong> is currently the z-plane rule above. The biologically-shaped alternative — <code>StickyNode.biochemStep()</code>'s <code>iAmHotRho</code> "Rho-hot patch" that nucleates filaments at the surface — <strong>exists but is hard-disabled</strong> (<code>getHotProb = 0</code>, <code>hotSpotSpreadProb = 0</code>, marked "testing only").</p>
+
+<p><strong>Elongation</strong> (<code>addMonomerSim</code>): ≤1 monomer per biochem fire, so growth velocity ≈ 1 monomer / <code>biochemDeltaT</code>, saturated and nearly independent of <code>kATPOn2</code>/<code>actinConc</code>. Monomer is drawn from a <strong>single global scalar</strong> <code>Env.actinConc</code> (15&nbsp;µM), decremented/incremented via <code>Crucible.takeMonomer/putMonomer</code>.</p>
+
+<p class="ps"><strong>Capping</strong> (<code>checkCapping()</code>): two regimes.</p>
+<ul>
+  <li>Default (<code>membraneCapDist = 0</code>): genuine stochastic capping, <code>capRate · capConc · biochemDeltaT</code>, from the scalar <code>capConc</code> (2&nbsp;µM).</li>
+  <li>Lamellipodium regime (<code>membraneCapDist &gt; 0</code>): <strong>deterministic, geometry-gated</strong> — <code>end2Capped = (end2TipC ≥ membraneCapDist)</code>. Uncapped at the cortex, force-capped everywhere else.</li>
+</ul>
+
+<p><strong>Force coupling</strong>: <code>stericPolyFactor</code> softly attenuates poly rate when the tip is within ~one monomer of an obstacle; <code>membraneFaceCollideOn</code> does one-sided point-vs-triangle collision against the membrane.</p>
+
+<p>The <strong>"three throttles"</strong> (journal 2026-06-15): branch density = <code>arpConc</code>; filament length = <code>biochemDeltaT</code>; cortex confinement = <code>membraneCapDist</code> — tuned to be near-orthogonal.</p>
+
+<div class="callout">The journal is admirably honest about the hacks. The two worth building on: the z = 0 plane is not the real (bulging) membrane, and <code>stericPolyFactor</code> is "ad-hoc, not a derived force–velocity law."</div>
+
+<h2>Part 2 — Comparison to the dendritic-nucleation model</h2>
+
+<p>The reference biology is the Pollard–Borisy dendritic nucleation / array-treadmilling model (Pollard &amp; Borisy 2003; Svitkina &amp; Borisy 1999; Mullins et al. 1998). Scoring the code against it:</p>
+
+<table>
+<thead>
+<tr><th style="width:20%">Mechanism</th><th style="width:31%">Biology</th><th style="width:31%">Code today</th><th style="width:18%">Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>Branch angle 70°, random azimuth</td><td>Arp2/3 binds mother side, daughter at 70° ± 7°</td><td>Exactly this (<code>arp23AlphaAngle</code>)</td><td class="v-ok">✓ Faithful</td></tr>
+<tr><td><strong>What localizes branching</strong></td><td>Membrane-bound <strong>NPF (WAVE/WASP)</strong> activated by Rac/Cdc42/PIP2 — branching where the <em>activator</em> is</td><td>Fixed <strong>z = 0 geometric plane</strong>, or disabled hot-Rho</td><td class="v-warn">⚠ Right idea, wrong mechanism</td></tr>
+<tr><td><strong>Which filament gets branched</strong></td><td>Preferentially <strong>newly-polymerized ATP/ADP-Pi</strong> filament near the front (Ichetovkin 2002)</td><td>Any eligible barbed-end zone; <strong>no nucleotide gate</strong> (<code>notADPFraction()</code> exists, unused)</td><td class="v-bad">✗ Missing autocatalytic bias</td></tr>
+<tr><td><strong>Debranching / Arp2/3 turnover</strong></td><td>Branches dissociate — ADP-Pi→ADP aging + GMF debranching (Gandhi 2010); array treadmills</td><td><strong>None.</strong> <code>removeArp23</code> only fires when the daughter fully depolymerizes</td><td class="v-bad">✗ Missing — net only accretes</td></tr>
+<tr><td><strong>Capping</strong></td><td>CP caps <strong>stochastically everywhere</strong> (bulk scalar); spatial pattern is <em>emergent</em></td><td>Geometry-gated deterministic cap (<code>membraneCapDist</code>) imposes the pattern</td><td class="v-warn">⚠ Right outcome, inverted mechanism</td></tr>
+<tr><td><strong>Force–velocity</strong></td><td>Elastic / Brownian ratchet, v ∝ exp(−f·δ/kT) (Mogilner–Oster)</td><td><code>stericPolyFactor</code>, a flat constant</td><td class="v-warn">⚠ Ad-hoc proxy</td></tr>
+<tr><td>Orientation selection (±35° pattern)</td><td>Emergent from branch+cap+treadmill competition (Maly &amp; Borisy 2001)</td><td>Cannot emerge — no turnover to select on</td><td class="v-bad">✗ Downstream of gaps above</td></tr>
+<tr><td>Monomer / CP pools</td><td>Spatially varying; leading-edge depletion + funneling (Akin &amp; Mullins 2008)</td><td><strong>Global</strong> scalars</td><td class="v-warn">⚠ OK as scalars, but global hides the gradient</td></tr>
+</tbody>
+</table>
+
+<div class="callout"><strong>The throughline:</strong> the code <em>imposes by geometry</em> what biology <em>produces by self-organization</em>. A real lamellipodium is thin, oriented, and treadmilling because branching is autocatalytic at the membrane, capping is bulk-stochastic, and old material debranches and depolymerizes at the rear. The code skips the loop and pins the <em>result</em> to a z-plane: branch near z = 0, cap away from z = 0. Fine as a flat-sheet snapshot — but it cannot curve, cannot treadmill, and cannot reproduce the orientation pattern.</div>
+
+<h2>Part 3 — Suggested changes</h2>
+<p>Actin and capping protein remain <strong>scalar fields</strong> throughout, per the design constraint — none of this proposes explicit monomer or CP particles.</p>
+
+<h3><span class="prio p1">PRIORITY 1</span>Localize branching by activator at the <em>real</em> surface, not a z-plane</h3>
+<p>Revive the disabled <code>iAmHotRho</code> path and make it the branch gate. Branch eligibility should be "barbed end within reach of an <strong>active NPF-bearing membrane node</strong>," computed from <code>StickyNode</code> proximity (<code>end2TipC</code>/mesh, already tracked), not from <code>getEnd2Z()</code>. This:</p>
+<ul>
+  <li>works for a curved / closed cortex for free (keys off membrane nodes, which move);</li>
+  <li>restores the biological knob (NPF activation density = <code>nucRateNearArpFactors</code> × an activator field), so Rac/Cdc42/PIP2 patterning becomes expressible;</li>
+  <li>lets you delete the fixed-plane assumption the journal calls out twice.</li>
+</ul>
+<p>Highest-leverage fix: replaces <em>both</em> <code>branchMembraneDist</code> and the <code>membraneCapDist</code> z-rule's rationale with the actual surface.</p>
+
+<h3><span class="prio p2">PRIORITY 2</span>Add Arp2/3 debranching (the missing turnover term)</h3>
+<p>Without it there is no treadmilling and no steady state — the network can only thicken. Add a stochastic per-branch dissociation in <code>Arp23</code> at rate <code>kDebranch · biochemDeltaT</code>, <strong>gated on the daughter's nucleotide age</strong> via the <code>notADPFraction()</code> you already compute: branches on ADP filament dissociate fast, ATP/ADP-Pi branches are stable (Gandhi 2010; Mahaffy &amp; Pollard). <code>removeArp23</code> already performs the topology change — this just calls it on a clock instead of only on full depoly. This is what lets the array recycle and what makes ±35° orientation emergent rather than impossible.</p>
+
+<h3><span class="prio p3">PRIORITY 3</span>Make capping a true bulk scalar process; let localization emerge</h3>
+<p>Demote <code>membraneCapDist</code> from a mechanism to (at most) a diagnostic. Cap stochastically from <code>capConc</code> everywhere (the default regime already does this). The thin membrane-hugging layer then <strong>emerges</strong> from P1 (branching only at the surface) + P2 (rear debranching/depoly) — more honest, and it tracks a curved membrane automatically. Keep <code>membraneCapDist</code> as a fast "force the outcome" shortcut, but stop treating it as the model.</p>
+
+<h3><span class="prio p4">PRIORITY 4</span>Bias branching to newly-polymerized filament</h3>
+<p>Gate <code>checkBranching()</code> on local nucleotide state: weight branch probability by <code>notADPFraction()</code> near the barbed end (ATP/ADP-Pi preferred). One extra factor in the existing probability expression — turns the branch step genuinely autocatalytic (new filament begets branches begets new filament), the engine of the dendritic array.</p>
+
+<h3><span class="prio p5">PRIORITY 5</span>Replace <code>stericPolyFactor</code> with a Brownian-ratchet law</h3>
+<p>You already have the per-tip membrane load from the face-collision reaction force. Swap the flat <code>stericPolyFactor</code> for <code>rate · exp(−f·δ / kT)</code> with δ = monomer half-size (Mogilner–Oster). Also fixes the poly-through-membrane tunneling the journal warns about: load rises → rate falls smoothly to zero at the stall force, rather than a constant fraction that can outrun the one-sided push.</p>
+
+<h3><span class="prio p6">PRIORITY 6</span>Optional, still scalar — spatially bin the actin/CP fields</h3>
+<p>A single global <code>actinConc</code> can't show leading-edge monomer depletion or the capping "funnel." Since you have a <code>Mesh</code>, the cheapest faithful upgrade is per-mesh-cell scalar fields for <code>actinConc</code>/<code>capConc</code> with diffusive relaxation between cells — still fields, no particles. The only change here that touches the monomer/CP representation, and it stays inside the "implicit scalar field" mandate. Defer until P1–P2 give you a treadmilling array that <em>would</em> deplete a local pool.</p>
+
+<h3><span class="prio opt">ALSO</span>Cheap correctness items flagged in the journal</h3>
+<ul>
+  <li><strong>Select the IC by parameter, not the <code>xLinkTesting</code>/<code>nodeLinkTesting</code> compile-time flags</strong> — the journal documents this contaminating a real run. A correctness wart, not just ergonomics.</li>
+  <li><strong>Default <code>arpConc</code> to nonzero</strong> in any "branching" param file, or assert at startup — silent dead branching has already bitten (memory + journal both record it).</li>
+</ul>
+
+<div class="callout seq"><strong>Recommended sequence.</strong> P1 → P2 → P3 form one coherent change — <em>localize branching at the real surface, add turnover, let capping be bulk</em> — together converting the system from "geometrically-pinned snapshot" to "self-organizing treadmilling array." P4–P5 sharpen the dynamics; P6 is the scalar-field refinement once there's a treadmill to feed it. Everything stays within the agent-based-filaments + scalar-field-monomers paradigm the codebase already commits to.</div>
+
+</body>
+</html>
