@@ -1,5 +1,35 @@
 # BoxOfActin Project Journal
 
+## 2026-06-15 — Lamellipodium tuning: orthogonal knobs + three throttles (exploratory)
+
+Working recipe for a sparse dendritic network pushing the membrane (membrane IC, both sub-cycles
+on), plus three non-obvious throttles found while tuning. Membrane modeling is still in development;
+this is current knowledge, not settled physics.
+
+- **Branch density = `arpConc`** (linear: branch prob/fire = `branchRateNearArpFactors·arpConc·
+  biochemDeltaT`). **GOTCHA: `arpConc` defaults to 0, so runtime branching is silently dead** no
+  matter the branch rate — the membrane configs never set it (`isoBranch` used 10). `branchMembraneDist`
+  (z-rule, ~0.3) makes near-membrane barbed ends branch-eligible (the dendritic self-amplification).
+  `nucRateNearArpFactors` + `kNodeNuc` are the de-novo "hot-Rho" nucleation; set both to 0 and growth
+  comes only from the IC mothers branching, not a nucleated brush (that brush was what the old
+  "dendritic" membrane runs actually were).
+- **Elongation speed = `biochemDeltaT`, NOT `kATPOn2`/`actinConc`.** `addMonomerSim` adds ≤1 monomer
+  per biochem fire, so growth velocity ≈ 1 monomer / `biochemDeltaT` regardless of rate/concentration
+  (the add-prob is already saturated at the 15 µM default). Lowering `biochemDeltaT` (0.01→0.001) gave
+  ~10× faster elongation while branch *rate per second* stayed fixed (branch prob ∝ `biochemDeltaT`,
+  cancels). So `arpConc` and `biochemDeltaT` tune branch-spacing and filament length nearly orthogonally.
+- **Cortex confinement = `membraneCapDist`.** Caps any barbed end whose clearance to the nearest
+  membrane node ≥ this; `end2TipC` defaults to 1e6 for tips the mesh doesn't detect near a node, so
+  off-cortex tips are always capped → no growth. 0 = free growth (light stochastic capping via
+  `capConc`); >0 = thin membrane-hugging layer. It throttles elongation by design.
+
+**Build wart:** the membrane IC (`makeMembraneBranchedMothers`) vs the free-space branch IC
+(`makeTestBranchedFilament`) is selected by the hardcoded `xLinkTesting`/`nodeLinkTesting` flags in
+`Env.java` (committed default `false`), so switching scenarios needs an edit + recompile — and flipping
+them for one run silently changes the IC for any *other* run launched on that binary (it contaminated a
+branch batch this session, caught only because the branch runs showed a membrane). Selecting the IC by
+a parameter instead of a compile-time flag is a wanted refactor.
+
 ## 2026-06-15 — Constraint sub-cycling (branches + membrane) and two segment-posing bugs
 
 **Branch spin, re-diagnosed and fixed.** The Arp2/3-branched-network spin at dt=1e-5 is a
