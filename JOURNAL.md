@@ -1,5 +1,43 @@
 # BoxOfActin Project Journal
 
+## 2026-06-15 — Constraint sub-cycling (branches + membrane) and two segment-posing bugs
+
+**Branch spin, re-diagnosed and fixed.** The Arp2/3-branched-network spin at dt=1e-5 is a
+dt-dependent *explicit-overshoot artifact*, not Brownian tumbling and not branch-count
+accumulation (cumulative rigid rotation via Kabsch confirmed it; the earlier per-segment-median
+metric was blind to coherent rigid rotation). Root cause: **every spring in BoA is a dt-coupled
+`coeff·strain/dt` position correction**, so its effective stiffness `k = coeff/(dt·mobility)`
+scales as 1/dt — a "close a fraction per step" projection, not a force. Two fixes were *falsified*
+on a new deterministic single-junction bench (`Env.junctionTest`): a rotational-drag-aware force
+rescale (`arpRotDragAware`, since reverted) and lowering `arpTransFracMove` — both no-ops, because
+the gap closes by a fixed fraction regardless of force magnitude. The fix that works: reformulate
+as a **fixed-stiffness explicit penalty spring** (`Env.arpFixedStiffnessDt`, k uses a reference dt,
+not live dt) and **sub-cycle it** (r-RESPA, `Env.arpSubcycleN` inner steps of dt/N on only the
+branch constraint, soft forces frozen; `Arp23.subcycleAll`). Junction misalignment 36°→~6°;
+isolated network cumulative rotation 75°→23° mean across 5 seeds (every seed lower, variance halved);
+confirmed by eye (mother filament Brownian-tumbles only, no coherent spin).
+
+**Membrane relaxation, GPU-shaped.** `NodeLink.subcycleRelaxAll` (`Env.membraneRelaxGpuShaped`,
+`Env.membraneFixedStiffnessDt`) — self-contained Jacobi iterative projection (zero node force → sum
+all link forces at fixed pose → integrate all nodes → repeat to cap/strain-tolerance), the shape a
+per-mesh GPU kernel takes. Indistinguishable from the legacy ThreadSet relaxation loop by eye and in
+bulge curves, and *more robust* (legacy NaN'd a membrane node at ~12k-segment load; Jacobi stayed
+finite). NodeLink uses the same `fracMove/dt` form, so the fixed-stiffness lesson transfers.
+
+**Two segment-posing bugs (unconditional fixes).** Same root cause — a newly created segment was
+positioned by its CENTER where a constraint anchors an END, so it was born off-constraint and the
+spring yanked it in (a pop at every creation; visible at startup, every branch, every split).
+(1) `splitSegment` placed the new plus-end segment from the STALE pre-split `end2Pt` (setFirstHalf
+defers the derived-end recompute) → ~½·stdSegLength off → big pop, synchronized across in-phase
+mothers every stdSegLength(=32) frames. Now uses the first half's fresh end2 = coord+½·length·uVec.
+(2) `makeArpBranch` put the daughter's center at the branch point → end1 ~½·length off. Now places
+center at branchPoint+½·length·uVec so end1 sits on the junction. Verified: clean startup, no split pop.
+
+All sub-cycle/fixed-stiffness/Jacobi params **default off** (legacy behavior). Design + GPU port plan
+(two sub-cycle flavors, fixed-stiffness prerequisite across all spring families, Jacobi-vs-atomic
+shared-endpoint accumulation, TaskGraph integration) in `SUBCYCLING_GPU.md`. Viewer: barbed-end "+"
+markers thinner/smaller and off by default. CPU prototypes; GPU kernel port is the next step.
+
 ## 2026-06-14 — Membrane nodes no longer randomly turn over
 
 Diagnosed apparent "nodes separating from the sheet" in the compliant-membrane runs: it was NOT

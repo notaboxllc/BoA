@@ -47,6 +47,8 @@ public class Arp23 {
 	Pt3D R = new Pt3D();
 	Pt3D RCrossF = new Pt3D();
 	boolean removeMe = false;
+	double lastAngTween = 0;   // junctionTest diagnostic: most recent torsion misalignment (rad)
+	static int jctStep = 0;    // junctionTest diagnostic: step counter for the relaxation log
 	static int arpJSonIDCounter = 0; // used for making unique Simularium JSon Ids only
 	
 	// multithreading
@@ -215,7 +217,13 @@ public class Arp23 {
 		
 		//forces and accompanying torques
 		double fracMove = Env.arpTransFracMove.getValue();  // live-tunable; 1.0=critically damped, was hardcoded 2.0 (overshoot)
-		double curForceMag= (fracMove*1.0e-6*endDisplacement/Env.deltaT.getValue())/(1/motherFil.bTransGam.y+1/daughterFil.bTransGam.x);
+		// Effective stiffness k = fracMove/(kDt*mobility). With kDt = live deltaT (legacy) the
+		// stiffness scales as 1/dt -- a "close fraction per step" position correction, NOT a
+		// fixed force, so it cannot be sub-cycled or dt-refined (smaller dt => stiffer spring).
+		// arpFixedStiffnessDt>0 pins kDt to a reference value => a dt-INDEPENDENT physical
+		// penalty spring (still fully explicit) that CAN be sub-cycled/refined.
+		double kDt = (Env.arpFixedStiffnessDt.getValue() > 0) ? Env.arpFixedStiffnessDt.getValue() : Env.deltaT.getValue();
+		double curForceMag= (fracMove*1.0e-6*endDisplacement/kDt)/(1/motherFil.bTransGam.y+1/daughterFil.bTransGam.x);
 		//forceMag.registerValue(curForceMag);
 		forceVec.scale(curForceMag,displacementVec);
 		motherFil.incForceSum(forceVec,momPt);
@@ -237,8 +245,8 @@ public class Arp23 {
 		if (dotVecs > 1.0) { dotVecs = 1.0; }
 		if (dotVecs < -1.0) { dotVecs = -1.0; }
 		angTween = Pt3D.fastAcos(dotVecs);
-	
-		
+		lastAngTween = angTween;   // junctionTest diagnostic
+
 		double curTorqueMag = Env.arpTorqSpring.getValue()*angTween;
 		
 		if (torsionVec.checkPt3D()) {
@@ -255,9 +263,98 @@ public class Arp23 {
 	}
 	
 	public void enforceFilLink () {
+		// When sub-cycling, the branch constraint is applied inside subcycleAll() (N inner
+		// steps of dt/N) instead of once here; skip the single-shot apply so it isn't doubled.
+		if (Env.arpSubcycleN.getIntValue() > 1) return;
 		updateArp23Links();
-		if (active) { 
+		if (active) {
 			applyForces();
+		}
+		if (Env.junctionTest.getValue() > 0.5) {
+			// log per-step relaxation: gap (um) and angular misalignment (rad)
+			System.out.println("JCT " + (jctStep++) + " " + endDisplacement + " " + lastAngTween);
+		}
+	}
+
+	// CPU prototype of branch-constraint sub-cycling (r-RESPA / multiple-time-stepping),
+	// structured to map onto a per-cluster GPU kernel. The soft forces (chain/boundary/node/
+	// joints) are already summed into soaForceSum by the step/joint waves (the branch wave was
+	// skipped above); we freeze them, then take N inner steps of dt/N that re-evaluate ONLY the
+	// stiff branch constraint and integrate ONLY the branch-involved segments. Branch segments
+	// are excluded from the global move wave (FilSegment.moveThing early-return) so they are not
+	// double-integrated. Runs once per global step from doLoop when Env.arpSubcycleN > 1.
+	// NOTE (prototype scope): all branch segments are treated as one cluster (serial relaxation);
+	// the GPU port partitions into independent connected clusters, one work-unit each. Brownian
+	// is applied inside moveThing each inner step — correct only when thermal is off (the test
+	// bench); production needs Brownian applied once at dt (deferred follow-on).
+	static final java.util.LinkedHashSet<FilSegment> subcycleSegs = new java.util.LinkedHashSet<>();
+	static double[] subSoftF, subSoftT;
+	static volatile boolean subcyclingNow = false;  // true only while subcycleAll() drives moveThing()
+
+	static void subcycleAll () {
+		int N = Env.arpSubcycleN.getIntValue();
+		if (N <= 1 || arp23Ct == 0) return;
+		subcycleSegs.clear();
+		for (int i=0;i<arp23Ct;i++) {
+			Arp23 a = theArp23s[i];
+			if (a != null && a.active && a.motherFil != null && a.daughterFil != null) {
+				subcycleSegs.add(a.motherFil); subcycleSegs.add(a.daughterFil);
+			}
+		}
+		int n = subcycleSegs.size();
+		if (n == 0) return;
+		if (subSoftF == null || subSoftF.length < n*3) { subSoftF = new double[n*3]; subSoftT = new double[n*3]; }
+		// freeze the soft force/torque currently in the SoA (branch contribution was skipped)
+		int k = 0;
+		for (FilSegment seg : subcycleSegs) {
+			int b = seg.myThingNumber*3;
+			subSoftF[k]=Thing.soaForceSum[b];   subSoftT[k]=Thing.soaTorqueSum[b];
+			subSoftF[k+1]=Thing.soaForceSum[b+1]; subSoftT[k+1]=Thing.soaTorqueSum[b+1];
+			subSoftF[k+2]=Thing.soaForceSum[b+2]; subSoftT[k+2]=Thing.soaTorqueSum[b+2];
+			k += 3;
+		}
+		double dtFull = Env.deltaT.getValue();
+		double dtSub = dtFull / N;
+		subcyclingNow = true;   // allow FilSegment.moveThing() to integrate branch segs here
+		for (int s=0; s<N; s++) {
+			// reset branch segments' force/torque to the frozen soft contribution
+			k = 0;
+			for (FilSegment seg : subcycleSegs) {
+				int b = seg.myThingNumber*3;
+				Thing.soaForceSum[b]=(float)subSoftF[k];   Thing.soaTorqueSum[b]=(float)subSoftT[k];
+				Thing.soaForceSum[b+1]=(float)subSoftF[k+1]; Thing.soaTorqueSum[b+1]=(float)subSoftT[k+1];
+				Thing.soaForceSum[b+2]=(float)subSoftF[k+2]; Thing.soaTorqueSum[b+2]=(float)subSoftT[k+2];
+				k += 3;
+			}
+			// Evaluate the branch constraint as a FIXED-stiffness force (uses the global dt in
+			// its k = fracMove/(dt*mobility) denominator, NOT the sub-dt) re-evaluated at the
+			// current sub-stepped pose. This is the crux: the constraint is a "close fraction
+			// per step" position correction whose effective stiffness scales as 1/dt, so feeding
+			// it the sub-dt would make it N-fold stiffer and overshoot. Keep dt=dtFull here...
+			Env.deltaT.setValue(dtFull);
+			for (int i=0;i<arp23Ct;i++) {
+				Arp23 a = theArp23s[i];
+				if (a != null && a.active) { a.updateArp23Links(); a.applyForces(); }
+			}
+			// ...then integrate the fine sub-step (dt/N) so the fixed-stiffness relaxation is
+			// resolved without explicit-Euler overshoot.
+			Env.deltaT.setValue(dtSub);
+			for (FilSegment seg : subcycleSegs) { seg.moveThing(); seg.initialize(); }
+		}
+		Env.deltaT.setValue(dtFull);
+		subcyclingNow = false;
+		// zero the branch segments' force/torque so the (skipped) global move is harmless
+		for (FilSegment seg : subcycleSegs) {
+			int b = seg.myThingNumber*3;
+			Thing.soaForceSum[b]=0; Thing.soaForceSum[b+1]=0; Thing.soaForceSum[b+2]=0;
+			Thing.soaTorqueSum[b]=0; Thing.soaTorqueSum[b+1]=0; Thing.soaTorqueSum[b+2]=0;
+		}
+		// junctionTest: one line per global step (final relaxed state), matching the non-subcycle cadence
+		if (Env.junctionTest.getValue() > 0.5) {
+			for (int i=0;i<arp23Ct;i++) {
+				Arp23 a = theArp23s[i];
+				if (a != null && a.active) System.out.println("JCT " + (jctStep++) + " " + a.endDisplacement + " " + a.lastAngTween);
+			}
 		}
 	}
 	

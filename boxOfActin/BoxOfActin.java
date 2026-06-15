@@ -1430,6 +1430,12 @@ public class BoxOfActin {
 				waitOnAllThreadSets(Env.gatherForcesStop);
 				gatherTimer.stopInc();
 
+				// Branch-constraint sub-cycling (r-RESPA): with soft forces now gathered into
+				// soaForceSum, take N inner steps of dt/N on ONLY the stiff Arp2/3 constraint and
+				// integrate ONLY the branch segments (excluded from the global move below). No-op
+				// unless Env.arpSubcycleN > 1. CPU prototype; per-cluster GPU kernel is the port.
+				if (Env.arpSubcycleN.getIntValue() > 1) { Arp23.subcycleAll(); }
+
 				// Contractility assay: read the anchor reaction (= tension) from the gathered
 				// force, before moveThing integrates and the pin snaps the endpoint back.
 				if (Env.contractilityAssay.isActive()) { captureContractilityTension(); accumulateContractilityStats(); }
@@ -1533,6 +1539,10 @@ public class BoxOfActin {
 				// Part-2 attribution: bracket the membrane relaxation block (no-op
 				// in non-membrane fixtures but its threadset fan-out is unlabeled).
 				long _membT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
+				if (Env.membraneRelaxGpuShaped.getValue() > 0.5) {
+					// GPU-shaped self-contained Jacobi relaxation (kernel-shaped; see SUBCYCLING_GPU.md)
+					NodeLink.subcycleRelaxAll();
+				} else {
 				int mPass = 0;
 				NodeLink.maxStrain = 10;
 				while (NodeLink.maxStrain > Env.membraneMaxLinkStrain.getValue() && mPass < Env.maxMembranePasses.getIntValue()) {
@@ -1550,6 +1560,7 @@ public class BoxOfActin {
 					waitOnAllThreadSets(Env.membraneMoveStop);
 
 					mPass++;
+				}
 				}
 				if (StepProfiler.ENABLED) { pcMembraneNs += System.nanoTime() - _membT0; }
 

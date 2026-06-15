@@ -548,7 +548,46 @@ public class Env {
 	static final Parameter arpTorqSpring = new Parameter("arpTorqSpring", " Torque Spring To Constrain Mother/Daughter Arp2/3 Relationship",arpTorqSpring_init, " N/rad", Parameter.DOUBLE, true);
 	static private final double arpTransFracMove_init = 1.0; // fraction of mother/daughter branch-point gap closed per step
 	static final Parameter arpTransFracMove = new Parameter("arpTransFracMove"," Arp2/3 Branch Translational Correction Fraction", arpTransFracMove_init, "").setMutableAtRuntime().setDescription("Fraction of the Arp2/3 mother-daughter branch-point gap closed per timestep by the translational constraint (Arp23.applyTransForce). 1.0 = close the gap exactly (critically damped); >1 over-corrects and overshoots (the original 2.0 caused visible spin/overshoot); <1 under-corrects, giving looser branches whose daughters can drift off the branch point. Lower if the branched network spins/overshoots; raise for tighter coupling. Live-tunable.");
-	
+
+	// Controlled single-junction relaxation test (diagnostic IC). When on, the xLinkTesting
+	// initial-condition builds ONE mother + ONE daughter Arp2/3 branch, perturbs the daughter
+	// off its constraint by junctionPerturbDeg, and the Arp23 logs "JCT <step> <gap_um> <angle_rad>"
+	// every step so the constraint relaxation can be inspected for overshoot/ringing in isolation
+	// (no growth, no other filaments). Use with thermal off and a short run. Default off.
+	static final Parameter junctionTest = new Parameter("junctionTest"," Single Arp2/3 Junction Relaxation Test", 0.0, "", Parameter.BOOLEAN, false);
+	static final Parameter junctionPerturbDeg = new Parameter("junctionPerturbDeg"," Junction Test Daughter Perturbation", 30.0, " deg", Parameter.DOUBLE, false);
+
+	// Arp2/3 branch-constraint sub-cycling (r-RESPA / multiple-time-stepping). N = number of
+	// inner sub-steps of dt/N taken on ONLY the stiff branch constraint each global step, with
+	// the soft forces (chain/boundary/node/joints/Brownian) frozen. 1 = off (legacy single
+	// integration). >1 reproduces a fine-dt relaxation of the stiff junction without paying
+	// dt/N on the whole sim, removing the explicit-Euler overshoot that misorients branches at
+	// large dt. CPU prototype (Arp23.subcycleAll); structured to map onto a per-cluster GPU
+	// kernel. Live-tunable.
+	static final Parameter arpSubcycleN = new Parameter("arpSubcycleN"," Arp2/3 Branch Constraint Sub-cycle Count", 1.0, "", Parameter.INT, false).setMutableAtRuntime().setDescription("Number of inner sub-steps (each dt/N) the Arp2/3 branch constraint is integrated per global timestep, with soft forces frozen (multiple-time-stepping / r-RESPA). 1 = off (single explicit integration, can overshoot and misorient branches at large dt). Raising it (e.g. 10) relaxes the stiff junction at a fine effective dt while the rest of the sim stays at the global dt -- fixes branch spin/overshoot without the 10x cost of globally shrinking dt. Requires arpFixedStiffnessDt>0 (otherwise the constraint stiffness scales as 1/dt and cannot be refined). CPU prototype; GPU port is per-cluster. Live-tunable.");
+
+	// Reference timestep for the Arp2/3 translational constraint stiffness. 0 = legacy (stiffness
+	// uses the live deltaT, k ~ 1/dt -- a per-step position correction that cannot be dt-refined
+	// or sub-cycled). >0 pins the stiffness to k = fracMove/(arpFixedStiffnessDt*mobility), a
+	// dt-INDEPENDENT explicit penalty spring whose relaxation time is ~arpFixedStiffnessDt; this
+	// is the prerequisite for arpSubcycleN to work. Set it to roughly the global dt at which the
+	// branch was tight (e.g. 1e-5). Live-tunable.
+	static final Parameter arpFixedStiffnessDt = new Parameter("arpFixedStiffnessDt"," Arp2/3 Constraint Fixed-Stiffness Reference dt", 0.0, " s", Parameter.DOUBLE, false).setMutableAtRuntime().setDescription("Reference timestep pinning the Arp2/3 translational branch stiffness k=fracMove/(this*mobility). 0 = legacy (k uses live deltaT, scales as 1/dt -- a position correction, not dt-refinable). >0 makes k a fixed, dt-independent explicit penalty spring (relaxation time ~ this value), which is required before arpSubcycleN sub-cycling is meaningful. Typically set to the dt at which the branch was acceptably tight (e.g. 1e-5). Live-tunable.");
+
+	// Membrane relaxation, GPU-shaped (Jacobi iterative projection). The membrane strain
+	// propagates one neighbour-ring per pass, so it is relaxed by N projection passes/step. The
+	// legacy loop in doLoop fans out ThreadSets in a host while-loop; this self-contained variant
+	// (NodeLink.subcycleRelaxAll) does the same Jacobi passes (zero node force -> sum all link
+	// forces at current pose -> integrate all nodes -> repeat) in one routine, the exact shape a
+	// per-mesh GPU kernel with a bounded internal pass-loop would take. Same pass cap / maxStrain
+	// early-out as the legacy loop. Default off (legacy ThreadSet loop). See SUBCYCLING_GPU.md.
+	static final Parameter membraneRelaxGpuShaped = new Parameter("membraneRelaxGpuShaped"," Membrane Relaxation GPU-Shaped (Jacobi)", 0.0, "", Parameter.BOOLEAN, false).setMutableAtRuntime().setDescription("0 = legacy membrane relaxation loop (ThreadSet fan-out per pass). 1 = self-contained Jacobi relaxation (NodeLink.subcycleRelaxAll): zero node forces, sum all NodeLink forces at the current pose, integrate all membrane nodes, repeat up to maxMembranePasses or until maxStrain<membraneMaxLinkStrain -- the structure a per-mesh GPU kernel would use. Behaviour should track the legacy loop. Live-tunable.");
+	// Reference dt pinning the membrane NodeLink stiffness (same role as arpFixedStiffnessDt).
+	// 0 = legacy (k = membraneLinkFracMove/(deltaT*mobility), scales as 1/dt). >0 = fixed,
+	// dt-independent in-plane membrane stiffness; required for dt-refinement, and makes the
+	// projection passes robust to global-dt changes. Set ~ the dt at which the sheet was tuned.
+	static final Parameter membraneFixedStiffnessDt = new Parameter("membraneFixedStiffnessDt"," Membrane Link Fixed-Stiffness Reference dt", 0.0, " s", Parameter.DOUBLE, false).setMutableAtRuntime().setDescription("Reference timestep pinning the membrane NodeLink stiffness k=membraneLinkFracMove/(this*mobility). 0 = legacy (k uses live deltaT, scales as 1/dt). >0 = fixed, dt-independent explicit in-plane spring (relaxation ~ this value). Same lesson as arpFixedStiffnessDt; required before membrane sub-cycling/dt-refinement is meaningful. Live-tunable.");
+
 	// **** Viscous Blobs — removed 2026-05-17 (Round 7); see JOURNAL.md. ****
 	// Listeria-specific hack: filaments accumulate sphere-drag blobs to simulate implicit
 	// crosslinking to unlisted cellular components. bRotGam jumped 560× at vBlobMinMons=50,

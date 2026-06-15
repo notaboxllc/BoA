@@ -613,6 +613,10 @@ public class FilSegment extends Thing {
 	
 	public void moveThing () {
 		if (isLpSeg && Env.lpActive.getValue() == 0) return;
+		// Branch-constraint sub-cycling: mothers (arpChildCt>0) and daughters (motherFil!=null)
+		// are integrated inside Arp23.subcycleAll() at dt/N, so skip them in the global move
+		// wave to avoid double-integration. Non-branch filaments fall through normally.
+		if (Env.arpSubcycleN.getIntValue() > 1 && !Arp23.subcyclingNow && (motherFil != null || arpChildCt > 0)) return;
 		// Given the forces/torques at this time point... move with explicit Euler approximation to ODE solution
 
 		double dt = Env.deltaT.getValue();
@@ -869,7 +873,16 @@ public class FilSegment extends Thing {
 		int halfSegCt = Env.stdSegLength.getIntValue();
 		splitFilSeg.setFirstHalf(halfSegCt);
 		double nextFilLength = (halfSegCt+1)*Env.actinMonoRadius;
-		Pt3D nextFilCoord = Pt3D.Add(splitFilSeg.end2Pt,0.5*nextFilLength-Env.actinMonoRadius,splitFilSeg.uVecAsPt3D());
+		// setFirstHalf() shortened splitFilSeg (new coord/length) but DEFERS the derived-end
+		// recompute, so splitFilSeg.end2Pt is still the STALE pre-split plus-end (~stdSegLength
+		// monomers too far out). Computing the new segment's position from it placed the new
+		// plus-end segment off-chain for one frame (chain spring then snapped it back — a visible
+		// pop at synchronized splits). Use the first half's FRESH end2 = coord + 0.5*length*uVec.
+		double fhHalf = 0.5*splitFilSeg.length;
+		Pt3D fhEnd2 = new Pt3D(splitFilSeg.getCoordX()+fhHalf*splitFilSeg.getUVecX(),
+		                       splitFilSeg.getCoordY()+fhHalf*splitFilSeg.getUVecY(),
+		                       splitFilSeg.getCoordZ()+fhHalf*splitFilSeg.getUVecZ());
+		Pt3D nextFilCoord = Pt3D.Add(fhEnd2,0.5*nextFilLength-Env.actinMonoRadius,splitFilSeg.uVecAsPt3D());
 		FilSegment nextFil = new FilSegment (nextFilCoord,splitFilSeg.uVecAsPt3D(),halfSegCt,splitFilSeg);
 		splitFilSeg.setEnd2Links(nextFil, true);
 		if (!Env.noMonomersSimd.isActive()) { splitFilSeg.transferMons (splitFilSeg.monomerCt,nextFil); }
@@ -1209,8 +1222,15 @@ public class FilSegment extends Thing {
 		double zPart = Math.sin(theta)*Env.sinArp23Alpha;
 		Pt3D nucUVec = new Pt3D(Env.cosArp23Alpha,yPart,zPart);
 		nucUVec.xToX(this);
-		Pt3D nucLoc = Pt3D.Add(end1Pt,bLoc,uVecAsPt3D());
-		FilSegment dFil = FilSegment.makeArp23NucFilament(nucLoc, nucUVec);
+		Pt3D nucLoc = Pt3D.Add(end1Pt,bLoc,uVecAsPt3D());   // branch point on the mother = daughter's end1 anchor
+		// Place the daughter so its end1 (pointed end) sits AT the branch point, not its CENTER.
+		// end1 = coord - 0.5*length*uVec, so coord = branchPoint + 0.5*length*uVec. Previously the
+		// daughter's center was put at the branch point, leaving end1 ~0.5*length off, which the
+		// Arp2/3 translational constraint then yanked in — a pop at every branch creation and at
+		// startup (subtle for seed-length daughters, but the same posing bug as the split).
+		double dHalf = 0.5*(Env.actinSeed.getIntValue()+1)*Env.actinMonoRadius;
+		Pt3D dCenter = Pt3D.Add(nucLoc, dHalf, nucUVec);
+		FilSegment dFil = FilSegment.makeArp23NucFilament(dCenter, nucUVec);
 		Arp23 newArp = Arp23.newArpBranch(this, bLoc, dFil);
 		
 		// load into arrays
@@ -3221,6 +3241,7 @@ public class FilSegment extends Thing {
 	}
 
 	public static void makeTestBranchedFilament() {
+		if (Env.junctionTest.getValue() > 0.5) { makeSingleJunctionTest(); return; }
 		Pt3D coordForBoth = new Pt3D(0,0,0);
 		Pt3D fil1UVec = new Pt3D(0,0,-1);
 		double testAngleBetween = 178; // in degrees
@@ -3252,6 +3273,37 @@ public class FilSegment extends Thing {
 		
 	} 
 	
+	// Controlled single-junction relaxation test: 1 mother + 1 daughter Arp2/3 branch,
+	// daughter perturbed off its constraint by junctionPerturbDeg. With thermal off and a
+	// short run, the Arp23 logs the gap/angle relaxation each step (see Arp23.enforceFilLink)
+	// so overshoot/ringing can be inspected in isolation, free of growth/floppiness/RNG.
+	public static void makeSingleJunctionTest() {
+		Pt3D coord = new Pt3D(0,0,0);
+		Pt3D mUVec = new Pt3D(0,0,-1);
+		int numMonomers = 128;
+		FilSegment mFil = new FilSegment(coord, mUVec, 0, numMonomers, false);
+		double bLoc = 0.5*numMonomers*Env.actinMonoRadius;
+		FilSegment dFil = mFil.makeArpBranch(bLoc);   // nascent daughter at relaxed orient; relaxDUVec set to relaxed
+		if (dFil == null) { talkln("junctionTest: branch creation failed"); return; }
+		// Perturb daughter orientation by perturbDeg about its center. Rotating about the
+		// center swings BOTH ends, so this excites the angular (torsion) AND the end-gap
+		// (translation) constraints at once; each is logged separately for attribution.
+		double p = Env.junctionPerturbDeg.getValue()*Math.PI/180.0;
+		Pt3D u = dFil.uVecAsPt3D();
+		Pt3D m = mFil.uVecAsPt3D();
+		double mu = Pt3D.Dot(m,u);
+		Pt3D w = new Pt3D(m.x-mu*u.x, m.y-mu*u.y, m.z-mu*u.z);   // mother uVec component perp to daughter uVec
+		double wn = Math.sqrt(Pt3D.Dot(w,w));
+		if (wn < 1e-9) { w.x=u.y; w.y=-u.x; w.z=0; wn=Math.sqrt(Pt3D.Dot(w,w)); }  // fallback perpendicular
+		w.scale(1.0/wn);
+		double c=Math.cos(p), s=Math.sin(p);
+		Pt3D nu = new Pt3D(c*u.x+s*w.x, c*u.y+s*w.y, c*u.z+s*w.z);
+		double nn=Math.sqrt(Pt3D.Dot(nu,nu)); nu.scale(1.0/nn);
+		dFil.setUVec(nu);
+		dFil.initialize();
+		talkln("junctionTest: built 1 mother + 1 daughter; daughter perturbed " + Env.junctionPerturbDeg.getValue() + " deg");
+	}
+
 	public static void makeTestBranchedFilament(Pt3D loc) {
 		Pt3D fil1UVec = new Pt3D(1,0,0);
 		int numMonomers = 128;

@@ -201,16 +201,73 @@ public class NodeLink {
 		
 		//forces and accompanying torques
 		double fracMove = Env.membraneLinkFracMove.getValue();  // membrane in-plane stiffness; lower = more compliant/stretchy (was hardcoded 2.0)
-		double curForceMag= (fracMove*1.0e-6*curStretchDist/Env.deltaT.getValue())/(1/node1.bTransGam.x+1/node2.bTransGam.x);
+		// Effective stiffness k = fracMove/(kDt*mobility). kDt = live deltaT (legacy, k~1/dt, a
+		// per-step position correction) unless membraneFixedStiffnessDt>0, which pins k to a
+		// dt-independent value (explicit penalty spring). See SUBCYCLING_GPU.md.
+		double kDt = (Env.membraneFixedStiffnessDt.getValue() > 0) ? Env.membraneFixedStiffnessDt.getValue() : Env.deltaT.getValue();
+		double curForceMag= (fracMove*1.0e-6*curStretchDist/kDt)/(1/node1.bTransGam.x+1/node2.bTransGam.x);
 		forceVec.scale(curForceMag,linkVec);
 		node1.incForceSum(forceVec,pt1);
-		
+
 		forceVec.reverse();
 		node2.incForceSum(forceVec,pt2);
 		//System.out.println("node link force is " + curForceMag);
 	}
-	
-	
+
+	// GPU-shaped membrane relaxation (Jacobi iterative projection). Self-contained replacement
+	// for the ThreadSet while-loop in doLoop: each pass zeros the membrane nodes' force, sums
+	// every active NodeLink's (fixed-stiffness) force at the current pose into its two endpoints
+	// (Jacobi -- positions held fixed during the sum), then integrates every membrane node by dt.
+	// Repeats up to maxMembranePasses or until maxStrain < membraneMaxLinkStrain -- the same
+	// termination as the legacy loop. This is the exact structure a per-mesh GPU kernel with a
+	// bounded internal pass-loop would take (resident node pose; Jacobi gather avoids the
+	// shared-node write race; deterministic). Serial here on the main thread (tid==-1 so
+	// incForceSum writes straight to soaForceSum); the kernel parallelizes links then nodes.
+	static final java.util.LinkedHashSet<StickyNode> membraneNodes = new java.util.LinkedHashSet<>();
+
+	static void subcycleRelaxAll () {
+		membraneNodes.clear();
+		for (int i=0;i<nodeLinkCt;i++) {
+			NodeLink nl = nodeLinks[i];
+			if (nl != null && nl.active) {
+				if (!nl.node1.fixedNode) membraneNodes.add(nl.node1);
+				if (!nl.node2.fixedNode) membraneNodes.add(nl.node2);
+			}
+		}
+		if (membraneNodes.isEmpty()) return;
+		int maxPasses = Env.maxMembranePasses.getIntValue();
+		double tol = Env.membraneMaxLinkStrain.getValue();
+		int pass = 0;
+		maxStrain = 10;
+		while (maxStrain > tol && pass < maxPasses) {
+			maxStrain = 0;   // re-registered by updateNodeLink() below
+			// Jacobi step 1: zero the membrane nodes' force/torque accumulators
+			for (StickyNode nd : membraneNodes) {
+				int b = nd.myThingNumber*3;
+				Thing.soaForceSum[b]=0; Thing.soaForceSum[b+1]=0; Thing.soaForceSum[b+2]=0;
+				Thing.soaTorqueSum[b]=0; Thing.soaTorqueSum[b+1]=0; Thing.soaTorqueSum[b+2]=0;
+			}
+			// Jacobi step 2: sum every link's force at the (held-fixed) current pose
+			for (int i=0;i<nodeLinkCt;i++) {
+				NodeLink nl = nodeLinks[i];
+				if (nl == null || !nl.active) continue;
+				if (nl.node1.fixedNode && nl.node2.fixedNode) continue;
+				nl.updateNodeLink();   // recompute pt1/pt2/linkLength/linkVec; registerStrain -> maxStrain
+				nl.applyForces();      // accumulate fixed-stiffness force into both endpoints
+			}
+			// Jacobi step 3: integrate all membrane nodes by dt
+			for (StickyNode nd : membraneNodes) { nd.moveThing(); }
+			pass++;
+		}
+		// leave node forces zeroed-ish; the next loop step's resetCt wave clears them anyway
+		for (StickyNode nd : membraneNodes) {
+			int b = nd.myThingNumber*3;
+			Thing.soaForceSum[b]=0; Thing.soaForceSum[b+1]=0; Thing.soaForceSum[b+2]=0;
+			Thing.soaTorqueSum[b]=0; Thing.soaTorqueSum[b+1]=0; Thing.soaTorqueSum[b+2]=0;
+		}
+	}
+
+
 	public void enforceNodeLink () {
 		if (node1.fixedNode && node2.fixedNode) { return; }  // don't waste computation if fixed nodes
 		updateNodeLink();
