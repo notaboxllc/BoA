@@ -1,5 +1,59 @@
 # BoxOfActin Project Journal
 
+## 2026-06-15 — Brownian-ratchet polymerization closure: implemented, demonstrated, and a buffer/scale-mismatch fix
+
+Implemented the Mogilner–Oster polymerization closure (`RATCHET_CLOSURE_DESIGN.{html,pdf}`) as a default-off
+replacement for `stericPolyFactor`. New params `ratchetOn` + `ratchetForce` (membrane-normal load f);
+`FilSegment.ratchetPolyFactor()` gates the barbed-end poly rate: **free when a full monomer fits the gap
+(g≥δ), else exp(−f·(δ−g)/kT)** — the deficit (δ−g) form, so an existing gap raises the rate. `RatchetDiag`
+bins every poly-eligible tip-fire by gap g (units of δ), recording the applied factor and the realized
+event rate; reported at frame cadence on the `-r` path.
+
+**The bug the demo exposed (jba's catch from the viewer: "collisions look far from the membrane").** The
+ratchet read `g = end2TipC` and never engaged — orthogonal tips polymerized freely. Root cause is a
+**scale mismatch**: the steric collision lives at the 50 nm node/tip-radius scale
+(`membraneNodeRadius=filTipRadiusForCollisions=0.05 µm`, collision standoff `nodeRadius+filTipR=0.10 µm`
+from node centre), but the ratchet gates at the 2.7 nm monomer scale. `end2TipC` (tip-to-node-surface) is
+held at ≈`filTipR` ≈ **18 δ** by the collision buffer, so `g≥δ` was always true → factor 1.0. The buffer is
+intentional (prevents poke-through) and untouched; the fix makes the ratchet read the gap to the **steric
+surface**: `g = end2TipC − filTipR` (→ 0 at collision contact). One line, plus the same correction in the
+`RatchetDiag` binning.
+
+**Validated (config `ParameterFiles/lamRatchet` = P1–P3 v4 + ratchetOn, f=2 pN, kATPOn2 lowered to 50 to
+de-saturate the base rate; run `threejs_output/lam_ratchet_fix`).** After the fix the boundary bins
+populate (0% → 14.8% of fires) and the applied **meanFactor reproduces exp(−f(δ−g)/kT) to ~1% across every
+gap bin** — 0.269 at full deficit (= exp(−1.31)), rising smoothly to 1.0 at g≥δ. Realized rate is suppressed
+in the contact bins (relRate 0.24–0.86 vs 1.0 free; noisier at ~15–40 events/bin). So the force–velocity law
+operates per-tip: leading-edge filaments slow under load, those with clearance grow free.
+
+**Open (sub-grid gap resolution):** the membrane is modeled at the 50 nm node scale, so the gap is resolved
+only to ~that softness — the sub-monomer `(δ−g)` part is coarse; the meaningful behavior is the load-gated
+`exp(−fδ/kT)` switching on at contact (consistent with a sub-grid closure). Also `ratchetForce` is a
+representative constant load; reading the per-tip membrane reaction is the rigorous upgrade. Both noted in
+the param/`Env` descriptions.
+
+## 2026-06-15 — Tip-flexibility diagnostic: lumped segments can't host an emergent Brownian ratchet (use a closure)
+
+Characterized whether the rigid-`FilSegment` filament has the right *tip compliance* for a Mogilner–Oster
+elastic ratchet to emerge. Built a cantilever (one end pinned, free tip, no wall) by reusing the deflection
+bench (`-singleFilDiag` + new `BOA_TIPFLEX=1`); measured free-tip transverse motion two ways. **Fluctuation
+mode** (Brownian on, accumulate `<y²>`) was too noisy — the soft cantilever's ~0.13 s correlation time gave
+~28 independent samples (5× y/z anisotropy). **Static-compliance mode** (`BOA_TIPFLEX_FORCE`, Brownian off:
+apply tip force, `k_eff=F/δ`, `σ_tip=√(kT/k_eff)`) is deterministic and clean — the reported data.
+
+Sweep at fixed contour 0.69 µm, varying segments: **tip compliance is strongly, monotonically
+segment-length-dependent** — coarser = *softer* (k_eff falls ~29× from 32→2 segs; bending is lumped at hinges,
+so a long rigid segment on one soft joint swings its tip far). In the **typical 24–64 mon/seg range** the tip
+came out ~11–17× softer than an ideal Lp=15 µm filament (σ_tip ≈ 290–355 nm vs ≈ 86 nm). Plus head-on
+incidence is geometrically dead (`σ_normal = sinθ·σ_tip`). **Caveat (don't over-read):** the sweep did NOT
+recalibrate bending per segment length, and effective Lp is segment-length-dependent here, so much of that
+factor is miscalibration, not a fundamental tip-resolution limit — the raw numbers overstate the in-range
+error; the clean test is recalibrate-then-measure at 24/32/48/64 (not yet done). **Decision either way:**
+the tip compliance a ratchet would ride is config-dependent, so **anchor the ratchet to physical constants
+(a closure), don't let its magnitude emerge.** Full method, table, caveats, repro: `TIP_FLEXIBILITY_DIAGNOSTIC.md`;
+closure spec: `RATCHET_CLOSURE_DESIGN.{html,pdf}`. Diagnostic scaffolding (`SingleFilDiag` TIPFLEX/STATIC,
+one-pin/Brownian/force gates, `tipFlexForce`) is default-off. Logs: `RUN_LOGS/2026-06-15_tipflex/`.
+
 ## 2026-06-15 — Dendritic lamellipodium P1–P3: NPF-surface branching + debranching + bulk capping (exploratory)
 
 Implemented the P1–P3 recommendations from the membrane-dendritic literature review (see

@@ -103,6 +103,7 @@ public class BoxOfActin {
 	static int jSonPlotCt = (int)1e6;	// ditto
 	static int jSon2Ct = 0;  // start counting at zero so file writing starts at specified time vi Env.simJSon2StartCounter
 	static int threeJSCounter = (int)1e6;	// large number so first frame writes at time zero
+	static int ratchetReportCt = 0;	// gates periodic RatchetDiag.report() at frame cadence
 	
 	// report time in logAndDraw
 	static double lastLogAndDrawTime = System.currentTimeMillis();
@@ -125,6 +126,7 @@ public class BoxOfActin {
 		boolean prevForceOn = true;
 	}
 	static final DeflFil deflFil = new DeflFil();
+	static final Pt3D tipFlexForce = new Pt3D();   // static tip-compliance diagnostic: force at the free tip
 
 	// Hard plus-end / endpoint pins applied after integration each step (applyBenchmarkPins()).
 	// Both the deflection benchmark (firstSeg.end1, lastSeg.end2) and the contractility assay
@@ -1443,6 +1445,10 @@ public class BoxOfActin {
 				// F1 benchmark: apply transverse force to midpoint segment before integration
 				if (Env.benchmarkFilament && deflFil.midSeg != null && Env.benchmarkForceOn.getValue() != 0) {
 					deflFil.midSeg.incForceSum(deflFil.transForce);
+				}
+				// Tip-flexibility STATIC mode: apply the fixed force at the free tip (last seg's end2).
+				if (SingleFilDiag.STATIC && deflFil.lastSeg != null) {
+					deflFil.lastSeg.incForceSum(tipFlexForce, deflFil.lastSeg.end2AsPt3D());
 				}
 				// Round 3 diagnostic: trace force application path
 				if (Env.benchmarkFilament && deflFil.midSeg != null && benchStepCount < 10) {
@@ -2801,7 +2807,8 @@ public class BoxOfActin {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 			}
-			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
+			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
+				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
 				accumulateLpData();
@@ -2894,7 +2901,8 @@ public class BoxOfActin {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 			}
-			if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
+			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
+				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
 				String bmJson = buildBenchmarkJson();
 				if (bmJson != null) LiveFrameServer.dispatchBenchmark(bmJson);
 				accumulateLpData();
@@ -2926,7 +2934,12 @@ public class BoxOfActin {
 			// Register the benchmark's two pinned endpoints (end1 of first seg, end2 of last seg).
 			pinRegistry.clear();
 			pinRegistry.add(new Pin(deflFil.firstSeg, 1, deflFil.anchor1));
-			pinRegistry.add(new Pin(deflFil.lastSeg,  2, deflFil.anchor2));
+			// Tip-flexibility diagnostic: pin only the first end → CANTILEVER (free tip at the last
+			// segment), the geometry the membrane ratchet cares about. Otherwise pin both ends (the
+			// standard deflection benchmark).
+			if (!SingleFilDiag.TIPFLEX) {
+				pinRegistry.add(new Pin(deflFil.lastSeg,  2, deflFil.anchor2));
+			}
 			double spanM = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2) * 1e-6;
 			double forceN = 48.0 * Env.EI * Env.benchmarkForceFrac.getValue() / (spanM * spanM);
 			deflFil.transForce.setVals(0, -forceN, 0); // negative Y: downward in default camera view
@@ -2936,8 +2949,15 @@ public class BoxOfActin {
 			for (int i = 0; i < n; i++) {
 				deflFil.initCoords[i] = new Pt3D(segs[i].getCoordX(), segs[i].getCoordY(), segs[i].getCoordZ());
 			}
-			// Suppress Brownian forces on deflection chain (per-segment, replacing removed global flag)
-			for (FilSegment s : segs) s.brownianOff = true;
+			// Suppress Brownian forces on deflection chain (per-segment, replacing removed global flag).
+			// Tip-flexibility FLUCTUATION mode leaves Brownian ON (the thermal tip wobble is the point);
+			// STATIC-compliance mode turns it OFF (deterministic deflection under a fixed tip force).
+			if (!SingleFilDiag.TIPFLEX || SingleFilDiag.STATIC) {
+				for (FilSegment s : segs) s.brownianOff = true;
+			}
+			if (SingleFilDiag.STATIC) {
+				tipFlexForce.setVals(0, -SingleFilDiag.STATIC_FORCE_PN * 1e-12, 0); // N, transverse (-y)
+			}
 
 			benchMonCt = (Env.benchmarkMonomerCt > 0) ? Env.benchmarkMonomerCt : Env.stdSegLength.getIntValue();
 			deflFil.chainSpanMicrons = Pt3D.ptDist(deflFil.anchor1, deflFil.anchor2);
@@ -2968,25 +2988,29 @@ public class BoxOfActin {
 			}
 
 			// --- LP benchmark chain (free BCs, Brownian forces) ---
-			int monCtLp = benchMonCt;
-			double segLenLp = (monCtLp + 1) * FilSegment.halfmono; // µm
-			int nLp = (int) Math.round(Env.testLpFilLength / segLenLp);
-			double lpYOff = -1.5, lpZOff = -0.5;
-			FilSegment[] lpSegs = FilSegment.makeLpChain(nLp, lpYOff, lpZOff);
-			lpFil = new LpFil();
-			lpFil.segs = lpSegs;
-			lpFil.nSegs = nLp;
-			lpFil.segLen = segLenLp;
-			lpFil.contourLength = nLp * segLenLp;
-			lpFil.cMean = new double[nLp];
-			java.util.Arrays.fill(lpFil.cMean, 1.0); // placeholder; real data accumulates from first frame
-			lpFil.cMeanInitialized = false;
-			lpFil.sampleCount = 0;
-			System.out.printf("[LP] %d-seg × %d-mon/seg LP chain, contour=%.4f µm, offset=(0, %.1f, %.1f) µm%n",
-				nLp, monCtLp, lpFil.contourLength, lpYOff, lpZOff);
+			// Skipped in the tip-flexibility diagnostic: the 48 µm LP chain (hundreds of segments)
+			// is irrelevant to the cantilever measurement and would bloat the box + compute.
+			if (!SingleFilDiag.TIPFLEX) {
+				int monCtLp = benchMonCt;
+				double segLenLp = (monCtLp + 1) * FilSegment.halfmono; // µm
+				int nLp = (int) Math.round(Env.testLpFilLength / segLenLp);
+				double lpYOff = -1.5, lpZOff = -0.5;
+				FilSegment[] lpSegs = FilSegment.makeLpChain(nLp, lpYOff, lpZOff);
+				lpFil = new LpFil();
+				lpFil.segs = lpSegs;
+				lpFil.nSegs = nLp;
+				lpFil.segLen = segLenLp;
+				lpFil.contourLength = nLp * segLenLp;
+				lpFil.cMean = new double[nLp];
+				java.util.Arrays.fill(lpFil.cMean, 1.0); // placeholder; real data accumulates from first frame
+				lpFil.cMeanInitialized = false;
+				lpFil.sampleCount = 0;
+				System.out.printf("[LP] %d-seg × %d-mon/seg LP chain, contour=%.4f µm, offset=(0, %.1f, %.1f) µm%n",
+					nLp, monCtLp, lpFil.contourLength, lpYOff, lpZOff);
+			}
 
-			// Box sizing: use the larger of deflection span and LP contour length
-			double maxSpan = Math.max(deflFil.chainSpanMicrons, lpFil.contourLength);
+			// Box sizing: use the larger of deflection span and LP contour length (LP absent in tipflex)
+			double maxSpan = Math.max(deflFil.chainSpanMicrons, lpFil != null ? lpFil.contourLength : 0.0);
 			double benchBoxDim = Math.max(maxSpan * 3.0, Env.boxXDim.getValue());
 			if (Thing.theBox instanceof Chamber) {
 				Chamber.dimX = benchBoxDim;

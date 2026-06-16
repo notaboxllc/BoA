@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Polymerization closure for the membrane Brownian ratchet</title>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(','\\)']], displayMath: [['$$','$$']] },
+  svg: { fontCache: 'global' },
+  startup: {
+    ready: () => {
+      MathJax.startup.defaultReady();
+      MathJax.startup.promise.then(() => { document.body.setAttribute('data-mathjax','done'); });
+    }
+  }
+};
+</script>
+<script src="./mathjax-tex-svg.js" id="MathJax-script"></script>
+<style>
+  @page { size: letter; margin: 18mm 16mm 20mm 16mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Charter", "Georgia", "Times New Roman", serif;
+    font-size: 10.7pt; line-height: 1.5; color: #1a1a1a;
+  }
+  h1 {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 18pt; line-height: 1.2; margin: 0 0 2pt 0; color: #14223a;
+  }
+  .subtitle {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.5pt; color: #5a6472; margin: 0 0 4pt 0; font-weight: 400;
+  }
+  .meta {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 8.5pt; color: #8a93a0; border-bottom: 2px solid #14223a;
+    padding-bottom: 8pt; margin-bottom: 14pt;
+  }
+  h2 {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 13pt; color: #14223a; margin: 18pt 0 6pt 0;
+    padding-bottom: 3pt; border-bottom: 1px solid #c7d0db;
+    page-break-after: avoid;
+  }
+  p { margin: 5pt 0; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 8.9pt; background: #eef1f5; padding: 0.5pt 3pt;
+    border-radius: 3px; color: #1b3a2b;
+  }
+  strong { color: #0d1b30; }
+  ul { margin: 5pt 0; padding-left: 18pt; }
+  li { margin: 3pt 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0 10pt 0; font-size: 9.2pt; page-break-inside: avoid; }
+  th { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8.5pt; background: #14223a; color: #fff; text-align: left; padding: 5pt 7pt; vertical-align: top; }
+  td { padding: 5pt 7pt; border-bottom: 1px solid #d8dee6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f6f8fa; }
+  .callout { background: #f3f6fa; border-left: 3px solid #3a6ea5; padding: 7pt 11pt; margin: 9pt 0; font-size: 10pt; }
+  .key { background: #eaf2ea; border-left: 3px solid #3a7a3a; }
+  .eqwrap { margin: 4pt 0; page-break-inside: avoid; }
+  mjx-container { font-size: 108% !important; }
+  .limits { font-size: 9.4pt; }
+  .ps { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>A polymerization closure for the membrane Brownian ratchet</h1>
+<p class="subtitle">Per-tip, gap- &amp; force-gated monomer addition — replacing the ad-hoc <code>stericPolyFactor</code></p>
+<p class="meta">BoxOfActin &nbsp;·&nbsp; design note &nbsp;·&nbsp; 2026-06-15 &nbsp;·&nbsp; context: lamellipodium P1–P3; Mogilner–Oster elastic Brownian ratchet</p>
+
+<h2>1. Why a closure, not emergence</h2>
+<p>The elastic ratchet's tip fluctuation lives on the monomer scale (\(\delta \approx 2.7\,\)nm). Our filaments are
+chains of rigid <code>FilSegment</code> rods, each spanning <code>stdSegLength</code> \(\approx\) 32–64 monomers, so the
+terminal segment is rigid over \(\sim\)90–170 nm. The tip therefore cannot fluctuate at the scale the ratchet needs,
+and joint bending only opens a membrane-normal gap for <em>oblique</em> filaments (the normal excursion per joint
+rotation scales as \(L\sin\theta\,d\theta\), vanishing at normal incidence). The mechanism is genuinely
+<strong>sub-grid</strong>. The disciplined response is a physically-parameterized closure — not a "flexible tip"
+hack, which would reintroduce free parameters, miss the density-dependent free length, destabilize the integrator,
+and still fail head-on filaments.</p>
+
+<div class="callout">A closure does <strong>not</strong> kill emergence. Supplied as a per-tip law that depends on the
+tip's actual geometry and load, it leaves the interesting behavior — ±35° orientation selection, load-sharing, array
+treadmilling — to self-organize at the <em>network</em> level (which filaments grow vs. stall vs. cap).</div>
+
+<h2>2. The core relation — the penalty is on the deficit</h2>
+<p>The rate is gated by whether there is room for a monomer of length \(\delta\). If the barbed end already sits a gap
+\(g\) short of the membrane (measured along the addition direction), a thermal fluctuation only needs to open the
+<strong>remaining</strong> \((\delta-g)\), not the whole \(\delta\):</p>
+
+<div class="eqwrap">
+$$
+k_{\text{poly}} \;=\; k_{on}\,c \,\cdot\,
+\begin{cases}
+1, & g \ge \delta \quad(\text{room already exists — free rate})\\[6pt]
+\exp\!\left(-\dfrac{f\,(\delta - g)}{k_B T}\right), & 0 \le g < \delta \quad(\text{ratchet against load }f)
+\end{cases}
+$$
+</div>
+
+<p class="limits ps"><strong>Limit checks:</strong></p>
+<ul class="limits">
+  <li>\(g = 0\): &nbsp; \(k_{\text{poly}} = k_{on}c\,\exp(-f\delta/k_BT)\) — recovers classic Mogilner–Oster. </li>
+  <li>\(g = \delta\): &nbsp; \(k_{\text{poly}} = k_{on}c\) — fully unobstructed; the penalty turns <em>off</em>. </li>
+  <li>monotonic and continuous in \(g\) between — an existing gap raises the rate, exactly as expected.</li>
+</ul>
+
+<p>Depolymerization is left load-independent (the load doesn't help remove a bound monomer), so the full
+force–velocity follows as</p>
+<div class="eqwrap">
+$$ v \;=\; \delta\,\big(k_{\text{poly}} - k_{off}\big), \qquad
+   f_{\text{stall}}\,\delta \;=\; k_B T\,\ln\!\frac{c\,k_{on}}{k_{off}}, $$
+</div>
+<p>i.e. the load can do work per monomer up to the polymerization free energy, then stalls — the energy is the
+chemical drive you already supply, not a new input.</p>
+
+<h2>3. Incidence angle enters through the geometry of "room"</h2>
+<p>The monomer adds along the filament axis \(\hat{u}\); what matters is the <strong>axial</strong> room before the
+tip meets the membrane. With \(\theta\) the angle from the membrane normal \(\hat{n}\),</p>
+<div class="eqwrap">
+$$ g_{\text{axial}} \;=\; \frac{g_{\perp}}{\cos\theta}, $$
+</div>
+<p>so an oblique tip converts a given perpendicular gap into <em>more</em> axial room (a grazing tip slides along the
+wall rather than into it), while the compliance available to close the residual deficit is the angle-projected bending
+mode \(\sim\sin\theta\). Thus \(\theta\) enters twice — how much room a gap buys (\(\cos\theta\)) and how easily the
+deficit is closed (\(\sin\theta\)) — and both are computable per tip.</p>
+
+<h2>4. The payoff: geometry does most of the work</h2>
+<p>The gap \(g\) is essentially <code>end2TipC</code>, the tip clearance the model already computes. Critically,
+<strong>gap and contact force are anti-correlated</strong>: when a real gap exists the tip isn't touching the
+membrane, so \(f \approx 0\) and the rate is near-free <em>without</em> the closure doing anything. The analytic
+Boltzmann factor only matters in the thin regime where \(g < \delta\) <em>and</em> the tip is loaded — the last
+sub-monomer crunch.</p>
+
+<div class="callout key">This shrinks the closure to a small correction on top of geometry the grid resolves natively.
+The noisy per-tip <strong>force</strong> read — the main implementation risk — only enters in that sub-\(\delta\)
+sliver; everywhere else <code>end2TipC</code> alone gives the answer.</div>
+
+<h2>5. One honest subtlety — what <code>end2TipC</code> represents</h2>
+<p>Whether <code>end2TipC</code> is the <em>instantaneous</em> or the <em>quasi-static mean</em> gap depends on whether
+the tip's fast fluctuation is resolved. With the over-damped rigid segment it is effectively the <strong>mean</strong>
+gap (set by the balance of polymerization push and membrane load). So the clean reading is: use <code>end2TipC</code>
+as the resolved mean clearance, let geometry handle \(g \ge \delta\) for free, and let
+\(\exp(-f(\delta-g)/k_BT)\) supply precisely the <strong>sub-grid thermal wobble</strong> the rigid segment cannot
+generate, over the residual \((\delta-g)\). Geometry where the grid resolves it; analytic closure only for the
+unresolved fluctuation.</p>
+
+<h2>6. Inputs (all available per tip)</h2>
+<table>
+<thead><tr><th style="width:16%">Symbol</th><th style="width:40%">Meaning</th><th style="width:44%">Source in the model</th></tr></thead>
+<tbody>
+<tr><td>\(g\)</td><td>clearance to membrane along the addition direction</td><td><code>end2TipC</code> (registered in the membrane collision phase), divided by \(\cos\theta\) for the axial value</td></tr>
+<tr><td>\(f\)</td><td>membrane-normal load on the tip</td><td>reaction force from the membrane point/face collision (the noisy read — only needed when \(g<\delta\))</td></tr>
+<tr><td>\(\theta\)</td><td>incidence angle from membrane normal</td><td>\(\hat{u}\cdot\hat{n}\); \(\hat{n}\) from the local membrane (linked-neighbour PCA normal, as the viewer already derives)</td></tr>
+<tr><td>\(L_{\text{free}}\)</td><td>free length to nearest clamp (sets compliance)</td><td>tip-to-nearest-<code>Arp2/3</code> distance — inherits the local branch density automatically</td></tr>
+<tr><td>\(\delta\)</td><td>monomer increment</td><td><code>halfmono</code> (the existing poly step)</td></tr>
+</tbody>
+</table>
+
+<h2>7. Where it slots in</h2>
+<p>Replace the <code>stericPolyFactor</code> multiplier in <code>FilSegment.end2BiochemSim</code> with this gate:
+compute \(g_{\text{axial}}\) from <code>end2TipC</code> and \(\cos\theta\); if \(g_{\text{axial}}\ge\delta\), no
+attenuation; else multiply the poly rate by \(\exp(-f(\delta-g_{\text{axial}})/k_BT)\). Crucially, the membrane
+<em>collision</em> must keep providing mechanical push-back but stop separately throttling polymerization — otherwise
+the load is double-counted. Default-off behind a flag so it can be A/B'd against the current soft proxy.</p>
+
+<div class="callout"><strong>Net.</strong> A per-tip law gated on the real clearance, with the ratchet penalty applied
+only to the unresolved sub-monomer deficit and weighted by the local load and incidence angle. More faithful than
+<code>stericPolyFactor</code>, discretization-independent, and <em>less</em> reliant on the messy force read than a
+blanket \(\exp(-f\delta/k_BT)\) would be — because an existing gap, at whatever angle, does exactly what you said it
+must: it raises the polymerization probability, all the way to the free rate once it reaches a full monomer.</div>
+
+</body>
+</html>

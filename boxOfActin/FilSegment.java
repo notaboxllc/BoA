@@ -1116,10 +1116,13 @@ public class FilSegment extends Thing {
 				// Soft steric attenuation: when the barbed end is sterically blocked, scale the poly
 				// rate by stericPolyFactor (0 = hard stop = original behavior; 0<f<1 = Brownian-ratchet-
 				// like reduced growth; 1 = no steric effect) instead of skipping polymerization entirely.
-				double sterFac = stericHindranceEnd2() ? Env.stericPolyFactor.getValue() : 1.0;
+				double sterFac = Env.ratchetOn.isActive()
+						? ratchetPolyFactor()
+						: (stericHindranceEnd2() ? Env.stericPolyFactor.getValue() : 1.0);
 				// normal actin polymerization
 				double rate = getPolyRateEnd2()*sterFac;
 				boolean monomerAdded = addMonomerSim(rate);
+				if (Env.ratchetOn.isActive()) { RatchetDiag.recordTip(end2TipC - Env.filTipRadiusForCollisions.getValue(), halfmono, sterFac, monomerAdded); }
 				if (monomerAdded) {
 					//talkln ("end2Pt norm poly");
 					incCoord(halfmono/2,uVecAsPt3D());
@@ -3122,6 +3125,26 @@ public class FilSegment extends Thing {
 		return false;
 	}
 	
+	// Brownian-ratchet polymerization closure (Mogilner-Oster), gating the barbed-end poly rate on the
+	// resolved clearance g=end2TipC: free rate when a full monomer fits (g>=delta), else the Boltzmann
+	// probability of a thermal fluctuation opening the remaining deficit (delta-g) against load f. An
+	// existing gap shrinks the deficit and raises the rate; the penalty vanishes at g>=delta. g=1e6 for
+	// tips with no detected obstacle => free rate (away from the membrane). See RATCHET_CLOSURE_DESIGN.
+	public double ratchetPolyFactor() {
+		// g is the gap from the tip to the membrane's STERIC SURFACE — where the collision actually
+		// stops the tip, which is filTipRadiusForCollisions BEYOND the node surface. end2TipC is the
+		// tip-to-node-surface distance, so subtract filTipR. Without this the collision standoff
+		// (~filTipR ~= 18 monomers) keeps g >> delta and the ratchet never engages.
+		double g = end2TipC - Env.filTipRadiusForCollisions.getValue();   // gap to membrane steric surface (um)
+		double delta = halfmono;      // monomer length increment (um)
+		if (g >= delta) return 1.0;   // a full monomer already fits -> unobstructed
+		double deficit = delta - g;   // remaining gap a fluctuation must open (um)
+		if (deficit > delta) deficit = delta;  // g<0 (tip overlapping membrane): cap the deficit at one monomer
+		double f = Env.ratchetForce.getValue();        // membrane-normal load (N)
+		double kT = Env.Boltz * Env.tempK;             // J
+		return Math.exp(-f * (deficit * 1e-6) / kT);   // deficit um -> m; f*deficit = J
+	}
+
 	public boolean stericHindranceEnd2() {
 		if (end2TipC < halfmono) return true;
 		return false;

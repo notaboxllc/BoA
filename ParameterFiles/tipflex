@@ -1,0 +1,11 @@
+<BOA> Tip-flexibility cantilever diagnostic (Brownian on, one end pinned). Used with -singleFilDiag + BOA_TIPFLEX=1.
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:100.0;
+toFileInterval:true:100000.0;
+boxXDim:true:6.0;
+boxYDim:true:6.0;
+boxZDim:true:6.0;
+aeta:true:0.1;
+simOutsideBug:false:0.0;
