@@ -874,6 +874,9 @@ const MEMBRANE_COLOR = 0x55bbdd;
 // Per-instance membrane colors: ordinary cortex vs hot-Rho (NPF/Arp2/3 activator) patch.
 const MEMBRANE_COL  = new THREE.Color(MEMBRANE_COLOR);
 const HOTRHO_COL    = new THREE.Color(0xff3399);  // bright pink — the activated branching patch
+const ARP_COLD      = new THREE.Color(0x0a2440);  // activated-Arp2/3 field heat-map: depleted (cold)
+const ARP_HOT       = new THREE.Color(0xff3399);  // activated-Arp2/3 field heat-map: high (hot)
+const _arpCol       = new THREE.Color();          // scratch
 
 const MAX_MEMBRANE_NODES = 20000;
 const MAX_MEMBRANE_LINKS = 120000;
@@ -1740,7 +1743,8 @@ function updateMembraneSurface(nodes, membraneLinks) {
       if (!nd.membrane) continue;
       const pos = new THREE.Vector3(nd.center[0], nd.center[1], nd.center[2]);
       const rec = { id: nd.id, pos, r: nd.r, nbrs: [], hot: !!nd.hotRho,
-                    normal: Array.isArray(nd.n) ? new THREE.Vector3(nd.n[0], nd.n[1], nd.n[2]) : null };
+                    normal: Array.isArray(nd.n) ? new THREE.Vector3(nd.n[0], nd.n[1], nd.n[2]) : null,
+                    arp: (typeof nd.arp === 'number') ? nd.arp : null };
       memById.set(nd.id, rec);
       mem.push(rec);
     }
@@ -1773,6 +1777,9 @@ function updateMembraneSurface(nodes, membraneLinks) {
     normSign = (dot >= 0) ? 1 : -1;   // orient the emitted normal AWAY from the filaments (outward)
   }
 
+  // Heat-map the activated-Arp2/3 field (per-frame normalized) so the diffusion is visible.
+  let maxArp = 0; for (const rec of mem) if (rec.arp != null && rec.arp > maxArp) maxArp = rec.arp;
+
   // Place each membrane node as a flattened disc.
   let mCt = 0;
   for (const rec of mem) {
@@ -1794,7 +1801,12 @@ function updateMembraneSurface(nodes, membraneLinks) {
     dummy.scale.set(rec.r, rec.r * membraneFlatten, rec.r);
     dummy.updateMatrix();
     membraneMesh.setMatrixAt(mCt, dummy.matrix);
-    membraneMesh.setColorAt(mCt, rec.hot ? HOTRHO_COL : MEMBRANE_COL);
+    if (maxArp > 0 && rec.arp != null) {
+      _arpCol.copy(ARP_COLD).lerp(ARP_HOT, Math.min(1, rec.arp / maxArp));
+      membraneMesh.setColorAt(mCt, _arpCol);
+    } else {
+      membraneMesh.setColorAt(mCt, rec.hot ? HOTRHO_COL : MEMBRANE_COL);
+    }
     mCt++;
   }
   membraneMesh.count = mCt;

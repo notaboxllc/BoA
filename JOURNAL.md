@@ -1,5 +1,36 @@
 # BoxOfActin Project Journal
 
+## 2026-06-16 — Spherical membrane: held, contained cortical-actin network (`buildMembraneSphere`)
+
+Smallish sphere (R=1.2, 3267 Deserno nodes) with shrunk hot-Rho patches + de-novo nucleation + branching →
+a bounded cortical net held under the membrane. `ParameterFiles/lamSphereBranch`, run `lam_sphere_confine2`.
+Long debug chain (all caught by jba via screenshots):
+
+**De-novo nucleation now does what Arp2/3 does.** Caps the pointed (minus) end, tethers it to the
+activating node (reuse of the existing `linkEnd1Node` end1 spring), grows the barbed end INWARD. Direction
+uses the **geometric** radial (sphere-center→node), NOT the node's body-frame `zVec`: membrane nodes rotate,
+so `zVec` drifts off-radial and ~10/3267 even flip → those nucleated/tethered *outward* (the first "escapes").
+Nucleation is also field-gated + field-consuming (same governor as branching).
+
+**Held-filament Brownian (`arpHeldBrownianFactor`=0.02).** A nascent tethered seed has tiny drag; a full
+free-filament Brownian kick against its stiff tether at dt=1e-5 went unstable. Scale the Brownian FORCE
+(not drag) 50× down for `childOfArp23 && nodeAtEnd1` filaments. jba's diagnosis.
+
+**Two Arp23 sub-cycle NPEs were the real "blowups."** `subcycleAll` (a) called `applyForces()` on a
+just-deactivated Arp23 and (b) added removed (nulled-`bForceSum`) segments to `subcycleSegs` → NPE on a
+worker thread → corrupted state → the 1e25 positions. Guarded both (match the single-shot `enforceFilLink`
+path). After this the net runs the full time with no numerical instability — growth is bounded only by the
+(still permanent) tether, a deferred turnover item.
+
+**Membrane confinement (`membraneConfine`/`membraneConfineFrac`).** The node lattice is **porous to filament
+bodies** (only barbed tips collide with nodes; `membraneFaceCollideOn` is still tip-only) — free/debranched
+filaments drift out through the gaps and pile up outside, capped. Added a one-sided inward radial force on
+any filament end past the cortex. **Confine to the INNER STERIC FACE** `membraneCellRadius−(nodeR+filTipR)`
+≈1.10, NOT the node-center sphere (1.2): the viewer draws the membrane there (`membraneSurfaceFit`), so a
+first version that confined to 1.2 held filaments in the 0.10-thick shell *outside* the drawn surface — they
+looked like escapes. Tether inset + seed depth use the same face. Result: max endpoint radius EVER = 1.101
+across 123 frames, all cortical actin under the membrane.
+
 ## 2026-06-16 — Membrane rendering: sim emits per-node normals; t=0 frame; IC backed off the membrane
 
 Three fixes after the collision-surface disc offset exposed real geometry issues (jba caught all via

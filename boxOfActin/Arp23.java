@@ -301,7 +301,11 @@ public class Arp23 {
 		subcycleSegs.clear();
 		for (int i=0;i<arp23Ct;i++) {
 			Arp23 a = theArp23s[i];
-			if (a != null && a.active && a.motherFil != null && a.daughterFil != null) {
+			// Exclude removed segments: an Arp23 may still read active here (dangling-ref deactivation
+				// happens later in the loop), but a removed mother/daughter has its SoA-backing fields
+				// (bForceSum, bTransGam) nulled -> moveThing()/applyForces() would NPE.
+				if (a != null && a.active && a.motherFil != null && a.daughterFil != null
+						&& !a.motherFil.removeMe && !a.daughterFil.removeMe) {
 				subcycleSegs.add(a.motherFil); subcycleSegs.add(a.daughterFil);
 			}
 		}
@@ -338,7 +342,10 @@ public class Arp23 {
 			Env.deltaT.setValue(dtFull);
 			for (int i=0;i<arp23Ct;i++) {
 				Arp23 a = theArp23s[i];
-				if (a != null && a.active) { a.updateArp23Links(); a.applyForces(); }
+				// updateArp23Links() may deactivate this Arp23 (mother/daughter left the sim, fields nulled);
+				// re-check active BEFORE applyForces(), exactly as the single-shot enforceFilLink() path does,
+				// or applyForces() dereferences a removed daughter's nulled bTransGam (NPE → corrupted state).
+				if (a != null && a.active) { a.updateArp23Links(); if (a.active) a.applyForces(); }
 			}
 			// ...then integrate the fine sub-step (dt/N) so the fixed-stiffness relaxation is
 			// resolved without explicit-Euler overshoot.

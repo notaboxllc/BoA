@@ -272,6 +272,11 @@ public class Env {
 	// Both default OFF, so production/gliding/contractility runs are unaffected.
 	static final Parameter buildMembraneSheet = new Parameter("buildMembraneSheet", " Build membrane StickyNode sheet IC", 0, "", Parameter.BOOLEAN, false);
 	static final Parameter buildBranchedFils  = new Parameter("buildBranchedFils", " Build Arp2/3 branched-filament IC", 0, "", Parameter.BOOLEAN, false);
+	// Closed spherical membrane IC (makeSphereOfNodes) with a few hot-Rho (NPF) patches, for testing the
+	// activated-Arp2/3 field on a curved/closed surface. Both default OFF.
+	static final Parameter buildMembraneSphere = new Parameter("buildMembraneSphere", " Build spherical membrane IC", 0, "", Parameter.BOOLEAN, false);
+	static final Parameter sphereHotPatches = new Parameter("sphereHotPatches", " Number of hot-Rho patches on the sphere", 3, "", Parameter.INT);
+	static final Parameter sphereHotPatchDeg = new Parameter("sphereHotPatchDeg", " Angular radius of each hot-Rho patch", 20.0, "degrees");
 	static boolean myosinsOff = false;
 	static boolean randomNodesOn = false;
 	static final Parameter fixedMyosinClusters = new Parameter("fixedMyosinClusters", " Fixed Myosin Cluster Test", 0, "", Parameter.BOOLEAN, false);
@@ -632,6 +637,14 @@ public class Env {
 
 	static private double BRotCoeff_init = 0.5; // range from zero (no brownian motion) to infinity
 	static final Parameter BRotCoeff = new Parameter("BRotCoeff"," Brownian Rotational Coefficient", BRotCoeff_init, "").setMutableAtRuntime();
+
+	static private double arpHeldBrownianFactor_init = 0.02; // 1/50: an Arp2/3-held filament is not free
+	static final Parameter arpHeldBrownianFactor = new Parameter("arpHeldBrownianFactor"," Arp2/3-Held Brownian Factor", arpHeldBrownianFactor_init, "").setMutableAtRuntime().setDescription("Brownian-force multiplier for a filament whose pointed end is Arp2/3-capped and held (de-novo nucleated at a membrane node, or a branch tethered there). Such a filament is structurally anchored, not freely diffusing, so its thermal forcing is scaled down by this factor (default 0.02 = 1/50). Without it, a tiny nascent seed gets a full free-filament Brownian kick that, against its stiff pointed-end tether at small dt, drives the integrator unstable. 1.0 = treat as free.");
+
+	static final Parameter membraneConfine = new Parameter("membraneConfine"," Membrane Confines Cytoskeleton", 0.0, "").setMutableAtRuntime().setDescription("If !=0 (and the membrane is a closed sphere), any filament end that pokes past the cortex radius gets a soft inward radial force pushing it back inside — the membrane physically containing the cytoskeleton. This stops free/depolymerizing filaments from leaking out through the gaps between membrane nodes (the membrane node lattice is porous to filament bodies; only barbed tips collide with nodes). One-sided: no force on filaments already inside.");
+
+	static private double membraneConfineFrac_init = 0.4; // overdamped 'close this fraction of the overshoot per step'
+	static final Parameter membraneConfineFrac = new Parameter("membraneConfineFrac"," Membrane Confinement Fraction", membraneConfineFrac_init, "").setMutableAtRuntime().setDescription("Stiffness of the membrane confinement push (fraction of the radial overshoot corrected per step; 0.4 default, <1 for stability). Higher snaps an escaped filament back in faster.");
 
 	static private final double maxSegAngle_init = 22.5; // degrees
 	static final Parameter maxSegAngle = new Parameter("maxSegAngle"," Max. Angle Between Segments", maxSegAngle_init, " degrees",Parameter.DOUBLE, false);

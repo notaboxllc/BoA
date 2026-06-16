@@ -249,11 +249,39 @@ public class StickyNode extends ProteinNode {
 	// inside the cortex, growing along the node's inward normal. Shared by the transient hot-spot path
 	// and the P1 permanent-patch path.
 	public void deNovoNucleate () {
-		double nucFilProb = Env.nucRateNearArpFactors.getValue()*Env.biochemDeltaT.getValue();
+		// De-novo nucleation draws on this node's activated-Arp2/3 budget, exactly like branching: a patch
+		// that has spent its activated pool nucleates more slowly (rate scaled by the local fraction), and
+		// each new filament consumes a quantum. Self-governing, and the heat-map drain now reflects
+		// nucleation as well as branching.
+		double localArp = Env.arpLocalField.isActive() ? arpLocal : Env.arpConc.getValue();
+		double nucFilProb = Env.nucRateNearArpFactors.getValue()*(localArp/Env.arpConc.getValue())*Env.biochemDeltaT.getValue();
 		if (currentScratch().rng.nextDouble() < nucFilProb) {
-			Pt3D nucVec = zVecAsPt3D();
-			Pt3D nucPt = Pt3D.Add(coordAsPt3D(), -1.3*Env.membraneNodeRadius.getValue(), nucVec);
-			FilSegment.makeArp23NucFilament(nucPt, nucVec);
+			// Dendritic de-novo nucleation: the NPF-activated Arp2/3 nucleates a filament, caps its pointed
+			// (minus) end, AND tethers that capped end to the membrane node — exactly as Arp2/3 holds a
+			// daughter's pointed end on its mother. The barbed (plus) end grows INWARD into the cytoplasm,
+			// so the filament pushes off the cortex rather than threading out through the gaps between nodes
+			// (which is how the un-anchored, outward-growing seeds were escaping the sphere).
+			// Use the GEOMETRIC inward radial (sphere center - node position), NOT the node's body-frame
+			// zVec: membrane nodes rotate during the sim, so a node's zVec drifts off-radial and can even
+			// flip inward -> then -zVec points OUT and the filament nucleates/grows out through the cortex.
+			// The geometric radial is rotation-proof.
+			Pt3D inward;
+			if (sphericalGeometry) {
+				inward = Pt3D.UnitVec(centerOfSphere, coordAsPt3D());  // from node toward center = inward
+			} else {
+				inward = zVecAsPt3D();
+				inward.scale(-1.0);                                   // flat sheet: node normal is stable
+			}
+			// Place the seed just inside the inner steric face (nodeR+filTipR), so its pointed end is born
+			// at the membrane surface (where it gets tethered), not in the shell outside the rendered cortex.
+			double seedDepth = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue() + 0.02;
+			Pt3D nucPt = Pt3D.Add(coordAsPt3D(), seedDepth, inward);
+			FilSegment dFil = FilSegment.makeArp23NucFilament(nucPt, inward);
+			FilSegment.linkEnd1Node(dFil, this);             // hold the Arp2/3 (pointed) end at the activated node
+			if (Env.arpLocalField.isActive()) {              // spend a quantum of activated Arp2/3 on this nucleation
+				arpLocal -= Env.arpConsumePerBranch.getValue();
+				if (arpLocal < 0) arpLocal = 0;
+			}
 		}
 	}
 	
@@ -281,15 +309,24 @@ public class StickyNode extends ProteinNode {
 	
 	public void moveThing () {
 		if (!fixedNode) {
-			if (sphericalGeometry && Env.simulationTime < 0) {  // simulation to distribute nodes uniformly before establishing links
+			if (sphericalGeometry) {
+				// Hold the closed shape: radial restoring to membraneCellRadius. This used to be applied ONLY
+				// during the (negative-time) pre-equilibration, so during the actual sim the sphere had outward
+				// turgor (internalPressure) but nothing setting its radius -> it inflated without bound. Apply
+				// it always so the cortex is held; pre-equilibration just uses different Brownian scaling.
 				addSphericalConstraintForce();
-				randForces.scale(1e-6,randForces);		// some random translation to find minimum energy state
-				randTorques.scale(1e-40,randTorques);	// no random rotation, essentially
+				if (Env.simulationTime < 0) {            // pre-equilibration: settle node distribution
+					randForces.scale(1e-6,randForces);		// some random translation to find minimum energy state
+					randTorques.scale(1e-40,randTorques);	// no random rotation, essentially
+				} else {
+					randForces.scale(Env.membraneBrownianScale.getValue(),randForces);
+					randTorques.scale(Env.membraneBrownianScale.getValue(),randTorques);
+				}
+				internalPressure();
 			} else {
 				randForces.scale(Env.membraneBrownianScale.getValue(),randForces);
 				randTorques.scale(Env.membraneBrownianScale.getValue(),randTorques);
 			}
-			if (sphericalGeometry) { internalPressure(); }
 			if (iAmConstricting && Env.simulationTime > Env.deltaT.getValue()*10) { fakeConstrictingRing(); }
 			super.moveThing();
 			updateStickyPointsInX();
@@ -570,7 +607,36 @@ public class StickyNode extends ProteinNode {
 				new StickyNode (nodeC,nodeUVec,nodeZVec,nodeR,6);
 			}
 		}
-		
+
+	}
+
+	// Designate a few hot-Rho (NPF) patches on a closed membrane: mark every node within angRadiusDeg of
+	// each fixed patch direction as a permanent NPF source. Used by the spherical-membrane IC so the
+	// activated-Arp2/3 field has localized sources to diffuse out from.
+	public static void markHotPatches (int nPatches, double angRadiusDeg) {
+		// Fixed, well-spread directions (deterministic): poles + a ring + tetra-ish points.
+		double[][] dirs = {
+			{0,0,1}, {0,0,-1}, {1,0,0}, {0,1,0}, {-1,0,0}, {0,-1,0},
+			{0.577,0.577,0.577}, {-0.577,-0.577,0.577}
+		};
+		int patches = Math.max(1, Math.min(nPatches, dirs.length));
+		double cosThresh = Math.cos(Math.toRadians(angRadiusDeg));
+		int marked = 0;
+		for (int i=0;i<ProteinNode.nodeCt;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s = (StickyNode)ProteinNode.theNodes[i];
+			double nx=s.getCoordX(), ny=s.getCoordY(), nz=s.getCoordZ();
+			double r=Math.sqrt(nx*nx+ny*ny+nz*nz);
+			if (r < 1e-9) continue;
+			nx/=r; ny/=r; nz/=r;
+			for (int p=0;p<patches;p++) {
+				if (nx*dirs[p][0] + ny*dirs[p][1] + nz*dirs[p][2] >= cosThresh) {
+					s.iAmHotRho = true; s.permanentHotRho = true; s.myHotSpotOriginator = s; marked++;
+					break;
+				}
+			}
+		}
+		System.out.println("[SPHERE] hot-Rho: " + patches + " patches (" + angRadiusDeg + " deg), " + marked + " nodes marked");
 	}
 	
 	public static void makeCylinderOfNodes () {

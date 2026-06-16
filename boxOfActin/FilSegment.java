@@ -539,6 +539,8 @@ public class FilSegment extends Thing {
 		addNodeForces();				// calculate elastic forces to keep filament ends and bound plasmids together
 		StepProfiler.add(StepProfiler.F5_6_FILSEG_NODE, _spT);
 
+		addMembraneConfinement();		// keep filaments inside a closed membrane (porous node lattice)
+
 		//setCompression();				// register compressive force in filament, if any
 
 	}
@@ -631,9 +633,13 @@ public class FilSegment extends Thing {
 		// add brownian force and torque... these are zero except at every chosen time-step
 		if (!Env.brownianFilMotionOff && !brownianOff) {
 			double transScale,rotScale;
+				// An Arp2/3-held filament (de-novo nucleated at a membrane node, pointed end tethered) is
+				// structurally anchored, not free -- dial its thermal forcing way down so the tiny nascent
+				// seed doesn't get a full free-filament kick that destabilizes its stiff pointed-end tether.
+				double heldBrown = (childOfArp23 && nodeAtEnd1) ? Env.arpHeldBrownianFactor.getValue() : 1.0;
 			if (motherFil == null) {
 				// trans
-				transScale = Env.BTransCoeff.getValue();
+				transScale = Env.BTransCoeff.getValue()*heldBrown;
 				if (linkedToCt > 0) { transScale = transScale/(1 + Env.xLinkTransAttn.getValue()*linkedToCt); }
 				if (actAOn) {
 					transScale *= bTransGam.y/Thing.lmBug.bTransGam.y; //Env.actATetherTransAttn.getValue();
@@ -642,7 +648,7 @@ public class FilSegment extends Thing {
 				bForceSum.inc(transScale,randForces);
 
 				// rot
-				rotScale = Env.BRotCoeff.getValue();
+				rotScale = Env.BRotCoeff.getValue()*heldBrown;
 				if (linkedToCt > 0) { rotScale = rotScale/(1+ Env.xLinkRotAttn.getValue()*linkedToCt); }
 				if (actAOn) {
 					rotScale *= bRotGam.y/Thing.lmBug.bRotGam.y; //Env.actATetherRotAttn.getValue();
@@ -1184,6 +1190,15 @@ public class FilSegment extends Thing {
 		// capped, so growth stays a thin layer tracking the membrane. Overrides stochastic capping.
 		double memCapDist = Env.membraneCapDist.getValue();
 		if (memCapDist > 0) {
+			// On a CLOSED membrane the "near a node" test can't tell a tip approaching the cortex from
+			// inside (good — keep growing) from one punching OUT through the porous gaps between nodes
+			// (bad — the daughter spikes out of the cell). Add a side test: a barbed tip at/beyond the
+			// cortex radius is on the wrong side, so cap it. This stops outward-pointing branch daughters
+			// at the membrane instead of letting them thread through.
+			if (StickyNode.sphericalGeometry) {
+				double tipR = Pt3D.ptDist(end2Pt, StickyNode.centerOfSphere);
+				if (tipR >= Env.membraneCellRadius.getValue()) { end2Capped = true; return; }
+			}
 			end2Capped = (end2TipC >= memCapDist);   // capped iff away from membrane; uncapped on contact/proximity
 			return;
 		}
@@ -2607,9 +2622,24 @@ public class FilSegment extends Thing {
 		
 		if (nodeAtEnd1) {
 			end1Node.registerWithNode(this);
-			double strainDist = Pt3D.ptDist(end1Node.coordAsPt3D(),end1Pt);
+			// Anchor the Arp2/3 (pointed) end at the node's INNER steric face, not its center. A membrane
+			// node's center sits on the cortex (radius R); pulling the pointed end there parks it on/through
+			// the rendered membrane. Offset inward along the node's outward normal (zVec) by the same
+			// standoff a barbed tip would stop at, so the pointed end sits just inside the cortex.
+			Pt3D end1Tgt = end1Node.coordAsPt3D();
+			if (end1Node instanceof StickyNode) {
+				double inset = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue();
+				// Inset along the GEOMETRIC outward radial on the sphere (not the node's body-frame zVec,
+				// which rotates off-radial during the sim and can flip -> tether target ends up OUTSIDE the
+				// cortex, pinning the pointed end out through the membrane). Flat sheet: zVec is stable.
+				Pt3D outward = StickyNode.sphericalGeometry
+						? Pt3D.UnitVec(end1Node.coordAsPt3D(), StickyNode.centerOfSphere)  // node from center = outward
+						: end1Node.zVecAsPt3D();
+				end1Tgt = Pt3D.Add(end1Tgt, -inset, outward);
+			}
+			double strainDist = Pt3D.ptDist(end1Tgt,end1Pt);
 			double forceMag = Env.fracMove.getValue()*1.0e-6*strainDist/((1/bTransGam.x + 1/end1Node.bTransGam.x)*Env.deltaT.getValue());
-			toPlasmidUVec.unitVec(end1Node.coordAsPt3D(),end1Pt);
+			toPlasmidUVec.unitVec(end1Tgt,end1Pt);
 			F.scale(forceMag,toPlasmidUVec);
 			incForceSum(F,end1Pt);
 			double axialF = Pt3D.Dot(uVecAsPt3D(),F);  // axial force contribution
@@ -2960,6 +2990,31 @@ public class FilSegment extends Thing {
 		return false;
 	}
 	
+	// Closed-membrane confinement: a soft one-sided inward radial force on any filament end that has
+	// poked past the cortex. The membrane node lattice is porous to filament BODIES (only barbed tips
+	// collide with nodes), so free/depolymerizing filaments otherwise drift out through the gaps and
+	// accumulate outside the cell. This is the membrane physically containing the cytoskeleton.
+	public void addMembraneConfinement () {
+		if (!StickyNode.sphericalGeometry || !Env.membraneConfine.isActive()) { return; }
+		// Confine to the INNER STERIC FACE of the cortex, not the node-center sphere: a barbed tip can't
+		// pass closer than (nodeRadius + filTipRadius) to a node center, and the viewer draws the membrane
+		// surface there too (membraneSurfaceFit). Holding filaments at the node-center radius leaves them
+		// in the (nodeR+filTipR)-thick shell OUTSIDE the rendered membrane — looking like they poke out.
+		double inset = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue();
+		double Rc = Env.membraneCellRadius.getValue() - inset;
+		confineEndInside(end1Pt, Rc);
+		confineEndInside(end2Pt, Rc);
+	}
+
+	private void confineEndInside (Pt3D pt, double Rc) {
+		double r = Pt3D.ptDist(pt, StickyNode.centerOfSphere);
+		if (r <= Rc) { return; }                                   // inside the cortex: no force
+		Pt3D inward = Pt3D.UnitVec(StickyNode.centerOfSphere, pt); // from the poking end toward the center
+		double overshoot = r - Rc;
+		double mag = Env.membraneConfineFrac.getValue()*(1.0e-6*overshoot/Env.collisionDeltaT.getValue())/(1.0/bTransGam.x);
+		incForceSum(Pt3D.Scale(mag, inward), pt);                  // push the end back in (torque reorients the filament inward)
+	}
+
 	public static void linkEnd1Node (FilSegment fil, ProteinNode node) {
 		fil.nodeAtEnd1 = true;
 		fil.end1Node = node;

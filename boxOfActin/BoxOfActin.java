@@ -2812,7 +2812,7 @@ public class BoxOfActin {
 			// P1-P3 lamellipodium diagnostic: total segments vs ACTIVE Arp2/3 branches. A bounded,
 			// turning-over network shows segs AND activeArps plateauing (P2/P3); runaway shows both
 			// climbing linearly. Cheap, only at frame cadence.
-			if (Env.buildMembraneSheet.isActive()) {
+			if (Env.buildMembraneSheet.isActive() || Env.buildMembraneSphere.isActive()) {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
@@ -2907,7 +2907,7 @@ public class BoxOfActin {
 			ThreeJSWriter.writeFrame();
 			reportContractilityStats();
 			// P1-P3 lamellipodium diagnostic: total segments vs ACTIVE Arp2/3 branches (turnover signature).
-			if (Env.buildMembraneSheet.isActive()) {
+			if (Env.buildMembraneSheet.isActive() || Env.buildMembraneSphere.isActive()) {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
@@ -3253,6 +3253,11 @@ public class BoxOfActin {
 			if (Env.buildMembraneSheet.isActive()) {
 				StickyNode.makeSheetHexPackedNodes();
 				//FilSegment.makeXLinkFromNodePair();
+			}
+
+			if (Env.buildMembraneSphere.isActive()) {
+				StickyNode.makeSphereOfNodes();
+				StickyNode.markHotPatches(Env.sphereHotPatches.getIntValue(), Env.sphereHotPatchDeg.getValue());
 			}
 
 			if (Env.buildBranchedFils.isActive()) {

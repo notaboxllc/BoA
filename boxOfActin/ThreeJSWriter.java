@@ -234,6 +234,8 @@ public class ThreeJSWriter {
                 // positions (which is sign-ambiguous on any curved/bulged surface). Consistent for any
                 // geometry (sheet, cylinder, sphere).
                 memberFlags += String.format(",\"n\":[%.4g,%.4g,%.4g]", pn.getZVecX(), pn.getZVecY(), pn.getZVecZ());
+                // Activated-Arp2/3 field value, so the viewer can heat-map the diffusing field.
+                if (Env.arpLocalField.isActive()) memberFlags += String.format(",\"arp\":%.4g", ((StickyNode)pn).arpLocal);
             }
             sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g%s}",
                     pn.thingInstanceId,
