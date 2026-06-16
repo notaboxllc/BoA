@@ -1,5 +1,28 @@
 # BoxOfActin Project Journal
 
+## 2026-06-16 — Membrane rendering: sim emits per-node normals; t=0 frame; IC backed off the membrane
+
+Three fixes after the collision-surface disc offset exposed real geometry issues (jba caught all via
+screenshots).
+
+**Sim emits per-node membrane normals (`ThreeJSWriter` `"n"` = node `zVec`).** The viewer was inferring
+each disc's normal from node positions (PCA + centroid orientation) to do the inward offset — fragile:
+on any curved/bulged surface the sign is ambiguous (which way is "out"?), giving a crater at frame 0 and
+inconsistent discs on the bulged dome, and it would never work for a sphere. The node already carries its
+own orientation (`zVec`), set correctly at construction and evolving smoothly — verified it stays consistent
+AND tilts with the surface as the sheet bulges (central node `[0,0,1]`→`[-0.003,0.026,0.9997]`, pinned edge
+stays `[0,0,1]`). Viewer now offsets the disc inward along the emitted normal with ONE global sign decision
+(keyed to the filament/cytoplasm centroid); position-inference kept only as a fallback for older frames.
+Robust for any geometry.
+
+**t=0 frame.** `doLoop` now writes a frame BEFORE the first integration step, so frame 0 is the pristine IC
+(flat sheet, z=0) instead of the post-first-step state (which had already bulged 0.026 µm).
+
+**IC backed off the membrane.** `makeMembraneBranchedMothers` seeded barbed tips at z=−0.04 — above the
+steric contact (a tip is stopped `membraneNodeRadius+filTipRadiusForCollisions`=0.10 µm below the node
+plane), so they started poking through. Now `barbedZ = −(nodeR+filTipR)−0.02` ≈ −0.12, just inside the
+cytoplasm; tied to the collision radii so it tracks them. Verified frame 0: barbed-end z ≤ −0.12.
+
 ## 2026-06-16 — Arp2/3 depletion as a branching governor: global pool → activated-Arp2/3 field (NPF source, bulk sink)
 
 4× branching (`arpConc` 20→80) over-branches into an "insanely bushy" net after ~0.2 s — autocatalytic

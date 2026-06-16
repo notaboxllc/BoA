@@ -229,6 +229,11 @@ public class ThreeJSWriter {
             if (pn instanceof StickyNode) {
                 memberFlags = ",\"membrane\":true";
                 if (pn.iAmHotRho) memberFlags += ",\"hotRho\":true";
+                // The node's own surface normal (its zVec) -- the sim's ground-truth orientation, so the
+                // viewer offsets the membrane disc inward along it instead of inferring a normal from node
+                // positions (which is sign-ambiguous on any curved/bulged surface). Consistent for any
+                // geometry (sheet, cylinder, sphere).
+                memberFlags += String.format(",\"n\":[%.4g,%.4g,%.4g]", pn.getZVecX(), pn.getZVecY(), pn.getZVecZ());
             }
             sb.append(String.format("{\"id\":%d,\"center\":[%.5g,%.5g,%.5g],\"r\":%.5g%s}",
                     pn.thingInstanceId,

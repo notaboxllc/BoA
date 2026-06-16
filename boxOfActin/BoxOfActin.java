@@ -1219,7 +1219,13 @@ public class BoxOfActin {
 		double startTime;
 		double collisionTime = 0;
 		double myosinTime = 0;
-		
+
+		// Write the pristine initial condition (t=0) BEFORE any integration step, so the first frame is
+		// the untouched IC (e.g. the perfectly flat membrane sheet) rather than the post-first-step state.
+		if (Env.threeJSOutputDir != null || LiveFrameServer.isRunning()) {
+			ThreeJSWriter.writeFrame();
+		}
+
 		// C3: label lets break escape from inside synchronized when kill is detected
 		outer:
 		while (Env.simulationTime <= (Env.runTime.getValue()+Env.runBump) && !Env.terminating) {

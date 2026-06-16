@@ -1713,25 +1713,22 @@ const _md1 = new THREE.Vector3();
 const _gn = new THREE.Vector3();   // global membrane (sheet) normal — fallback for under-linked nodes
 let _memPlanar = false;            // true when the membrane is roughly planar (so _gn is meaningful)
 
-// Global membrane normal (PCA of all node centres). For a flat-ish sheet this is the sheet normal,
-// the correct fallback for edge/under-linked nodes whose own neighbour-PCA is degenerate (e.g. the
-// outer ring before auto-linking wires it up) -- avoids the radial-from-centroid fallback pointing
-// in-plane and mis-placing those discs at startup.
+// Global membrane normal = sign-aligned AVERAGE of the well-defined per-node normals (the LINKED nodes).
+// This replaces a global PCA eigensolver, which is numerically unstable for a perfectly flat, near-square
+// sheet (degenerate in-plane eigenvalues, xx≈yy, zz=0) -- exactly the startup case that left _memPlanar
+// false so edge/under-linked discs fell back to a radial (in-plane) "normal" and were mis-placed (the
+// crater seen at frame 0). Averaging the linked centre nodes' normals is robust and inherits their
+// (correctly oriented) sign, so the outer ring offsets the right way from frame 0.
 function computeGlobalMembraneNormal(mem, centroid) {
-  _memPlanar = false;
-  if (mem.length < 3) return;
-  let xx=0,xy=0,xz=0,yy=0,yz=0,zz=0;
+  _gn.set(0, 0, 0); _memPlanar = false;
+  let ref = null;
   for (const rec of mem) {
-    const dx=rec.pos.x-centroid.x, dy=rec.pos.y-centroid.y, dz=rec.pos.z-centroid.z;
-    xx+=dx*dx; xy+=dx*dy; xz+=dx*dz; yy+=dy*dy; yz+=dy*dz; zz+=dz*dz;
+    if (membraneNormalLocal(rec, centroid, _mn)) {          // PCA / 2-neighbour normal, no fallback
+      if (!ref) ref = _mn.clone();
+      _gn.addScaledVector(_mn, _mn.dot(ref) < 0 ? -1 : 1);  // sign-align to a common reference before summing
+    }
   }
-  if (!smallestEigenVec3(xx, xy, xz, yy, yz, zz, _gn)) return;
-  let varN=0; const varT = xx+yy+zz;
-  for (const rec of mem) {
-    const dx=rec.pos.x-centroid.x, dy=rec.pos.y-centroid.y, dz=rec.pos.z-centroid.z;
-    const d = dx*_gn.x + dy*_gn.y + dz*_gn.z; varN += d*d;
-  }
-  _memPlanar = (varT > 0 && varN/varT < 0.05);  // sheet thin along _gn => planar => _gn is a good normal
+  if (_gn.lengthSq() > 1e-12) { _gn.normalize(); _memPlanar = true; }
 }
 
 function updateMembraneSurface(nodes, membraneLinks) {
@@ -1742,7 +1739,8 @@ function updateMembraneSurface(nodes, membraneLinks) {
     for (const nd of nodes) {
       if (!nd.membrane) continue;
       const pos = new THREE.Vector3(nd.center[0], nd.center[1], nd.center[2]);
-      const rec = { id: nd.id, pos, r: nd.r, nbrs: [], hot: !!nd.hotRho };
+      const rec = { id: nd.id, pos, r: nd.r, nbrs: [], hot: !!nd.hotRho,
+                    normal: Array.isArray(nd.n) ? new THREE.Vector3(nd.n[0], nd.n[1], nd.n[2]) : null };
       memById.set(nd.id, rec);
       mem.push(rec);
     }
@@ -1760,13 +1758,29 @@ function updateMembraneSurface(nodes, membraneLinks) {
   _mc.set(0, 0, 0);
   for (const rec of mem) _mc.add(rec.pos);
   if (mem.length) _mc.multiplyScalar(1 / mem.length);
-  computeGlobalMembraneNormal(mem, _mc);   // sets _gn/_memPlanar (fallback normal for under-linked nodes)
+  computeGlobalMembraneNormal(mem, _mc);   // fallback normal for older frames lacking emitted "n"
+
+  // Emitted per-node normals (nd.n): the sim's ground truth. Decide ONE global sign so the disc offset
+  // goes toward the cytoplasm (the filament side) — robust for ANY geometry, no per-node inference.
+  let normSign = 1;
+  if (mem.length && mem[0].normal) {
+    const fc = new THREE.Vector3(); const segs = (currentFrameData && currentFrameData.segments) || [];
+    let sc = 0;
+    for (const s of segs) if (s.end1 && s.end2) { fc.x+=(s.end1[0]+s.end2[0])*0.5; fc.y+=(s.end1[1]+s.end2[1])*0.5; fc.z+=(s.end1[2]+s.end2[2])*0.5; sc++; }
+    if (sc) fc.multiplyScalar(1/sc); else fc.copy(_mc);
+    let dot = 0;
+    for (const rec of mem) if (rec.normal) dot += (rec.pos.x-fc.x)*rec.normal.x + (rec.pos.y-fc.y)*rec.normal.y + (rec.pos.z-fc.z)*rec.normal.z;
+    normSign = (dot >= 0) ? 1 : -1;   // orient the emitted normal AWAY from the filaments (outward)
+  }
 
   // Place each membrane node as a flattened disc.
   let mCt = 0;
   for (const rec of mem) {
     if (mCt >= MAX_MEMBRANE_NODES) break;
-    membraneNormal(rec, _mc, _mn);   // -> _mn (unit OUTWARD normal)
+    // Use the sim's emitted per-node normal (oriented outward by normSign); fall back to position
+    // inference only for older frames without "n".
+    if (rec.normal) _mn.copy(rec.normal).multiplyScalar(normSign);
+    else membraneNormal(rec, _mc, _mn);
     // Offset the disc inward (toward the cytoplasm, -normal) so its inner FACE lands on the collisional
     // contact: filaments stop (nodeRadius + filTipR) from the node centre, but the flattened disc's inner
     // face is only rec.r*membraneFlatten from it — so shift by the difference. membraneSurfaceFit scales
@@ -1806,31 +1820,33 @@ function updateMembraneSurface(nodes, membraneLinks) {
   membraneLinkMesh.geometry.computeBoundingSphere();
 }
 
-// Derive a unit surface normal for one membrane node from its linked neighbours.
-// out receives the result. Falls back to radial-from-centroid when under-linked.
-function membraneNormal(rec, centroid, out) {
+// Per-node normal from LINKED NEIGHBOURS ONLY (PCA for >=3, cross-product for 2). Returns true if it
+// produced a normal, false if the node is under-linked (caller then falls back to the global normal).
+function membraneNormalLocal(rec, centroid, out) {
   const nbrs = rec.nbrs;
   if (nbrs.length >= 3) {
-    // PCA: smallest-variance eigenvector of the neighbour-displacement covariance
-    // is the surface normal (perpendicular to the locally-fit tangent plane).
+    // PCA: smallest-variance eigenvector of the neighbour-displacement covariance is the surface normal.
     let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
     for (const q of nbrs) {
       const dx = q.x - rec.pos.x, dy = q.y - rec.pos.y, dz = q.z - rec.pos.z;
       xx += dx * dx; xy += dx * dy; xz += dx * dz;
       yy += dy * dy; yz += dy * dz; zz += dz * dz;
     }
-    if (smallestEigenVec3(xx, xy, xz, yy, yz, zz, out)) {
-      orientOutward(rec.pos, centroid, out);
-      return;
-    }
+    if (smallestEigenVec3(xx, xy, xz, yy, yz, zz, out)) { orientOutward(rec.pos, centroid, out); return true; }
   }
   if (nbrs.length === 2) {
     // Two neighbours: normal is perpendicular to both displacement directions.
     _md0.subVectors(nbrs[0], rec.pos);
     _md1.subVectors(nbrs[1], rec.pos);
     out.crossVectors(_md0, _md1);
-    if (out.lengthSq() > 1e-20) { out.normalize(); orientOutward(rec.pos, centroid, out); return; }
+    if (out.lengthSq() > 1e-20) { out.normalize(); orientOutward(rec.pos, centroid, out); return true; }
   }
+  return false;
+}
+
+// Derive a unit surface normal for one membrane node; out receives the result.
+function membraneNormal(rec, centroid, out) {
+  if (membraneNormalLocal(rec, centroid, out)) return;
   // Fallback. For a planar sheet, use the GLOBAL sheet normal (correct for edge/under-linked nodes,
   // e.g. the outer ring before auto-linking); otherwise radial from the centroid (closed cortices).
   if (_memPlanar) { out.copy(_gn); orientOutward(rec.pos, centroid, out); return; }

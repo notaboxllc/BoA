@@ -3297,7 +3297,11 @@ public class FilSegment extends Thing {
 		int nMothers = 5;
 		int momMonomers = 80;                                  // ~0.22 um mother (visible)
 		double momLen = (momMonomers+1)*Env.actinMonoRadius;
-		double barbedZ = -0.04;                                // barbed tip just below the sheet (z=0)
+		// Start the barbed tips just INSIDE the cytoplasm, below the membrane's steric contact (a tip is
+		// stopped nodeRadius+filTipR below the node plane), so the seeded mothers don't begin poking
+		// through the membrane. Tied to the collision geometry so it tracks the radii.
+		double standoff = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue();
+		double barbedZ = -standoff - 0.02;                     // barbed tip a hair below the collision contact
 		double cz = barbedZ - 0.5*momLen;                      // centre z so end2 (barbed, +z) sits at barbedZ
 		// place mothers in a small ring near the hot-patch centre so the branched tufts are distinct
 		double[][] xy = { {0.0,0.0}, {0.22,0.0}, {-0.22,0.0}, {0.0,0.22}, {0.0,-0.22} };
