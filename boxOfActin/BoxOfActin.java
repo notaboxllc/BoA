@@ -1531,6 +1531,9 @@ public class BoxOfActin {
 					System.err.printf("[BENCH:POST] step=%d getCoordY()=%.6e veloc.y=%.4e%n",
 						benchStepCount, deflFil.midSeg.getCoordY(), deflFil.midSeg.veloc.y);
 				}
+				// Per-node Arp2/3 field: one explicit diffusion+exchange step (single-threaded, cheap),
+				// before biochem reads/consumes the local pools. No-op unless arpLocalField is on.
+				StickyNode.diffuseArpField();
 				biochemTimer.start();
 				startAllThreadSets(Env.biochemStart);
 				waitOnAllThreadSets(Env.biochemStop);
@@ -2806,6 +2809,7 @@ public class BoxOfActin {
 			if (Env.buildMembraneSheet.isActive()) {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
+				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
@@ -2900,6 +2904,7 @@ public class BoxOfActin {
 			if (Env.buildMembraneSheet.isActive()) {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
+				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {

@@ -1710,6 +1710,29 @@ const _mn = new THREE.Vector3();
 const _mc = new THREE.Vector3();
 const _md0 = new THREE.Vector3();
 const _md1 = new THREE.Vector3();
+const _gn = new THREE.Vector3();   // global membrane (sheet) normal — fallback for under-linked nodes
+let _memPlanar = false;            // true when the membrane is roughly planar (so _gn is meaningful)
+
+// Global membrane normal (PCA of all node centres). For a flat-ish sheet this is the sheet normal,
+// the correct fallback for edge/under-linked nodes whose own neighbour-PCA is degenerate (e.g. the
+// outer ring before auto-linking wires it up) -- avoids the radial-from-centroid fallback pointing
+// in-plane and mis-placing those discs at startup.
+function computeGlobalMembraneNormal(mem, centroid) {
+  _memPlanar = false;
+  if (mem.length < 3) return;
+  let xx=0,xy=0,xz=0,yy=0,yz=0,zz=0;
+  for (const rec of mem) {
+    const dx=rec.pos.x-centroid.x, dy=rec.pos.y-centroid.y, dz=rec.pos.z-centroid.z;
+    xx+=dx*dx; xy+=dx*dy; xz+=dx*dz; yy+=dy*dy; yz+=dy*dz; zz+=dz*dz;
+  }
+  if (!smallestEigenVec3(xx, xy, xz, yy, yz, zz, _gn)) return;
+  let varN=0; const varT = xx+yy+zz;
+  for (const rec of mem) {
+    const dx=rec.pos.x-centroid.x, dy=rec.pos.y-centroid.y, dz=rec.pos.z-centroid.z;
+    const d = dx*_gn.x + dy*_gn.y + dz*_gn.z; varN += d*d;
+  }
+  _memPlanar = (varT > 0 && varN/varT < 0.05);  // sheet thin along _gn => planar => _gn is a good normal
+}
 
 function updateMembraneSurface(nodes, membraneLinks) {
   // Collect membrane nodes and an id -> {pos, r} map (used for both normals and links).
@@ -1737,6 +1760,7 @@ function updateMembraneSurface(nodes, membraneLinks) {
   _mc.set(0, 0, 0);
   for (const rec of mem) _mc.add(rec.pos);
   if (mem.length) _mc.multiplyScalar(1 / mem.length);
+  computeGlobalMembraneNormal(mem, _mc);   // sets _gn/_memPlanar (fallback normal for under-linked nodes)
 
   // Place each membrane node as a flattened disc.
   let mCt = 0;
@@ -1807,8 +1831,9 @@ function membraneNormal(rec, centroid, out) {
     out.crossVectors(_md0, _md1);
     if (out.lengthSq() > 1e-20) { out.normalize(); orientOutward(rec.pos, centroid, out); return; }
   }
-  // Fallback: radial from the membrane centroid (correct for closed cortices;
-  // harmless for the flat sheet, where an under-linked node is an edge case).
+  // Fallback. For a planar sheet, use the GLOBAL sheet normal (correct for edge/under-linked nodes,
+  // e.g. the outer ring before auto-linking); otherwise radial from the centroid (closed cortices).
+  if (_memPlanar) { out.copy(_gn); orientOutward(rec.pos, centroid, out); return; }
   out.subVectors(rec.pos, centroid);
   if (out.lengthSq() > 1e-20) out.normalize();
   else out.set(0, 1, 0);

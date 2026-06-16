@@ -16,6 +16,9 @@ public class StickyNode extends ProteinNode {
 	String myIJ;
 	boolean iAmConstricting = false;  // for testing, specify ring of nodes in center to get inward force
 	double hotTime = 0;
+	double arpLocal = 0;       // per-node Arp2/3 concentration (uM): the localized-depletion field
+	double arpLocalNext = 0;   // Jacobi scratch for the diffusion update
+	static boolean arpFieldInit = false;
 	static boolean sphericalGeometry = false;
 	static Pt3D centerOfSphere = new Pt3D(0,0,0);
 	static int maxHotSpots = 6;
@@ -45,14 +48,16 @@ public class StickyNode extends ProteinNode {
 		super(initCoord,false);
 		this.radius = radius;
 		this.valence = valence;
+		this.arpLocal = Env.arpConc.getValue();   // init local Arp2/3 field to the bulk concentration
 		makeStickyPoints();
 		updateStickyPointsInX();
 	}
-	
+
 	public StickyNode (Pt3D initCoord, Pt3D initUVec, Pt3D initZVec, double radius, int valence) {
 		super(initCoord,initUVec,initZVec,false);
 		this.radius = radius;
 		this.valence = valence;
+		this.arpLocal = Env.arpConc.getValue();   // init local Arp2/3 field to the bulk concentration
 		makeStickyPoints();
 		updateStickyPointsInX();
 	}
@@ -807,6 +812,51 @@ public class StickyNode extends ProteinNode {
 			}
 		}
 		//talkln("StickyStats: " + stickyFullCt + "/" + stickyCt + " fully bound");
+	}
+
+	// ACTIVATED Arp2/3 field — one explicit Jacobi step of the NPF-source / bulk-sink model:
+	//   dc_i/dt = [hot-Rho ? ke*target : 0]  +  D * Σ_neighbours(c_j - c_i)  -  ke * c_i
+	// Hot-Rho (NPF) nodes are the ONLY source of activated Arp2/3 (production toward `target`=arpConc);
+	// it diffuses laterally as a slow membrane-bound species (D ~ membrane-protein scale, not the fast
+	// free complex); and it is LOST everywhere at rate ke (escape to / deactivation in the inactive bulk,
+	// modeled as a sink at 0 — activated complex that reaches the deep cytoplasm resumes fast 3-D
+	// diffusion and disperses). Branching consumes it with NO return (incorporated/released Arp2/3
+	// rejoins the inactive pool), so branching is ACTIVATION-RATE-LIMITED. Decay length ~ sqrt(D/ke).
+	// Stable at the sim dt (D*valence*dt << 1); do NOT call at biochem cadence. Single-threaded.
+	static double arpFieldHotMean = 0, arpFieldHotMin = 0;  // readout: activated conc over hot-Rho nodes
+	public static void diffuseArpField () {
+		if (!Env.arpLocalField.isActive()) return;
+		double target = Env.arpConc.getValue();   // activated conc the NPF source drives toward (uM)
+		double D  = Env.arpDiffusion.getValue();   // lateral (membrane-bound) diffusion
+		double ke = Env.arpBulkExchange.getValue(); // loss/deactivation rate (escape to the bulk sink at 0)
+		double dt = Env.deltaT.getValue();
+		int n = ProteinNode.nodeCt;
+		if (!arpFieldInit) {   // seed steady state (no consumption): hot=target, elsewhere 0 — avoids a slow startup ramp
+			for (int i=0;i<n;i++) if (ProteinNode.theNodes[i] instanceof StickyNode) {
+				StickyNode s = (StickyNode)ProteinNode.theNodes[i];
+				s.arpLocal = s.iAmHotRho ? target : 0.0;
+			}
+			arpFieldInit = true;
+		}
+		for (int i=0;i<n;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s = (StickyNode)ProteinNode.theNodes[i];
+			double lap = 0;
+			for (int b=0;b<s.valence;b++) {
+				if (s.isBound[b] && s.boundTo[b] != null) { lap += s.boundTo[b].arpLocal - s.arpLocal; }
+			}
+			double src = s.iAmHotRho ? ke*target : 0.0;        // production only at NPF (hot-Rho) nodes
+			s.arpLocalNext = s.arpLocal + dt*(src + D*lap - ke*s.arpLocal);  // bulk sink at 0 => -ke*c loss
+		}
+		double sum=0, min=Double.MAX_VALUE; int hot=0;
+		for (int i=0;i<n;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s = (StickyNode)ProteinNode.theNodes[i];
+			s.arpLocal = s.arpLocalNext;
+			if (s.iAmHotRho) { sum += s.arpLocal; if (s.arpLocal < min) min = s.arpLocal; hot++; }
+		}
+		arpFieldHotMean = hot>0 ? sum/hot : 0;
+		arpFieldHotMin  = hot>0 ? min : 0;
 	}
 	
 

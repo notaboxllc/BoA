@@ -232,6 +232,7 @@ public class FilSegment extends Thing {
 	double end1TipC = 1e6; // large number for initial tip clearance of end1Pt
 	double end2TipC = 1e6; // large number for initial tip clearance of end2Pt
 	boolean end2NearArpFactor = false;  // use for deciding when to branch... hacky for now
+	StickyNode end2NearArpNode = null;  // the nearest hot-Rho node gating this barbed end (for the per-node Arp2/3 field)
 	double fturn;
 	double ftrans;
 	double fnorm;
@@ -1158,13 +1159,15 @@ public class FilSegment extends Thing {
 		}
 	}
 	
-	public void registerATipClearance (double tipC,boolean arpActivator) {
-		if (tipC < end2TipC) { 
-			end2TipC = tipC; 
-			if (end2TipC < Env.branchZone.getValue() && arpActivator) { 
-				end2NearArpFactor = true; 
-			} else { 
-				end2NearArpFactor = false; 
+	public void registerATipClearance (double tipC, ProteinNode arpNode) {
+		if (tipC < end2TipC) {
+			end2TipC = tipC;
+			if (end2TipC < Env.branchZone.getValue() && arpNode != null && arpNode.iAmHotRho) {
+				end2NearArpFactor = true;
+				end2NearArpNode = (arpNode instanceof StickyNode) ? (StickyNode)arpNode : null;  // for the per-node Arp2/3 field
+			} else {
+				end2NearArpFactor = false;
+				end2NearArpNode = null;
 			}
 		}
 		
@@ -1212,7 +1215,11 @@ public class FilSegment extends Thing {
 		double memDist = Env.branchMembraneDist.getValue();
 		boolean nearMembrane = memDist > 0 && getEnd2Z() > -memDist;
 		if (!end2NearArpFactor && !nearMembrane) { return; }
-		if (currentScratch().rng.nextDouble() < Env.branchRateNearArpFactors.getValue()*Env.arpConc.getValue()*Env.biochemDeltaT.getValue()) {
+		// Branch rate reads the LOCAL Arp2/3 pool (nearest hot node) when the per-node field is on,
+		// else the global arpConc. Local depletion at a hot zone therefore slows branching THERE.
+		double localArp = (Env.arpLocalField.isActive() && end2NearArpNode != null)
+				? end2NearArpNode.arpLocal : Env.arpConc.getValue();
+		if (currentScratch().rng.nextDouble() < Env.branchRateNearArpFactors.getValue()*localArp*Env.biochemDeltaT.getValue()) {
 			// branch in the upper (barbed) region; cap the offset at 0.8*length so bLoc never goes
 			// negative (a bLoc<0 branch is marked inactive immediately).
 			double bLoc = length - Math.random()*Math.min(Env.branchZone.getValue(), 0.8*length);
@@ -1259,7 +1266,26 @@ public class FilSegment extends Thing {
 		Pt3D dCenter = Pt3D.Add(nucLoc, dHalf, nucUVec);
 		FilSegment dFil = FilSegment.makeArp23NucFilament(dCenter, nucUVec);
 		Arp23 newArp = Arp23.newArpBranch(this, bLoc, dFil);
-		
+
+		// Localized Arp2/3 depletion: consume from the nearest hot node's local pool (per-node field)
+		// or the global pool; recorded on the Arp23 so it is returned exactly once on dissociation.
+		double cons = Env.arpConsumePerBranch.getValue();
+		if (cons > 0) {
+			if (Env.arpLocalField.isActive()) {
+				// Activated field: consume the nearest hot node's local pool. Branches with no resolved
+				// node (e.g. the IC seed mothers at startup) do NOT touch arpConc — it is the production
+				// TARGET in this model, not a consumable pool.
+				if (end2NearArpNode != null) {
+					end2NearArpNode.arpLocal -= cons;
+					newArp.arpConsumedNode = end2NearArpNode;
+					newArp.arpConsumedAmt = cons;
+				}
+			} else {
+				Env.arpConc.addToValue(-cons);   // global conserved pool
+				newArp.arpConsumedAmt = cons;
+			}
+		}
+
 		// load into arrays
 		arpChildren[arpChildCt] = dFil;
 		arp23s[arpChildCt] = newArp;
@@ -1352,7 +1378,8 @@ public class FilSegment extends Thing {
 		end1TorqCkd = false;
 		end2TorqCkd = false;
 		end2TipC = 1e6; 		// big number
-		end1TipC = 1e6; 
+		end1TipC = 1e6;
+		end2NearArpNode = null; // re-resolved each step by registerATipClearance when a tip nears a hot node
 	}
 	
 	public static void zeroAllLinkCts () {
@@ -2179,7 +2206,7 @@ public class FilSegment extends Thing {
 	
 	public static void checkNodeFilTipsCollision (ProteinNode node, FilSegment fil) {
 		// store tip clearance part
-		fil.registerATipClearance(Pt3D.ptDist(node.coordAsPt3D(), fil.end2Pt) - node.getRadius(),node.iAmHotRho);  // register tip clearance for polymerization / capping
+		fil.registerATipClearance(Pt3D.ptDist(node.coordAsPt3D(), fil.end2Pt) - node.getRadius(), node);  // register tip clearance (+ nearest hot node) for poly / capping / branching
 
 		// FACE (triangulated-surface) collision: the membrane is an impermeable sheet of triangles
 		// (a node + two of its mutually-linked neighbours). Colliding the filament tip with the FACES

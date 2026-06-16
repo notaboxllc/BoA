@@ -1,5 +1,39 @@
 # BoxOfActin Project Journal
 
+## 2026-06-16 — Arp2/3 depletion as a branching governor: global pool → activated-Arp2/3 field (NPF source, bulk sink)
+
+4× branching (`arpConc` 20→80) over-branches into an "insanely bushy" net after ~0.2 s — autocatalytic
+branching with no negative feedback. Built the feedback in two stages.
+
+**1. Global consumable pool (`arpConsumePerBranch`, default off).** Each branch consumes `arpConc`, returned
+on dissociation (conserved); standing branches cap at ~`arpConc/consume`. Works as a knob, BUT the
+*physical* global pool can't be the limiter: at 80 µM the box holds ~millions of complexes.
+
+**2. Per-node ACTIVATED-Arp2/3 field (`arpLocalField`) — the physically-grounded model.** The realization
+(prompted by "how do the knobs fit real Arp2/3 diffusion?"): free cytoplasmic Arp2/3 (~5 µm²/s →
+`arpDiffusion = D/(1.5·spacing²) ≈ 700`) refills a depleted node in ~0.25 ms — ~1000× faster than branching
+empties it — so **free Arp2/3 can't deplete locally at all.** The real depletable resource is the
+**membrane-bound, NPF-activated** pool (D ~0.01–0.1 µm²/s, ~50–500× slower → `arpDiffusion` ~1–14, where I
+had it). So the field is an *activated*-Arp2/3 model, **NPF source / bulk sink**: hot-Rho (NPF) nodes are the
+only source (produce toward `arpConc`); it diffuses laterally as a slow membrane species (`arpDiffusion`);
+it is lost everywhere to the inactive bulk = sink at 0 (`arpBulkExchange`, lifetime ~1/k, decay length
+√(D/k)); branching consumes the nearest node's pool with **no return** (incorporated complex rejoins the
+inactive pool) → branching is **activation-rate-limited**, the biologically correct governor.
+
+Implementation: `StickyNode.arpLocal` + `diffuseArpField()` (one explicit Jacobi step over the NodeLink
+graph, single-threaded, before biochem); `FilSegment.end2NearArpNode` (nearest hot node, set in
+`registerATipClearance`); `checkBranching`/`makeArpBranch` read+consume the local pool; `Arp23` records the
+node and skips the return for field-consumed Arp2/3. `[ARPFIELD] hotMean/hotMin` readout on the `[LAM]` line.
+**Verified** (`ParameterFiles/lamRatchet4xField`, run `threejs_output/lam_ratchet_npf`): the activated field
+develops a real depletion gradient — hotMin 22 < hotMean 36 < target 80 µM — the most-branched nodes dig the
+deepest hole, so growth is pushed laterally rather than piling up. Plenty of dials (`arpConc` target,
+`arpDiffusion`, `arpBulkExchange`, `arpConsumePerBranch`) to tune toward a morphological match later.
+All default-off.
+
+**Also (viewer):** membrane-disc inward offset (from the collision-surface fix) used a degenerate per-node
+PCA normal for under-linked nodes (the outer ring before auto-linking), placing them wrong at startup.
+Fixed with a global-sheet-normal fallback (planar membranes) — outer ring sits correctly from frame 0.
+
 ## 2026-06-15 — Brownian-ratchet polymerization closure: implemented, demonstrated, and a buffer/scale-mismatch fix
 
 Implemented the Mogilner–Oster polymerization closure (`RATCHET_CLOSURE_DESIGN.{html,pdf}`) as a default-off

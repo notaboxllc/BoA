@@ -825,6 +825,22 @@ public class Env {
 	// (ADP) fraction so newly-polymerized ATP/ADP-Pi branches are stable and old ones release (GMF-like).
 	// On debranch the daughter becomes a free filament and depolymerizes. 0 = disabled (no turnover).
 	static final Parameter arpDebranchRate = new Parameter("arpDebranchRate"," Arp2/3 Debranch Rate", 0.0, "/second").setMutableAtRuntime().setDescription("P2 debranching: stochastic dissociation rate of an Arp2/3 branch, scaled by the daughter filament's aged (ADP) fraction so new ATP/ADP-Pi branches are stable and old ones release (GMF-like turnover). On debranch the daughter is freed and depolymerizes. 0 = disabled (network only accretes, never treadmills). Live-tunable.");
+	// Localized Arp2/3 depletion (negative feedback against autocatalytic over-branching). Each branch
+	// consumes this much arpConc; it is returned when the branch dissociates (conserved pool). For a
+	// single hot-Rho zone the global arpConc acts as the LOCAL pool, so standing branches are capped at
+	// ~arpConc/this. Tunable because the physical box-wide pool (~millions of complexes at 80 uM) is far
+	// too large to limit anything — what matters is the small, fast-depleting local hot-zone pool.
+	static final Parameter arpConsumePerBranch = new Parameter("arpConsumePerBranch"," Arp2/3 consumed per branch", 0.0, concUnits).setMutableAtRuntime().setDescription("Localized Arp2/3 depletion: each branch consumes this much arpConc (uM), returned when it dissociates. Caps standing branches at ~arpConc/this, the negative feedback that stops a dendritic network running away into an over-branched bush. 0 = disabled. Live-tunable.");
+	// ACTIVATED Arp2/3 field (NPF-source / bulk-sink model). When arpLocalField is on, each membrane node
+	// carries arpLocal (uM activated Arp2/3). The hot-Rho (NPF) nodes are the ONLY source (production
+	// toward arpConc); it diffuses laterally as a SLOW membrane-bound species (arpDiffusion ~ membrane-
+	// protein scale, NOT the fast free complex); it is LOST everywhere at arpBulkExchange (escape/deactiv-
+	// ation to the inactive bulk = sink at 0); and branching consumes it with no return. Branching is thus
+	// activation-rate-limited. Free cytoplasmic Arp2/3 (~5 um^2/s -> arpDiffusion ~700) refills too fast to
+	// deplete, which is exactly why the depletable resource is the slow membrane-bound ACTIVE pool.
+	static final Parameter arpLocalField = new Parameter("arpLocalField"," Activated-Arp2/3 field (NPF source, bulk sink)", 0, "", Parameter.BOOLEAN, false).setMutableAtRuntime().setDescription("When on, branching is governed by a per-membrane-node ACTIVATED Arp2/3 field: hot-Rho/NPF nodes produce it toward arpConc, it diffuses laterally (slow, membrane-bound) and is lost to the bulk (sink at 0), and branching consumes the nearest node's pool with no return -> activation-rate-limited. Default off (global pool). Live-tunable.");
+	static final Parameter arpDiffusion = new Parameter("arpDiffusion"," Activated-Arp2/3 lateral diffusion", 10.0, "/second").setMutableAtRuntime().setDescription("Effective lateral diffusion of the activated-Arp2/3 field over the NodeLink graph (graph-Laplacian; = D_phys/(1.5*spacing^2), so ~140*D_phys). Membrane-bound active pool: D_phys ~0.01-0.1 um^2/s -> ~1-14. Free complex (~5 um^2/s -> ~700) refills too fast to deplete. Decay length ~ sqrt(arpDiffusion/arpBulkExchange). Live-tunable.");
+	static final Parameter arpBulkExchange = new Parameter("arpBulkExchange"," Activated-Arp2/3 loss/deactivation rate", 2.0, "/second").setMutableAtRuntime().setDescription("Rate the activated-Arp2/3 field is lost everywhere to the inactive bulk (sink at 0) -- deactivation + escape of activated complex to the deep cytoplasm. Sets the activated-pool lifetime (~1/this) and the decay length sqrt(arpDiffusion/this). Live-tunable.");
 	// Extended branching: branch-eligible when the barbed end is within this distance BELOW the
 	// membrane plane (z=0), in addition to the original near-hot-node trigger. >0 lets the dendritic
 	// network self-amplify (daughters branch too) into a thick lamellipodium-like layer. 0 = disabled.

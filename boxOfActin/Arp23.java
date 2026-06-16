@@ -47,6 +47,8 @@ public class Arp23 {
 	Pt3D R = new Pt3D();
 	Pt3D RCrossF = new Pt3D();
 	boolean removeMe = false;
+	double arpConsumedAmt = 0;          // localized Arp2/3 depletion: uM this branch consumed (returned on dissociation)
+	StickyNode arpConsumedNode = null;  // which node's local pool it came from (null = the global arpConc pool)
 	double lastAngTween = 0;   // junctionTest diagnostic: most recent torsion misalignment (rad)
 	static int jctStep = 0;    // junctionTest diagnostic: step counter for the relaxation log
 	static int arpJSonIDCounter = 0; // used for making unique Simularium JSon Ids only
@@ -141,6 +143,8 @@ public class Arp23 {
 		} else { 
 			arp = new Arp23(mFil,mLoc,dFil);
 		}
+		// Arp2/3 consumption is done by the caller (FilSegment.makeArpBranch), which knows the nearest
+		// node for the per-node field; it records the amount/node on this Arp23 for return on dissociation.
 		Env.registerArp(mFil);
 		return arp;
 	}
@@ -374,9 +378,18 @@ public class Arp23 {
 		for (int i=0;i<arp23Ct;i++) {
 			try {
 				if (!theArp23s[i].active) {
+					// Return consumed Arp2/3 — exactly once. The GLOBAL pool is conserved (return it). The
+					// per-node ACTIVATED field is NOT (arpConsumedNode!=null): incorporated/released Arp2/3
+					// rejoins the inactive bulk and must be re-activated by NPF, so it is not returned to
+					// the activated pool — branching stays activation-rate-limited.
+					if (theArp23s[i].arpConsumedAmt != 0) {
+						if (theArp23s[i].arpConsumedNode == null) Env.arpConc.addToValue(theArp23s[i].arpConsumedAmt);
+						theArp23s[i].arpConsumedAmt = 0;
+						theArp23s[i].arpConsumedNode = null;
+					}
 					theArp23s[i].cleanUpPointers();
 					addInactive(theArp23s[i]);
-				}	
+				}
 			}
 			catch (NullPointerException npe)
 			{ System.out.println("null pointer exception in Arp23.setInactiveArp23s!");}
