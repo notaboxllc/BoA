@@ -696,6 +696,7 @@
   <label><span class="pLabel">Membrane links</span>  <input id="chkMembraneLinks" type="checkbox"></label>
   <label><span class="pLabel">Membrane opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
   <label><span class="pLabel">Membrane flatten</span><input id="sMembFlatten" type="range" min="0.05" max="1" step="0.05" value="0.30"><span class="pVal" id="vMembFlatten">0.30</span></label>
+  <label><span class="pLabel">Surface fit</span><input id="sMembFit" type="range" min="0" max="1.5" step="0.05" value="1.0"><span class="pVal" id="vMembFit">1.00</span></label>
 </div>
 
 <button id="renderToggle">Render ▶</button>
@@ -866,6 +867,8 @@ scene.add(nodeMesh);
 // Tunable knobs (also exposed as UI controls in the Display panel):
 let membraneOpacity = 0.35;   // translucency of the membrane discs
 let membraneFlatten = 0.30;   // oblate ratio: short (normal) axis / in-plane radius
+let membFilTipR = 0.05;       // filament-tip collision radius (from frame.filTipR); fallback 0.05
+let membraneSurfaceFit = 1.0; // 0 = discs centered on node centers (legacy); 1 = inner face on the collisional contact
 let showMembraneLinks = false; // NodeLink connectivity lines on/off
 const MEMBRANE_COLOR = 0x55bbdd;
 // Per-instance membrane colors: ordinary cortex vs hot-Rho (NPF/Arp2/3 activator) patch.
@@ -1340,6 +1343,7 @@ function fitCameraToBox(xDim, yDim, zDim) {
 }
 
 function applyFrameData(data) {
+  if (typeof data.filTipR === 'number') membFilTipR = data.filTipR;   // membrane steric-surface offset source
   // Build box wireframe from first frame; absent in benchmark mode.
   if (!boundsObj && data.bounds) {
     const { xDim, yDim, zDim } = data.bounds;
@@ -1738,8 +1742,14 @@ function updateMembraneSurface(nodes, membraneLinks) {
   let mCt = 0;
   for (const rec of mem) {
     if (mCt >= MAX_MEMBRANE_NODES) break;
-    membraneNormal(rec, _mc, _mn);   // -> _mn (unit normal)
-    dummy.position.copy(rec.pos);
+    membraneNormal(rec, _mc, _mn);   // -> _mn (unit OUTWARD normal)
+    // Offset the disc inward (toward the cytoplasm, -normal) so its inner FACE lands on the collisional
+    // contact: filaments stop (nodeRadius + filTipR) from the node centre, but the flattened disc's inner
+    // face is only rec.r*membraneFlatten from it — so shift by the difference. membraneSurfaceFit scales
+    // it (0 = legacy at node centre). renderPos is reused for the connectivity lines below.
+    const offset = ((rec.r + membFilTipR) - rec.r * membraneFlatten) * membraneSurfaceFit;
+    rec.renderPos = rec.pos.clone().addScaledVector(_mn, -offset);
+    dummy.position.copy(rec.renderPos);
     // Map the sphere's local +Y to the normal, then flatten along Y (the short axis).
     _mq.setFromUnitVectors(_yAxis, _mn);
     dummy.quaternion.copy(_mq);
@@ -1762,8 +1772,9 @@ function updateMembraneSurface(nodes, membraneLinks) {
       if (v / 6 >= MAX_MEMBRANE_LINKS) break;
       const a = memById.get(ln[0]), b = memById.get(ln[1]);
       if (!a || !b) continue;
-      arr[v++] = a.pos.x; arr[v++] = a.pos.y; arr[v++] = a.pos.z;
-      arr[v++] = b.pos.x; arr[v++] = b.pos.y; arr[v++] = b.pos.z;
+      const ap = a.renderPos || a.pos, bp = b.renderPos || b.pos;   // follow the same inward offset as the discs
+      arr[v++] = ap.x; arr[v++] = ap.y; arr[v++] = ap.z;
+      arr[v++] = bp.x; arr[v++] = bp.y; arr[v++] = bp.z;
     }
   }
   posAttr.needsUpdate = true;
@@ -2048,6 +2059,11 @@ document.getElementById('sMembOpacity').addEventListener('input', e => {
 document.getElementById('sMembFlatten').addEventListener('input', e => {
   membraneFlatten = Number(e.target.value);
   document.getElementById('vMembFlatten').textContent = membraneFlatten.toFixed(2);
+  if (currentFrameData) updateMembraneSurface(currentFrameData.nodes, currentFrameData.membraneLinks);
+});
+document.getElementById('sMembFit').addEventListener('input', e => {
+  membraneSurfaceFit = Number(e.target.value);
+  document.getElementById('vMembFit').textContent = membraneSurfaceFit.toFixed(2);
   if (currentFrameData) updateMembraneSurface(currentFrameData.nodes, currentFrameData.membraneLinks);
 });
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {

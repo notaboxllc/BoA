@@ -130,6 +130,10 @@ public class ThreeJSWriter {
         StringBuilder sb = new StringBuilder(4096);
         sb.append("{\"frame\":").append(frameNumber);
         sb.append(String.format(",\"t\":%.6g", Env.simulationTime));
+        // Filament-tip collision radius: the membrane steric surface sits this far beyond the node
+        // surface, so the viewer can offset the rendered membrane discs to coincide with where tips
+        // actually stop (otherwise the flattened discs float ~nodeRadius+filTipR above the contact).
+        sb.append(String.format(",\"filTipR\":%.5g", Env.filTipRadiusForCollisions.getValue()));
         if (!Env.benchmarkFilament) {
             sb.append(String.format(",\"bounds\":{\"xDim\":%.5g,\"yDim\":%.5g,\"zDim\":%.5g}",
                     Env.boxXDim.getValue(), Env.boxYDim.getValue(), Env.boxZDim.getValue()));
