@@ -19,6 +19,12 @@ public class StickyNode extends ProteinNode {
 	double arpLocal = 0;       // per-node Arp2/3 concentration (uM): the localized-depletion field
 	double arpLocalNext = 0;   // Jacobi scratch for the diffusion update
 	double forminLocal = 0;    // per-hot-node implicit formin pool: depletable, nucleates linear mothers
+	// Captured actin->membrane force (face-collision push + tether reactions) for the membraneYield
+	// protrusion relaxation: accumulated as filaments push this node, re-applied each Jacobi relax pass.
+	double extMembFx = 0, extMembFy = 0, extMembFz = 0;
+	public void incExtMembForce (double fx, double fy, double fz) { extMembFx += fx; extMembFy += fy; extMembFz += fz; }
+	public void incExtMembForce (Pt3D f) { extMembFx += f.x; extMembFy += f.y; extMembFz += f.z; }
+	public void resetExtMembForce () { extMembFx = 0; extMembFy = 0; extMembFz = 0; }
 	static boolean arpFieldInit = false;
 	static boolean sphericalGeometry = false;
 	static Pt3D centerOfSphere = new Pt3D(0,0,0);

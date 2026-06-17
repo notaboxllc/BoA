@@ -1,5 +1,38 @@
 # BoxOfActin Project Journal
 
+## 2026-06-16 — Membrane protrusion attempt (`membraneYield`): mechanism works, but NODES NOT STABLE (jba) — WIP
+
+First crack at letting the closed sphere protrude under actin load. Recap of why it's hard: `NodeLink.
+subcycleRelaxAll` relaxes the membrane links to rest length every step (inextensible) and **discards the
+actin push** — a flat sheet protrudes by BENDING (no stretch, relaxation allows it) but a closed-sphere
+bulge needs STRETCHING, which the relaxation forbids.
+
+**`membraneYield` mechanism.** Capture the actin->membrane force (barbed-tip `faceCollideTipVsNodeTriangles`
+push; `membraneFaceCollideOn` required) into a per-node accumulator (`StickyNode.extMembF*`,
+`incExtMembForce`/`resetExtMembForce`) and RE-APPLY it inside the relaxation so the mesh settles at a
+force-balanced bulge instead of rest length. `bestViol` capped to `colThresh` so a deep-leaking tip can't
+give an unbounded push. Tether reaction is NOT captured (too large at high strain → unstable).
+
+**Two relaxation variants tried.** (a) Re-apply the push every full-`deltaT` Jacobi pass → bulges large
+(70 nm → 1700 nm) but the stiff mesh OVERSHOOTS each pass → nodes shoot around / fly to inf. (b) Sub-cycled
+integration `membraneYieldSubN` sub-steps of `deltaT/N` (Arp2/3 pattern) → metrics looked much better:
+smooth, localized, gradually-developing bulge (≈100 nm over ~38 hot nodes at t=0.12, rest of sphere ~1.18–
+1.20, `err:0`, no inf). `sphereConstraintFrac` parameterizes the radial pin; a compliant (no-yield, high
+`membraneMaxLinkStrain`) control was smooth but FLAT (single main-move push too weak to pay the stretch
+cost).
+
+**jba's conclusion: the nodes are still NOT stable in the viewer** — the sub-cycling improved the summary
+metrics but the membrane node motion is not acceptable. So `membraneYield` is **WIP / not a solution yet**.
+Default-off (`membraneYield`=0), so nothing else is affected; `ParameterFiles/lamSphereProtrusion` holds the
+experiment (membraneYield on, face-collide on, confine off, soft pin, angle 45 + ratchet).
+
+**Next time.** (1) Stabilize the relaxation under load — likely Gauss-Seidel instead of Jacobi, and/or treat
+the membrane links as genuinely compliant springs rather than a rest-length constraint. (2) The real fix is
+**#2 membrane growth** (add area / grow rest lengths / insert nodes at the protrusion) so the membrane gains
+area instead of stretching — sidesteps the stretch-cost + stiffness fight entirely; jba wants this. (3) A
+**yielding confinement** that rides the local node radius (the fixed-radius `membraneConfine` is off here, so
+filaments leak through the porous mesh). See memory `membrane-protrusion-inextensible-relax`.
+
 ## 2026-06-16 — Formin mothers + Arp2/3 branches: literature-faithful cortical network; protrusion blocked by inextensible membrane
 
 Reworked the spherical cortical model to match the literature (a focused agent sweep, citations in the

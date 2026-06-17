@@ -2303,10 +2303,14 @@ public class FilSegment extends Thing {
 			}
 		}
 		if (bestA == null) return;                               // no face barrier here (vertex/edge handled by node-sphere)
+		if (bestViol > colThresh) bestViol = colThresh;          // bound the push: a deep-leaking tip can't give an unbounded (unstable) force
 		double mag = (0.3*1.0e-6*bestViol/Env.collisionDeltaT.getValue())/(1.0/fil.bTransGam.y + 1.0/node.bTransGam.x);
 		fil.incForceSum(Pt3D.Scale(-mag, bestN), tip);          // push tip toward inner side (never further out)
 		Pt3D back = Pt3D.Scale(mag/3.0, bestN);                 // reaction: membrane nodes pushed outward (sheet deflects = compliant)
 		node.incForceSum(back); bestA.incForceSum(back); bestB.incForceSum(back);
+		if (Env.membraneYield.getValue() > 0.5) {              // capture the push so the relax pass re-applies it -> protrusion
+			node.incExtMembForce(back); bestA.incExtMembForce(back); bestB.incExtMembForce(back);
+		}
 		node.collision(); fil.collision();
 	}
 
@@ -2665,6 +2669,8 @@ public class FilSegment extends Thing {
 			// full tether. (Non-membrane anchors keep the full Newton reaction.)
 			if (end1Node instanceof StickyNode) { Fopp.scale(Env.membraneAnchorReactionFrac.getValue()); }
 			end1Node.incForceSum(Fopp);
+			// (tether reaction is NOT captured for membraneYield — only the barbed-end face-collision push
+			// drives protrusion; the tether reaction can be large at high strain and destabilizes the relax)
 
 			
 			// register strainDist and check for filament detachment

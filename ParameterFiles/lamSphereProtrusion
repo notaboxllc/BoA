@@ -11,7 +11,7 @@ deltaT:true:1.0E-5;
 collisionDeltaT:true:1.0E-5;
 brownianDeltaT:true:1.0E-5;
 biochemDeltaT:true:0.001;
-runTime:true:0.2;
+runTime:true:0.12;
 toFileInterval:true:100.0;
 remoteWriteInterval:true:2000.0;
 boxXDim:true:5.0;
@@ -27,6 +27,7 @@ kNodeNuc:true:0.0;
 membraneLinkFracMove:true:0.15;
 membraneRelaxGpuShaped:true:1.0;
 membraneFixedStiffnessDt:true:1e-5;
+membraneMaxLinkStrain:true:0.5;
 // --- activated Arp2/3 field ---
 arpLocalField:true:1.0;
 arpConc:true:80.0;
@@ -49,7 +50,8 @@ membraneFaceCollideOn:true:1.0;
 // Confine the cytoskeleton: push any filament poking past the cortex back inside (the node lattice
 // is porous to filament bodies; this is the membrane physically containing the actin).
 membraneConfine:false:0.0;
-sphereConstraintFrac:true:0.08;
+sphereConstraintFrac:true:0.2;
+membraneYield:true:1.0;
 // Membrane = heavy anchor: cut the tether reaction on nodes so filaments don't jitter the cortex.
 membraneAnchorReactionFrac:true:1.0;
 // Nurse-log: lay Arp2/3-held mothers tangent to the cortex; branches grow off into the cytoplasm.

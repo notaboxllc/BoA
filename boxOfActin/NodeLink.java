@@ -239,6 +239,41 @@ public class NodeLink {
 		double tol = Env.membraneMaxLinkStrain.getValue();
 		int pass = 0;
 		maxStrain = 10;
+		boolean yield = Env.membraneYield.getValue() > 0.5;
+		if (yield) {
+			// PROTRUSION path: integrate the membrane (link springs + sustained actin push + radial pin)
+			// over one full dt as N small sub-steps of dt/N (the Arp2/3 sub-cycle pattern). The legacy
+			// full-dt Jacobi RE-application overshot the stiff mesh each pass (nodes shooting around); small
+			// sub-steps converge smoothly to the force-balanced bulge. Link force eval at dtFull (fixed
+			// stiffness), integration at dtSub.
+			int N = Math.max(1, Env.membraneYieldSubN.getIntValue());
+			double dtFull = Env.deltaT.getValue();
+			double dtSub  = dtFull / N;
+			for (int s=0; s<N; s++) {
+				for (StickyNode nd : membraneNodes) {   // reset to the sustained actin push (constant over the sub-cycle)
+					int b = nd.myThingNumber*3;
+					Thing.soaForceSum[b]=(float)nd.extMembFx; Thing.soaForceSum[b+1]=(float)nd.extMembFy; Thing.soaForceSum[b+2]=(float)nd.extMembFz;
+					Thing.soaTorqueSum[b]=0; Thing.soaTorqueSum[b+1]=0; Thing.soaTorqueSum[b+2]=0;
+				}
+				Env.deltaT.setValue(dtFull);            // link spring eval (fixed-stiffness denominator)
+				for (int i=0;i<nodeLinkCt;i++) {
+					NodeLink nl = nodeLinks[i];
+					if (nl == null || !nl.active) continue;
+					if (nl.node1.fixedNode && nl.node2.fixedNode) continue;
+					nl.updateNodeLink(); nl.applyForces();
+				}
+				Env.deltaT.setValue(dtSub);             // integrate the fine sub-step (radial pin added in moveThing)
+				for (StickyNode nd : membraneNodes) { nd.moveThing(); }
+			}
+			Env.deltaT.setValue(dtFull);
+			for (StickyNode nd : membraneNodes) {
+				int b = nd.myThingNumber*3;
+				Thing.soaForceSum[b]=0; Thing.soaForceSum[b+1]=0; Thing.soaForceSum[b+2]=0;
+				Thing.soaTorqueSum[b]=0; Thing.soaTorqueSum[b+1]=0; Thing.soaTorqueSum[b+2]=0;
+				nd.resetExtMembForce();   // consumed this step; re-accumulated next step's collision phase
+			}
+			return;
+		}
 		while (maxStrain > tol && pass < maxPasses) {
 			maxStrain = 0;   // re-registered by updateNodeLink() below
 			// Jacobi step 1: zero the membrane nodes' force/torque accumulators
