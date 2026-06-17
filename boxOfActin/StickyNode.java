@@ -18,6 +18,7 @@ public class StickyNode extends ProteinNode {
 	double hotTime = 0;
 	double arpLocal = 0;       // per-node Arp2/3 concentration (uM): the localized-depletion field
 	double arpLocalNext = 0;   // Jacobi scratch for the diffusion update
+	double forminLocal = 0;    // per-hot-node implicit formin pool: depletable, nucleates linear mothers
 	static boolean arpFieldInit = false;
 	static boolean sphericalGeometry = false;
 	static Pt3D centerOfSphere = new Pt3D(0,0,0);
@@ -245,23 +246,21 @@ public class StickyNode extends ProteinNode {
 		}
 	}
 
-	// De-novo Arp2/3 nucleation at an activated (hot-Rho/NPF) membrane node: seed a filament just
-	// inside the cortex, growing along the node's inward normal. Shared by the transient hot-spot path
-	// and the P1 permanent-patch path.
+	// Implicit-FORMIN mother nucleation at an activated (hot Rac1/Cdc42 NPF) membrane node. Arp2/3 cannot
+	// nucleate de novo (it only branches off a mother); the first/mother cortical filaments are made by
+	// formins recruited to the same GTPase zone. We model formin implicitly as the node's depletable
+	// forminLocal pool: each mother spends a quantum, so a zone makes at most ~forminConc/consume mothers.
+	// The mother is LINEAR (no Arp2/3 pointed-end cap); it's held to the membrane by an ERM-like linker
+	// (the end1 node tether), and Arp2/3 then branches off it (checkBranching). Method name kept for callers.
 	public void deNovoNucleate () {
-		// De-novo nucleation draws on this node's activated-Arp2/3 budget, exactly like branching: a patch
-		// that has spent its activated pool nucleates more slowly (rate scaled by the local fraction), and
-		// each new filament consumes a quantum. Self-governing, and the heat-map drain now reflects
-		// nucleation as well as branching.
-		double localArp = Env.arpLocalField.isActive() ? arpLocal : Env.arpConc.getValue();
-		double nucFilProb = Env.nucRateNearArpFactors.getValue()*(localArp/Env.arpConc.getValue())*Env.biochemDeltaT.getValue();
+		double pool = Env.forminConc.getValue();
+		double avail = pool > 0 ? forminLocal : 0.0;
+		if (avail <= 0) { return; }                          // formin pool spent: no more mothers here (hard cap)
+		double nucFilProb = Env.nucRateNearArpFactors.getValue()*(avail/pool)*Env.biochemDeltaT.getValue();
 		if (currentScratch().rng.nextDouble() < nucFilProb) {
-			// Dendritic de-novo nucleation: the NPF-activated Arp2/3 nucleates a filament, caps its pointed
-			// (minus) end, AND tethers that capped end to the membrane node — exactly as Arp2/3 holds a
-			// daughter's pointed end on its mother. The barbed (plus) end grows INWARD into the cytoplasm,
-			// so the filament pushes off the cortex rather than threading out through the gaps between nodes
-			// (which is how the un-anchored, outward-growing seeds were escaping the sphere).
-			// Use the GEOMETRIC inward radial (sphere center - node position), NOT the node's body-frame
+			// The formin seeds a linear mother just inside the cortex, held to the membrane by an ERM-like
+			// linker (end1 tether). Direction uses the GEOMETRIC inward radial (sphere center - node position),
+			// NOT the node's body-frame
 			// zVec: membrane nodes rotate during the sim, so a node's zVec drifts off-radial and can even
 			// flip inward -> then -zVec points OUT and the filament nucleates/grows out through the cortex.
 			// The geometric radial is rotation-proof.
@@ -272,16 +271,35 @@ public class StickyNode extends ProteinNode {
 				inward = zVecAsPt3D();
 				inward.scale(-1.0);                                   // flat sheet: node normal is stable
 			}
-			// Place the seed just inside the inner steric face (nodeR+filTipR), so its pointed end is born
-			// at the membrane surface (where it gets tethered), not in the shell outside the rendered cortex.
-			double seedDepth = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue() + 0.02;
-			Pt3D nucPt = Pt3D.Add(coordAsPt3D(), seedDepth, inward);
-			FilSegment dFil = FilSegment.makeArp23NucFilament(nucPt, inward);
-			FilSegment.linkEnd1Node(dFil, this);             // hold the Arp2/3 (pointed) end at the activated node
-			if (Env.arpLocalField.isActive()) {              // spend a quantum of activated Arp2/3 on this nucleation
-				arpLocal -= Env.arpConsumePerBranch.getValue();
-				if (arpLocal < 0) arpLocal = 0;
+			// Growth direction: radially inward by default, OR a random TANGENTIAL direction when the
+			// cortex-alignment torque is on (the 'nurse log' — the mother lies along the membrane and
+			// branches grow off it into the cytoplasm). The alignment torque then keeps it tangent.
+			boolean alignNuc = sphericalGeometry && Env.membraneAlignTorque.isActive();
+			Pt3D growDir = inward;
+			if (alignNuc) {
+				Pt3D radOut = Pt3D.Scale(-1.0, inward);              // outward surface normal
+				Pt3D rv = Pt3D.RandomUnitVec(currentScratch().rng);
+				Pt3D tang = Pt3D.Sub(rv, Pt3D.Scale(Pt3D.Dot(rv, radOut), radOut)); // random tangent (azimuth)
+				if (Pt3D.Dot(tang, tang) < 1e-9) { growDir = inward; } // (rv ~ radial; rare) fall back
+				else {
+					tang.unitVec();
+					// barbed direction at membraneAlignAngle from the outward normal: 90deg = tangent,
+					// <90 tilts the barbed end toward the membrane (the protrusive dendritic geometry).
+					double a = Math.toRadians(Env.membraneAlignAngle.getValue());
+					growDir = Pt3D.Add(Math.cos(a), radOut, Math.sin(a), tang);
+					growDir.unitVec();
+				}
 			}
+			// Seat the seed at the inner steric face (nodeR+filTipR), plus motherTetherDepth so a barbed-toward-
+			// membrane mother's pointed end is held OFF the surface (it then angles up to the cortex). For the
+			// tangent mat motherTetherDepth=0 -> seed sits at the face (barbed tips stay within membraneCapDist).
+			double extra = alignNuc ? Env.motherTetherDepth.getValue() : 0.02;
+			double seedDepth = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue() + extra;
+			Pt3D nucPt = Pt3D.Add(coordAsPt3D(), seedDepth, inward);
+			FilSegment dFil = FilSegment.makeForminMother(nucPt, growDir);
+			FilSegment.linkEnd1Node(dFil, this);             // ERM-like membrane linker holds the mother's end
+			forminLocal -= Env.forminConsumePerMother.getValue();  // spend a formin from this zone's pool
+			if (forminLocal < 0) forminLocal = 0;
 		}
 	}
 	
@@ -352,7 +370,7 @@ public class StickyNode extends ProteinNode {
 		Pt3D forceVec = Pt3D.Sub(coordAsPt3D(), centerOfSphere);  // radially outward
 		forceVec.unitVec();	// make unit vec
 		double radialDisp = Env.membraneCellRadius.getValue()-Pt3D.ptDist(coordAsPt3D(), centerOfSphere);
-		double forceMag = 0.4*(1.0e-6*radialDisp/Env.collisionDeltaT.getValue())/(1/bTransGam.x);
+		double forceMag = Env.sphereConstraintFrac.getValue()*(1.0e-6*radialDisp/Env.collisionDeltaT.getValue())/(1/bTransGam.x);
 		incForceSum(Pt3D.Scale(forceMag,forceVec));
 	}
 	
@@ -614,13 +632,18 @@ public class StickyNode extends ProteinNode {
 	// each fixed patch direction as a permanent NPF source. Used by the spherical-membrane IC so the
 	// activated-Arp2/3 field has localized sources to diffuse out from.
 	public static void markHotPatches (int nPatches, double angRadiusDeg) {
-		// Fixed, well-spread directions (deterministic): poles + a ring + tetra-ish points.
+		// Hot Rac1/Cdc42 (NPF) zones. Use the 8 cube-corner directions (all components +-0.577): every one is
+		// OFF the coordinate singularities of the Deserno node lattice — not on the poles (z=+-1, where theta
+		// bands converge) nor the phi=0 seam (y=0, x>0, the sparsest meridian) — so each patch sees uniform,
+		// well-linked mesh and grows mothers evenly (fixes the pole-vs-equator asymmetry).
+		double c = 0.5773502692;
 		double[][] dirs = {
-			{0,0,1}, {0,0,-1}, {1,0,0}, {0,1,0}, {-1,0,0}, {0,-1,0},
-			{0.577,0.577,0.577}, {-0.577,-0.577,0.577}
+			{ c, c, c}, { c,-c,-c}, {-c, c,-c}, {-c,-c, c},
+			{-c,-c,-c}, {-c, c, c}, { c,-c, c}, { c, c,-c}
 		};
 		int patches = Math.max(1, Math.min(nPatches, dirs.length));
 		double cosThresh = Math.cos(Math.toRadians(angRadiusDeg));
+		double forminPool = Env.forminConc.getValue();
 		int marked = 0;
 		for (int i=0;i<ProteinNode.nodeCt;i++) {
 			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
@@ -631,12 +654,14 @@ public class StickyNode extends ProteinNode {
 			nx/=r; ny/=r; nz/=r;
 			for (int p=0;p<patches;p++) {
 				if (nx*dirs[p][0] + ny*dirs[p][1] + nz*dirs[p][2] >= cosThresh) {
-					s.iAmHotRho = true; s.permanentHotRho = true; s.myHotSpotOriginator = s; marked++;
+					s.iAmHotRho = true; s.permanentHotRho = true; s.myHotSpotOriginator = s;
+					s.forminLocal = forminPool;   // seed the implicit formin pool that nucleates mothers here
+					marked++;
 					break;
 				}
 			}
 		}
-		System.out.println("[SPHERE] hot-Rho: " + patches + " patches (" + angRadiusDeg + " deg), " + marked + " nodes marked");
+		System.out.println("[SPHERE] hot Rac1 (NPF): " + patches + " patches (" + angRadiusDeg + " deg), " + marked + " nodes marked");
 	}
 	
 	public static void makeCylinderOfNodes () {
@@ -915,10 +940,13 @@ public class StickyNode extends ProteinNode {
 			s.arpLocalNext = s.arpLocal + dt*(src + D*lap - ke*s.arpLocal);  // bulk sink at 0 => -ke*c loss
 		}
 		double sum=0, min=Double.MAX_VALUE; int hot=0;
+		double fRec = Env.forminRecover.getValue(), fCap = Env.forminConc.getValue();
 		for (int i=0;i<n;i++) {
 			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
 			StickyNode s = (StickyNode)ProteinNode.theNodes[i];
 			s.arpLocal = s.arpLocalNext;
+			// formin pool recovery (re-recruitment) toward the cap, only at hot zones; 0 = hard mother cap
+			if (s.iAmHotRho && fRec > 0 && s.forminLocal < fCap) { s.forminLocal = Math.min(fCap, s.forminLocal + fRec*dt); }
 			if (s.iAmHotRho) { sum += s.arpLocal; if (s.arpLocal < min) min = s.arpLocal; hot++; }
 		}
 		arpFieldHotMean = hot>0 ? sum/hot : 0;

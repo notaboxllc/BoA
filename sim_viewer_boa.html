@@ -871,9 +871,9 @@ let membFilTipR = 0.05;       // filament-tip collision radius (from frame.filTi
 let membraneSurfaceFit = 1.0; // 0 = discs centered on node centers (legacy); 1 = inner face on the collisional contact
 let showMembraneLinks = false; // NodeLink connectivity lines on/off
 const MEMBRANE_COLOR = 0x55bbdd;
-// Per-instance membrane colors: ordinary cortex vs hot-Rho (NPF/Arp2/3 activator) patch.
+// Per-instance membrane colors: ordinary cortex vs hot Rac1/Cdc42 (NPF) activator patch.
 const MEMBRANE_COL  = new THREE.Color(MEMBRANE_COLOR);
-const HOTRHO_COL    = new THREE.Color(0xff3399);  // bright pink — the activated branching patch
+const HOTRHO_COL    = new THREE.Color(0xff3399);  // bright pink — the activated (Rac1/NPF) nucleation patch
 const ARP_COLD      = new THREE.Color(0x0a2440);  // activated-Arp2/3 field heat-map: depleted (cold)
 const ARP_HOT       = new THREE.Color(0xff3399);  // activated-Arp2/3 field heat-map: high (hot)
 const _arpCol       = new THREE.Color();          // scratch

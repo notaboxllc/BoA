@@ -275,8 +275,8 @@ public class Env {
 	// Closed spherical membrane IC (makeSphereOfNodes) with a few hot-Rho (NPF) patches, for testing the
 	// activated-Arp2/3 field on a curved/closed surface. Both default OFF.
 	static final Parameter buildMembraneSphere = new Parameter("buildMembraneSphere", " Build spherical membrane IC", 0, "", Parameter.BOOLEAN, false);
-	static final Parameter sphereHotPatches = new Parameter("sphereHotPatches", " Number of hot-Rho patches on the sphere", 3, "", Parameter.INT);
-	static final Parameter sphereHotPatchDeg = new Parameter("sphereHotPatchDeg", " Angular radius of each hot-Rho patch", 20.0, "degrees");
+	static final Parameter sphereHotPatches = new Parameter("sphereHotPatches", " Number of hot Rac1/Cdc42 (NPF) patches on the sphere", 3, "", Parameter.INT);
+	static final Parameter sphereHotPatchDeg = new Parameter("sphereHotPatchDeg", " Angular radius of each hot Rac1 patch", 20.0, "degrees");
 	static boolean myosinsOff = false;
 	static boolean randomNodesOn = false;
 	static final Parameter fixedMyosinClusters = new Parameter("fixedMyosinClusters", " Fixed Myosin Cluster Test", 0, "", Parameter.BOOLEAN, false);
@@ -641,10 +641,40 @@ public class Env {
 	static private double arpHeldBrownianFactor_init = 0.02; // 1/50: an Arp2/3-held filament is not free
 	static final Parameter arpHeldBrownianFactor = new Parameter("arpHeldBrownianFactor"," Arp2/3-Held Brownian Factor", arpHeldBrownianFactor_init, "").setMutableAtRuntime().setDescription("Brownian-force multiplier for a filament whose pointed end is Arp2/3-capped and held (de-novo nucleated at a membrane node, or a branch tethered there). Such a filament is structurally anchored, not freely diffusing, so its thermal forcing is scaled down by this factor (default 0.02 = 1/50). Without it, a tiny nascent seed gets a full free-filament Brownian kick that, against its stiff pointed-end tether at small dt, drives the integrator unstable. 1.0 = treat as free.");
 
+	static private double membraneAnchorReactionFrac_init = 1.0; // 1 = full Newton reaction; <1 = heavy-anchor membrane
+	static private double sphereConstraintFrac_init = 0.4; // per-step fraction of the radial-displacement restoring (was hardcoded)
+	static final Parameter sphereConstraintFrac = new Parameter("sphereConstraintFrac"," Sphere Radial Constraint Stiffness", sphereConstraintFrac_init, "").setMutableAtRuntime().setDescription("Stiffness of the per-node radial restoring force that holds the closed membrane at membraneCellRadius (fraction of the radial displacement corrected per step; default 0.4, the legacy hardcoded value). The flat-sheet membrane has NO such pin and protrudes freely under actin load. Lower this so a node pushed out by the dendritic network can BULGE locally (a protrusion) instead of snapping back to R; too low and turgor/Brownian let the whole sphere lose shape. ~0.05-0.1 to allow protrusions.");
+
+	static final Parameter membraneAnchorReactionFrac = new Parameter("membraneAnchorReactionFrac"," Membrane Anchor Reaction Fraction", membraneAnchorReactionFrac_init, "").setMutableAtRuntime().setDescription("Scales the reaction force a filament tether (ERM-like end1 linker) exerts back on its membrane node. A membrane node's drag is only comparable to a filament's, so the full reaction lets a tethered filament drag the node ~half the strain per step — the hot-zone jitter. <1 treats the membrane as a heavy, mesh-constrained anchor (the filament still feels the full tether). Default 1.0 (full reaction). ~0.2 calms the cortex.");
+
 	static final Parameter membraneConfine = new Parameter("membraneConfine"," Membrane Confines Cytoskeleton", 0.0, "").setMutableAtRuntime().setDescription("If !=0 (and the membrane is a closed sphere), any filament end that pokes past the cortex radius gets a soft inward radial force pushing it back inside — the membrane physically containing the cytoskeleton. This stops free/depolymerizing filaments from leaking out through the gaps between membrane nodes (the membrane node lattice is porous to filament bodies; only barbed tips collide with nodes). One-sided: no force on filaments already inside.");
 
 	static private double membraneConfineFrac_init = 0.4; // overdamped 'close this fraction of the overshoot per step'
 	static final Parameter membraneConfineFrac = new Parameter("membraneConfineFrac"," Membrane Confinement Fraction", membraneConfineFrac_init, "").setMutableAtRuntime().setDescription("Stiffness of the membrane confinement push (fraction of the radial overshoot corrected per step; 0.4 default, <1 for stability). Higher snaps an escaped filament back in faster.");
+
+	static final Parameter membraneAlignTorque = new Parameter("membraneAlignTorque"," Cortex Alignment Torque", 0.0, " N/rad").setMutableAtRuntime().setDescription("If >0 (closed sphere), a gentle restoring torque (N/rad, like arpTorqSpring~1e-18) orients each held mother filament's long axis to membraneAlignAngle from the surface normal, and switches de-novo nucleation to that orientation. 0 = mother grows radially inward.");
+	static private double membraneAlignAngle_init = 90.0; // deg of uVec (barbed dir) from the OUTWARD normal: 90=tangent
+	static final Parameter membraneAlignAngle = new Parameter("membraneAlignAngle"," Mother Angle From Surface Normal", membraneAlignAngle_init, " degrees").setMutableAtRuntime().setDescription("Target angle (deg) between a held mother's barbed direction and the OUTWARD surface normal. 90 = tangent to the cortex (flat 'nurse-log' mat; branches grow inward and stop -> bounded cortex). <90 tilts the barbed end back TOWARD the membrane (with motherTetherDepth holding the pointed end off the surface) -> branches stay in the NPF zone and orientation-selective capping builds a self-amplifying ~35-deg dendritic array (protrusion). ~35-50 is the lamellipodial regime. Needs membraneAlignTorque>0.");
+	static private double motherTetherDepth_init = 0.0; // microns the pointed end is held BELOW the inner cortex face
+	static final Parameter motherTetherDepth = new Parameter("motherTetherDepth"," Mother Pointed-End Anchor Depth", motherTetherDepth_init, " microns").setMutableAtRuntime().setDescription("Depth (microns) below the inner cortex face at which the formin/ERM complex holds a mother's pointed end. 0 = at the cortex (tangent mat). >0 holds it off the surface so a barbed-toward-membrane mother (membraneAlignAngle<90) has room to angle up to the cortex — the geometry that makes a dendritic protrusion. ~0.1-0.2 um pairs with membraneAlignAngle~40.");
+
+	static private double cortexBrownianZone_init = 0.0; // microns below the inner cortex face; 0 = off
+	static final Parameter cortexBrownianZone = new Parameter("cortexBrownianZone"," Cortex Brownian Damping Zone", cortexBrownianZone_init, " microns").setMutableAtRuntime().setDescription("If >0 (closed sphere), any filament whose center lies within this distance of the inner cortex face has its Brownian forcing scaled by cortexBrownianFactor. The cortex is a dense, low-mobility shell; without this, large filaments freed by debranching get a full free-filament thermal kick and thrash against the membrane nodes. 0 = no cortex-proximity damping.");
+
+	static private double cortexBrownianFactor_init = 0.1; // 10x-down thermal in the cortical shell
+	static final Parameter cortexBrownianFactor = new Parameter("cortexBrownianFactor"," Cortex Brownian Factor", cortexBrownianFactor_init, "").setMutableAtRuntime().setDescription("Brownian-force multiplier applied to filaments within cortexBrownianZone of the cortex (default 0.1 = 10x down). Lower = calmer cortical layer.");
+
+	// Implicit FORMIN mother-filament nucleation. Per the literature, Arp2/3 (WASP/WAVE) cannot nucleate
+	// de novo — it only branches off a pre-existing mother. The first/mother cortical filaments are made by
+	// formins (mDia), recruited to the same GTPase (Rac1/Cdc42) hot zones. We model formin implicitly as a
+	// per-hot-node depletable pool: each mother consumes a quantum, so a zone makes at most ~forminConc/
+	// forminConsumePerMother mothers (a hard cap unless forminRecover>0). Arp2/3 then branches off them.
+	static private double forminConc_init = 6.0; // per-hot-node formin pool -> ~6 mothers/zone at consume=1
+	static final Parameter forminConc = new Parameter("forminConc"," Formin Pool Per Hot Node", forminConc_init, "").setMutableAtRuntime().setDescription("Per-hot-node implicit formin pool that seeds linear MOTHER filaments at a Rac1/Cdc42 zone. Each de-novo mother consumes forminConsumePerMother, so standing mothers per zone cap at ~forminConc/forminConsumePerMother (hard cap unless forminRecover>0). This is the knob that controls how dense the cortical mat gets at a hot spot. Replaces the (biologically wrong) de-novo Arp2/3 nucleation.");
+	static private double forminConsumePerMother_init = 1.0;
+	static final Parameter forminConsumePerMother = new Parameter("forminConsumePerMother"," Formin Consumed Per Mother", forminConsumePerMother_init, "").setMutableAtRuntime().setDescription("Formin pool spent per mother-filament nucleation (default 1). With forminConc this sets the per-zone mother cap.");
+	static private double forminRecover_init = 0.0; // /s; 0 = hard cap (no formin turnover)
+	static final Parameter forminRecover = new Parameter("forminRecover"," Formin Pool Recovery Rate", forminRecover_init, " /s").setMutableAtRuntime().setDescription("Rate (/s) at which a hot node's formin pool recovers toward forminConc (formin re-recruitment). 0 = hard cap on mothers; >0 lets the zone slowly make new mothers over time (turnover).");
 
 	static private final double maxSegAngle_init = 22.5; // degrees
 	static final Parameter maxSegAngle = new Parameter("maxSegAngle"," Max. Angle Between Segments", maxSegAngle_init, " degrees",Parameter.DOUBLE, false);

@@ -173,6 +173,7 @@ public class ThreeJSWriter {
                     sb.append(",\"isBarbedEnd\":true");
                 }
             }
+            if (fs.childOfArp23) { sb.append(",\"branch\":true"); }   // Arp2/3 daughter vs formin mother
             sb.append("}");
             first = false;
         }

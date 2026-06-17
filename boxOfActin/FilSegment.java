@@ -147,6 +147,7 @@ public class FilSegment extends Thing {
 	int arpChildCt = 0;
 	FilSegment motherFil;
 	boolean childOfArp23 = false;  // if true then first two monomers are not actin, but ARPs
+	boolean forminMother = false;  // implicit-formin-nucleated linear MOTHER (not an Arp2/3 branch product)
 	Pt3D randForcesInX = new Pt3D();
 	Pt3D randTorquesInX = new Pt3D();
 	
@@ -540,6 +541,7 @@ public class FilSegment extends Thing {
 		StepProfiler.add(StepProfiler.F5_6_FILSEG_NODE, _spT);
 
 		addMembraneConfinement();		// keep filaments inside a closed membrane (porous node lattice)
+		addCortexAlignTorque();			// lay Arp2/3-held mothers tangent to the cortex (nurse-log geometry)
 
 		//setCompression();				// register compressive force in filament, if any
 
@@ -636,7 +638,16 @@ public class FilSegment extends Thing {
 				// An Arp2/3-held filament (de-novo nucleated at a membrane node, pointed end tethered) is
 				// structurally anchored, not free -- dial its thermal forcing way down so the tiny nascent
 				// seed doesn't get a full free-filament kick that destabilizes its stiff pointed-end tether.
-				double heldBrown = (childOfArp23 && nodeAtEnd1) ? Env.arpHeldBrownianFactor.getValue() : 1.0;
+				double heldBrown = ((childOfArp23 || forminMother) && nodeAtEnd1) ? Env.arpHeldBrownianFactor.getValue() : 1.0;
+				// Crowded cortical shell: damp Brownian for any filament pressed against the cortex (NOT just
+				// the held mothers) — otherwise a large filament freed by debranching gets a full free-filament
+				// kick and smashes into the membrane nodes. Spatial gate on the center's radius near the inner
+				// steric face. Take the stronger (smaller) of the held and cortex factors.
+				if (StickyNode.sphericalGeometry && Env.cortexBrownianZone.getValue() > 0) {
+					double inner = Env.membraneCellRadius.getValue() - (Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue());
+					double rC = Pt3D.ptDist(coordAsPt3D(), StickyNode.centerOfSphere);
+					if (rC > inner - Env.cortexBrownianZone.getValue()) { heldBrown = Math.min(heldBrown, Env.cortexBrownianFactor.getValue()); }
+				}
 			if (motherFil == null) {
 				// trans
 				transScale = Env.BTransCoeff.getValue()*heldBrown;
@@ -2628,7 +2639,8 @@ public class FilSegment extends Thing {
 			// standoff a barbed tip would stop at, so the pointed end sits just inside the cortex.
 			Pt3D end1Tgt = end1Node.coordAsPt3D();
 			if (end1Node instanceof StickyNode) {
-				double inset = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue();
+				double inset = Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue()
+						+ Env.motherTetherDepth.getValue();   // hold the pointed end this far OFF the surface
 				// Inset along the GEOMETRIC outward radial on the sphere (not the node's body-frame zVec,
 				// which rotates off-radial during the sim and can flip -> tether target ends up OUTSIDE the
 				// cortex, pinning the pointed end out through the membrane). Flat sheet: zVec is stable.
@@ -2646,8 +2658,14 @@ public class FilSegment extends Thing {
 			incEnd1AxialForce(axialF);  
 
 			Fopp.scale(-1,F);
+			// A membrane (StickyNode) anchor is a heavy, mesh-constrained structure — the ERM linker should
+			// hold the filament without the filament dragging the node around (the node-vs-filament drag is
+			// only comparable, so the un-scaled reaction yanks the node ~half the strain each step, the
+			// hot-zone jitter). Scale the reaction on the membrane node down; the filament still feels the
+			// full tether. (Non-membrane anchors keep the full Newton reaction.)
+			if (end1Node instanceof StickyNode) { Fopp.scale(Env.membraneAnchorReactionFrac.getValue()); }
 			end1Node.incForceSum(Fopp);
-	
+
 			
 			// register strainDist and check for filament detachment
 			end1ToPlasStrain.registerValue(strainDist);
@@ -3004,6 +3022,33 @@ public class FilSegment extends Thing {
 		double Rc = Env.membraneCellRadius.getValue() - inset;
 		confineEndInside(end1Pt, Rc);
 		confineEndInside(end2Pt, Rc);
+	}
+
+	// Lay an Arp2/3-held de-novo mother TANGENT to the cortex (the 'nurse log'): a gentle restoring
+	// torque rotating the filament's long axis into the local tangent plane, so it lies along the
+	// membrane and 70-degree branches grow off it into the cytoplasm — rather than the mother spiking
+	// radially inward. Mirrors Arp23.applyTorsionForce (align uVec to a target direction).
+	public void addCortexAlignTorque () {
+		if (!StickyNode.sphericalGeometry || !Env.membraneAlignTorque.isActive()) { return; }
+		if (!((childOfArp23 || forminMother) && nodeAtEnd1)) { return; }  // only the tethered held mothers
+		Pt3D radOut = Pt3D.UnitVec(coordAsPt3D(), StickyNode.centerOfSphere);  // outward surface normal at filament center
+		Pt3D u = uVecAsPt3D();
+		double uDotR = Pt3D.Dot(u, radOut);
+		Pt3D tang = Pt3D.Sub(u, Pt3D.Scale(uDotR, radOut));      // tangential component of u (azimuth to keep)
+		if (Pt3D.Dot(tang, tang) < 1e-9) { return; }             // u ~ radial: azimuth undefined, skip (rare)
+		tang.unitVec();
+		// Target = the nearest direction at membraneAlignAngle from the OUTWARD normal, same azimuth as u.
+		// 90deg -> target = tang (tangent mat); <90 -> tilts the barbed end toward the membrane (protrusion).
+		double a = Math.toRadians(Env.membraneAlignAngle.getValue());
+		Pt3D target = Pt3D.Add(Math.cos(a), radOut, Math.sin(a), tang);
+		target.unitVec();
+		double dot = Pt3D.Dot(u, target); if (dot > 1) dot = 1; if (dot < -1) dot = -1;
+		double ang = Pt3D.fastAcos(dot);                         // deviation from the target cone
+		Pt3D axis = new Pt3D(); axis.cross(u, target);           // rotate u -> target
+		if (!axis.checkPt3D() || Pt3D.Dot(axis, axis) < 1e-18) { return; }
+		axis.unitVec();
+		axis.scale(Env.membraneAlignTorque.getValue()*ang);
+		incTorqueSum(axis);
 	}
 
 	private void confineEndInside (Pt3D pt, double Rc) {
@@ -3530,6 +3575,15 @@ public class FilSegment extends Thing {
 		FilSegment newBranch = new FilSegment (nucPt,nucAng,-1);
 		newBranch.isArp23Bound(true);;
 		return newBranch;
+	}
+
+	// An implicit-formin-nucleated LINEAR mother filament: a plain actin seed (NOT Arp2/3-capped at the
+	// pointed end), flagged forminMother so it gets the held-mother treatment (reduced Brownian, cortex
+	// alignment) without being treated as an Arp2/3 branch product. Arp2/3 branches off it later.
+	synchronized static FilSegment makeForminMother (Pt3D nucPt, Pt3D nucAng) {
+		FilSegment m = new FilSegment (nucPt,nucAng,-1);
+		m.forminMother = true;
+		return m;
 	}
 
 	public static void makeOrderedFilament () {

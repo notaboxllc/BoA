@@ -1,5 +1,37 @@
 # BoxOfActin Project Journal
 
+## 2026-06-16 — Formin mothers + Arp2/3 branches: literature-faithful cortical network; protrusion blocked by inextensible membrane
+
+Reworked the spherical cortical model to match the literature (a focused agent sweep, citations in the
+session): **Arp2/3 cannot nucleate de novo** (WASP/WAVE only branches off a mother); the mother/first
+filaments are made by **formins (mDia)** at the same GTPase zone; branched nets are **Rac1/Cdc42**, not
+RhoA; the membrane tether is **ERM-like**, not Arp2/3; lamellipodial barbed ends face the membrane (±35°).
+
+**Implicit-formin mothers (`forminConc`/`forminConsumePerMother`/`forminRecover`).** De-novo Arp2/3
+nucleation replaced: each hot Rac1 node has a depletable formin pool that seeds **linear** mothers
+(`makeForminMother`, no Arp2/3 pointed cap, `forminMother` flag), hard-capped at `forminConc/consume` per
+node. Arp2/3 now branches only off these. Hot-Rho → **Hot Rac1/Cdc42** relabel (params, log, viewer).
+
+**Nurse-log cortex.** `membraneAlignTorque` lays held mothers at `membraneAlignAngle` from the surface
+normal (90°=tangent mat); `cortexBrownianZone`/`Factor` damp the crowded cortical shell; debranch rate
+dropped (4→~0.15) keeps the mat. `membraneAnchorReactionFrac` makes the membrane node a HEAVY anchor (the
+tether reaction was jittering the comparatively-light nodes — that was the "node instability"). Hot patches
+moved to **cube-corner directions**, off the Deserno poles + φ=0 seam (fixes the pole-vs-equator asymmetry,
+where a sparser patch auto-capped mothers into stubs). Per-segment `"branch"` flag emitted for analysis.
+
+**Findings (runs in `RUN_LOGS/2026-06-15_lamellipodium_p1p3/`).** Tangent cortex is BOUNDED — branches
+track mothers (br:mo peaks ~0.7 then declines), they don't take off, because NPF-surface-gated branching
+can't self-amplify (inward daughters leave the zone). Tilting barbed ends toward the membrane
+(`membraneAlignAngle`<90 + shallow `motherTetherDepth` + `ratchetOn` + `membraneCapDist`≥`branchZone`)
+DOES build a membrane-incident dendritic network — but it **gets pushed back, not protrusive**. Root cause:
+`NodeLink.subcycleRelaxAll` zeroes each node's force then relaxes links to rest length every step →
+**inextensible mesh** that discards the actin push. The flat sheet protrudes by out-of-plane BENDING
+(no stretch); a closed-sphere bulge needs STRETCHING, which the relaxation forbids. `sphereConstraintFrac`
+parameterizes the (sphere-only) radial pin. NEXT: make the relaxation respect the actin load (preserve +
+re-apply external node forces across Jacobi passes) + a yielding confinement that rides the local node.
+Protrusive-mode knobs are default-off (`membraneAlignAngle`=90, `motherTetherDepth`=0, `sphereConstraintFrac`
+=0.4) so the tangent cortex is unaffected. `ParameterFiles/lamSphereProtrusion` records the experiment.
+
 ## 2026-06-16 — Spherical membrane: held, contained cortical-actin network (`buildMembraneSphere`)
 
 Smallish sphere (R=1.2, 3267 Deserno nodes) with shrunk hot-Rho patches + de-novo nucleation + branching →
