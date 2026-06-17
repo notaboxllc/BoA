@@ -1,5 +1,93 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Vesicle membrane (volume-pressure shell) + the real blocker: actin→membrane force coupling (all default-off)
+
+**Replan.** Comparing the two reference runs settled why the sphere never behaved: `lam_npf_backed` (the
+"happy medium" sheet) protrudes 0.46 µm by out-of-plane BENDING with edge pins — a coherent elastic
+membrane anchored at a boundary; `lam_sphere_protrusion3` is held by a per-node radial pin
+(`addSphericalConstraintForce`) = a Winkler foundation that leashes every node to fixed R independently, so
+it's either rigid (frozen at r=1.200) or, when softened, floppy (nodes shoved aside). No happy medium,
+and "more nodes" can't help because they're uncoupled. The closed-surface analog of the sheet's pinned rim
+is the **enclosed volume**.
+
+**Vesicle model (`membraneVesicle`, default-off).** Replace the per-node radial pin with a volume-conserving
+pressure `P = P0 + K·(V0−V)/V0` over the surface, balanced by the Tier-1 rest-length link tension. v1 used a
+clique triangulation for V and **collapsed** — the auto-linked lattice (avg degree ~4.6) isn't a clean closed
+triangulation, so untriangulated nodes got zero outward force and caved in while others flew out. Fix:
+**triangulation-free** — each node's outward normal is the geometric radial (robust, never flips), local area
+≈ (√3/2)·spacing²; `V = ⅓Σ r·A`; force = `P·A·n̂`. V0 comes out correct (7.04 µm³) and pressure covers EVERY
+node. Result: a **stable coherent shell** — holds a clean sphere (rStd ~2e-4), conserves volume (V/V0≈1.00),
+no collapse, and filaments can no longer shove individual nodes through (the excavation/mess is gone). New
+params `membraneVolumeModulus`, `membraneTurgorP0`; `[VESICLE]` readout. Applied via per-node `presF` in
+`StickyNode.moveThing` (replacing pin+turgor), recomputed each relax pass and before the move phase; runs
+through the `membraneYield` sub-cycle so push+tension+pressure integrate together.
+
+**The real blocker (diagnosed, NOT yet fixed): the actin transmits ~no force to the membrane.** Drove a
+0.5 s run (`lamSphereVesicle`, run `vesicle_long`): the dendritic net grew to **459 segments** (≈protrusion3
+scale) and the shell stayed **completely unmoved** (rStd 2e-4) while **97 tips leaked past the node shell**.
+The captured push `maxExtF ≈ 4e-19 N` — ~8 orders below the ~1e-11 N needed. Three causes, all on the
+coupling side: (1) the steric barrier equilibrates tips at the standoff with ~0 force (force ∝ penetration ≈ 0;
+the ratchet stops poly at contact); (2) `membraneYield` captures only the FACE push (FilSegment.java:2312),
+the ~0 equilibrium term, NOT the dominant point-node push (line 2258), and the relaxation zeroes the real
+per-step collision force; (3) the thin push (~1 fil/node) just threads through the porous lattice. The old
+runs only ever looked "pushed" because filaments shoved individual nodes aside — which the coherent vesicle
+correctly forbids. **Fix (next): a sustained polymerization force** (Mogilner–Oster stall force, `ratchetForce`)
+per contacting barbed tip along the membrane normal, applied to the nearest node and persisted through the
+relaxation — distinct from, and now unblocked by, the vesicle structure. Config `ParameterFiles/lamSphereVesicle`.
+
+## 2026-06-16 — Tier-2 membrane area growth: node insertion / edge-split (all default-off)
+
+When a bulge grows, a fixed node count thins coverage → the cortex tears open and the net excavates through
+(measured: 10 bulge nodes, links 4.2× rest, 0.34 µm holes). **Tier-2 (`membraneAreaGrow`):** when a membrane
+link over-stretches, EDGE-SPLIT it — insert a StickyNode at the midpoint, wire it to the two endpoints + the
+two shared triangle-apex neighbours (a 2→4 split), rest length = mesh nominal. New nodes auto-register
+(`Thing` ctor → SoA + `theNodes`); `StickyNode.freeSlot()` bumps valence (up to `maxStickies`) for the apex
+nodes; requires `membraneLinkCenterAttach` (links act center-to-center, so inserted nodes need no rigid
+sticky-point geometry; `getCurrentLinkLoc` returns the center in that mode).
+
+**Two failure modes found and fixed.** (a) Strain-relative trigger (split at 1.6× rest) + the apex-link
+geometry (M–C, M–D born at ~0.87× the split length, just over threshold) → a **refinement CASCADE** that
+floods to the 12000-node cap (a cauliflower bloom; jba caught it). A young-link cooldown
+(`membraneInsertCooldown`) damped it but didn't converge — on a soft mesh the force-balanced stretch sits
+permanently above any strain threshold, so insertion pins at the per-step cap. (b) Fixed with a
+**coverage-based trigger** (`membraneInsertGapUm`, absolute hole size ~0.14 µm) + metering
+(`membraneInsertEveryNSteps`, `membraneInsertPerStep`, biggest holes first): a stretched-but-covered bulge is
+left alone, so it CONVERGES → a gentle trickle (+391 nodes over a run vs +8700 capped). Verified
+`ParameterFiles/lamSphereProtrusionT2`. NOTE: superseded as the primary approach by the vesicle replan above
+(area growth is a later concern once the shell is driven); kept default-off.
+
+## 2026-06-16 — Tier-1 membrane stabilizers: elastic mesh + center-attach + averaged Jacobi + step clamp (all default-off)
+
+Fresh look at the `membraneYield` node instability. Root cause found: `NodeLink.applyTransForce` used
+`curStretchDist = linkLength` — a **zero-rest-length contractile spring** (force ∝ full length). On a
+pinned flat sheet that's a stable trampoline, but on the closed sphere (no boundary pins, only the radial
+pin) it gives the mesh **no in-plane ground state** — nothing sets node spacing inside the relaxation loop
+(steric repulsion runs in the main collision phase, not in `subcycleRelaxAll`), so the springs contract
+the lattice and it shears/clumps under perturbation = "nodes are a mess." Three contributing factors:
+un-normalized Jacobi over-relaxation (each node integrates the SUM of ~6 incident link corrections,
+`membraneLinkFracMove` default 2.0), links applied at the **off-center sticky point** (torque → the
+lightly rotationally-damped node spins, sticky points whip → jitter), and no per-step displacement clamp.
+
+**Four default-off knobs added** (Env): `membraneLinkRestFrac` (>0 ⇒ elastic spring, rest = frac×length
+captured at link creation; force ∝ length−rest, resists stretch AND compression), `membraneLinkCenterAttach`
+(apply link force at node center, no torque), `membraneRelaxAvgValence` (divide each node's incident link
+force by its `boundCt` → averaged/under-relaxed Jacobi, can't overshoot), `membraneNodeMaxDispFrac` (cap a
+StickyNode's per-substep translation to frac×nodeRadius — explosion safety net). `ParameterFiles/
+lamSphereProtrusionT1` = `lamSphereProtrusion` + all four on (restFrac 1.0, center, avg, clamp 0.25).
+
+**A/B on the sphere (123 frames each, `RUN_LOGS/2026-06-16_tier1/`, viewer dirs `t1_baseline`/`t1_tier1`;
+metric = per-node frame-to-frame displacement (jitter) + link-length CoV (clumping), a far better instability
+proxy than the radius/err summaries that misled earlier).** Tier-1 wins where it was breaking: early window
+(t<0.05, before heavy load) **jitter RMS 0.00011 vs 0.00135 (~12× quieter)**, link CoV flat 0.088 vs baseline
+rising 0.10; baseline's `lkMean` contracts (0.079→0.077) and `lkMin` collapses 0.064→0.014 (nodes piling up),
+Tier-1 holds 0.079 / ~0.05. Whole-run jitter RMS 0.00046 vs 0.00101 (~2.2×). Neither NaN'd. Tier-1 also makes
+a **cleaner, larger** protrusion (maxBulgeR 1.316 vs 1.293; rMean stays pinned 1.2009 — rest of sphere doesn't
+move). **Honest limit:** late-time under heavy actin load (170 segs, 77 branches) the **bulge region itself**
+still distorts hard — links stretch to 4× rest (lkMax 0.32) and some compress to ~0 (lkMin 0.0013), CoV 0.19.
+That's the Tier-2 problem: a *large* bleb needs added membrane AREA; a fixed-node mesh must absorb the bulge
+as extreme local strain. So Tier-1 fixes the global "mess" and quiets the nodes, but large blebs still need
+area growth / node insertion. All changes default-off; production paths untouched.
+
 ## 2026-06-16 — Membrane protrusion attempt (`membraneYield`): mechanism works, but NODES NOT STABLE (jba) — WIP
 
 First crack at letting the closed sphere protrude under actin load. Recap of why it's hard: `NodeLink.

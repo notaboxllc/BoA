@@ -25,6 +25,8 @@ public class StickyNode extends ProteinNode {
 	public void incExtMembForce (double fx, double fy, double fz) { extMembFx += fx; extMembFy += fy; extMembFz += fz; }
 	public void incExtMembForce (Pt3D f) { extMembFx += f.x; extMembFy += f.y; extMembFz += f.z; }
 	public void resetExtMembForce () { extMembFx = 0; extMembFy = 0; extMembFz = 0; }
+	// VESICLE model: per-node pressure force (N), recomputed from the enclosed volume each pass.
+	double presFx = 0, presFy = 0, presFz = 0;
 	static boolean arpFieldInit = false;
 	static boolean sphericalGeometry = false;
 	static Pt3D centerOfSphere = new Pt3D(0,0,0);
@@ -334,11 +336,15 @@ public class StickyNode extends ProteinNode {
 	public void moveThing () {
 		if (!fixedNode) {
 			if (sphericalGeometry) {
-				// Hold the closed shape: radial restoring to membraneCellRadius. This used to be applied ONLY
-				// during the (negative-time) pre-equilibration, so during the actual sim the sphere had outward
-				// turgor (internalPressure) but nothing setting its radius -> it inflated without bound. Apply
-				// it always so the cortex is held; pre-equilibration just uses different Brownian scaling.
-				addSphericalConstraintForce();
+				// Hold the closed shape. VESICLE mode: a volume-conserving pressure force (presF, computed
+				// from the enclosed volume) replaces BOTH the per-node radial pin and the constant turgor --
+				// a coherent compliant shell instead of independent radial leashes. Legacy: the radial pin
+				// (addSphericalConstraintForce) + constant turgor (internalPressure).
+				if (Env.membraneVesicle.getValue() > 0.5) {
+					incForceSumSlot(presFx, presFy, presFz);
+				} else {
+					addSphericalConstraintForce();
+				}
 				if (Env.simulationTime < 0) {            // pre-equilibration: settle node distribution
 					randForces.scale(1e-6,randForces);		// some random translation to find minimum energy state
 					randTorques.scale(1e-40,randTorques);	// no random rotation, essentially
@@ -346,7 +352,7 @@ public class StickyNode extends ProteinNode {
 					randForces.scale(Env.membraneBrownianScale.getValue(),randForces);
 					randTorques.scale(Env.membraneBrownianScale.getValue(),randTorques);
 				}
-				internalPressure();
+				if (Env.membraneVesicle.getValue() <= 0.5) { internalPressure(); }
 			} else {
 				randForces.scale(Env.membraneBrownianScale.getValue(),randForces);
 				randTorques.scale(Env.membraneBrownianScale.getValue(),randTorques);
@@ -379,10 +385,66 @@ public class StickyNode extends ProteinNode {
 		double forceMag = Env.sphereConstraintFrac.getValue()*(1.0e-6*radialDisp/Env.collisionDeltaT.getValue())/(1/bTransGam.x);
 		incForceSum(Pt3D.Scale(forceMag,forceVec));
 	}
+
+	// ======================= VESICLE model (volume-pressure shell) =======================
+	// Hold the closed membrane like a pressurized elastic shell instead of leashing every node to a
+	// fixed radius. Enclosed volume V is computed from the triangulated surface; a uniform internal
+	// pressure P = P0 + K*(V0-V)/V0 is applied as outward force over the triangles (P * vector-area /3
+	// per vertex). Balanced by the Tier-1 rest-length link tension, this is a coherent compliant shell:
+	// a local actin push makes a real, bounded, neighbour-coupled bleb (the closed-surface analog of the
+	// pinned sheet's edge-anchored bending). Single-threaded; called before the move phase and each relax pass.
+	static double restVolume = -1;               // V0 (enclosed volume at first compute)
+	static double lastVesicleV = 0, lastVesicleP = 0;   // diagnostics
+	static double lastMaxExtMembF = 0; static int lastPushedNodeCt = 0;   // captured actin-push diagnostics
+	double vesArea = 0;                          // per-node surface area (um^2), recomputed each pass
+
+	// Triangulation-free volume + pressure. Each node carries an OUTWARD normal (geometric radial from
+	// the cell center -- robust, never flips, unlike the body-frame zVec) and a local area A ~ spacing^2.
+	// V = (1/3) sum r * A   (divergence theorem, n.r = r for a radial normal). Pressure force on each
+	// node = P * A * n_hat (outward). Covers EVERY node uniformly -- no patchy triangulation gaps that
+	// would let untriangulated nodes cave in while others get shoved out (the collapse failure mode).
+	static final double AREA_COEFF = 0.8660254;  // sqrt(3)/2: area per node of a hex lattice of spacing d is (sqrt3/2) d^2
+	static void computeVesiclePressure () {
+		double cx=centerOfSphere.x, cy=centerOfSphere.y, cz=centerOfSphere.z;
+		// Pass 1: per-node outward radial, local area, and the enclosed volume.
+		double V=0;
+		for (int i=0;i<ProteinNode.nodeCt;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s=(StickyNode)ProteinNode.theNodes[i];
+			double rx=s.getCoordX()-cx, ry=s.getCoordY()-cy, rz=s.getCoordZ()-cz;
+			double r=Math.sqrt(rx*rx+ry*ry+rz*rz);
+			// local area from mean linked-neighbour spacing
+			double dsum=0; int dn=0;
+			for (int k=0;k<maxStickies;k++) {
+				StickyNode b=s.boundTo[k];
+				if (b==null) continue;
+				double ddx=b.getCoordX()-s.getCoordX(), ddy=b.getCoordY()-s.getCoordY(), ddz=b.getCoordZ()-s.getCoordZ();
+				dsum+=Math.sqrt(ddx*ddx+ddy*ddy+ddz*ddz); dn++;
+			}
+			double dbar = (dn>0) ? dsum/dn : 2*s.getRadius();
+			s.vesArea = AREA_COEFF*dbar*dbar;
+			V += r * s.vesArea;
+		}
+		V /= 3.0;
+		if (restVolume < 0) restVolume = V;
+		double P = Env.membraneTurgorP0.getValue() + Env.membraneVolumeModulus.getValue()*(restVolume - V)/restVolume;
+		lastVesicleV = V; lastVesicleP = P;
+		// Pass 2: outward pressure force per node = P * A * n_hat (N; um^2 -> m^2 = 1e-12).
+		for (int i=0;i<ProteinNode.nodeCt;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s=(StickyNode)ProteinNode.theNodes[i];
+			double rx=s.getCoordX()-cx, ry=s.getCoordY()-cy, rz=s.getCoordZ()-cz;
+			double r=Math.sqrt(rx*rx+ry*ry+rz*rz);
+			if (r < 1e-9) { s.presFx=s.presFy=s.presFz=0; continue; }
+			double fmag = P * s.vesArea * 1.0e-12 / r;   // (P*A) along unit radial (rx/r,...)
+			s.presFx = fmag*rx; s.presFy = fmag*ry; s.presFz = fmag*rz;
+		}
+	}
 	
 	
 	public void updateStickyPointsInX () {
 		for (int i=0;i<valence; i++) {
+			if (stickyPointsInX[i] == null || stickyPointsInx[i] == null) continue;  // valence-bumped slot (Tier-2): no placed sticky point
 			stickyPointsInX[i].xToXPlusxOrigin(this,stickyPointsInx[i]);
 		}
 	}
@@ -418,7 +480,26 @@ public class StickyNode extends ProteinNode {
 	}
 	
 	public void getCurrentLinkLoc (Pt3D pt, int loc) {
+		// Center-attach (Tier-1/Tier-2): links act center-to-center, independent of the rigid
+		// sticky-point geometry. This also lets inserted nodes use any free slot (incl. bumped
+		// valence) without a placed sticky point -- getCurrentLinkLoc never touches stickyPointsInX.
+		if (Env.membraneLinkCenterAttach.getValue() > 0.5) { pt.copy(coordAsPt3D()); return; }
 		pt.copy(stickyPointsInX[loc]);
+	}
+
+	// First free (unbound) sticky slot, bumping valence up to maxStickies if currently full.
+	// Used by Tier-2 node insertion to attach a new link to an existing membrane node. Safe with
+	// center-attach (sticky-point geometry is unused); returns -1 if genuinely no slot is free.
+	public int freeSlot () {
+		if (boundCt == valence && valence < maxStickies) {
+			// Expose one more slot. Give it a (dummy) sticky point so updateStickyPointsInX (iterates
+			// i<valence) won't NPE; geometry is irrelevant under center-attach (links act center-to-center).
+			if (stickyPointsInx[valence] == null) stickyPointsInx[valence] = new Pt3D(packRAdj*radius, 0, 0);
+			if (stickyPointsInX[valence] == null) stickyPointsInX[valence] = new Pt3D();
+			valence++;
+		}
+		for (int i=0; i<maxStickies; i++) { if (!isBound[i]) return i; }
+		return -1;
 	}
 	
 	public void registerNodeLink (double loc, StickyNode node) {

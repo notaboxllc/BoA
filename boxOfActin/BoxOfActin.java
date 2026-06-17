@@ -1470,6 +1470,9 @@ public class BoxOfActin {
 				// biochem phase read the same value). No-op (flag=true) unless global cadence
 				// is active. See GPUMoveThing.advanceBiochemCadence / biochemGlobalCadence.
 				GPUMoveThing.advanceBiochemCadence();
+				// Vesicle membrane: compute the volume-pressure force once (single-threaded) before the
+				// multi-threaded move phase integrates it (the relaxation passes refresh it themselves).
+				if (Env.membraneVesicle.getValue() > 0.5) StickyNode.computeVesiclePressure();
 				moveTimer.start();
 				if (Env.useGPU) {
 					// Iteration 2b: unified Thing.moveThing() kernel. The GPU path
@@ -1577,6 +1580,9 @@ public class BoxOfActin {
 					mPass++;
 				}
 				}
+				// Tier-2: grow membrane area by inserting nodes where links over-stretch (single-threaded,
+				// after relaxation, before cleanup). Default-off; keeps the cortex covered over a bulge.
+				NodeLink.insertNodesForArea();
 				if (StepProfiler.ENABLED) { pcMembraneNs += System.nanoTime() - _membT0; }
 
 				// Part-2 attribution: bracket the post-step / safe-point region
@@ -2816,6 +2822,7 @@ public class BoxOfActin {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
+				if (Env.membraneVesicle.getValue() > 0.5) System.out.printf("[VESICLE] V=%.4f V0=%.4f V/V0=%.4f P=%.2f Pa  push: maxExtF=%.3e N on %d nodes%n", StickyNode.lastVesicleV, StickyNode.restVolume, (StickyNode.restVolume>0?StickyNode.lastVesicleV/StickyNode.restVolume:0), StickyNode.lastVesicleP, StickyNode.lastMaxExtMembF, StickyNode.lastPushedNodeCt);
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
@@ -2911,6 +2918,7 @@ public class BoxOfActin {
 				System.out.printf("[LAM] t=%.4f segs=%d activeArps=%d%n",
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
+				if (Env.membraneVesicle.getValue() > 0.5) System.out.printf("[VESICLE] V=%.4f V0=%.4f V/V0=%.4f P=%.2f Pa  push: maxExtF=%.3e N on %d nodes%n", StickyNode.lastVesicleV, StickyNode.restVolume, (StickyNode.restVolume>0?StickyNode.lastVesicleV/StickyNode.restVolume:0), StickyNode.lastVesicleP, StickyNode.lastMaxExtMembF, StickyNode.lastPushedNodeCt);
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {

@@ -247,9 +247,17 @@ public class ProteinNode extends Thing {
 		veloc.xToX(this, bVeloc);
 		
 		// **** movement restrictions in fixed frame ****
-		if (!xMove) { veloc.x = 0; } 
+		if (!xMove) { veloc.x = 0; }
 		if (!yMove) { veloc.y = 0; }
 		if (!zMove) { veloc.z = 0; }
+		// Tier-1 safety net: cap a membrane node's per-(sub)step translation so one overloaded node
+		// can't take a single huge explicit-Euler step and fly off. disp = |veloc|*dt (microns).
+		if (this instanceof StickyNode && Env.membraneNodeMaxDispFrac.getValue() > 0) {
+			double dt = Env.deltaT.getValue();
+			double maxDisp = Env.membraneNodeMaxDispFrac.getValue() * Env.membraneNodeRadius.getValue();
+			double disp = Pt3D.vecMag(veloc) * dt;
+			if (disp > maxDisp && disp > 0) { veloc.scale(maxDisp/disp, veloc); }
+		}
 		incCoord(Env.deltaT.getValue(), veloc);
 		
 		Pt3D scratch = new Pt3D();

@@ -1,0 +1,89 @@
+<BOA> FUN: spherical membrane + activated-Arp2/3 field, now with small de-novo nucleation at the (shrunk)
+<BOA> hot-Rho patches -> cortical actin that branches at the surface and consumes the field (watch the
+<BOA> heat-map deplete where branching is active).
+buildMembraneSphere:true:1.0;
+membraneCellRadius:true:1.2;
+membraneNodeRadius:true:0.05;
+membraneCellPackingFactor:true:1.0;
+sphereHotPatches:true:3;
+sphereHotPatchDeg:true:14;
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.12;
+toFileInterval:true:100.0;
+remoteWriteInterval:true:2000.0;
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+kNodeNuc:true:0.0;
+membraneLinkFracMove:true:0.15;
+membraneRelaxGpuShaped:true:1.0;
+membraneFixedStiffnessDt:true:1e-5;
+membraneMaxLinkStrain:true:0.5;
+// --- activated Arp2/3 field ---
+arpLocalField:true:1.0;
+arpConc:true:80.0;
+arpDiffusion:true:10.0;
+arpBulkExchange:true:2.0;
+arpConsumePerBranch:true:12.0;
+// --- a small bit of de-novo nucleation at the patches + branching ---
+// Implicit formin makes the linear MOTHERS (Arp2/3 only branches off them); per-zone hard cap.
+forminConc:true:1.0;
+nucRateNearArpFactors:true:0.12;
+branchRateNearArpFactors:true:0.2;
+branchZone:true:0.1;
+// Lamellipodial capping: a barbed end caps once it falls >0.08um behind the cortex, so de-novo
+// filaments stay SHORT cortical actin (held at the membrane by their tethered pointed end) instead
+// of growing all the way across the sphere interior and tangling.
+membraneCapDist:true:0.12;
+// Make the membrane impermeable: filament tips collide with the triangular faces (node + 2 linked
+// neighbours), not just point-nodes, so filaments can't slip out through the gaps between nodes.
+membraneFaceCollideOn:true:1.0;
+// Confine the cytoskeleton: push any filament poking past the cortex back inside (the node lattice
+// is porous to filament bodies; this is the membrane physically containing the actin).
+membraneConfine:false:0.0;
+sphereConstraintFrac:true:0.2;
+membraneYield:true:1.0;
+// Membrane = heavy anchor: cut the tether reaction on nodes so filaments don't jitter the cortex.
+membraneAnchorReactionFrac:true:1.0;
+// Nurse-log: lay Arp2/3-held mothers tangent to the cortex; branches grow off into the cytoplasm.
+membraneAlignTorque:true:1.0e-18;
+// PROTRUSIVE test: barbed tilted toward the membrane (45deg from normal) with the pointed end held
+// 0.15um off the surface -> branches stay in the NPF zone, capping selects them -> dendritic takeoff?
+membraneAlignAngle:true:45.0;
+ratchetOn:true:1.0;
+motherTetherDepth:true:0.05;
+// Calm the crowded cortical shell: damp Brownian for filaments pressed against the cortex.
+cortexBrownianZone:true:0.3;
+cortexBrownianFactor:true:0.1;
+kATPOn2:true:50.0;
+capConc:true:3.0;
+arpDebranchRate:true:0.15;
+kHydrolysis:true:3.0;
+kDissociation:true:3.0;
+filDragMinMonomers:true:200;
+arpTransFracMove:true:1.5;
+arpSubcycleN:true:10;
+arpFixedStiffnessDt:true:1e-5;
+// === Tier-1 membrane stability (rest-length elastic mesh + center attach + averaged Jacobi + clamp) ===
+membraneLinkRestFrac:true:1.0;
+membraneLinkCenterAttach:true:1.0;
+membraneRelaxAvgValence:true:1.0;
+membraneNodeMaxDispFrac:true:0.25;
+// === Tier-2 membrane area growth (node insertion / edge-split) ===
+membraneAreaGrow:true:1.0;
+// COVERAGE-based trickle: split a link only when its gap exceeds a real hole size (0.14um), metered to
+// a few per tick every 20 steps, biggest holes first. Converges (stops when covered) -> a trickle, not a flood.
+membraneInsertGapUm:true:0.14;
+membraneInsertPerStep:true:2;
+membraneInsertEveryNSteps:true:20;
+membraneMaxNodes:true:12000;
+membraneInsertCooldown:true:300;
