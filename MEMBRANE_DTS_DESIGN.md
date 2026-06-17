@@ -18,6 +18,10 @@ standard coarse-grained biophysics membrane model. Decisions already made with j
   linkers are sparse or rupture and pressure balloons the freed membrane out.
 - **Multi-instance:** a sim may hold several independent `Membrane` objects (cell surface, organelles).
   Architecture must not assume one global membrane.
+- **GPU/ECS-PORTABLE: flat structure-of-arrays, not half-edge.** The membrane must port to BoA's ECS/GPU
+  rewrite. Canonical topology = flat `int[]` index arrays (faces, wing-edges, fixed-width vertex incidence)
+  resident on device; forces = per-edge/per-face kernels + per-vertex gather; topology mutations host-patched
+  via the existing POSE_DELTA scatter. NO pointer-based half-edge in the resident structure. See §2.
 - **Initial mesh: icosphere** (subdivided icosahedron), matching the reference codes (they read clean
   triangulations; nobody hull-triangulates point clouds).
 - **Port the physics into BoA's overdamped-Langevin MD loop**; do not drive an external code. We crib the
@@ -39,21 +43,50 @@ We are MD (overdamped Langevin), so TriMem's HMC structure (MD vertex moves + in
 is the closest paradigm. FreeDTS/trisurf are pure MC and only ever evaluate *energy*; we additionally need
 the **gradient** (force) — see §3.
 
-## 2. Geometry & data structure
+## 2. Geometry & data structure — **GPU/ECS-ready (flat SoA, NOT half-edge)**
 
-- **Icosphere:** start from the 12-vertex / 20-face icosahedron; subdivide each triangle into 4 (edge
-  midpoints projected to the sphere) ν times → `10·4^ν + 2` vertices, `20·4^ν` faces.
-  - ν=4 → 2562 verts / 5120 faces (≈ current 3267-node sphere; ~50–80 nm patches on a 1.2 µm cell).
-  - ν=5 → 10242 verts. Pick ν by target patch size vs cost.
-- **Topology:** a **half-edge** structure (TriMem uses OpenMesh's). Gives O(1) neighbor iteration and clean
-  edge-flip / edge-split / edge-collapse. A lightweight Java half-edge (`Vertex`, `HalfEdge`, `Face`) is the
-  data-structure investment of Stage 1. (A faces[]+incidence-lists alternative works for fixed topology but
-  is painful for flips/splits — go half-edge.)
-- **`Membrane` object** owns its own `Vertex[]/HalfEdge[]/Face[]` and parameters (κ, K_A, A₀, K_V, V₀, …).
-  A static `Membrane[] theMembranes` allows several per sim. **Vertices are lightweight `Thing`s**
-  (StickyNode-derived or a new `MembraneVertex`) so they ride the existing SoA pose, overdamped mover,
-  Brownian forcing, and collision machinery — the `Membrane` object only adds the topology + the
-  bending/area/volume force computation on top.
+**HARD REQUIREMENT (jba):** the membrane must be portable to the ECS/GPU port of BoA. So the canonical,
+device-resident representation is **flat structure-of-arrays index arrays — NOT a pointer-based half-edge.**
+A half-edge is the CPU-mesh-processing convention (OpenMesh/TriMem) and is exactly the AoS/pointer-chasing
+shape we must avoid. The flat-SoA design below maps directly onto BoA's *existing* GPU residency machinery
+(device-resident SoA pose, per-element force kernels, Jacobi gather, host-side topology deltas).
+
+- **Icosphere IC:** 12-vertex / 20-face icosahedron; subdivide each triangle into 4 (edge midpoints projected
+  to the sphere) ν times → `10·4^ν + 2` vertices, `20·4^ν` faces. ν=4 → 2562 v / 5120 f (≈ current
+  3267-node sphere; ~50–80 nm patches on a 1.2 µm cell); ν=5 → 10242 v. Build deterministically (CPU, once).
+
+- **Canonical topology = flat index arrays** (all `int[]`/`IntArray`, device-resident):
+  - vertex pose: **reuse the existing SoA** `coord[3·nv]` (FloatArray, already device-resident) — vertices
+    are ECS entities / lightweight `Thing`s.
+  - faces: `faceVert[3·nf]` (CCW vertex indices).
+  - **wing-edges** (the flat analog of half-edge for our ops): `edgeVert[2·ne]`, `edgeFace[2·ne]` (the two
+    adjacent faces), `edgeWing[2·ne]` (the two opposite/apex vertices). This carries everything **dihedral
+    bending** and **edge-flips** need, with zero pointer chasing.
+  - per-vertex incidence for the gather: **fixed-width** `vertEdge[nv·maxVal]` + `vertEdgeCt[nv]` (DTS bounds
+    valence ~5–8 via flips → fixed width is coalesced and simplest; CSR `off[nv+1]+idx[]` is the alternative).
+
+- **Hot path (every step, data-parallel → GPU kernels), mirrors the existing chain/joint/move TaskGraph:**
+  1. per-EDGE kernel → dihedral bending force; per-FACE kernel → area + volume gradient. Write per-edge /
+     per-face partials.
+  2. per-VERTEX **gather** kernel → sum incident edge/face partials into the vertex force (race-free,
+     deterministic — the same Jacobi-gather pattern already in `subcycleRelaxAll` / `GPUMoveThing`; **no
+     atomics required**, though PTX `atomicAdd` is available — see memory `tornadovm-ptx-atomics-workergrid`).
+  3. existing unified move/integrate kernel advances the vertices (pose stays resident).
+
+- **Cold path (infrequent, host at MC/flip cadence):** bond flips / edge splits / collapses mutate the flat
+  index arrays **on the host**, patched into the device arrays via the **existing POSE_DELTA-style scatter**
+  (a topology delta). Same model BoA already uses for filament create/remove/split (`scatterPose`,
+  `buildDeltaSet`, `POSE_DELTA_CAP`) — topology changes are rare, so host-patch-then-scatter is the right
+  cadence and avoids GPU topology-mutation hazards.
+
+- **`Membrane` (ECS)** = a component set: the flat topology arrays + params (κ, K_A, A₀, K_V, V₀, …), with
+  vertices as entities carrying Position/Force components. Multi-instance = several such sets (per-membrane
+  arrays, or offset ranges into the shared vertex SoA). A static registry (`Membrane[] theMembranes`) drives
+  them.
+
+- **Half-edge is demoted to an optional HOST-side authoring convenience** for *coding* the flip/split/collapse
+  ops if the flat-array edits prove fiddly — but it is never the resident/canonical structure and never
+  touches the device. The flat SoA above is the source of truth.
 
 ## 3. Energy terms (the math we crib)
 
@@ -180,6 +213,9 @@ move `Δr[µm] = F[N]/(1e6·γ[N·s/m])·Δt[s]`. The reference codes are in red
   face-collision** forces into the vertices' `soaForceSum` (physical N). Then the **existing overdamped move
   phase** integrates them (no separate relaxation loop — the DTS forces are real forces, so
   `NodeLink.subcycleRelaxAll` is *retired* for DTS membranes; big simplification).
+- **Write `computeForces()` as the §2 kernels from day one** (per-EDGE bending, per-FACE area/volume,
+  per-VERTEX gather) even in the CPU prototype — CPU runs them as plain loops over the same flat arrays, so
+  the GPU port is "register these kernels into the existing chained TaskGraph," not a rewrite.
 - **Bond flips:** an MC sweep every `N_flip` steps on each `Membrane`'s topology (§4).
 - Brownian: vertices keep the standard per-Thing thermal forcing (FDT with the physical drag).
 - Stability: bending+area can be stiff; if explicit overdamped Euler is marginal, sub-cycle the membrane
@@ -205,9 +241,10 @@ move `Δr[µm] = F[N]/(1e6·γ[N·s/m])·Δt[s]`. The reference codes are in red
 
 ## 10. Staged build plan
 
-1. **Geometry + data structure** (~2 d): icosphere builder, half-edge `Membrane` object (multi-instance),
-   vertices as Things. Render the faces + viewer surface toggle (the rendering payoff; correct tipping
-   falls out of vertex normals).
+1. **Geometry + data structure** (~2 d): icosphere builder, **flat-SoA `Membrane` object** (faces + wing-edges
+   + fixed-width vertex incidence; §2 — GPU/ECS-ready, NOT half-edge), multi-instance, vertices as Things.
+   Render the faces + viewer surface toggle (the rendering payoff; correct tipping falls out of vertex
+   normals). Build/validate on CPU first, but keep the arrays kernel-shaped from the start.
 2. **Bending + area + volume forces** (~1–2 d): dihedral bending first (analytic force), area & volume
    constraints. Validate: sphere holds at `8πκ`; a vesicle relaxes to known reduced-volume shapes
    (oblate/stomatocyte) — a *standard DTS validation* we inherit from the papers.
