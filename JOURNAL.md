@@ -1,5 +1,38 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Constant-force PROBE isolates the real bug: membrane node drag scale (membraneNodeDragScale)
+
+To decouple membrane mechanics from the messy actin, added a clean isolation tool: a single plain protein
+node (no myosins/formins/actin), created inside the sphere and driven outward with a CONSTANT force
+(`membraneProbeForce`/`Radius`/`StartRadius`; `StickyNode.createMembraneProbe`/`driveMembraneProbe`, steric
+collision with membrane nodes captured into extMembF; `[PROBE]` readout). Config `ParameterFiles/lamSphereProbe`.
+
+**The probe found the bug that blocked everything.** First runs: the probe sailed straight through the
+membrane. Not a missing collision — the instrumentation showed real overlaps (0.15 um) but `maxPush ~1e-19 N`,
+8 orders below the probe's drive. Root cause: **`membraneNodeDragScale` defaults to 1e-10**, so a membrane
+node's drag is ~9e-18 and the drag-weighted collision force `(overlap/dt)/(1/g_probe+1/g_node)` is capped at
+the membrane's force scale (~1e-20 N). The whole membrane lives at ~1e-20 N while the probe/actin push at
+~1e-11 N — a 9-order mismatch, so ANY normal-force body (probe OR filament) overpowers the collision and
+punches through while the membrane feels nothing. This is almost certainly why the dendritic net never moved
+the cortex either; it was never the vesicle stiffness, the ratchet, or the geometry — it was the drag scale.
+
+**Fix: physical drag (`membraneNodeDragScale=1.0`).** The spring/relaxation is a drag-coupled position
+projection, so its dynamics are ~drag-independent (verified: resting sphere holds, relaxation stable); but the
+collision now couples at the physical ~1e-11 N scale. Result (run `probe_drag1`, F=2e-11 N): the probe pushes
+a smooth, growing bleb (0.4 um, 80 nodes), SLOWS toward a stall as the reaction (-1e-10 N) overtakes the
+drive, the rest of the sphere holds at ~1.18 and dimples slightly inward (volume borrowed for the bleb), and
+**jitter DECREASES over time (0.006->0.003) — the membrane smooths and settles**. Finally decent shell
+behaviour: a known force makes a coherent bleb and stalls. Set in `lamSphereProbe`; Env DEFAULT left at 1e-10
+(don't silently change untested sheet/sphere configs) — flip per-config for now.
+
+**Two follow-on nuances.** (1) At physical drag the VESICLE pressure (a true physical force ~1e-14 N) becomes
+negligible vs the drag-coupled link projections, so the shell is effectively held by rest-length link tension
+alone (worked fine in the probe run). The volume constraint needs re-expressing (drag-coupled, or modulus
+scaled ~1e10) to stay relevant. (2) The old off-center-link jitter that drove us to center-attach was the
+SAME tiny-bRotGam drag artifact — so off-center (physically-tipping) attachment may now be viable. Also added
+the `(b)` point-node steric push capture into extMembF (FilSegment) — correct but insufficient alone (the
+steric push is ~0 at equilibrium); kept.
+
 ## 2026-06-17 — Vesicle membrane (volume-pressure shell) + the real blocker: actin→membrane force coupling (all default-off)
 
 **Replan.** Comparing the two reference runs settled why the sphere never behaved: `lam_npf_backed` (the

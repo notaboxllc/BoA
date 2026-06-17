@@ -1470,6 +1470,9 @@ public class BoxOfActin {
 				// biochem phase read the same value). No-op (flag=true) unless global cadence
 				// is active. See GPUMoveThing.advanceBiochemCadence / biochemGlobalCadence.
 				GPUMoveThing.advanceBiochemCadence();
+				// Membrane probe: apply the constant drive force + steric reaction (no-op unless enabled),
+				// before the move phase integrates the probe and the pushed nodes.
+				StickyNode.driveMembraneProbe();
 				// Vesicle membrane: compute the volume-pressure force once (single-threaded) before the
 				// multi-threaded move phase integrates it (the relaxation passes refresh it themselves).
 				if (Env.membraneVesicle.getValue() > 0.5) StickyNode.computeVesiclePressure();
@@ -2823,6 +2826,7 @@ public class BoxOfActin {
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
 				if (Env.membraneVesicle.getValue() > 0.5) System.out.printf("[VESICLE] V=%.4f V0=%.4f V/V0=%.4f P=%.2f Pa  push: maxExtF=%.3e N on %d nodes%n", StickyNode.lastVesicleV, StickyNode.restVolume, (StickyNode.restVolume>0?StickyNode.lastVesicleV/StickyNode.restVolume:0), StickyNode.lastVesicleP, StickyNode.lastMaxExtMembF, StickyNode.lastPushedNodeCt);
+				if (StickyNode.membraneProbe != null) { double _pr=Math.sqrt(StickyNode.membraneProbe.getCoordX()*StickyNode.membraneProbe.getCoordX()+StickyNode.membraneProbe.getCoordY()*StickyNode.membraneProbe.getCoordY()+StickyNode.membraneProbe.getCoordZ()*StickyNode.membraneProbe.getCoordZ()); System.out.printf("[PROBE] r=%.4f contacts=%d minD=%.4f maxOverlap=%.4f maxPush=%.2e reactAlong=%.2e blebMaxR=%.4f%n", _pr, StickyNode.probeContactCt, StickyNode.probeMinD, StickyNode.probeMaxOverlap, StickyNode.probeNodePushMag, StickyNode.probeReactionX, StickyNode.probeBlebMaxR); }
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
@@ -2919,6 +2923,7 @@ public class BoxOfActin {
 					Env.simulationTime, FilSegment.filSegmentCt, Arp23.getNumberActiveArps());
 				if (Env.arpLocalField.isActive()) System.out.printf("[ARPFIELD] hotMean=%.2f hotMin=%.2f uM (target=%.1f)%n", StickyNode.arpFieldHotMean, StickyNode.arpFieldHotMin, Env.arpConc.getValue());
 				if (Env.membraneVesicle.getValue() > 0.5) System.out.printf("[VESICLE] V=%.4f V0=%.4f V/V0=%.4f P=%.2f Pa  push: maxExtF=%.3e N on %d nodes%n", StickyNode.lastVesicleV, StickyNode.restVolume, (StickyNode.restVolume>0?StickyNode.lastVesicleV/StickyNode.restVolume:0), StickyNode.lastVesicleP, StickyNode.lastMaxExtMembF, StickyNode.lastPushedNodeCt);
+				if (StickyNode.membraneProbe != null) { double _pr=Math.sqrt(StickyNode.membraneProbe.getCoordX()*StickyNode.membraneProbe.getCoordX()+StickyNode.membraneProbe.getCoordY()*StickyNode.membraneProbe.getCoordY()+StickyNode.membraneProbe.getCoordZ()*StickyNode.membraneProbe.getCoordZ()); System.out.printf("[PROBE] r=%.4f contacts=%d minD=%.4f maxOverlap=%.4f maxPush=%.2e reactAlong=%.2e blebMaxR=%.4f%n", _pr, StickyNode.probeContactCt, StickyNode.probeMinD, StickyNode.probeMaxOverlap, StickyNode.probeNodePushMag, StickyNode.probeReactionX, StickyNode.probeBlebMaxR); }
 			}
 			if (Env.ratchetOn.isActive() && (ratchetReportCt++ % 25 == 0)) { RatchetDiag.report(); }
 				if (Env.benchmarkFilament && LiveFrameServer.isRunning()) {
@@ -3266,6 +3271,7 @@ public class BoxOfActin {
 			if (Env.buildMembraneSphere.isActive()) {
 				StickyNode.makeSphereOfNodes();
 				StickyNode.markHotPatches(Env.sphereHotPatches.getIntValue(), Env.sphereHotPatchDeg.getValue());
+				StickyNode.createMembraneProbe();   // constant-force isolation probe (no-op unless membraneProbeForce>0)
 			}
 
 			if (Env.buildBranchedFils.isActive()) {

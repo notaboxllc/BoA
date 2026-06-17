@@ -2257,7 +2257,14 @@ public class FilSegment extends Thing {
 			double mag = (attnFactor*1.0e-6*impingedist/Env.collisionDeltaT.getValue())/(1/node.bTransGam.x+1/fil.bTransGam.y);
 			node.incForceSum(Pt3D.Scale(mag,nodeVec));
 			fil.incForceSum(Pt3D.Scale(mag,filVec),filTipCenter);
-			
+			// (b) Capture the POINT-NODE steric push (the dominant one) so the membrane relaxation
+			// re-applies it -- without this only the near-zero face push was captured, so a net pressing
+			// the cortex transmitted ~no sustained force and the shell stayed frozen. Confirmation test
+			// that the vesicle blebs under a real load before the physical stall-force coupling.
+			if (Env.membraneYield.getValue() > 0.5 && node instanceof StickyNode) {
+				((StickyNode)node).incExtMembForce(Pt3D.Scale(mag,nodeVec));
+			}
+
 			//register collsions
 			node.collision();
 			fil.collision();

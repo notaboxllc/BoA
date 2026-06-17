@@ -440,7 +440,67 @@ public class StickyNode extends ProteinNode {
 			s.presFx = fmag*rx; s.presFy = fmag*ry; s.presFz = fmag*rz;
 		}
 	}
-	
+
+	// ======================= Membrane PROBE (constant-force isolation test) =======================
+	// A single plain protein node (no actin) driven outward (+x) with a constant force, colliding
+	// sterically with the membrane nodes. A clean, known load: how does the shell deform, and at what
+	// bulge does it stall the probe? Pushes nodes via the move phase AND captures into extMembF so the
+	// membraneYield relaxation re-applies the push (the bleb forms through the same path the actin would).
+	static ProteinNode membraneProbe = null;
+	static double probeStartX = 0;
+	static int probeContactCt = 0;
+	static double probeBlebMaxR = 0;
+	static double probeReactionX = 0;   // total x-reaction on the probe (diagnostic)
+	static double probeNodePushMag = 0;  // a representative node push magnitude (diagnostic)
+	static double probeDragDiag = 0;
+	static double probeMinD = 0, probeMaxOverlap = 0;
+
+	static void createMembraneProbe () {
+		if (Env.membraneProbeForce.getValue() <= 0) return;
+		probeStartX = Env.membraneProbeStartRadius.getValue();
+		membraneProbe = new ProteinNode(new Pt3D(probeStartX, 0, 0), Env.membraneProbeRadius.getValue());
+		talkln("[PROBE] created at x=" + probeStartX + " radius=" + Env.membraneProbeRadius.getValue()
+		        + " driveForce=" + Env.membraneProbeForce.getValue() + " N");
+	}
+
+	static void driveMembraneProbe () {
+		if (membraneProbe == null) return;
+		double F  = Env.membraneProbeForce.getValue();
+		double pr = Env.membraneProbeRadius.getValue();
+		double px = membraneProbe.getCoordX(), py = membraneProbe.getCoordY(), pz = membraneProbe.getCoordZ();
+		// Drive along (1,1,1)/sqrt(3): a DENSE, generic region of the Deserno lattice -- away from the
+		// poles (z=+-1) and the phi=0 seam (+x), where the lattice has gaps a small probe threads through.
+		final double DX = 0.5773503, DY = 0.5773503, DZ = 0.5773503;
+		membraneProbe.incForceSumSlot(F*DX, F*DY, F*DZ);
+		double probeDrag = membraneProbe.bTransGam.x;
+		int contacts = 0; double blebMaxR = 0; double reactX = 0; double pushMag = 0;
+		double minD = 1e9; double maxOverlap = 0;
+		boolean yield = Env.membraneYield.getValue() > 0.5;
+		for (int i=0;i<ProteinNode.nodeCt;i++) {
+			if (!(ProteinNode.theNodes[i] instanceof StickyNode)) continue;
+			StickyNode s = (StickyNode)ProteinNode.theNodes[i];
+			double dx = s.getCoordX()-px, dy = s.getCoordY()-py, dz = s.getCoordZ()-pz;
+			double d2 = dx*dx+dy*dy+dz*dz;
+			double colR = pr + s.getRadius();
+			double draw = Math.sqrt(d2); if (draw < minD) minD = draw;
+			if (d2 >= colR*colR || d2 < 1e-12) continue;
+			double d = Math.sqrt(d2);
+			double overlap = colR - d;
+			if (overlap > maxOverlap) maxOverlap = overlap;
+			double ux = dx/d, uy = dy/d, uz = dz/d;      // probe -> node (push node outward, away from probe)
+			double mag = (1.0e-6*overlap/Env.collisionDeltaT.getValue())/(1.0/probeDrag + 1.0/s.bTransGam.x);
+			s.incForceSumSlot(mag*ux, mag*uy, mag*uz);                       // push node (move phase)
+			if (yield) s.incExtMembForce(mag*ux, mag*uy, mag*uz);           // capture for the relaxation re-application
+			membraneProbe.incForceSumSlot(-mag*ux, -mag*uy, -mag*uz);       // reaction back on the probe (stalls it)
+			reactX += -mag*(ux*DX+uy*DY+uz*DZ); if (mag > pushMag) pushMag = mag; contacts++;
+			double r = Math.sqrt(s.getCoordX()*s.getCoordX()+s.getCoordY()*s.getCoordY()+s.getCoordZ()*s.getCoordZ());
+			if (r > blebMaxR) blebMaxR = r;
+		}
+		probeMinD = minD; probeMaxOverlap = maxOverlap;
+		probeContactCt = contacts; probeBlebMaxR = blebMaxR;
+		probeReactionX = reactX; probeNodePushMag = pushMag; probeDragDiag = probeDrag;
+	}
+
 	
 	public void updateStickyPointsInX () {
 		for (int i=0;i<valence; i++) {
