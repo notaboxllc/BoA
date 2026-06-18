@@ -1,0 +1,72 @@
+<BOA> DTS membrane v2 -- DENDRITIC NETWORK (restored): formin nucleates mothers at NPF patches (barbed end
+<BOA> toward the cortex); Arp2/3 branches form off them (connected junctions), gated by the local activated-Arp
+<BOA> field; barbed ends POLYMERIZE (real monomer addition) following the Mogilner-Oster brownian ratchet at
+<BOA> the membrane (end2TipC clearance written by the DTS segment-vs-triangle collision); the collision turns
+<BOA> the growth into a membrane push -> protrusions at the NPF zones.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.15;
+dtsKappaVolume:true:1.0e-13;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+dtsBrownianOff:true:1.0;
+dtsAnchorStiffness:true:0.0;
+
+// --- Arp field (hot patches + heat-map) ---
+dtsArpOn:true:1.0;
+dtsArpHotPatches:true:5;
+dtsArpHotPatchDeg:true:12.0;
+dtsArpDiffusion:true:0.1;
+dtsArpDecay:true:0.015;
+
+// --- formin mothers, barbed end toward the cortex ---
+dtsForminOn:true:1.0;
+dtsForminGrowOut:true:1.0;
+dtsForminPool:true:1.0;
+dtsForminConsume:true:1.0;
+dtsForminNucRate:true:4.0;
+dtsForminRecover:true:0.0;
+actinSeed:true:8;                  // small mother seed; it ELONGATES by polymerization
+
+// --- Arp2/3 branching (connected junctions, gated by local Arp) ---
+dtsBranchOn:true:1.0;
+dtsBranchRate:true:40.0;
+dtsArpConsumePerBranch:true:0.05;
+dtsMaxFilaments:true:2000;
+
+// --- actin-membrane collision (writes end2TipC) + Mogilner-Oster ratchet polymerization ---
+dtsActinCollide:true:1.0;
+dtsRatchetForce:true:0.0;           // no constant push: growth + ratchet + collision are the mechanism
+ratchetOn:true:1.0;
+ratchetForce:true:1.5e-12;          // membrane-normal load f in exp(-f*(delta-g)/kT) (~1.5 pN ~ kT/delta)
+actinConc:true:12.0;                // free G-actin pool that drives barbed-end elongation
+filTipRadiusForCollision:true:0.04;
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.08;
+toFileInterval:true:120.0;
+remoteWriteInterval:true:2000.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+arpConc:true:0.0;

@@ -1,5 +1,29 @@
 # BoxOfActin Project Journal
 
+## 2026-06-18 — Membrane v2 DTS, STAGE 3d: dendritic network RESTORED on the DTS membrane (Mogilner–Oster ratchet)
+
+Restored the pre-DTS dendritic-lamellipodium actin model, now driven by the DTS membrane — **reusing the
+validated FilSegment biochem** rather than the static-seed approximation. Three wirings:
+- **Real barbed-end polymerization** (the existing `end2BiochemSim`/`addMonomerSim`): turned on via a free
+  G-actin pool (`actinConc`) so mothers + branches ELONGATE by monomer addition (validated: seeds grow
+  0.024→0.051 µm over the run).
+- **Mogilner–Oster ratchet**: `collideActin()` now writes each barbed tip's clearance into `FilSegment.end2TipC`
+  (the tip→membrane gap from the segment-vs-triangle collision), which `ratchetPolyFactor` reads —
+  `rate *= exp(-f·(δ-g)/kT)` when the tip presses the cortex. `ratchetOn:true`, `ratchetForce` (~1.5 pN). This
+  replaces the old `faceCollideTipVsNodeTriangles` → `registerATipClearance` StickyNode coupling. So growth
+  slows against the membrane and resumes as it bulges away; the collision turns the growth into the push.
+- **Connected Arp2/3 branches**: `branchStep` now calls `fs.makeArpBranch(bLoc)` (real Arp23 junction, ~70°
+  structural angle), gated by the local DTS Arp field + barbed-tip-near-cortex, consuming Arp (bounded).
+
+Hardening: capped the steric force at 2e-10 N + cull any NaN filament — a thin low-drag filament could
+otherwise overshoot under the hard-recovery → runaway → NaN (3/162 filaments before the fix; 0 after).
+
+Demo (`ParameterFiles/dtsMembraneDendritic`): formin mothers (barbed end toward cortex) + Arp branching +
+polymerization + ratchet → a branched network that elongates and pushes protrusions at the NPF patches
+(104 filaments, rMax 1.2→1.74), contained by the membrane, no NaN. The DTS membrane now runs the real
+dendritic model. (Open: pointed-end anchoring for cleaner fingers; formin holding the barbed end explicitly;
+GPU when scale demands.)
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 3c-ii: Arp2/3 branch gating — a real branched network pushing the cortex
 
 Completes Stage-3 #4. `Membrane.branchStep()` (in `computeAllForces`, gated by `dtsBranchOn`): a filament

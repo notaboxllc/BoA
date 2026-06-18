@@ -576,6 +576,8 @@ public final class Membrane {
             if (fs == null || fs.removeMe) continue;
             double e1x=fs.getEnd1X(), e1y=fs.getEnd1Y(), e1z=fs.getEnd1Z();
             double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();
+            if (!(Double.isFinite(e1x)&&Double.isFinite(e2x)&&Double.isFinite(e1y)&&Double.isFinite(e2y)
+                  &&Double.isFinite(e1z)&&Double.isFinite(e2z))) { fs.removeMe = true; continue; }  // cull NaN filaments
             // ERM-like anchor: hold the pointed end (end1) to its membrane vertex with a spring, so the mother
             // stays pinned to the (moving) cortex and pushes straight out. end1Node tracks the bulging vertex.
             if (kAnchor > 0 && fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
@@ -592,19 +594,26 @@ public final class Membrane {
             if (r1[0]!=0||r1[1]!=0||r1[2]!=0) { force.setVals(r1[0],r1[1],r1[2]); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force,pt); hit=true; }
             if (r2[0]!=0||r2[1]!=0||r2[2]!=0) { force.setVals(r2[0],r2[1],r2[2]); pt.setVals(e2x,e2y,e2z); fs.incForceSum(force,pt); hit=true; }
             if (hit) contacts++;
-            // Polymerization ratchet: a barbed tip (end2) near the inner face is pushed OUTWARD along the
-            // membrane normal -> a network growing against the cortex protrudes it (the collision above
-            // transmits that push into a membrane bulge while preventing the tip from passing through).
-            if (ratchet > 0) {
-                int f = nearestFace(e2x,e2y,e2z, scratchCp);
-                if (f >= 0) {
-                    double signed = (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
-                    double band = rad + vertexRadius + 0.03;
-                    if (signed > -band && signed < band) {
-                        force.setVals(ratchet*fNx[f], ratchet*fNy[f], ratchet*fNz[f]);
-                        pt.setVals(e2x,e2y,e2z);
-                        fs.incForceSum(force, pt);
-                    }
+            // MOGILNER-OSTER coupling: write the barbed tip's clearance to the membrane into end2TipC, which
+            // FilSegment.ratchetPolyFactor reads (g = end2TipC - filTipR; growth rate *= exp(-f*(delta-g)/kT)
+            // when g < delta). So a barbed tip pressing the cortex polymerizes slowly; when the membrane
+            // bulges away (room opens) it grows -- and the steric collision above turns that growth into the
+            // membrane push. (Replaces the old faceCollideTipVsNodeTriangles registerATipClearance.)
+            int ft = nearestFace(e2x,e2y,e2z, scratchCp);
+            if (ft >= 0) {
+                double signed = (e2x-scratchCp[0])*fNx[ft] + (e2y-scratchCp[1])*fNy[ft] + (e2z-scratchCp[2])*fNz[ft];
+                double clearance = -signed;                 // distance from the barbed tip to the membrane surface (um)
+                if (clearance < 0) clearance = 0;
+                if (clearance < fs.end2TipC) fs.end2TipC = clearance;
+            }
+            // Optional constant ratchet push (legacy approximation; default off — the Mogilner-Oster growth
+            // above + the steric collision are the physical mechanism).
+            if (ratchet > 0 && ft >= 0) {
+                double signed = (e2x-scratchCp[0])*fNx[ft] + (e2y-scratchCp[1])*fNy[ft] + (e2z-scratchCp[2])*fNz[ft];
+                double band = rad + vertexRadius + 0.03;
+                if (signed > -band && signed < band) {
+                    force.setVals(ratchet*fNx[ft], ratchet*fNy[ft], ratchet*fNz[ft]);
+                    pt.setVals(e2x,e2y,e2z); fs.incForceSum(force, pt);
                 }
             }
         }
@@ -651,17 +660,12 @@ public final class Membrane {
             double arp = (arpLocal[a]+arpLocal[b]+arpLocal[c]) / 3.0;
             if (arp <= 0.02) continue;
             if (Thing.currentScratch().rng.nextDouble() >= rate*arp*dt) continue;
-            // branch direction: ang off the mother axis, tilted toward the membrane normal.
-            double ux=e2x-fs.getEnd1X(), uy=e2y-fs.getEnd1Y(), uz=e2z-fs.getEnd1Z();
-            double ul=Math.sqrt(ux*ux+uy*uy+uz*uz); if (ul<1e-9) continue; ux/=ul; uy/=ul; uz/=ul;
-            double nx=fNx[f], ny=fNy[f], nz=fNz[f];
-            double ndu = nx*ux+ny*uy+nz*uz;
-            double tx=nx-ndu*ux, ty=ny-ndu*uy, tz=nz-ndu*uz;                  // membrane normal ⟂ to axis
-            double tl=Math.sqrt(tx*tx+ty*ty+tz*tz);
-            if (tl < 1e-6) { tx=uy; ty=-ux; tz=0; tl=Math.sqrt(tx*tx+ty*ty+tz*tz); if (tl<1e-6) continue; }
-            tx/=tl; ty/=tl; tz/=tl;
-            Pt3D branchDir = new Pt3D(ca*ux+sa*tx, ca*uy+sa*ty, ca*uz+sa*tz);
-            FilSegment.makeArp23NucFilament(new Pt3D(e2x,e2y,e2z), branchDir);   // daughter at the barbed tip
+            // Real Arp2/3 branch: a daughter nucleates off this mother at a point in its barbed-end zone,
+            // CONNECTED via an Arp23 junction (makeArpBranch handles the ~70deg structural angle + the helix
+            // tilt + the mother-daughter linkage). The membrane-facing daughters then grow + ratchet + push.
+            double bLoc = fs.length - Thing.currentScratch().rng.nextDouble() * Math.min(0.05, 0.6*fs.length);
+            if (bLoc < 0.1*fs.length) bLoc = 0.1*fs.length;
+            fs.makeArpBranch(bLoc);
             arpLocal[a]=Math.max(0,arpLocal[a]-consume);
             arpLocal[b]=Math.max(0,arpLocal[b]-consume);
             arpLocal[c]=Math.max(0,arpLocal[c]-consume);
@@ -812,6 +816,8 @@ public final class Membrane {
                 // spring on top, so it is yanked back in within a step or two -- guarantees containment even
                 // under a strong outward drive (the soft term alone equilibrates just past the surface).
                 if (signed > 0) mag += Env.dtsStericRecover.getValue() * signed * 1.0e-6;
+                if (mag > 2.0e-10) mag = 2.0e-10;   // cap: a thin low-drag filament can otherwise overshoot
+                                                    // under the hard recovery -> runaway -> NaN. Bound it.
                 double fx = -mag*nx, fy = -mag*ny, fz = -mag*nz;       // push sample INWARD (-n̂)
                 reac1[0]+=(1-t)*fx; reac1[1]+=(1-t)*fy; reac1[2]+=(1-t)*fz;
                 reac2[0]+=t*fx;     reac2[1]+=t*fy;     reac2[2]+=t*fz;
