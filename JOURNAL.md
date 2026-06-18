@@ -1,5 +1,25 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 3c-ii: Arp2/3 branch gating — a real branched network pushing the cortex
+
+Completes Stage-3 #4. `Membrane.branchStep()` (in `computeAllForces`, gated by `dtsBranchOn`): a filament
+whose **barbed tip is near the cortex in a high-Arp region** branches — a daughter nucleates
+(`FilSegment.makeArp23NucFilament`) at the **branch angle (~70°) tilted toward the membrane normal** (the
+dendritic protrusive geometry). Branch rate ∝ the **local Arp field** (read from the nearest face's vertices
+via the collision grid); each branch **consumes Arp** from those vertices (the negative feedback that bounds
+branching near each NPF source, which replenishes by diffusion). Hard `dtsMaxFilaments` cap as a runaway
+backstop. New Env params `dtsBranchOn/Rate/Angle`, `dtsArpConsumePerBranch`, `dtsMaxFilaments`.
+
+Demo (`ParameterFiles/dtsMembraneBranch` = protrusion + branching): the actin multiplies from ~12 formin
+mothers to **515 filaments** via Arp branching, localized to the NPF patches (denser where Arp is high),
+**bounded** (no runaway), pushing the cortex into protrusions (rMax 1.2→1.65). Screenshot: a dense branched
+brush at the NPF zones deforming the membrane. The DTS membrane now has the full old-membrane feature set
+ported — Arp diffusion, formin nucleation, a branched network — plus robust thin-filament containment.
+
+**Remaining refinements (not blocking):** the ERM anchor geometry (fixed-depth linker rest-length) for clean
+distinct fingers; filament GROWTH (free-monomer polymerization) so the network elongates rather than relying
+on a static seed length; and (when scale demands) moving the collision onto the GPU TaskGraph.
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 3c-i: actin↔membrane collision in the main loop (grid-accelerated) + protrusion
 
 Wired `segmentVsMembrane` into the sim loop so **actin physically interacts with the cortex** — containment +

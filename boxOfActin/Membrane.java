@@ -313,6 +313,7 @@ public final class Membrane {
         }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
+        if (Env.dtsBranchOn.getValue() != 0) branchAllActin();        // Arp2/3 branching (gated by local Arp)
         if (Env.dtsActinCollide.getValue() != 0) collideAllActin();   // actin <-> membrane (containment + push)
     }
 
@@ -610,6 +611,65 @@ public final class Membrane {
         if (Env.counter % 500 == 0 && contacts > 0) {
             Thing.talkln(String.format("[DTS-ACTIN] step %d  filaments contacting membrane = %d / %d",
                     Env.counter, contacts, FilSegment.filSegmentCt));
+        }
+    }
+
+    private int branchCt = 0;
+
+    /** Arp2/3 branch nucleation off membrane-proximal filaments, gated by the local Arp field. A filament
+     *  whose barbed tip is near the cortex in a high-Arp region branches: a daughter nucleates at the branch
+     *  angle, tilted toward the membrane normal (dendritic geometry). Rate ∝ local Arp; each branch consumes
+     *  Arp (negative feedback). Bounded by the Arp field + dtsMaxFilaments cap. */
+    public static void branchAllActin() {
+        if (theMembranes.isEmpty() || FilSegment.filSegmentCt == 0) return;
+        Membrane m = theMembranes.get(0);
+        if (m.arpLocal == null) return;
+        m.branchStep();
+    }
+
+    void branchStep() {
+        buildFaceGrid();
+        double rate = Env.dtsBranchRate.getValue();
+        double consume = Env.dtsArpConsumePerBranch.getValue();
+        double ang = Math.toRadians(Env.dtsBranchAngle.getValue());
+        double ca = Math.cos(ang), sa = Math.sin(ang);
+        double dt = Env.deltaT.getValue();
+        double band = vertexRadius + 0.06;
+        int cap = Env.dtsMaxFilaments.getIntValue();
+        int n0 = FilSegment.filSegmentCt;   // snapshot: a daughter can't branch the same step it's born
+        int made = 0;
+        for (int i = 0; i < n0; i++) {
+            if (FilSegment.filSegmentCt >= cap) break;
+            FilSegment fs = FilSegment.theFilSegments[i];
+            if (fs == null || fs.removeMe) continue;
+            double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();   // barbed tip
+            int f = nearestFace(e2x,e2y,e2z, scratchCp);
+            if (f < 0) continue;
+            double signed = (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
+            if (signed < -band || signed > band) continue;                   // tip not near the cortex
+            int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
+            double arp = (arpLocal[a]+arpLocal[b]+arpLocal[c]) / 3.0;
+            if (arp <= 0.02) continue;
+            if (Thing.currentScratch().rng.nextDouble() >= rate*arp*dt) continue;
+            // branch direction: ang off the mother axis, tilted toward the membrane normal.
+            double ux=e2x-fs.getEnd1X(), uy=e2y-fs.getEnd1Y(), uz=e2z-fs.getEnd1Z();
+            double ul=Math.sqrt(ux*ux+uy*uy+uz*uz); if (ul<1e-9) continue; ux/=ul; uy/=ul; uz/=ul;
+            double nx=fNx[f], ny=fNy[f], nz=fNz[f];
+            double ndu = nx*ux+ny*uy+nz*uz;
+            double tx=nx-ndu*ux, ty=ny-ndu*uy, tz=nz-ndu*uz;                  // membrane normal ⟂ to axis
+            double tl=Math.sqrt(tx*tx+ty*ty+tz*tz);
+            if (tl < 1e-6) { tx=uy; ty=-ux; tz=0; tl=Math.sqrt(tx*tx+ty*ty+tz*tz); if (tl<1e-6) continue; }
+            tx/=tl; ty/=tl; tz/=tl;
+            Pt3D branchDir = new Pt3D(ca*ux+sa*tx, ca*uy+sa*ty, ca*uz+sa*tz);
+            FilSegment.makeArp23NucFilament(new Pt3D(e2x,e2y,e2z), branchDir);   // daughter at the barbed tip
+            arpLocal[a]=Math.max(0,arpLocal[a]-consume);
+            arpLocal[b]=Math.max(0,arpLocal[b]-consume);
+            arpLocal[c]=Math.max(0,arpLocal[c]-consume);
+            made++; branchCt++;
+        }
+        if (made > 0 && Env.counter % 500 == 0) {
+            Thing.talkln(String.format("[DTS-BRANCH] step %d  branches this window=%d  total branches=%d  total fils=%d",
+                    Env.counter, made, branchCt, FilSegment.filSegmentCt));
         }
     }
 

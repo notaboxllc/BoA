@@ -590,6 +590,20 @@ public class Env {
 	static final Parameter dtsForminNucRate = new Parameter("dtsForminNucRate"," DTS formin nucleation rate", 8.0, "1/s")
 		.setMutableAtRuntime()
 		.setDescription("Mother-nucleation rate at a full-pool hot vertex (scaled by pool fraction). Per-step prob = rate*(forminLocal/pool)*deltaT. Higher = a denser actin brush sprouts from the NPF patches.");
+	static final Parameter dtsBranchOn = new Parameter("dtsBranchOn"," DTS Arp2/3 branch nucleation off membrane-proximal filaments", 0, "", Parameter.BOOLEAN, false)
+		.setMutableAtRuntime()
+		.setDescription("When on, a filament whose barbed tip is near the cortex in a high-Arp region branches (Arp2/3): a daughter nucleates at the Arp angle, tilted toward the membrane (the dendritic protrusive geometry). Branch rate is proportional to the LOCAL activated-Arp field, and each branch consumes Arp (negative feedback) -> a real branched network localized to the NPF zones.");
+	static final Parameter dtsBranchRate = new Parameter("dtsBranchRate"," DTS branch rate per unit Arp", 60.0, "1/(uM s)")
+		.setMutableAtRuntime()
+		.setDescription("Branch-nucleation rate per unit local Arp concentration: per-step prob = rate*arpLocal*deltaT. Higher = a denser dendritic brush.");
+	static final Parameter dtsArpConsumePerBranch = new Parameter("dtsArpConsumePerBranch"," DTS Arp consumed per branch", 0.05, "uM")
+		.setMutableAtRuntime()
+		.setDescription("Activated Arp removed from the local membrane vertices per branch -- the negative feedback that bounds branching near each NPF source (the source replenishes via diffusion).");
+	static final Parameter dtsBranchAngle = new Parameter("dtsBranchAngle"," DTS Arp2/3 branch angle", 70.0, "degrees")
+		.setDescription("Daughter-vs-mother branch angle (~70 deg for Arp2/3), tilted toward the membrane normal so the dendritic network grows into the cortex.");
+	static final Parameter dtsMaxFilaments = new Parameter("dtsMaxFilaments"," DTS max filament count (branch cap)", 3000, "", Parameter.INT)
+		.setMutableAtRuntime()
+		.setDescription("Hard cap on total FilSegments; branching stops above it (runaway backstop).");
 	static final Parameter dtsActinCollide = new Parameter("dtsActinCollide"," DTS actin-vs-membrane collision in the loop", 0, "", Parameter.BOOLEAN, false)
 		.setMutableAtRuntime()
 		.setDescription("When on, every actin FilSegment is collided against the membrane each step (segment-vs-triangle, grid-accelerated): the cortex CONTAINS the actin and the reaction BULGES the membrane where actin pushes. The basis for actin-driven protrusion.");
