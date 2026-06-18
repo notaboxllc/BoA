@@ -15,7 +15,7 @@ dtsKappaVolume:true:1.0e-13;
 dtsTargetReducedVol:true:1.0;
 dtsMaxDispFrac:true:0.2;
 dtsBrownianOff:true:1.0;
-dtsAnchorStiffness:true:0.0;
+dtsAnchorStiffness:true:0.015;
 
 // --- Arp field (hot patches + heat-map) ---
 dtsArpOn:true:1.0;

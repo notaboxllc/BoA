@@ -538,12 +538,21 @@ public final class Membrane {
             double il = Math.sqrt(ix*ix+iy*iy+iz*iz);
             if (il < 1e-9) continue;
             ix/=il; iy/=il; iz/=il;                              // inward radial (vertex -> center)
-            // seed the pointed end just inside the cortex; grow inward (de-novo mother) or OUTWARD (barbed tip
-            // toward the membrane, so with the ratchet it protrudes).
-            Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
-            Pt3D growDir = Env.dtsForminGrowOut.isActive() ? new Pt3D(-ix, -iy, -iz) : new Pt3D(ix, iy, iz);
-            FilSegment mother = FilSegment.makeForminMother(nucPt, growDir);
-            FilSegment.linkEnd1Node(mother, vert[v]);           // ERM-like membrane anchor (pointed end)
+            double halfLen = 0.5*(Env.actinSeed.getIntValue()+1)*Env.actinMonoRadius;   // seed half-length (um)
+            FilSegment mother;
+            if (Env.dtsForminGrowOut.isActive()) {
+                // FORMIN holds the BARBED end (end2) at the cortex; pointed end (end1) trails into the
+                // cytoplasm. Seat the center so end2 (= center + halfLen*uVec, uVec=outward) lands AT the
+                // vertex (zero initial anchor offset); link the BARBED end to the vertex (formin-membrane bond).
+                Pt3D nucPt = new Pt3D(vx(v) + halfLen*ix, vy(v) + halfLen*iy, vz(v) + halfLen*iz);
+                mother = FilSegment.makeForminMother(nucPt, new Pt3D(-ix, -iy, -iz));   // uVec outward -> barbed toward cortex
+                FilSegment.linkEnd2Node(mother, vert[v]);        // formin holds the barbed end at the membrane
+            } else {
+                // de-novo mother: pointed end held at the cortex, grows inward (the legacy geometry).
+                Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
+                mother = FilSegment.makeForminMother(nucPt, new Pt3D(ix, iy, iz));
+                FilSegment.linkEnd1Node(mother, vert[v]);        // ERM-like anchor (pointed end)
+            }
             forminLocal[v] -= consume;
             if (forminLocal[v] < 0) forminLocal[v] = 0;
             forminMotherCt++;
@@ -563,6 +572,16 @@ public final class Membrane {
         theMembranes.get(0).collideActin();
     }
 
+    // Anchor-spring magnitude (N), capped so a large offset (e.g. a freshly nucleated mother before the
+    // spring relaxes) can never deliver a NaN-inducing kick. k is N/m; offset (ax,ay,az) is in microns,
+    // so the linear force is k * (offset_um * 1e-6). Capped at ANCHOR_FMAX.
+    private static final double ANCHOR_FMAX = 1.0e-10;   // ~0.1 pN ceiling on the formin-membrane tether
+    private static double anchorMag(double k, double ax, double ay, double az) {
+        double off = Math.sqrt(ax*ax+ay*ay+az*az);       // microns
+        double f = k * off * 1.0e-6;                     // N
+        return f > ANCHOR_FMAX ? ANCHOR_FMAX : f;
+    }
+
     void collideActin() {
         buildFaceGrid();
         double rad = FilSegment.radius;
@@ -578,15 +597,28 @@ public final class Membrane {
             double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();
             if (!(Double.isFinite(e1x)&&Double.isFinite(e2x)&&Double.isFinite(e1y)&&Double.isFinite(e2y)
                   &&Double.isFinite(e1z)&&Double.isFinite(e2z))) { fs.removeMe = true; continue; }  // cull NaN filaments
-            // ERM-like anchor: hold the pointed end (end1) to its membrane vertex with a spring, so the mother
-            // stays pinned to the (moving) cortex and pushes straight out. end1Node tracks the bulging vertex.
-            if (kAnchor > 0 && fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
-                ProteinNode an = fs.end1Node;
-                double ax = an.getCoordX()-e1x, ay = an.getCoordY()-e1y, az = an.getCoordZ()-e1z;
-                force.setVals(kAnchor*1.0e-6*ax, kAnchor*1.0e-6*ay, kAnchor*1.0e-6*az);   // N (um->m on the offset)
-                pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
-                // One-sided: hold the mother's pointed end to the cortex WITHOUT loading the membrane inward
-                // (the inward reaction would cancel the protrusion). The membrane only feels the barbed-tip push.
+            if (kAnchor > 0) {
+                // FORMIN holds the BARBED end (end2) at the cortex: a TWO-SIDED spring between end2 and its
+                // vertex. As the barbed end elongates and advances against the membrane, the spring pulls the
+                // vertex OUTWARD (the formin/filopodial push); the vertex (cortex) pulls the barbed end back,
+                // keeping it at the membrane. This is the formin-membrane attachment doing work as it grows.
+                if (fs.nodeAtEnd2 && fs.end2Node != null && !fs.end2Node.removeMe) {
+                    ProteinNode an = fs.end2Node;
+                    double ax = (an.getCoordX()-e2x), ay = (an.getCoordY()-e2y), az = (an.getCoordZ()-e2z);
+                    double m = anchorMag(kAnchor, ax, ay, az);   // N, capped
+                    double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
+                    double fxA=m*ax/off, fyA=m*ay/off, fzA=m*az/off;
+                    force.setVals(fxA,fyA,fzA); pt.setVals(e2x,e2y,e2z); fs.incForceSum(force, pt);   // barbed end -> vertex
+                    an.incForceSumSlot(-fxA,-fyA,-fzA);                                                // vertex -> barbed end (push cortex out)
+                }
+                // de-novo (pointed-end) mother: one-sided tether (don't load the cortex inward).
+                else if (fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
+                    ProteinNode an = fs.end1Node;
+                    double ax = (an.getCoordX()-e1x), ay = (an.getCoordY()-e1y), az = (an.getCoordZ()-e1z);
+                    double m = anchorMag(kAnchor, ax, ay, az);
+                    double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
+                    force.setVals(m*ax/off, m*ay/off, m*az/off); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
+                }
             }
             double gSeg = fs.bTransGam.y;                              // perpendicular filament drag
             segmentVsMembrane(e1x,e1y,e1z, e2x,e2y,e2z, rad, gSeg, r1, r2);
@@ -647,15 +679,18 @@ public final class Membrane {
         int cap = Env.dtsMaxFilaments.getIntValue();
         int n0 = FilSegment.filSegmentCt;   // snapshot: a daughter can't branch the same step it's born
         int made = 0;
+        int cand=0, nearCortex=0;   // gate counters (pipeline-health diagnostics)
         for (int i = 0; i < n0; i++) {
             if (FilSegment.filSegmentCt >= cap) break;
             FilSegment fs = FilSegment.theFilSegments[i];
             if (fs == null || fs.removeMe) continue;
+            cand++;
             double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();   // barbed tip
             int f = nearestFace(e2x,e2y,e2z, scratchCp);
             if (f < 0) continue;
             double signed = (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
             if (signed < -band || signed > band) continue;                   // tip not near the cortex
+            nearCortex++;
             int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
             double arp = (arpLocal[a]+arpLocal[b]+arpLocal[c]) / 3.0;
             if (arp <= 0.02) continue;
@@ -671,9 +706,9 @@ public final class Membrane {
             arpLocal[c]=Math.max(0,arpLocal[c]-consume);
             made++; branchCt++;
         }
-        if (made > 0 && Env.counter % 500 == 0) {
-            Thing.talkln(String.format("[DTS-BRANCH] step %d  branches this window=%d  total branches=%d  total fils=%d",
-                    Env.counter, made, branchCt, FilSegment.filSegmentCt));
+        if (Env.counter % 1000 == 0) {
+            Thing.talkln(String.format("[DTS-BRANCH] step %d  fils=%d nearCortex=%d  totalBranches=%d",
+                    Env.counter, cand, nearCortex, branchCt));
         }
     }
 

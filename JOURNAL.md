@@ -1,5 +1,30 @@
 # BoxOfActin Project Journal
 
+## 2026-06-18 — Membrane v2 DTS, STAGE 3e: FORMIN holds the BARBED end at the cortex (filopodial push)
+
+Restored the explicit formin-at-the-barbed-end model (the open item from 3d). Formin is a processive
+**barbed-end** elongator: it sits at the membrane and the barbed end grows against it. Wiring (`dtsForminGrowOut`):
+- **forminStep** seeds the mother so the barbed end (end2 = center + halfLen·uVec, uVec = outward) lands **at
+  the vertex** (`nucPt = V + halfLen·inward`, zero initial anchor offset); pointed end (end1) trails into the
+  cytoplasm. Links the **barbed** end via `linkEnd2Node(mother, vert)` (the formin–membrane bond).
+- **collideActin** anchor is now a **TWO-SIDED** spring for `nodeAtEnd2`: pulls the barbed end toward its
+  vertex AND pulls the vertex outward toward the advancing barbed end — i.e. the formin does work on the
+  cortex as the filament elongates (the protrusive coupling). The de-novo pointed-end (`nodeAtEnd1`) case
+  stays one-sided (doesn't load the cortex inward).
+
+**Bug found + fixed**: with end2 seeded ~0.1 µm off the vertex and `dtsAnchorStiffness=0.015 N/m`, the spring
+delivered ~1.6e-9 N → a single-step kick → NaN → every mother culled (`segs=0`, no deformation — the
+regression). Two fixes: seat the barbed end AT the vertex (zero initial offset), and **cap the anchor force**
+at `ANCHOR_FMAX=1e-10 N` (`anchorMag()`). Also fixed a copy-paste typo in `branchStep` (`fNz` where `fNy`
+belonged in the signed-distance dot product).
+
+Demo (`ParameterFiles/dtsMembraneDendritic`, `dtsAnchorStiffness:0.015`, 20000 steps): 67 formin mothers +
+287 Arp branches, real Mogilner–Oster ratchet polymerization → the cortex protrudes **outward**
+(rMax 1.20→1.51, rStd 0→0.123, rMean ~1.17 volume-conserved, rMin ~0.94 — no runaway dimple), 0 NaN, no
+escapes. The two-sided anchor makes the elongating barbed end pull the membrane out (vs 3d where the bulge
+came only from the steric push). Live filament count treadmills (peaks ~125, settles ~70) as the formin/actin
+pools deplete against ongoing pointed-end turnover — a dynamic steady state, not a leak.
+
 ## 2026-06-18 — Membrane v2 DTS, STAGE 3d: dendritic network RESTORED on the DTS membrane (Mogilner–Oster ratchet)
 
 Restored the pre-DTS dendritic-lamellipodium actin model, now driven by the DTS membrane — **reusing the
