@@ -313,6 +313,7 @@ public final class Membrane {
         }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
+        if (Env.dtsActinCollide.getValue() != 0) collideAllActin();   // actin <-> membrane (containment + push)
     }
 
     // ---- Bouncers: free nodes that shoot around inside the membrane, ricochet off it (pushing transient
@@ -535,10 +536,12 @@ public final class Membrane {
             double ix = center.x - vx(v), iy = center.y - vy(v), iz = center.z - vz(v);
             double il = Math.sqrt(ix*ix+iy*iy+iz*iz);
             if (il < 1e-9) continue;
-            ix/=il; iy/=il; iz/=il;
-            Pt3D inward = new Pt3D(ix, iy, iz);
+            ix/=il; iy/=il; iz/=il;                              // inward radial (vertex -> center)
+            // seed the pointed end just inside the cortex; grow inward (de-novo mother) or OUTWARD (barbed tip
+            // toward the membrane, so with the ratchet it protrudes).
             Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
-            FilSegment mother = FilSegment.makeForminMother(nucPt, inward);
+            Pt3D growDir = Env.dtsForminGrowOut.isActive() ? new Pt3D(-ix, -iy, -iz) : new Pt3D(ix, iy, iz);
+            FilSegment mother = FilSegment.makeForminMother(nucPt, growDir);
             FilSegment.linkEnd1Node(mother, vert[v]);           // ERM-like membrane anchor (pointed end)
             forminLocal[v] -= consume;
             if (forminLocal[v] < 0) forminLocal[v] = 0;
@@ -549,6 +552,64 @@ public final class Membrane {
             for (int v = 0; v < nv; v++) if (arpHot[v]) { remain += forminLocal[v]; if (forminLocal[v] > 0) active++; }
             Thing.talkln(String.format("[DTS-FORMIN] step %d  mothers nucleated=%d  pool remaining=%.1f over %d hot verts",
                     Env.counter, forminMotherCt, remain, active));
+        }
+    }
+
+    /** Collide all actin FilSegments against the (first) membrane each step: containment + push (the reaction
+     *  bulges the membrane), plus the polymerization ratchet on barbed tips. Grid-accelerated. */
+    public static void collideAllActin() {
+        if (theMembranes.isEmpty() || FilSegment.filSegmentCt == 0) return;
+        theMembranes.get(0).collideActin();
+    }
+
+    void collideActin() {
+        buildFaceGrid();
+        double rad = FilSegment.radius;
+        double ratchet = Env.dtsRatchetForce.getValue();
+        double kAnchor = Env.dtsAnchorStiffness.getValue();
+        double[] r1 = new double[3], r2 = new double[3];
+        Pt3D force = new Pt3D(), pt = new Pt3D();
+        int contacts = 0;
+        for (int i = 0; i < FilSegment.filSegmentCt; i++) {
+            FilSegment fs = FilSegment.theFilSegments[i];
+            if (fs == null || fs.removeMe) continue;
+            double e1x=fs.getEnd1X(), e1y=fs.getEnd1Y(), e1z=fs.getEnd1Z();
+            double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();
+            // ERM-like anchor: hold the pointed end (end1) to its membrane vertex with a spring, so the mother
+            // stays pinned to the (moving) cortex and pushes straight out. end1Node tracks the bulging vertex.
+            if (kAnchor > 0 && fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
+                ProteinNode an = fs.end1Node;
+                double ax = an.getCoordX()-e1x, ay = an.getCoordY()-e1y, az = an.getCoordZ()-e1z;
+                force.setVals(kAnchor*1.0e-6*ax, kAnchor*1.0e-6*ay, kAnchor*1.0e-6*az);   // N (um->m on the offset)
+                pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
+                // One-sided: hold the mother's pointed end to the cortex WITHOUT loading the membrane inward
+                // (the inward reaction would cancel the protrusion). The membrane only feels the barbed-tip push.
+            }
+            double gSeg = fs.bTransGam.y;                              // perpendicular filament drag
+            segmentVsMembrane(e1x,e1y,e1z, e2x,e2y,e2z, rad, gSeg, r1, r2);
+            boolean hit = false;
+            if (r1[0]!=0||r1[1]!=0||r1[2]!=0) { force.setVals(r1[0],r1[1],r1[2]); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force,pt); hit=true; }
+            if (r2[0]!=0||r2[1]!=0||r2[2]!=0) { force.setVals(r2[0],r2[1],r2[2]); pt.setVals(e2x,e2y,e2z); fs.incForceSum(force,pt); hit=true; }
+            if (hit) contacts++;
+            // Polymerization ratchet: a barbed tip (end2) near the inner face is pushed OUTWARD along the
+            // membrane normal -> a network growing against the cortex protrudes it (the collision above
+            // transmits that push into a membrane bulge while preventing the tip from passing through).
+            if (ratchet > 0) {
+                int f = nearestFace(e2x,e2y,e2z, scratchCp);
+                if (f >= 0) {
+                    double signed = (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
+                    double band = rad + vertexRadius + 0.03;
+                    if (signed > -band && signed < band) {
+                        force.setVals(ratchet*fNx[f], ratchet*fNy[f], ratchet*fNz[f]);
+                        pt.setVals(e2x,e2y,e2z);
+                        fs.incForceSum(force, pt);
+                    }
+                }
+            }
+        }
+        if (Env.counter % 500 == 0 && contacts > 0) {
+            Thing.talkln(String.format("[DTS-ACTIN] step %d  filaments contacting membrane = %d / %d",
+                    Env.counter, contacts, FilSegment.filSegmentCt));
         }
     }
 
@@ -671,18 +732,13 @@ public final class Membrane {
         double contact = rad + vertexRadius;
         double maxLeak = -1e30;
         reac1[0]=reac1[1]=reac1[2]=0; reac2[0]=reac2[1]=reac2[2]=0;
-        double[] cp = new double[6];
+        double[] cp = new double[7];   // {cx,cy,cz, wa,wb,wc, faceIndex}
         for (int k = 0; k < K; k++) {
             double t = (K <= 1) ? 0.0 : (double)k/(K-1);
             double sx = p1x + t*ex, sy = p1y + t*ey, sz = p1z + t*ez;
-            // nearest triangle to this sample (continuous surface — no gaps)
-            int bestF = -1; double bestD2 = 1e30, bcx=0,bcy=0,bcz=0,bwa=0,bwb=0,bwc=0;
-            for (int f = 0; f < nf; f++) {
-                closestPtTri(sx, sy, sz, faceVert[3*f], faceVert[3*f+1], faceVert[3*f+2], cp);
-                double dx = sx-cp[0], dy = sy-cp[1], dz = sz-cp[2];
-                double d2 = dx*dx + dy*dy + dz*dz;
-                if (d2 < bestD2) { bestD2=d2; bestF=f; bcx=cp[0];bcy=cp[1];bcz=cp[2]; bwa=cp[3];bwb=cp[4];bwc=cp[5]; }
-            }
+            // nearest triangle to this sample (continuous surface — no gaps). Grid-accelerated when built.
+            int bestF = nearestFace(sx, sy, sz, cp);
+            double bcx=cp[0],bcy=cp[1],bcz=cp[2],bwa=cp[3],bwb=cp[4],bwc=cp[5];
             if (bestF < 0) continue;
             double nx = fNx[bestF], ny = fNy[bestF], nz = fNz[bestF];
             double signed = (sx-bcx)*nx + (sy-bcy)*ny + (sz-bcz)*nz;   // >0 = sample outside the surface
@@ -705,6 +761,65 @@ public final class Membrane {
             }
         }
         return maxLeak;
+    }
+
+    // ---- Spatial face grid (accelerates actin-vs-membrane collision; rebuilt each step) ----
+    private int[] gHead, gNext;                  // uniform-grid bucket heads + per-face next (linked list)
+    private double gCell, gx0, gy0, gz0;
+    private int gnx, gny, gnz;
+    private final double[] scratchCp = new double[7];
+
+    private int axisIdx(double v, double v0, int n) { int i=(int)((v-v0)/gCell); return i<0?0:(i>=n?n-1:i); }
+
+    /** Bin the faces (by centroid) into a uniform grid over the membrane bbox; cell ~2 mean edges so a face's
+     *  neighbourhood is covered by the 3x3x3 cells around any query point. O(nf), rebuilt each collision step. */
+    public void buildFaceGrid() {
+        double minx=1e30,miny=1e30,minz=1e30,maxx=-1e30,maxy=-1e30,maxz=-1e30;
+        for (int v=0; v<nv; v++) {
+            double x=vx(v),y=vy(v),z=vz(v);
+            if(x<minx)minx=x; if(y<miny)miny=y; if(z<minz)minz=z;
+            if(x>maxx)maxx=x; if(y>maxy)maxy=y; if(z>maxz)maxz=z;
+        }
+        gCell = 2.0*l0;
+        gx0=minx-gCell; gy0=miny-gCell; gz0=minz-gCell;
+        gnx=(int)((maxx-minx)/gCell)+3; gny=(int)((maxy-miny)/gCell)+3; gnz=(int)((maxz-minz)/gCell)+3;
+        int nc=gnx*gny*gnz;
+        if (gHead==null || gHead.length<nc) gHead=new int[nc];
+        java.util.Arrays.fill(gHead, 0, nc, -1);
+        if (gNext==null || gNext.length<nf) gNext=new int[nf];
+        for (int f=0; f<nf; f++) {
+            int a=faceVert[3*f],b=faceVert[3*f+1],c=faceVert[3*f+2];
+            double cx=(vx(a)+vx(b)+vx(c))/3.0, cy=(vy(a)+vy(b)+vy(c))/3.0, cz=(vz(a)+vz(b)+vz(c))/3.0;
+            int cell=(axisIdx(cx,gx0,gnx)*gny+axisIdx(cy,gy0,gny))*gnz+axisIdx(cz,gz0,gnz);
+            gNext[f]=gHead[cell]; gHead[cell]=f;
+        }
+    }
+
+    /** Closest face to (sx,sy,sz): fills out[0..5]={cx,cy,cz,wa,wb,wc}, returns the face index (-1 if none).
+     *  Uses the grid (3x3x3 cells) when built, else scans all faces (the brute-force path the test uses). */
+    private int nearestFace(double sx, double sy, double sz, double[] out) {
+        int bestF=-1; double bestD2=1e30;
+        if (gHead != null) {
+            int ix=axisIdx(sx,gx0,gnx), iy=axisIdx(sy,gy0,gny), iz=axisIdx(sz,gz0,gnz);
+            for (int dx=-1; dx<=1; dx++) for (int dy=-1; dy<=1; dy++) for (int dz=-1; dz<=1; dz++) {
+                int cx=ix+dx, cy=iy+dy, cz=iz+dz;
+                if (cx<0||cx>=gnx||cy<0||cy>=gny||cz<0||cz>=gnz) continue;
+                for (int f=gHead[(cx*gny+cy)*gnz+cz]; f>=0; f=gNext[f]) {
+                    closestPtTri(sx,sy,sz, faceVert[3*f],faceVert[3*f+1],faceVert[3*f+2], scratchCp);
+                    double ddx=sx-scratchCp[0], ddy=sy-scratchCp[1], ddz=sz-scratchCp[2];
+                    double d2=ddx*ddx+ddy*ddy+ddz*ddz;
+                    if (d2<bestD2){ bestD2=d2; bestF=f; System.arraycopy(scratchCp,0,out,0,6); }
+                }
+            }
+        } else {
+            for (int f=0; f<nf; f++) {
+                closestPtTri(sx,sy,sz, faceVert[3*f],faceVert[3*f+1],faceVert[3*f+2], scratchCp);
+                double ddx=sx-scratchCp[0], ddy=sy-scratchCp[1], ddz=sz-scratchCp[2];
+                double d2=ddx*ddx+ddy*ddy+ddz*ddz;
+                if (d2<bestD2){ bestD2=d2; bestF=f; System.arraycopy(scratchCp,0,out,0,6); }
+            }
+        }
+        return bestF;
     }
 
     /** Refresh the per-face geometry (normals/areas) the steric reads — call before segmentVsMembrane when

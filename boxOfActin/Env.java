@@ -590,6 +590,17 @@ public class Env {
 	static final Parameter dtsForminNucRate = new Parameter("dtsForminNucRate"," DTS formin nucleation rate", 8.0, "1/s")
 		.setMutableAtRuntime()
 		.setDescription("Mother-nucleation rate at a full-pool hot vertex (scaled by pool fraction). Per-step prob = rate*(forminLocal/pool)*deltaT. Higher = a denser actin brush sprouts from the NPF patches.");
+	static final Parameter dtsActinCollide = new Parameter("dtsActinCollide"," DTS actin-vs-membrane collision in the loop", 0, "", Parameter.BOOLEAN, false)
+		.setMutableAtRuntime()
+		.setDescription("When on, every actin FilSegment is collided against the membrane each step (segment-vs-triangle, grid-accelerated): the cortex CONTAINS the actin and the reaction BULGES the membrane where actin pushes. The basis for actin-driven protrusion.");
+	static final Parameter dtsRatchetForce = new Parameter("dtsRatchetForce"," DTS polymerization-ratchet force on barbed tips", 0.0, "Newtons")
+		.setMutableAtRuntime()
+		.setDescription("Outward (along the local membrane normal) Mogilner-Oster ratchet force on actin BARBED tips pressing the membrane from inside -- so a network growing against the cortex protrudes it. The bulge grows until the membrane's bending+area+volume reaction balances the push. 0 = off. ~1e-11 N.");
+	static final Parameter dtsAnchorStiffness = new Parameter("dtsAnchorStiffness"," DTS membrane-actin anchor (ERM linker) stiffness", 0.02, "N/m")
+		.setMutableAtRuntime()
+		.setDescription("Spring stiffness of the ERM-like tether holding a formin mother's pointed end (end1) to its membrane vertex. Enforces the linkEnd1Node anchor so mothers stay pinned to the cortex and push straight out (clean localized protrusions) instead of tumbling. 0 = no anchor (free filaments).");
+	static final Parameter dtsForminGrowOut = new Parameter("dtsForminGrowOut"," DTS formin mothers grow outward (toward membrane)", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When on, formin mothers point their barbed end OUTWARD (toward the cortex) so their tips press the membrane (with the ratchet -> protrusion). Default off = grow inward (the physical de-novo mother; Arp branches then face the membrane).");
 	static final Parameter dtsForminRecover = new Parameter("dtsForminRecover"," DTS formin pool recovery rate", 0.0, "1/s")
 		.setMutableAtRuntime()
 		.setDescription("Re-recruitment rate of the formin pool at hot vertices (toward dtsForminPool). 0 = bounded (each zone makes a fixed number of mothers); >0 = sustained turnover.");

@@ -1,0 +1,64 @@
+<BOA> DTS membrane v2 -- ACTIN PROTRUSION DEMO: formin mothers nucleate at NPF patches, grow toward the
+<BOA> cortex, and a polymerization ratchet pushes their barbed tips into the membrane. The loop-integrated
+<BOA> segment-vs-triangle collision (grid-accelerated) CONTAINS the actin and transmits the push into membrane
+<BOA> BULGES -> protrusions at the NPF patches, balanced by bending+area+volume.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+// --- membrane: stiff enough to hold shape, soft enough to protrude; bounded by area+volume ---
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.2;
+dtsKappaVolume:true:1.0e-13;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+dtsBrownianOff:true:1.0;
+dtsAnchorStiffness:true:0.0;       // anchor off for now (the surface-vertex tether geometry needs work)
+
+// --- Arp field (hot patches + heat-map) ---
+dtsArpOn:true:1.0;
+dtsArpHotPatches:true:5;
+dtsArpHotPatchDeg:true:12.0;
+dtsArpDiffusion:true:0.1;
+dtsArpDecay:true:0.015;
+
+// --- formin mothers grow OUTWARD toward the cortex ---
+dtsForminOn:true:1.0;
+dtsForminGrowOut:true:1.0;
+dtsForminPool:true:1.0;
+dtsForminConsume:true:1.0;
+dtsForminNucRate:true:12.0;
+dtsForminRecover:true:0.0;
+actinSeed:true:40;
+
+// --- actin-vs-membrane collision + polymerization ratchet (the push) ---
+dtsActinCollide:true:1.0;
+dtsRatchetForce:true:2.0e-11;
+dtsStericRecover:true:0.2;
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.1;
+toFileInterval:true:150.0;
+remoteWriteInterval:true:2000.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+arpConc:true:0.0;
+ratchetOn:false:0.0;

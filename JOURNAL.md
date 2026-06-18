@@ -1,5 +1,27 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 3c-i: actin↔membrane collision in the main loop (grid-accelerated) + protrusion
+
+Wired `segmentVsMembrane` into the sim loop so **actin physically interacts with the cortex** — containment +
+push. New `Membrane.collideAllActin()` (in `computeAllForces`, gated by `dtsActinCollide`): each step, every
+FilSegment is collided against the membrane; the reaction is applied to its endpoints (`incForceSum`) and the
+membrane vertices are pushed out (bulge). **Spatial-accelerated**: a uniform face grid (`buildFaceGrid`,
+cell ~2·l0, rebuilt each step) bins faces by centroid; `nearestFace` queries the 3×3×3 cells around each
+filament sample (brute-force fallback retained → the containment regression still PASSES). Refactored
+`segmentVsMembrane` to use `nearestFace`.
+
+**Protrusion demo** (`ParameterFiles/dtsMembraneProtrusion`): formin mothers grow outward (`dtsForminGrowOut`)
+toward the cortex; a Mogilner–Oster **ratchet** (`dtsRatchetForce`) pushes barbed tips pressing the membrane
+outward; the collision contains them and transmits the push into membrane **bulges** → protrusions at the NPF
+patches (rMax 1.2→1.77, the rest dimples in as volume is borrowed; 63 filaments contacting). The actin
+visibly deforms the cortex into protrusions where formin nucleated it.
+
+**Open / deferred:** the ERM anchor (`dtsAnchorStiffness`) is implemented but its *anchor-to-surface-vertex*
+geometry is wrong for outward growth (it drags the barbed tip outside / over-constrains), so it's **off** in
+the demo — needs anchoring the pointed end to a fixed inner depth (a linker rest-length), a refinement.
+Clean distinct fingers (vs. a coherent-but-lumpy cell) also want tuning + the anchor. **Next (Stage 3c-ii):**
+Arp2/3 branch gating — branches off the mothers, rate ∝ the local Arp field, → a real *branched* network.
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 3b: formin nucleation of mother filaments (actin ON)
 
 NPF (hot) membrane vertices now carry a **depletable per-vertex formin pool** and nucleate **real linear
