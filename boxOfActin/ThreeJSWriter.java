@@ -223,6 +223,9 @@ public class ThreeJSWriter {
         for (int i = 0; i < ProteinNode.nodeCt; i++) {
             ProteinNode pn = ProteinNode.theNodes[i];
             if (pn == null || pn.removeMe) continue;
+            // DTS membrane vertices are rendered as a triangulated surface (the "membranes"
+            // array below), not as individual node spheres — skip them here.
+            if (pn instanceof MembraneVertex) continue;
             if (!firstNode) sb.append(",");
             // Hot-Rho (NPF/Arp2/3 activator) membrane nodes carry "hotRho":true so the viewer can
             // highlight the activated patch where branching is localized.
@@ -267,6 +270,33 @@ public class ThreeJSWriter {
             firstLink = false;
         }
         sb.append("]");
+
+        // DTS membranes (v2 dynamically-triangulated surfaces). One object per Membrane:
+        // a flat vertex list (live pose) + a flat triangle-index list, which the viewer
+        // turns into a THREE.Mesh (BufferGeometry position attribute + index). Vertices
+        // and faces come straight from the Membrane's flat SoA topology. Emitted for both
+        // live and file-based -3js since this single JSON feeds both consumers.
+        if (!Membrane.theMembranes.isEmpty()) {
+            sb.append(",\"membranes\":[");
+            for (int m = 0; m < Membrane.theMembranes.size(); m++) {
+                Membrane mem = Membrane.theMembranes.get(m);
+                if (m > 0) sb.append(",");
+                sb.append("{\"id\":").append(mem.membraneId).append(",\"vertices\":[");
+                for (int v = 0; v < mem.nv; v++) {
+                    if (v > 0) sb.append(",");
+                    sb.append(String.format("[%.5g,%.5g,%.5g]", mem.vx(v), mem.vy(v), mem.vz(v)));
+                }
+                sb.append("],\"faces\":[");
+                for (int f = 0; f < mem.nf; f++) {
+                    if (f > 0) sb.append(",");
+                    sb.append(mem.faceVert[3 * f]).append(",")
+                      .append(mem.faceVert[3 * f + 1]).append(",")
+                      .append(mem.faceVert[3 * f + 2]);
+                }
+                sb.append("]}");
+            }
+            sb.append("]");
+        }
 
         // Benchmark overlay: pinned endpoint anchors and force arrows (absent in non-benchmark frames).
         if (Env.benchmarkFilament) {

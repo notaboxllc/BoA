@@ -506,7 +506,63 @@ public class Env {
 	static final double [] beadActAMeasure = new double [] {0.026836158,0.04519774,0.059322034,0.063559322,0.064971751,0.066384181,0.06779661,0.070621469,0.070621469,0.070621469,0.06779661,0.066384181,0.064971751,0.063559322,0.059322034,0.04519774,0.026836158};
 	static final double [] beadActAProb = new double [] {0.854,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1.000,1,1,1,0.854};
 
-	// **** Membrane ****
+	// **** DTS membrane (v2 — dynamically-triangulated surface; see MEMBRANE_DTS_DESIGN.md) ****
+	// New subsystem, independent of the legacy spring/vesicle membrane below. Stage 1 = geometry + render.
+	static final Parameter buildDtsMembrane = new Parameter("buildDtsMembrane"," Build DTS (dynamically-triangulated) membrane IC", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When on, builds a v2 dynamically-triangulated-surface membrane: an icosphere of lightweight vertex Things with flat-SoA topology (faces + wing-edges + fixed-width vertex incidence), device/ECS-portable. Stage 1 builds geometry + render only -- no bending/area/volume forces yet. Independent of the legacy spring/vesicle membrane (buildMembraneSphere/Sheet). Vertices use PHYSICAL drag (no membraneNodeDragScale).");
+	static final Parameter dtsMembraneSubdiv = new Parameter("dtsMembraneSubdiv"," DTS membrane icosphere subdivision (nu)", 4, "", Parameter.INT)
+		.setDescription("Icosphere subdivision level: nv = 10*4^nu + 2 vertices, nf = 20*4^nu faces. nu=2 -> 162 v, nu=3 -> 642 v, nu=4 -> 2562 v (~50-80 nm patches on a ~1.2 um cell), nu=5 -> 10242 v. Cost grows 4x per level.");
+	static final Parameter dtsMembraneRadius = new Parameter("dtsMembraneRadius"," DTS membrane radius", 1.0, "microns")
+		.setDescription("Radius of the initial DTS icosphere membrane, in microns.");
+	static final Parameter dtsVertexRadiusFrac = new Parameter("dtsVertexRadiusFrac"," DTS vertex radius (fraction of edge length)", 0.5, "")
+		.setDescription("Per-vertex steric/drag radius as a fraction of the mean initial edge length l0. 0.5 (~half the vertex spacing) is the design default; sets Stokes drag gamma = 6*pi*eta*r_v and the steric size of each vertex.");
+	static final Parameter dtsKappaBend = new Parameter("dtsKappaBend"," DTS bending rigidity kappa", 1.0e-19, "Joules")
+		.setMutableAtRuntime()
+		.setDescription("Helfrich bending rigidity (Julicher/TriMem edge form: E = kappa * Sum_v 2 c_v^2/A_v). Lipid bilayer ~20-25 kBT ~ 0.8-1.0e-19 J. 0 disables bending. Cortex stiffness comes from actin, not kappa.");
+	static final Parameter dtsKappaArea = new Parameter("dtsKappaArea"," DTS area-stretch modulus K_A", 0.0, "N/m")
+		.setMutableAtRuntime()
+		.setDescription("Area-compressibility modulus in the harmonic area constraint E_area = (K_A/2)(A-A0)^2/A0. Lipid bilayer ~0.2 N/m (near-inextensible -- may need softening for dt=1e-5 stability). 0 = off (free area). A0 is the icosphere IC area.");
+	static final Parameter dtsKappaVolume = new Parameter("dtsKappaVolume"," DTS volume-constraint modulus K_V", 0.0, "Joules")
+		.setMutableAtRuntime()
+		.setDescription("Volume-constraint modulus in E_vol = (K_V/2)(V/V0 - vt)^2 (vesicle/turgor). Larger = stiffer (near-incompressible cytoplasm). 0 = off (free volume). V0 is the icosphere IC volume.");
+	static final Parameter dtsTargetReducedVol = new Parameter("dtsTargetReducedVol"," DTS target reduced volume vt", 1.0, "")
+		.setMutableAtRuntime()
+		.setDescription("Target for the volume constraint, as a fraction of the IC volume V0 (vt=1 holds the IC sphere; vt<1 deflates -> oblate/stomatocyte shapes, the standard DTS reduced-volume validation).");
+	static final Parameter dtsPushForce = new Parameter("dtsPushForce"," DTS membrane push-patch total force (+x)", 0.0, "Newtons")
+		.setMutableAtRuntime()
+		.setDescription("Total constant outward (+x) force spread over a cap of membrane vertices near the +x pole -- a localized protrusion drive (a clean stand-in for actin pushing a bulge). The bulge grows and STALLS when the bending+area+volume reaction balances the push: the signature membrane mechanical response. 0 = off. ~1e-10 to 1e-9 N. Soften dtsKappaArea/dtsKappaVolume for a bigger bulge.");
+	static final Parameter dtsPushCapDeg = new Parameter("dtsPushCapDeg"," DTS push-patch cap half-angle", 25.0, "degrees")
+		.setMutableAtRuntime()
+		.setDescription("Half-angle of the +x polar cap that the push force is spread over. Smaller = sharper, more localized protrusion; larger = a broad dome.");
+	static final Parameter dtsProbeForce = new Parameter("dtsProbeForce"," DTS membrane probe constant drive force (+x)", 0.0, "Newtons")
+		.setMutableAtRuntime()
+		.setDescription("Constant outward (+x) force on a single probe node placed inside the DTS membrane (no actin). It pushes a bulge into the bilayer and STALLS when the bending+area+volume reaction balances the drive -- a clean visual demonstration of the membrane's mechanics. 0 = no probe. ~2e-11 to 1e-10 N.");
+	static final Parameter dtsProbeRadius = new Parameter("dtsProbeRadius"," DTS membrane probe radius", 0.25, "microns")
+		.setDescription("Radius of the constant-force probe sphere (steric contact with membrane vertices = probeRadius + vertexRadius).");
+	static final Parameter dtsProbeStartX = new Parameter("dtsProbeStartX"," DTS membrane probe start x", 0.0, "microns")
+		.setDescription("Initial x of the probe (0 = center). It is driven +x from here into the membrane wall.");
+	static final Parameter dtsBouncerCount = new Parameter("dtsBouncerCount"," DTS bouncer node count", 0, "", Parameter.INT)
+		.setDescription("Number of free nodes that shoot around INSIDE the membrane, ricocheting off it (pushing transient bulges) and randomly changing direction. A live demo of membrane response + relaxation. 0 = none.");
+	static final Parameter dtsBouncerForce = new Parameter("dtsBouncerForce"," DTS bouncer drive force", 2.0e-10, "Newtons")
+		.setMutableAtRuntime()
+		.setDescription("Drive-force magnitude on each bouncer: sets its speed (v=F/gamma) and how hard it bulges the membrane on impact. Raise for faster, harder hits.");
+	static final Parameter dtsBouncerTurnProb = new Parameter("dtsBouncerTurnProb"," DTS bouncer random-turn probability/step", 0.004, "")
+		.setMutableAtRuntime()
+		.setDescription("Per-step probability a bouncer re-aims in a new random direction (in addition to bouncing off the membrane). Higher = more erratic, jittery motion; lower = long straight runs between wall hits.");
+	static final Parameter dtsBouncerMinR = new Parameter("dtsBouncerMinR"," DTS bouncer min radius", 0.12, "microns")
+		.setDescription("Smallest bouncer radius (each bouncer gets a random radius in [min,max] -- nodes of different sizes).");
+	static final Parameter dtsBouncerMaxR = new Parameter("dtsBouncerMaxR"," DTS bouncer max radius", 0.35, "microns")
+		.setDescription("Largest bouncer radius. Bigger bouncers contact more triangles and push broader bulges.");
+	static final Parameter dtsStericStiffness = new Parameter("dtsStericStiffness"," DTS probe/bouncer steric spring stiffness", 8.0e-4, "N/m per face")
+		.setMutableAtRuntime()
+		.setDescription("Stiffness of the soft penetration spring between a probe/bouncer node and each contacting membrane face. Soft enough that the node DWELLS in contact and transmits a sustained push (so the membrane bulges) rather than being ejected in one step. Too stiff (> ~gamma/dt summed over contacts) -> bouncy rigid wall, no bulge; too soft -> the node sinks through. ~8e-4 works for vertexRadius~0.05 um at dt=1e-5.");
+	static final Parameter dtsMaxDispFrac = new Parameter("dtsMaxDispFrac"," DTS vertex max per-step move (frac of vertex radius)", 0.0, "")
+		.setMutableAtRuntime()
+		.setDescription("0 = off. >0 caps a DTS membrane vertex's per-step translation to this * vertexRadius. Safety net for stiff area/volume constraints and large transients (e.g. a reduced-volume target mismatch) under explicit Euler -- the vertex moves slowly instead of taking one huge step and exploding. ~0.1-0.25 is reasonable.");
+	static final Parameter dtsBrownianOff = new Parameter("dtsBrownianOff"," DTS deterministic (no vertex Brownian)", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When active, suppresses per-vertex thermal forcing (sets nodeBrownianMotionOff) for a clean deterministic relaxation -- used to validate that the IC sphere is a force-balanced equilibrium. Default off = physical undulations on.");
+
+	// **** Membrane (legacy v1 -- spring/vesicle; all default-off) ****
 	static final Parameter membraneCellRadius = new Parameter("membraneCellRadius"," Radius of membrane created cell", 1.0, "microns");
 	static final Parameter membraneCellPackingFactor = new Parameter("membraneCellPackingFactor"," Adjust to pack cells as desired", 1.0, "");
 	static final Parameter membraneNodeRadius = new Parameter("membraneNodeRadius"," Radius of connected membrane nodes", 0.05, "microns");

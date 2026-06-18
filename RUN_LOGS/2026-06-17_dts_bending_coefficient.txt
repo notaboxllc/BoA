@@ -1,0 +1,46 @@
+DTS bending energy — §11 VERIFY numeric resolution (2026-06-17)
+================================================================
+Tool: DtsDihedralCheck.java (pure geometry on Icosphere.build(nu); no sim machinery).
+
+Two candidate discrete bending energies, compared to the continuum sphere target 8*pi = 25.13274
+(Helfrich E = (k/2) integral (2H)^2 dA = 8*pi*k for a sphere, radius-independent):
+
+  CRUDE   (Seung-Nelson)    E/kd = S1 = Sum_edges (1 - n_a . n_b)            -- anisotropic, NOT Helfrich
+  JULICHER(TriMem/FreeDTS)  E/k  = S2 = Sum_v 2 c_i^2 / A_i                  -- isotropic, TRUE Helfrich
+                                        c_i = (1/4) Sum_{e in i} l_e theta_e
+                                        A_i = (1/3) Sum_{faces in i} area    (barycentric)
+                                        theta_e = acos(n_f1 . n_f2)          (dihedral / turning angle)
+
+nu     nv       nf     S1(crude)   S1/(8pi)   S2(julicher)  S2/(8pi)   notes
+1      42       80      7.496815   0.298289   25.850401     1.028555
+2      162      320     7.485433   0.297836   25.320959     1.007489
+3      642      1280    7.499489   0.298395   25.180414     1.001897
+4      2562     5120    7.511568   0.298876   25.144699     1.000476   <- nu=4 default: 0.05% error
+5      10242    20480   7.518857   0.299166   25.135733     1.000119
+6      40962    81920   7.522811   0.299323   25.133489     1.000030
+
+Radius-independence: S2 at R=2.7 identical to R=1.0 at every nu (Helfrich is scale-free). Confirmed.
+
+CONCLUSIONS
+-----------
+1. JULICHER/TriMem/FreeDTS form S2 -> 8*pi cleanly (h^2 convergence, ~4x error reduction per subdivision;
+   0.05% at nu=4, 0.003% at nu=6). kappa multiplies the energy DIRECTLY: E_bend = kappa * S2. No sqrt(3)/2,
+   no geometry-dependent fudge. This is the form to implement. Matches FreeDTS energy AND TriMem gradient.
+
+2. CRUDE Seung-Nelson Sum(1-n.n) is anisotropic (sphere != cylinder): S1 sits at ~0.299*8pi on the sphere,
+   nowhere near a clean 8*pi*kappa. (Literature is itself split on the crude-form sphere constant -- the
+   "general/cylinder" mapping kappa=(sqrt3/2)kd predicts 8pi*sqrt3/2=21.77, while the sphere-specific
+   mapping kappa=kd/sqrt3 predicts 8pi/sqrt3=14.51; our once-per-edge icosphere measures ~7.52. The point
+   is precisely that there is NO single clean constant -- which is why we reject the crude form.) REJECTED.
+
+KEY LITERATURE (full citations in JOURNAL / design doc)
+- FreeDTS (Pezeshkian 2024): shape-operator per-vertex curvature; A_v = (1/3) sum incident areas (barycentric);
+  MC-only, energy-only (no forces). GPL-2.0.
+- TriMem (Siggel 2022): SAME edge/dihedral (Itzykson/Julicher) curvature H_i=(1/4A_i)sum l_e theta_e, A_i
+  barycentric; E = kappa sum_i 2 c_i^2/A_i; provides the ANALYTIC GRADIENT (3 primitive derivatives:
+  d l_e/dr, d A_face/dr = 0.5 n x e_opp, d theta_e/dr hinge-angle gradient). GPL-3.0. NOT the Meyer cotangent
+  operator (that's Mem3DG).
+- Seung-Nelson 1988 / Schmidt-Fraternali 2012 / Fedosov 2010 / arXiv:2503.00302: crude-dihedral coefficient
+  is geometry-dependent (the reason we don't use it).
+- Licenses: all three codes are GPL (copyleft). Port the MATH from the papers (not copyrightable); do NOT
+  copy/translate source verbatim.

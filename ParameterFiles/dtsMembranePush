@@ -1,0 +1,46 @@
+<BOA> DTS membrane v2 -- PROTRUSION DEMO: a constant outward (+x) force spread over a polar cap pushes a
+<BOA> bulge into the bilayer; it GROWS then STALLS when the bending + area + volume reaction balances the
+<BOA> push -- the signature membrane mechanical response. No actin (a clean stand-in for an actin protrusion).
+<BOA> Watch [DTS-PUSH]: poleX advances then stalls. Soften dtsKappaArea/dtsKappaVolume for a bigger bulge.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;          // nu=4 -> 2562 vertices (smooth surface)
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+// --- membrane mechanics (stiff/lipid-like so the protrusion clearly STALLS) ---
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.2;             // near-inextensible bilayer -> protrusion stalls (no runaway tube)
+dtsKappaVolume:true:1.0e-13;       // near-incompressible interior (bulge borrows volume; rest dimples in)
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+
+// --- the protrusion push ---
+dtsPushForce:true:1.5e-10;         // total outward force over the cap (N)
+dtsPushCapDeg:true:22.0;           // cap half-angle (degrees)
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.15;
+toFileInterval:true:150.0;
+remoteWriteInterval:true:2000.0;
+dtsBrownianOff:true:1.0;
+
+boxXDim:true:6.0;
+boxYDim:true:6.0;
+boxZDim:true:6.0;
+aeta:true:0.1;
+
+// --- actin / motors / bugs / legacy membrane OFF ---
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+ratchetOn:false:0.0;

@@ -102,22 +102,34 @@ E_bend = Σ_v [ (κ/2)(2H_v − C̄)²  −  κ_G·K_v ] · A_v
 - `2H_v = c1,v + c2,v` (twice mean curvature at vertex v); `K_v = c1,v·c2,v` (Gaussian curvature).
 - `A_v` vertex (dual) area. Units in the papers: energy in k_BT, lengths in `l_dts`, curvature in `l_dts⁻¹`.
 
-The per-vertex principal curvatures `c1,c2` and `A_v` come from the **vertex shape operator**: build the
-3×3 curvature tensor at v by summing edge contributions (edge curvature × outer product of the edge
-direction), area-weighted, then diagonalize (the surviving two non-zero eigenvalues are c1,c2). This is the
-Gompper–Kroll / Ramakrishnan–Ipsen discretization FreeDTS & trisurf use. **VERIFY the exact edge weights and
-A_v definition against FreeDTS source before coding** (`Vertex`/`Triangle` curvature routines).
+**RESOLVED 2026-06-17 (VERIFY done — see §11 + `RUN_LOGS/2026-06-17_dts_bending_coefficient.txt`).** Use the
+**Jülicher / Itzykson edge-weighted form** that *both* FreeDTS (energy) and TriMem (gradient) use. Do **not**
+use the crude unweighted dihedral `Σ(1−n̂·n̂)` — it is anisotropic (sphere ≠ cylinder; no clean continuum κ).
 
-**For the MD (force) path, start with the simpler dihedral form** — its gradient is analytic and cheap:
+**The discrete energy (spontaneous curvature C̄):**
 ```
-E_bend ≈ κ_d · Σ_{shared edges αβ} (1 − n̂_α · n̂_β)
+E_bend = κ · Σ_v  2 · (c_v / A_v − C̄/2)² · A_v        (C̄ = 0 default ⇒ E_bend = κ · Σ_v 2 c_v²/A_v)
+   c_v = (1/4) · Σ_{edges e ∋ v}  l_e · θ_e            l_e = edge length, θ_e = dihedral angle
+   A_v = (1/3) · Σ_{faces f ∋ v}  area(f)              barycentric vertex (dual) area
+   θ_e = signed angle between the two adjacent face normals (acos(n̂_f1·n̂_f2); the "turning angle", →0 flat)
 ```
-- `n̂_α, n̂_β` unit normals of the two triangles sharing the edge.
-- Continuum mapping (regular triangulation): `κ ≈ (√3/2)·κ_d`  — **VERIFY coefficient** (Seung–Nelson /
-  Gompper–Kroll; the √3/2 is the standard result for a triangular lattice but pin it down).
-- Sphere check: discrete `E_bend` should reproduce the continuum `8πκ` for a sphere.
-Upgrade to the FreeDTS per-vertex form (more accurate, captures C̄ and curvature-tensor anisotropy) once the
-pipeline works; crib TriMem's analytic gradient for that form.
+Here `c_v = H_v·A_v` is the integrated mean curvature at v (`2H_v = c1+c2`). κ multiplies the energy
+**directly** — there is no √3/2 or geometry-dependent coefficient, because this form discretizes
+`(κ/2)∫(2H)²dA` *isotropically*. (FreeDTS's shape-operator + diagonalize route gives the same physics via the
+curvature tensor `SV += (N̂_v·n̂_e)·h_e·(Ŝ_e⊗Ŝ_e)`, `h_e=±l_e√(½(1−n̂_f1·n̂_f2))`, eigenvalues `/A_v`; the
+Jülicher scalar form above is the equivalent, cheaper isotropic case and is what we implement.)
+
+**Sphere unit test (PASSED, our actual icosphere):** `Σ_v 2c_v²/A_v → 8π` (= continuum 8πκ/κ). Measured
+25.145 at ν=4 (**0.05%**), 25.1335 at ν=6 (0.003%); textbook h² convergence; exactly radius-independent.
+`DtsDihedralCheck.java` is the committed regression test — Stage 2 must keep reproducing 8π.
+
+**Force (MD path) — crib TriMem's analytic gradient** (re-derived from papers; TriMem is GPL, don't copy code).
+`f_i = −κ ∂/∂r_i Σ_v 2c_v²/A_v`, assembled from three elementary primitive gradients over v's 1-ring:
+- `∂l_e/∂r = ±ê` (unit edge vector);
+- `∂A_face/∂r = ½ (n̂ × e_opposite)` (and `∂A_v/∂r = ⅓ Σ ∂A_face/∂r`);
+- `∂θ_e/∂r` — the hinge/dihedral-angle gradient (the only nontrivial one; standard cot-weighted-normals form).
+Chain rule with `H_v = c_v/A_v`: `∂(2c²/A)/∂c = 4H_v` (× `∂c_v/∂r = ¼(θ_e ∂l_e/∂r + l_e ∂θ_e/∂r)`),
+`∂(2c²/A)/∂A = −2H_v²` (× `∂A_v/∂r`). Written as the §2 per-edge → per-vertex-gather kernels.
 
 ### 3b. Area / tension — FreeDTS Eq. 3 + frame tension
 
@@ -245,23 +257,48 @@ move `Δr[µm] = F[N]/(1e6·γ[N·s/m])·Δt[s]`. The reference codes are in red
    + fixed-width vertex incidence; §2 — GPU/ECS-ready, NOT half-edge), multi-instance, vertices as Things.
    Render the faces + viewer surface toggle (the rendering payoff; correct tipping falls out of vertex
    normals). Build/validate on CPU first, but keep the arrays kernel-shaped from the start.
-2. **Bending + area + volume forces** (~1–2 d): dihedral bending first (analytic force), area & volume
-   constraints. Validate: sphere holds at `8πκ`; a vesicle relaxes to known reduced-volume shapes
-   (oblate/stomatocyte) — a *standard DTS validation* we inherit from the papers.
+2. **Bending + area + volume forces** — **DONE 2026-06-17.** Jülicher bending (NOT crude dihedral) + harmonic
+   area + volume constraints, as per-edge/per-face kernels → per-vertex gather/scatter (`Membrane.computeForces`,
+   all in metres → N). Analytic forces FD-validated to 2e-4 (`DtsForceCheck.java`). vt=1 vesicle holds the
+   sphere (E_bend=8πκ, forces decay to ~1e-15 N); vt=0.9 deflates to a stable oblate. `computeForces` OWNS the
+   vertex force (zeroes then writes — the generic node pipeline otherwise pollutes it). `dtsMaxDispFrac` clamp
+   for stiff transients. Deep reduced-volume shapes (vt≤0.6) need Stage-3/4 self-avoidance + conditioning.
 3. **Actin linkers + face collision** (~1–2 d): kinetic side-binding linkers + tip-vs-triangle push.
    Demonstrate **bleb-by-detachment** (drop linker density locally → bilayer balloons under pressure).
 4. **Fluidity (bond flips)** + **growth (split/collapse)** (~several d, research-y): defer until 1–3 behave.
 
 ## 11. Open questions / VERIFY-before-coding
 
-- [ ] Exact per-vertex curvature/`A_v` discretization & weights in FreeDTS source (for the §3a upgrade).
-- [ ] The `κ = (√3/2)κ_d` dihedral↔continuum coefficient (Seung–Nelson / Gompper–Kroll).
-- [ ] Crib TriMem's analytic gradient for the per-vertex Helfrich form (when upgrading from dihedral).
-- [ ] K_A stiffness vs `dt=1e-5` stability — softened effective modulus or membrane sub-stepping?
-- [ ] Fixed-topology-first (solid-ish) vs flips-from-start — recommend fixed first.
-- [ ] Linker: confirm side-binding model + kinetic (slip) parameters.
-- [ ] Licenses of FreeDTS/TriMem/trisurf before copying any code verbatim (we port methods from papers; code
-      is reference only).
+**Bending energy/force fully RESOLVED 2026-06-17** (3 source/literature agents + numeric test on our own
+icosphere; details in `RUN_LOGS/2026-06-17_dts_bending_coefficient.txt` and JOURNAL 2026-06-17). Net effect:
+§3a is rewritten — implement the **Jülicher edge form directly**, skip the crude dihedral entirely.
+
+- [x] **FreeDTS per-vertex curvature/`A_v` discretization & weights** — read from source (`master`,
+      `version_1/dts_src/`): shape-operator `SV += (N̂_v·n̂_e)·h_e·(Ŝ_e⊗Ŝ_e)`, `h_e=±l_e√(½(1−n̂_f1·n̂_f2))`,
+      `Ŝ_e=normalize((I−N⊗N)·(n̂_e×ê))`, diagonalize the 2×2 minor, eigenvalues **`/A_v`**. **`A_v=(1/3)·Σ
+      incident triangle areas` (barycentric — NOT Voronoi/cotangent).** FreeDTS is **MC-only / energy-only**
+      (no forces). `Curvature.cpp`, `links.cpp`, `triangle.cpp`, `Energy.cpp`.
+- [x] **The κ↔κ_d coefficient** — the crude `Σ(1−n̂·n̂)` form is **anisotropic** (sphere≠cylinder; literature
+      κ=(√3/2)κ_d cylinder vs κ=κ_d/√3 sphere, and our once-per-edge icosphere measures yet another value
+      ~0.30·8π). **REJECTED.** The Jülicher form needs **no coefficient**: `E_bend = κ·Σ_v 2c_v²/A_v` → `8π`
+      on the sphere (verified to 0.05% at ν=4). Citations: Seung–Nelson 1988, Schmidt–Fraternali 2012
+      (arXiv:1102.1383), Fedosov 2010 (arXiv:0905.0042), arXiv:2503.00302.
+- [x] **TriMem analytic gradient** — same Jülicher/Itzykson curvature (NOT the Meyer cotangent-Laplacian; that
+      is Mem3DG). Three primitive gradients (`∂l/∂r`, `∂A_face/∂r=½n̂×e_opp`, `∂θ/∂r` hinge gradient) +
+      chain rule with `H_v=c_v/A_v`. Formulas transcribed into §3a. `mesh_properties.cpp`/`mesh_util.h`.
+- [x] **Licenses** — FreeDTS **GPL-2.0**, TriMem **GPL-3.0**, trisurf-ng/cluster-trisurf **GPL-3.0** (all
+      strong copyleft, and GPLv2↔v3 mutually incompatible). **Port the math from the papers** (methods/
+      equations aren't copyrightable) — clean-room; do **not** copy or line-by-line translate the GPL source.
+
+Still open (engineering, not physics-correctness — resolve as Stage 2/3 reach them):
+- [x] **K_A/K_V stiffness vs `dt=1e-5`** (Stage 2) — the IC vesicle (vt=1) holds stably with K_A=0.2 N/m,
+      K_V=1e-13 J at dt=1e-5; forces decay to ~1e-15 N. Large transients (deep reduced-volume target
+      mismatch) explode under explicit Euler → added the **`dtsMaxDispFrac` per-step displacement clamp**
+      (DTS analog of `membraneNodeMaxDispFrac`). Deep deflation (vt≤0.6) additionally needs self-avoidance +
+      mesh conditioning + vt-annealing (Stage 3/4). Force sub-cycling remains an option if needed.
+- [x] **Fixed-topology-first** (no bond flips) — confirmed the right call: the Jülicher bending + area +
+      volume is well-defined and validated at fixed connectivity; flips (§4) are Stage 4.
+- [ ] Linker: confirm side-binding model + kinetic (slip) parameters (Stage 3).
 
 ## 12. References
 

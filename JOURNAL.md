@@ -1,5 +1,115 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 2: bending + area + volume forces — vesicle holds, FD-validated (default-off)
+
+Implemented the Stage-2 forces on `Membrane` as kernel-shaped passes (per-face normal/area + signed-volume,
+per-edge length/dihedral → per-vertex curvature/area gather, then per-edge/per-face force scatter into a
+per-vertex accumulator; all geometry in **metres** so forces come out in N with no fudge factor):
+- **Bending** (Jülicher/TriMem): `E = κ·Σ_v 2(c_v/A_v − C̄/2)²·A_v`, force assembled from the edge-length,
+  face-area, and **exact dihedral-angle gradients**.
+- **Area**: `E = (K_A/2)(A−A₀)²/A₀`, force `−K_A(A−A₀)/A₀·∇A`, `∇A_face = ½ n̂×e_opp`.
+- **Volume**: `E = (K_V/2)(V/V₀−v_t)²`, force `−K_V(V/V₀−v_t)/V₀·∇V`, `∇_iV = ⅙(r_j×r_k)`.
+New Env params `dtsKappaArea`/`dtsKappaVolume`/`dtsTargetReducedVol`/`dtsMaxDispFrac`/`dtsBrownianOff`; the
+pre-move loop hook is `Membrane.computeAllForces()` (single-threaded, before the move phase).
+
+**Validation: `DtsForceCheck.java` (committed) finite-difference-checks every analytic force vs −∂E/∂r → 2e-4
+relative (PASS).** The vt=1 vesicle **holds a near-perfect sphere**: E_bend pinned at 8πκ (2.517e-18 J), A/V
+held exactly, and **Fmax decays 8.75e-14 → 1.0e-15 N** (true equilibrium; the icosphere defect residual
+smooths out). vt=0.9 deflates to the target volume and reaches a stable non-spherical shape. Deep deflation
+(vt≤0.6) drives severe buckling that needs self-avoidance + mesh conditioning (§3d tethers / §4 flips) +
+vt-annealing — explicitly later stages.
+
+**Four bugs found and fixed during bring-up** (each via the FD oracle + energy monitoring):
+1. **Hinge gradient.** The cotangent-weighted dihedral-gradient heuristic was structurally wrong (no
+   sign/assignment combo passed FD). Replaced with the **exact normal-derivative form** `∂θ/∂x =
+   s·(−1/sinθ)·∂(n̂₁·n̂₂)/∂x`, `∂(n̂₁·n̂₂)/∂x_i = Σ_f (1/2A_f)(r_f×w_i)` from `∂N/∂x=[w]_×` skew matrices. FD → 2e-4.
+2. **Dihedral sign.** `θ`'s sign must use ê oriented by **face f1's CCW winding**, else the arbitrary
+   edgeVert lo/hi order randomizes the sign and `c_v=¼Σ l·θ` cancels to garbage (live E read 16× too small).
+3. **Force ownership.** The generic node pipeline (chamber-wall collision etc.) left a ~2.7e-10 N spurious
+   force on the vertices that swamped the membrane forces and inflated the surface — even though manual
+   gradient descent with the *same* force was perfectly stable. Fix: **`computeForces` zeroes each vertex's
+   `soaForceSum` then writes only the membrane forces** (it owns the DTS vertex force; Brownian/actin coupling
+   will be added there explicitly). Also `MembraneVertex.step()` overridden empty (no chamber collision).
+4. **Stiffness.** Stiff K_A/K_V + large transients explode under explicit Euler at dt=1e-5; added the
+   `dtsMaxDispFrac` per-step displacement clamp (the §11 open item; DTS analog of `membraneNodeMaxDispFrac`).
+
+Config `ParameterFiles/dtsMembrane2` (needs `-Xmx4G`). All default-off; production paths untouched.
+
+**Protrusion demo (`ParameterFiles/dtsMembranePush`).** A constant outward (+x) force spread over a polar
+cap of vertices (`dtsPushForce`/`dtsPushCapDeg`) pushes a **smooth, coherent pear-shaped bleb** that grows and
+**stalls** when the bending+area+volume reaction balances the push (poleX 1.2 → ~2.2 µm at K_A=0.2, K_V=1e-13,
+push 1.5e-10 N). The bending rigidity keeps it kink-free; the near-inextensible area constraint stalls it
+(soft K_A pulls an unbounded tube instead — the membrane-tether regime). A clean visual of the DTS mechanical
+character. Also added a constant-force **probe** node (`dtsProbeForce`) with point-vs-triangle steric
+(Ericson closest-point) — the surface is continuous (no punch-through), but the free-flying-probe *contact
+dynamics* (sustained push vs bounce) still need work; the push-patch is the reliable demo for now. All knobs
+(`dtsKappaBend/Area/Volume`, `dtsTargetReducedVol`, `dtsMaxDispFrac`, `dtsPushForce/CapDeg`, `dtsProbeForce`)
+are `setMutableAtRuntime()` — compliance is tunable live in the viewer Params panel.
+
+**Bouncers demo (`ParameterFiles/dtsMembraneBouncers`).** `dtsBouncerCount` free nodes of random sizes
+(`dtsBouncerMinR/MaxR`) shoot around inside the shell (`dtsBouncerForce` drive + `dtsBouncerTurnProb` random
+re-aim), ricochet off it, and dent transient bulges — a live demo of membrane **response + relaxation**.
+Steric is a **vertex-based soft spring** (`dtsStericStiffness`): pushing the vertices directly is what bulges
+the surface — the earlier triangle-wall / drag-coupled steric just held the node at the boundary at ~0
+penetration and never bulged (probe `dtsProbeForce` parks for the same reason; the probe needs sustained
+contact work — deferred). Containment uses a **backstop that tracks the LOCAL (bulging) membrane surface**
+(`stericContactMaxR`) so a bouncer can reach+bulge the wall but never push its surface through — fixes small
+bouncers escaping. Verified: rStd~0.03 bulging, worst poke-through 0.001 µm, 0 escapes. **Viewer cleanup:**
+removed the dead legacy **Membrane flatten** / **Surface fit** sliders (they only drove the old StickyNode
+disc membrane; the DTS surface is a real mesh — opacity + DTS surface/wireframe toggles are what apply).
+
+## 2026-06-17 — Membrane v2 DTS: §11 VERIFY resolved — the bending energy is the Jülicher edge form, not the crude dihedral
+
+Before coding Stage-2 energies, resolved the §11 VERIFY items (3 source/literature research agents + a numeric
+test on our own icosphere; `RUN_LOGS/2026-06-17_dts_bending_coefficient.txt`). **Outcome changed the plan:**
+skip the crude `Σ(1−n̂·n̂)` dihedral form the doc tentatively proposed — it is **anisotropic** (sphere ≠
+cylinder, no clean continuum κ; literature splits √3/2 vs 1/√3, and our icosphere measures ~0.30·8π). Use the
+**Jülicher / Itzykson edge-weighted form** that FreeDTS (energy) and TriMem (gradient) both use:
+`E_bend = κ·Σ_v 2c_v²/A_v`, `c_v = ¼Σ_{e∋v} l_e θ_e`, `A_v = ⅓Σ area` (barycentric), `θ_e = acos(n̂_f1·n̂_f2)`.
+
+**Numeric proof** (`DtsDihedralCheck.java`, committed as the Stage-2 regression test): on our actual icosphere
+`Σ_v 2c_v²/A_v → 8π` (continuum 8πκ/κ) — **0.05% at ν=4**, 0.003% at ν=6, textbook h² convergence, exactly
+radius-independent. **κ multiplies directly — no √3/2 fudge.** The crude form stays stuck at ~0.30·8π.
+
+**Source findings.** FreeDTS: shape-operator per-vertex curvature, `A_v` barycentric `(1/3)Σ`, **MC-only / no
+forces**. TriMem: the gradient source — same Jülicher curvature (NOT the Meyer cotangent-Laplacian; that's
+Mem3DG), analytic force from 3 primitive gradients (`∂l/∂r`, `∂A_face/∂r=½n̂×e_opp`, `∂θ/∂r` hinge), transcribed
+into §3a. **Licenses:** FreeDTS GPL-2.0, TriMem + trisurf GPL-3.0 — port the *math* from papers (not
+copyrightable), no verbatim/line-by-line code copy. Design doc §3a rewritten, §11 checkboxes closed.
+
+## 2026-06-17 — Membrane v2 DTS, STAGE 1: icosphere + flat-SoA Membrane object + viewer surface render (all default-off)
+
+First stage of the DTS rebuild (plan in `MEMBRANE_DTS_DESIGN.md` §10). Geometry + data structure +
+render only — **no bending/area/volume forces yet** (those are Stage 2, gated on the §11 VERIFY items).
+
+**Three new classes.** (1) `Icosphere.java` — deterministic icosahedron → ν-subdivision → unit-sphere
+projection; shared-edge midpoint dedup keeps it watertight; emits CCW-outward faces and self-checks via
+positive signed volume. (2) `Membrane.java` — the GPU/ECS-ready **flat-SoA** object (NOT half-edge):
+`faceVert[3nf]`, wing-edges `edgeVert/edgeFace/edgeWing[2ne]`, fixed-width vertex incidence
+`vertEdge[nv·maxVal]`+`vertEdgeCt[nv]`, all derived from the faces; multi-instance via a static
+`theMembranes` registry; readouts (`totalArea`/`enclosedVolume`) read **live** vertex pose. (3)
+`MembraneVertex.java` — a lightweight vertex Thing extending `ProteinNode` (reuses SoA pose / overdamped
+mover / collisions) but **not** `StickyNode`: no sticky-points/NodeLink, structural (no turnover), and
+**PHYSICAL drag** — `calculateProperties` computes γ=6πηr directly, deliberately bypassing the StickyNode
+`membraneNodeDragScale` (the 1e-10 force-scale trap) and the nodeTransDiff overrides. Added a no-myosin
+`ProteinNode(Pt3D,double,boolean)` ctor for it.
+
+**Wiring.** Env params `buildDtsMembrane` (IC flag, default-off), `dtsMembraneSubdiv` (ν, def 4),
+`dtsMembraneRadius` (def 1.0 µm), `dtsVertexRadiusFrac` (def 0.5), `dtsKappaBend` (stored for Stage 2).
+`begin()` calls `Membrane.buildIcosphereMembrane()` when active. `ThreeJSWriter` emits a new `membranes`
+array (flat `vertices` + flat triangle-index `faces`) and **skips** MembraneVertex from `nodes`. Viewer
+(`sim_viewer_boa.html`) builds an indexed `BufferGeometry` (position + `computeVertexNormals`) into a solid
+translucent `Mesh` + a shared-geometry wireframe `Mesh`; toggles **DTS surface** / **DTS wireframe**;
+opacity slider reused.
+
+**Validated** (`ParameterFiles/dtsMembrane1`, ν=4): nv=2562 / nf=5120 / ne=7680, maxVal=6, **Euler V−E+F=2**,
+mesh area/volume **99.9% / 99.8%** of the continuum sphere. Full short run completes; frame JSON has the
+`membranes` array (indices in range) and empty `nodes`. Headless-Chrome screenshot of the real viewer shows
+a smooth shaded translucent sphere in the box — the Stage-1 render payoff. **Note:** ν=4 needs `-Xmx4G`
+(the 26³×binDepth-1000 collision mesh OOMs the default 800M; unrelated to DTS — the static membrane doesn't
+need collisions, a later trim). **Next:** Stage 2 forces, but first resolve §11 VERIFY (FreeDTS curvature
+discretization, the √3/2 dihedral↔κ coefficient).
+
 ## 2026-06-17 — Constant-force PROBE isolates the real bug: membrane node drag scale (membraneNodeDragScale)
 
 To decouple membrane mechanics from the messy actin, added a clean isolation tool: a single plain protein

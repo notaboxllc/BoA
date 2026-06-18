@@ -1,0 +1,44 @@
+<BOA> DTS membrane v2 -- STAGE 2: bending (Julicher) + area + volume forces on the icosphere vesicle.
+<BOA> A closed bilayer with Helfrich bending, harmonic area constraint, and volume constraint. The IC
+<BOA> sphere is a force-balanced equilibrium (uniform curvature, A=A0, V=V0) so it HOLDS; forces decay to
+<BOA> ~0 (true equilibrium). Set dtsTargetReducedVol < 1 to deflate toward a non-spherical (oblate) shape
+<BOA> -- mild deflation (>=0.85) is stable; deep deflation needs self-avoidance + mesh conditioning (later).
+<BOA> No actin. Brownian off (deterministic) for clean relaxation.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:3;         // nu=3 -> 642 vertices / 1280 faces (fast)
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+// --- Stage-2 force moduli (validated stable at dt=1e-5) ---
+dtsKappaBend:true:1.0e-19;        // ~25 kBT bending rigidity (J); E_bend -> 8*pi*kappa on the sphere
+dtsKappaArea:true:0.2;            // area-stretch modulus (N/m), lipid-like
+dtsKappaVolume:true:1.0e-13;      // volume-constraint modulus (J), stiff enough to actually conserve V
+dtsTargetReducedVol:true:1.0;     // 1.0 = hold the IC sphere; <1 deflates (try 0.9 for a stable oblate)
+dtsMaxDispFrac:true:0.1;          // per-step displacement clamp (safety net for stiff transients)
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.05;
+toFileInterval:true:200.0;
+remoteWriteInterval:true:2000.0;
+dtsBrownianOff:true:1.0;          // deterministic relaxation (no thermal noise)
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+// --- actin / motors / bugs / legacy membrane OFF ---
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+ratchetOn:false:0.0;

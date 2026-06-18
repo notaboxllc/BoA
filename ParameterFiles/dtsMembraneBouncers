@@ -1,0 +1,51 @@
+<BOA> DTS membrane v2 -- BOUNCERS DEMO: several nodes of different sizes shoot around inside the bilayer,
+<BOA> ricochet off it (each impact pushes a transient bulge), and randomly change direction. You see both the
+<BOA> membrane's elastic RESPONSE (bulge on impact) and its RELAXATION (the bulge smooths back once the node
+<BOA> leaves). No actin. The bouncers render as grey spheres (different sizes); turn on "DTS wireframe" to see
+<BOA> the surface deform.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;          // nu=4 -> 2562 vertices (smooth surface)
+dtsMembraneRadius:true:1.3;
+dtsVertexRadiusFrac:true:0.5;
+
+// --- membrane mechanics (compliant enough for visible bulges, stiff enough to relax cleanly) ---
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.06;
+dtsKappaVolume:true:1.0e-14;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+
+// --- the bouncers ---
+dtsBouncerCount:true:6;
+dtsBouncerForce:true:4.5e-10;      // drive (sets speed + impact strength)
+dtsBouncerTurnProb:true:0.004;     // random re-aim probability per step
+dtsBouncerMinR:true:0.12;
+dtsBouncerMaxR:true:0.35;
+dtsStericStiffness:true:8.0e-4;    // soft contact spring (node dwells + bulges; backstop prevents escape)
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.25;
+toFileInterval:true:120.0;
+remoteWriteInterval:true:2000.0;
+dtsBrownianOff:true:1.0;
+
+boxXDim:true:6.0;
+boxYDim:true:6.0;
+boxZDim:true:6.0;
+aeta:true:0.1;
+
+// --- actin / motors / bugs / legacy membrane OFF ---
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+ratchetOn:false:0.0;

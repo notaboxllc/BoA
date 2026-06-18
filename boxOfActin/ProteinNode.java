@@ -123,6 +123,23 @@ public class ProteinNode extends Thing {
 		makeMyosinDimers();
 
 	}
+
+	// Lightweight node at a given radius with NO surface myosins. Used by DTS membrane
+	// vertices (MembraneVertex), which reuse the node SoA pose / overdamped mover /
+	// collision machinery but carry no myosin payload. calculateProperties() is virtual,
+	// so a subclass override (e.g. physical-drag) is honoured here.
+	protected ProteinNode (Pt3D initCoord, double radius, boolean makeMyosins) {
+		super(initCoord);
+		addNode(this);
+		this.radius = radius;
+		calculateProperties();
+		pushPoseToSoa();
+		initialize();
+		if (makeMyosins) {
+			makeMyosinSinglets();
+			makeMyosinDimers();
+		}
+	}
 	
 	static class ProteinNodeThreads extends ThreadSet {
 		ProteinNodeThreads () {
@@ -255,6 +272,15 @@ public class ProteinNode extends Thing {
 		if (this instanceof StickyNode && Env.membraneNodeMaxDispFrac.getValue() > 0) {
 			double dt = Env.deltaT.getValue();
 			double maxDisp = Env.membraneNodeMaxDispFrac.getValue() * Env.membraneNodeRadius.getValue();
+			double disp = Pt3D.vecMag(veloc) * dt;
+			if (disp > maxDisp && disp > 0) { veloc.scale(maxDisp/disp, veloc); }
+		}
+		// DTS membrane vertex clamp: same safety net, keyed off the vertex's own radius. Lets stiff
+		// area/volume constraints (and large transients, e.g. a reduced-volume target mismatch) relax
+		// gradually under explicit Euler instead of taking one huge step and exploding.
+		if (this instanceof MembraneVertex && Env.dtsMaxDispFrac.getValue() > 0) {
+			double dt = Env.deltaT.getValue();
+			double maxDisp = Env.dtsMaxDispFrac.getValue() * getRadius();
 			double disp = Pt3D.vecMag(veloc) * dt;
 			if (disp > maxDisp && disp > 0) { veloc.scale(maxDisp/disp, veloc); }
 		}

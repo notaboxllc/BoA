@@ -1476,6 +1476,9 @@ public class BoxOfActin {
 				// Vesicle membrane: compute the volume-pressure force once (single-threaded) before the
 				// multi-threaded move phase integrates it (the relaxation passes refresh it themselves).
 				if (Env.membraneVesicle.getValue() > 0.5) StickyNode.computeVesiclePressure();
+				// DTS membrane v2: accumulate bending + area + volume forces (Newtons) into the vertex
+				// soaForceSum, single-threaded, before the move phase integrates them. No-op if no Membrane.
+				if (!Membrane.theMembranes.isEmpty()) Membrane.computeAllForces();
 				moveTimer.start();
 				if (Env.useGPU) {
 					// Iteration 2b: unified Thing.moveThing() kernel. The GPU path
@@ -3272,6 +3275,13 @@ public class BoxOfActin {
 				StickyNode.makeSphereOfNodes();
 				StickyNode.markHotPatches(Env.sphereHotPatches.getIntValue(), Env.sphereHotPatchDeg.getValue());
 				StickyNode.createMembraneProbe();   // constant-force isolation probe (no-op unless membraneProbeForce>0)
+			}
+
+			if (Env.buildDtsMembrane.isActive()) {
+				if (Env.dtsBrownianOff.isActive()) Env.nodeBrownianMotionOff = true;   // deterministic relaxation
+				Membrane.buildIcosphereMembrane();   // v2 DTS membrane (icosphere, flat SoA)
+				Membrane.createDtsProbe();           // optional constant-force probe (no-op unless dtsProbeForce>0)
+				Membrane.createDtsBouncers();        // optional bouncing nodes (no-op unless dtsBouncerCount>0)
 			}
 
 			if (Env.buildBranchedFils.isActive()) {

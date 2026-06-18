@@ -694,9 +694,9 @@
   <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
   <label><span class="pLabel">Membrane links</span>  <input id="chkMembraneLinks" type="checkbox"></label>
+  <label><span class="pLabel">DTS surface</span>     <input id="chkDtsSurface" type="checkbox" checked></label>
+  <label><span class="pLabel">DTS wireframe</span>   <input id="chkDtsWire"    type="checkbox"></label>
   <label><span class="pLabel">Membrane opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
-  <label><span class="pLabel">Membrane flatten</span><input id="sMembFlatten" type="range" min="0.05" max="1" step="0.05" value="0.30"><span class="pVal" id="vMembFlatten">0.30</span></label>
-  <label><span class="pLabel">Surface fit</span><input id="sMembFit" type="range" min="0" max="1.5" step="0.05" value="1.0"><span class="pVal" id="vMembFit">1.00</span></label>
 </div>
 
 <button id="renderToggle">Render ▶</button>
@@ -901,6 +901,63 @@ membraneLinkMesh.frustumCulled = false;
 membraneLinkMesh.visible = showMembraneLinks;
 membraneLinkGeo.setDrawRange(0, 0);
 scene.add(membraneLinkMesh);
+
+// DTS membrane (v2 dynamically-triangulated surface). The sim sends a triangulated
+// mesh directly (vertices + faces) in the frame's "membranes" array, so the viewer just
+// uploads it into a BufferGeometry — no normal-inference / disc-flattening heuristics
+// (those are the legacy StickyNode membrane above). A solid translucent Mesh plus a
+// wireframe Mesh share one geometry; the two checkboxes toggle their visibility.
+// For now a single membrane object is rendered (theMembranes[0]); multi-instance is a
+// straightforward extension (one geometry per object).
+let showDtsSurface = true, showDtsWire = false;
+const dtsGeo = new THREE.BufferGeometry();
+let dtsPosArr = null, dtsVertCap = 0;
+const dtsSurfaceMesh = new THREE.Mesh(dtsGeo,
+  new THREE.MeshPhongMaterial({ color: 0x55bbdd, transparent: true, opacity: membraneOpacity,
+    side: THREE.DoubleSide, depthWrite: false, flatShading: false }));
+dtsSurfaceMesh.frustumCulled = false;
+dtsSurfaceMesh.renderOrder = 2;
+dtsSurfaceMesh.visible = false;
+scene.add(dtsSurfaceMesh);
+const dtsWireMesh = new THREE.Mesh(dtsGeo,
+  new THREE.MeshBasicMaterial({ color: 0x113344, wireframe: true, transparent: true, opacity: 0.5 }));
+dtsWireMesh.frustumCulled = false;
+dtsWireMesh.renderOrder = 3;
+dtsWireMesh.visible = false;
+scene.add(dtsWireMesh);
+
+// Build/update the DTS surface geometry from the frame's "membranes" array.
+function updateDtsMembranes(membranes) {
+  const hasData = Array.isArray(membranes) && membranes.length > 0
+                  && membranes[0].vertices && membranes[0].vertices.length > 0;
+  if (!hasData) { dtsSurfaceMesh.visible = false; dtsWireMesh.visible = false; return; }
+  const mem = membranes[0];                       // single-membrane render (Stage 1)
+  const verts = mem.vertices, faces = mem.faces;  // faces is a FLAT index array [a,b,c,...]
+  const nv = verts.length;
+
+  if (dtsVertCap < nv) {                           // (re)allocate position buffer if needed
+    dtsVertCap = nv;
+    dtsPosArr = new Float32Array(nv * 3);
+    dtsGeo.setAttribute('position', new THREE.BufferAttribute(dtsPosArr, 3));
+  }
+  for (let i = 0; i < nv; i++) {
+    const v = verts[i];
+    dtsPosArr[3 * i] = v[0]; dtsPosArr[3 * i + 1] = v[1]; dtsPosArr[3 * i + 2] = v[2];
+  }
+  dtsGeo.getAttribute('position').needsUpdate = true;
+
+  // Index (topology) only changes on a rebuild; upload when absent or size-changed.
+  const idx = dtsGeo.getIndex();
+  if (!idx || idx.count !== faces.length) {
+    dtsGeo.setIndex(new THREE.BufferAttribute(new Uint32Array(faces), 1));
+  }
+  dtsGeo.setDrawRange(0, faces.length);
+  dtsGeo.computeVertexNormals();
+  dtsGeo.computeBoundingSphere();
+
+  dtsSurfaceMesh.visible = showDtsSurface;
+  dtsWireMesh.visible = showDtsWire;
+}
 
 const motorColors = {
   'NONE':  new THREE.Color(0x4444ff),
@@ -1378,6 +1435,7 @@ function applyFrameData(data) {
 
   updateMyosinData(data.myosins, data.minifilaments, data.nodes);
   updateMembraneSurface(data.nodes, data.membraneLinks);
+  updateDtsMembranes(data.membranes);
   updateAxisLines(data.segments);
   updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
@@ -2104,20 +2162,19 @@ document.getElementById('chkMembraneLinks').addEventListener('change', e => {
   showMembraneLinks = e.target.checked;
   membraneLinkMesh.visible = showMembraneLinks;
 });
+document.getElementById('chkDtsSurface').addEventListener('change', e => {
+  showDtsSurface = e.target.checked;
+  if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
+});
+document.getElementById('chkDtsWire').addEventListener('change', e => {
+  showDtsWire = e.target.checked;
+  if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
+});
 document.getElementById('sMembOpacity').addEventListener('input', e => {
   membraneOpacity = Number(e.target.value);
   membraneMesh.material.opacity = membraneOpacity;
+  dtsSurfaceMesh.material.opacity = membraneOpacity;
   document.getElementById('vMembOpacity').textContent = membraneOpacity.toFixed(2);
-});
-document.getElementById('sMembFlatten').addEventListener('input', e => {
-  membraneFlatten = Number(e.target.value);
-  document.getElementById('vMembFlatten').textContent = membraneFlatten.toFixed(2);
-  if (currentFrameData) updateMembraneSurface(currentFrameData.nodes, currentFrameData.membraneLinks);
-});
-document.getElementById('sMembFit').addEventListener('input', e => {
-  membraneSurfaceFit = Number(e.target.value);
-  document.getElementById('vMembFit').textContent = membraneSurfaceFit.toFixed(2);
-  if (currentFrameData) updateMembraneSurface(currentFrameData.nodes, currentFrameData.membraneLinks);
 });
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {
   showBarbedEnds = e.target.checked;
