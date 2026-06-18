@@ -514,6 +514,71 @@ public final class Membrane {
         out[3]=wa; out[4]=wb; out[5]=wc;
     }
 
+    /**
+     * Steric collision of a thin SEGMENT (capsule: endpoints p1,p2, radius {@code rad}) against the closed
+     * membrane — the actin-filament containment / push primitive (reused by real FilSegments in Stage 3).
+     *
+     * The OLD membrane collided only the barbed TIP against triangles, so a filament BODY could leak through
+     * in oblique/tangential orientations. Here we sample the whole segment and do one-sided point-vs-triangle
+     * at each sample over the CONTINUOUS triangulated surface — the triangle faces tile the surface with no
+     * gaps (unlike vertex-spheres, which leave face-center gaps a thin rod slips through). Each sample within
+     * the collision envelope of its nearest face is pushed back inward (the membrane is pushed outward,
+     * reaction distributed to the face's 3 vertices); the reaction on the segment is split to p1/p2 by the
+     * sample's parameter and returned in {@code reac1}/{@code reac2} (N). Drag-coupled magnitude (stiff — a
+     * containing wall), the same form the old tip-vs-triangle used.
+     *
+     * Returns the MAX signed distance of any sample past its nearest triangle (along the outward normal):
+     * &lt;= 0 means every sample is inside (contained); &gt; rad means a sample has clearly leaked out.
+     */
+    public double segmentVsMembrane(double p1x, double p1y, double p1z, double p2x, double p2y, double p2z,
+                             double rad, double gSeg, double[] reac1, double[] reac2) {
+        double ex = p2x-p1x, ey = p2y-p1y, ez = p2z-p1z;
+        double sLen = Math.sqrt(ex*ex + ey*ey + ez*ez);
+        int K = Math.max(2, (int)Math.ceil(sLen / (0.4*l0)) + 1);   // sample finer than the triangle size
+        double cdt = Env.collisionDeltaT.getValue();
+        double contact = rad + vertexRadius;
+        double maxLeak = -1e30;
+        reac1[0]=reac1[1]=reac1[2]=0; reac2[0]=reac2[1]=reac2[2]=0;
+        double[] cp = new double[6];
+        for (int k = 0; k < K; k++) {
+            double t = (K <= 1) ? 0.0 : (double)k/(K-1);
+            double sx = p1x + t*ex, sy = p1y + t*ey, sz = p1z + t*ez;
+            // nearest triangle to this sample (continuous surface — no gaps)
+            int bestF = -1; double bestD2 = 1e30, bcx=0,bcy=0,bcz=0,bwa=0,bwb=0,bwc=0;
+            for (int f = 0; f < nf; f++) {
+                closestPtTri(sx, sy, sz, faceVert[3*f], faceVert[3*f+1], faceVert[3*f+2], cp);
+                double dx = sx-cp[0], dy = sy-cp[1], dz = sz-cp[2];
+                double d2 = dx*dx + dy*dy + dz*dz;
+                if (d2 < bestD2) { bestD2=d2; bestF=f; bcx=cp[0];bcy=cp[1];bcz=cp[2]; bwa=cp[3];bwb=cp[4];bwc=cp[5]; }
+            }
+            if (bestF < 0) continue;
+            double nx = fNx[bestF], ny = fNy[bestF], nz = fNz[bestF];
+            double signed = (sx-bcx)*nx + (sy-bcy)*ny + (sz-bcz)*nz;   // >0 = sample outside the surface
+            if (signed > maxLeak) maxLeak = signed;
+            if (signed > -contact) {                                   // within the collision envelope (or crossed)
+                double pen = signed + contact;                         // >0
+                int a = faceVert[3*bestF], b = faceVert[3*bestF+1], c = faceVert[3*bestF+2];
+                double gv = vert[a].bTransGam.x;
+                double mag = (1.0e-6 * pen / cdt) / (1.0/gSeg + 1.0/gv);   // drag-coupled engagement (stiff), N
+                // HARD RECOVERY: any sample that has crossed to the OUTSIDE (signed>0) gets a stiff inward
+                // spring on top, so it is yanked back in within a step or two -- guarantees containment even
+                // under a strong outward drive (the soft term alone equilibrates just past the surface).
+                if (signed > 0) mag += Env.dtsStericRecover.getValue() * signed * 1.0e-6;
+                double fx = -mag*nx, fy = -mag*ny, fz = -mag*nz;       // push sample INWARD (-n̂)
+                reac1[0]+=(1-t)*fx; reac1[1]+=(1-t)*fy; reac1[2]+=(1-t)*fz;
+                reac2[0]+=t*fx;     reac2[1]+=t*fy;     reac2[2]+=t*fz;
+                vert[a].incForceSumSlot(mag*nx*bwa, mag*ny*bwa, mag*nz*bwa);   // push membrane OUTWARD (+n̂),
+                vert[b].incForceSumSlot(mag*nx*bwb, mag*ny*bwb, mag*nz*bwb);   // distributed by closest-point
+                vert[c].incForceSumSlot(mag*nx*bwc, mag*ny*bwc, mag*nz*bwc);   // barycentric weights
+            }
+        }
+        return maxLeak;
+    }
+
+    /** Refresh the per-face geometry (normals/areas) the steric reads — call before segmentVsMembrane when
+     *  the membrane is held rigid (computeForces is otherwise the one to populate the per-face arrays). */
+    public void refreshFaceGeometry() { computeGeometryAndEnergy(); }
+
     // Max vertex radius in the +x hemisphere (a crude bulge-extent readout).
     private double maxRadiusAlongX() {
         double m = 0;

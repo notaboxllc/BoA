@@ -553,6 +553,9 @@ public class Env {
 		.setDescription("Smallest bouncer radius (each bouncer gets a random radius in [min,max] -- nodes of different sizes).");
 	static final Parameter dtsBouncerMaxR = new Parameter("dtsBouncerMaxR"," DTS bouncer max radius", 0.35, "microns")
 		.setDescription("Largest bouncer radius. Bigger bouncers contact more triangles and push broader bulges.");
+	static final Parameter dtsStericRecover = new Parameter("dtsStericRecover"," DTS filament steric hard-recovery stiffness", 0.2, "N/m")
+		.setMutableAtRuntime()
+		.setDescription("Stiff inward spring applied to any actin/filament sample that has crossed to the OUTSIDE of the membrane (one-sided), yanking it back in. Guarantees containment of thin filaments under strong outward drive, on top of the soft drag-coupled engagement. Only fires on a crossed sample.");
 	static final Parameter dtsStericStiffness = new Parameter("dtsStericStiffness"," DTS probe/bouncer steric spring stiffness", 8.0e-4, "N/m per face")
 		.setMutableAtRuntime()
 		.setDescription("Stiffness of the soft penetration spring between a probe/bouncer node and each contacting membrane face. Soft enough that the node DWELLS in contact and transmits a sustained push (so the membrane bulges) rather than being ejected in one step. Too stiff (> ~gamma/dt summed over contacts) -> bouncy rigid wall, no bulge; too soft -> the node sinks through. ~8e-4 works for vertexRadius~0.05 um at dt=1e-5.");

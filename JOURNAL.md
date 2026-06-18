@@ -1,5 +1,24 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 3 prep: thin-filament containment (segment-vs-triangle) — PASS
+
+Before wiring real actin, de-risked the collision: can the DTS membrane contain a THIN rigid rod (actin
+filament, r=3.5 nm) driven against it in ALL orientations? The OLD membrane collided only the barbed TIP
+vs triangles (the body could leak in oblique/tangential cases). New `Membrane.segmentVsMembrane(p1,p2,rad,…)`
+**samples the whole segment** and does one-sided point-vs-triangle at each sample over the CONTINUOUS surface
+(the triangle faces tile with no gaps — unlike vertex-spheres, which leave face-center gaps a thin rod slips
+through). Stiff drag-coupled engagement + a **hard-recovery** spring (`dtsStericRecover`) that yanks back any
+sample that crosses to the outside. Reusable by real FilSegments in Stage 3.
+
+`DtsFilamentContainmentCheck.java` (committed) sweeps 24 directions × {radial, 45° oblique, 90° tangential},
+driving each rod hard against a **held-rigid** membrane (the strictest test) and measuring the worst leak
+(any sample past the surface). **Result: PASS in all orientations** at realistic (5e-12 N ≈ few-pN stall),
+strong (5e-11, 10×), and extreme (2e-10, ~40×) drive, ν=3 and ν=4: tip held ~0.04–0.09 µm *inside*, no
+escape. (The hard cases — oblique/tangential, where tip-only would leak — are exactly the ones the
+segment-vs-triangle handles.) Actin coupling (Arp diffusion + formin nucleation) is the next step; the
+explorer's mapping of the old per-node mechanisms (`arpLocal` Jacobi diffusion over the link graph,
+depletable `forminLocal` pool, hot-Rho patches) ports onto DTS vertices + the wing-edge graph.
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 2: bending + area + volume forces — vesicle holds, FD-validated (default-off)
 
 Implemented the Stage-2 forces on `Membrane` as kernel-shaped passes (per-face normal/area + signed-volume,
