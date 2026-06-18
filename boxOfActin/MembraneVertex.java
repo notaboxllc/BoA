@@ -53,6 +53,20 @@ public final class MembraneVertex extends ProteinNode {
         pushDragToSoa();
     }
 
+    /** Point a formin "standoff" distance INSIDE this vertex, along the outward radial (vertex from
+     *  membrane centre). This is where a formin (or formin complex with accessory proteins) holds the
+     *  barbed end -- a small distance off the membrane -- so the formin-membrane tether's rest position
+     *  agrees with where the steric collision keeps the filament (just inside the surface). Targeting
+     *  this point instead of the vertex itself removes the tether-vs-collision battle that otherwise
+     *  craters the cortex. Writes the target into {@code out} (microns). */
+    public void forminStandoffTarget(Pt3D out, double standoff) {
+        double ox = getCoordX()-owner.center.x, oy = getCoordY()-owner.center.y, oz = getCoordZ()-owner.center.z;
+        double l = Math.sqrt(ox*ox+oy*oy+oz*oz);
+        if (l < 1e-12) { out.setVals(getCoordX(), getCoordY(), getCoordZ()); return; }
+        double s = standoff / l;
+        out.setVals(getCoordX()-ox*s, getCoordY()-oy*s, getCoordZ()-oz*s);
+    }
+
     /** Structural: DTS vertices never undergo stochastic node turnover. Topology changes
      *  (split / collapse / flip) are explicit, later-stage operations. */
     @Override

@@ -1,5 +1,129 @@
 # BoxOfActin Project Journal
 
+## 2026-06-18 — STATE OF PLAY (commit / rollback point): formin-membrane bond + isolated dendritic anti-spin
+
+Snapshot before a planned "compare to biological reality" survey. Two threads landed this session; this entry
+is the index. **IMPORTANT CAVEAT: the Arp2/3-branched ("dendritic") actin has NOT been tested WITH the
+membrane yet.** The membrane formin BOND (single held mother) is validated against the membrane; the
+branching network and its anti-spin tuning are validated only IN ISOLATION (free space, no membrane). Wiring
+branching into the membrane (`dtsMembraneForminBranch`) compiles and runs but its membrane behavior is
+unverified — expect to revisit the stall-force push, the bending 1/sinθ blow-up, and bond/branch interaction.
+
+**Thread A — formin–membrane bond (validated vs membrane).** A formin mother held by its BARBED end at the
+DTS cortex. Key fix: hold the barbed end a STANDOFF distance OFF the membrane (`dtsForminStandoff`, 0.05 µm)
+so the tether's rest position agrees with the steric collision → no tether-vs-collision battle → the cortex
+stays smooth (rStd 0.012→0.0006, E_bend pinned at 8πκ). Also: `forminBarbedBrownianFactor` (20× thermal damp
+on held mothers), `dtsAnchorForceMax` (tunable bond cap), `forminRelease:0` to stop mothers detaching and
+flying. Daughters inherit the mother's damping (`FilSegment.heldBrownFactor`). Config
+`ParameterFiles/dtsMembraneForminBond`. Detail in the entries below.
+
+**Thread B — isolated dendritic network, no spin (validated in FREE SPACE only).** Reproduced the old
+`iso_on_11` free-space dendritic growth (`buildBranchedFils:true`, no membrane → `makeTestBranchedFilament`).
+The branched-network SPIN (coherent rotation even with Brownian off) is killed by the **daughter rotational
+drag floor** `filDragMinMonomers:200` (over-damps daughter rotation, drag~L³) + `arpTransFracMove:1.0`
+(critically damped, not the overshooting 2.0) + Arp junction sub-cycling. Verified by eye + Kabsch:
+Brownian-off net rotation 48°→**~5°**. Config `ParameterFiles/isoBranch` (sparse/long: branchRate 0.4,
+biochemDeltaT 5e-4, runTime 1.0 → ~300–500 filaments). NOTE on tuning: branch density = `branchRateNearArpFactors·arpConc`
+(exponentially amplified — small rate changes swing the count a lot); elongation/length = lower `biochemDeltaT`.
+
+**Tip Brownian — diagnosed, left as-is (physical).** Growing barbed-tip segments visibly fluctuate more than
+interior segments. Cause (data-backed: Brownian-off → tips static): tip segments compute their OWN
+FDT-correct thermal, while interior/branch-point segments are over-damped by the mother-Brownian-sharing.
+Decision: LEAVE it — fluctuating barbed tips are physically correct and are exactly what drives the
+Mogilner–Oster ratchet at a membrane (relevant once branching meets the membrane).
+
+**Tried and REVERTED (do not reapply blindly):** an `inArpNetwork` flag to extend the drag floor to grown/
+split segments, and a "hub fix" to also floor branch hubs/the root. The hub fix **reintroduced visible spin**
+(flooring a junction mother raises the Arp constraint stiffness via the mobility term → overshoot). Both
+removed; code is back to the `filDragMinMonomers`-only drag-floor state. (The tip motion was Brownian, not the
+grown-segment drag — so these didn't help anyway.)
+
+**New runtime params this session:** `dtsForminStandoff`, `dtsAnchorForceMax`, `dtsActinPushMax` (stall-force
+cap on the actin→membrane protrusion push), `forminBarbedBrownianFactor`, `arpDaughterBrownianFactor`
+(default 1.0 = off; daughter Brownian now also respects global BTransCoeff/BRotCoeff, so =0 turns Brownian
+fully off for a junction-only spin test). New configs: `dtsMembraneForminBond`, `dtsMembraneForminBranch`
+(membrane+branching, UNVERIFIED), `isoBranch`. Run logs in `RUN_LOGS/2026-06-18_*` (not committed).
+
+## 2026-06-18 — Barbed-held formin mother Brownian damping + discovered a pre-existing DTS bending blow-up
+
+Added `forminBarbedBrownianFactor` (default 0.05 = 20× down, runtime-mutable): a formin mother held at the
+**barbed** end (Stage-3e `dtsForminGrowOut`, `nodeAtEnd2`) now gets its thermal forcing damped, the same way
+the pointed-end hold (`nodeAtEnd1`) already used `arpHeldBrownianFactor` (0.02). One line in
+`FilSegment.moveThing` (`heldBrown = min(..., forminBarbedBrownianFactor)` when `forminMother && nodeAtEnd2`).
+Motivation: the barbed-held mothers were getting a **full free-filament kick**, twisting and convoluting the
+membrane through the two-sided formin–membrane anchor spring. With damping the attached filaments are visibly
+calmer.
+
+**Follow-on 4 — "mother + daughter fly apart as soon as a branch forms": daughter must inherit the mother's
+Brownian damping.** Root cause in `FilSegment.moveThing` daughter branch: an Arp2/3 daughter rides
+`motherFil.randForcesInX`, which is the mother's UNDAMPED random force (stored in `calcRandomForces` BEFORE
+the `heldBrown` factor is applied), scaled only by the drag ratio — so a daughter of a held/damped formin
+mother got ~full thermal (~20× the mother's 0.05) and the critically-damped Arp junction flung both. (The old
+lamSphereProtrusion runs calmed daughters via `cortexBrownianZone/Factor`, but that gate is `StickyNode.
+sphericalGeometry`-only and does nothing for DTS `MembraneVertex`.) Fix: factored the damping into
+`FilSegment.heldBrownFactor()` and the daughter branch now multiplies by `motherFil.heldBrownFactor()` — a
+branch inherits its mother's damping (1.0 for a free mother → no change elsewhere). Result
+(`dts_branch_damped`, 8000 steps): filament motion 17.2→**9.9 nm/frame**, max filament radius **1.184**
+(contained, best of all variants), |F|max ~2e-12, E_bend 8πκ, 21 fils/15 branches bounded. NOTE: sub-cycling
+the Arp junction (`arpSubcycleN>1`, the old trick) is the WRONG lever here — `Arp23.subcycleAll` freezes the
+soft forces incl. the DTS membrane steric, so daughters escape THROUGH the cortex (max radius 1.32). Left
+`arpSubcycleN:1` in `ParameterFiles/dtsMembraneForminBranch`.
+
+**Follow-on 3 — Arp2/3 branching back ON without re-convoluting: stall-force-capped daughter push.** Risk:
+a growing Arp daughter shoves the cortex via the steric collision, capped at 2e-10 N (~200 pN) ≈ 40× the
+actin polymerization stall force — far stiffer than a real filament, so it would chatter/convolute and risk
+the 1/sinθ blow-up. Fix: split the steric cap by regime in `segmentVsMembrane`. PROTRUSION (sample inside,
+pressing out) caps at the STALL force `dtsActinPushMax` (default 5e-12 N ~5 pN) — a daughter pushes only as
+hard as it can before stalling, and the Mogilner-Oster ratchet throttles growth as the gap closes (gentle,
+self-limiting). CONTAINMENT (sample crossed outside) keeps the stiff hard-recovery + 2e-10 cap (safety). The
+push is already face-distributed (barycentric), so it's not a point load. New config
+`ParameterFiles/dtsMembraneForminBranch` (built on the bond config, `dtsBranchOn:true`, rate 20, ONE hot
+patch). Result (`dts_formin_branch`, 8000 steps clean): 6 mothers + 10 branches (16 fils, bounded, far from
+the 400 cap), |F|max peaks ~2e-11 and settles ~7e-12 N (NO blow-up), rStd 0.0024 (5× smoother than the old
+at-surface mother bond's 0.012) with rMax 1.236 = a real GENTLE protrusion where the branched tuft pushes out.
+Note `nodeTorqSpring` (the formin bond's torsional alignment spring, 1e-18 N/rad) is on but currently aligns
+to the vertex's arbitrary body frame — harmless now, flagged to retarget to the membrane normal when used
+meaningfully.
+
+**Follow-on 2 — membrane convolution was the tether/collision BATTLE, fixed by a formin STANDOFF.** The held
+mothers were cratering the cortex (rStd 0.012, dimples to r=0.97, ~26 deformed verts). Ruled out causes by
+controls: Brownian damping works and is NOT it (thermal fully off ≈ damped, both ~1e-10 N vertex force);
+growth is NOT it (static actinConc=0 ≈ growth); the membrane ALONE is a flawless sphere (rStd 4e-5). The
+cause: the tether targeted the vertex (the surface) while the steric collision pushed the filament INSIDE —
+the bond springs craters the vertex chasing the pushed-in barbed end. Fix (user's insight): a formin holds
+the barbed end a small distance OFF the membrane. New `dtsForminStandoff` (µm, default 0.05): the
+collideActin anchor AND the addNodeForces tether both target a point `standoff` inside the vertex along the
+outward radial (`MembraneVertex.forminStandoffTarget`), and `forminStep` seeds the barbed end there. Tether
+rest-position now agrees with the collision → ~zero net reaction on the vertex. Result (`dts_bond_standoff`):
+rStd 0.012→**0.00058** (~21× smoother, ≈ the no-filament control), 0 deformed verts, no crater, E_bend pinned
+at 8πκ, |F|max decays to ~1.4e-12 N; 6 mothers held throughout. Also added `dtsAnchorForceMax` (tunable
+anchor cap, was hardcoded 1e-10). Note: stiffer membrane / anchor-off / less steric did NOT help (anchor-off
+was far worse — filaments spike the cortex out to r=1.65, so the anchor is containing).
+
+**Follow-on — formin-membrane BOND focus config (`ParameterFiles/dtsMembraneForminBond`).** Symptom: "a bunch
+of small filaments flying around." Cause: `Env.forminRelease` (default **1 /s, active by default**) — every
+barbed-end biochem step `forminCanHold()` detaches a mother with prob `forminRelease·biochemDeltaT`
+(force-modulated, ~exp down under compression). On release `nodeAtEnd2→false`, so the mother loses BOTH the
+membrane bond and the barbed-held Brownian damping → it becomes a free filament with full thermal forcing and
+flies. Arp branching (`dtsBranchOn`) compounds it with shed daughters. New config turns `forminRelease:0`,
+`dtsBranchOn:false`, ONE small hot patch (`dtsArpHotPatches:1`, `dtsArpHotPatchDeg:6` → ~6 hot verts) with
+`dtsForminNucRate:200` (pool=1/vert caps it at ~6 mothers). Result: 5–6 mothers, all held at the cortex, NONE
+flying; and with so few gentle filaments + no branching the bending blow-up never triggers (`|F|max` ≤ 3.9e-10 N
+through all 8000 steps — clean end-to-end). 3js: `~/Code/threejs_output/dts_formin_bond2` (69 frames).
+
+**Discovered (not caused by the change): a pre-existing DTS bending instability.** On
+`ParameterFiles/dtsMembraneDendritic`, `[DTS-E] |F|max` jumps from ~1e-10 N to ~1e+128 N mid-run (3 runs:
+step 7000 damped, 6000 damped-rerun, **4500 baseline/factor=1.0** — i.e. the pre-change behavior blows up
+*earliest*; the damping delays it). Root cause: the exact dihedral gradient `±(-1/sinT)` in `Membrane.java`
+(~:1090) with `sinT` floored at `sqrt(1e-300)` — when actin pushes a vertex into a near-degenerate triangle
+(`dot→±1`), `1/sinT`→~1e150. Bounded only by the `dtsMaxDispFrac` move-clamp, so frame geometry stays finite
+(no NaN/huge coords, A/V near nominal) — the journal's clean 20000-step Stage-3e run was a lucky seed
+(`Env.mtRNG` seeds off `Math.random()`). **Fix deferred (touches FD-validated force code):** clamp `sinT` to a
+small floor angle and/or cap the assembled per-vertex membrane force like the actin caps; real fix = mesh
+conditioning (edge flips / tethers). Logs: `RUN_LOGS/2026-06-18_formin_brownian20x.log`,
+`_dts_baseline.log`, `_dts_damped_rerun.log`. 3js: `~/Code/threejs_output/dts_formin_brownian20x` (clean to
+~frame 57).
+
 ## 2026-06-18 — Membrane v2 DTS, STAGE 3e: FORMIN holds the BARBED end at the cortex (filopodial push)
 
 Restored the explicit formin-at-the-barbed-end model (the open item from 3d). Formin is a processive

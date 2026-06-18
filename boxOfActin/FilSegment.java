@@ -108,6 +108,7 @@ public class FilSegment extends Thing {
 	Pt3D R = new Pt3D();
 	Pt3D RcrossF = new Pt3D();
 	Pt3D toPlasmidUVec = new Pt3D();
+	Pt3D forminStandoffTmp = new Pt3D();   // scratch: standoff target for the formin-membrane tether
 	Pt3D torsionVec = new Pt3D();
 	
 	// for filament distribution
@@ -639,6 +640,10 @@ public class FilSegment extends Thing {
 				// structurally anchored, not free -- dial its thermal forcing way down so the tiny nascent
 				// seed doesn't get a full free-filament kick that destabilizes its stiff pointed-end tether.
 				double heldBrown = ((childOfArp23 || forminMother) && nodeAtEnd1) ? Env.arpHeldBrownianFactor.getValue() : 1.0;
+				// Stage-3e: a formin mother held by its BARBED end at the DTS cortex (nodeAtEnd2) is processively
+				// bound to the membrane, not free. Without damping, its full free-filament thermal kick twists the
+				// filament and convolutes the membrane through the formin-membrane anchor spring. Dial it down 20x.
+				if (forminMother && nodeAtEnd2) { heldBrown = Math.min(heldBrown, Env.forminBarbedBrownianFactor.getValue()); }
 				// Crowded cortical shell: damp Brownian for any filament pressed against the cortex (NOT just
 				// the held mothers) — otherwise a large filament freed by debranching gets a full free-filament
 				// kick and smashes into the membrane nodes. Spatial gate on the center's radius near the inner
@@ -670,14 +675,22 @@ public class FilSegment extends Thing {
 				}
 			} else {  // use mother filaments thermal forces if I'm an Arp2/3 branch
 				try {
+					// Inherit the MOTHER's damping: motherFil.randForcesInX is the mother's UNDAMPED force
+					// (stored before heldBrown is applied), so a branch off a held/damped mother must apply the
+					// mother's factor too -- otherwise the daughter rides full thermal (~20x the held mother)
+					// and the stiff Arp junction flings both. (1.0 for a free mother -> no change.)
+					// Daughter damping = mother's inherited held-factor x a per-daughter factor x the GLOBAL
+					// Brownian coefficient (BTransCoeff/BRotCoeff). The last term means BTransCoeff=BRotCoeff=0
+					// turns Brownian fully off for daughters too (clean junction-only spin test).
+					double daughterDamp = motherFil.heldBrownFactor()*Env.arpDaughterBrownianFactor.getValue();
 					// trans
 					randForces.XTox(this,motherFil.randForcesInX);			// and finally back to body-fixed for this filament
-					transScale = Math.min(1,(bTransGam.y/motherFil.bTransGam.y)); // ratio of translation drag coeff, but not greater than 1
+					transScale = Env.BTransCoeff.getValue()*daughterDamp*Math.min(1,(bTransGam.y/motherFil.bTransGam.y)); // ratio of translation drag coeff, but not greater than 1
 					if (actAOn) { transScale *= Env.actATetherTransAttn.getValue(); }
 					bForceSum.inc(transScale,randForces); // scale brownian forces copied from mother filament
 					// rot
 					randTorques.XTox(this,motherFil.randTorquesInX);
-					rotScale = Math.min(1,(bRotGam.y/motherFil.bRotGam.y));  // ratio or rotational drag coeff but not greater than 1
+					rotScale = Env.BRotCoeff.getValue()*daughterDamp*Math.min(1,(bRotGam.y/motherFil.bRotGam.y));  // ratio or rotational drag coeff but not greater than 1
 					if (actAOn) { rotScale *= Env.actATetherRotAttn.getValue(); }
 					bTorqueSum.inc(rotScale,motherFil.randTorques); // scale brownian torques copied from mother filament
 				} catch (NullPointerException npe) {
@@ -725,7 +738,22 @@ public class FilSegment extends Thing {
 			randTorques.zero();
 		}
 	}
-	
+
+	/** Brownian-force damping factor for this filament (1.0 = free). Mirrors the inline logic in moveThing's
+	 *  mother branch, factored out so an Arp2/3 DAUGHTER can inherit its MOTHER's damping: a branch off a
+	 *  held/damped mother rides the mother's (undamped) randForcesInX, so without applying the mother's factor
+	 *  the daughter gets ~full thermal (~20x the held mother) and the stiff junction flings both. */
+	double heldBrownFactor () {
+		double hb = ((childOfArp23 || forminMother) && nodeAtEnd1) ? Env.arpHeldBrownianFactor.getValue() : 1.0;
+		if (forminMother && nodeAtEnd2) { hb = Math.min(hb, Env.forminBarbedBrownianFactor.getValue()); }
+		if (StickyNode.sphericalGeometry && Env.cortexBrownianZone.getValue() > 0) {
+			double inner = Env.membraneCellRadius.getValue() - (Env.membraneNodeRadius.getValue() + Env.filTipRadiusForCollisions.getValue());
+			double rC = Pt3D.ptDist(coordAsPt3D(), StickyNode.centerOfSphere);
+			if (rC > inner - Env.cortexBrownianZone.getValue()) { hb = Math.min(hb, Env.cortexBrownianFactor.getValue()); }
+		}
+		return hb;
+	}
+
 
 	
 	public void joinSegments () {
@@ -1318,7 +1346,7 @@ public class FilSegment extends Thing {
 		arpChildLoc[arpChildCt] = bLoc;
 		arpActive[arpChildCt] = true;
 		arpChildCt++;
-		
+
 		return dFil;
 	}
 	
@@ -2592,19 +2620,29 @@ public class FilSegment extends Thing {
 		
 		if (nodeAtEnd2) {
 			end2Node.registerWithNode(this);
-			double strainDist = Pt3D.ptDist(end2Node.coordAsPt3D(),end2Pt);
+			// DTS membrane: tether the barbed end to a STANDOFF point just inside the vertex (where the formin
+			// holds it, off the membrane), not the vertex itself -- so this tether agrees with the steric
+			// collision and stops cratering the cortex. Other (plasmid/StickyNode) bonds keep targeting the node.
+			Pt3D end2Tgt;
+			if (end2Node instanceof MembraneVertex) {
+				((MembraneVertex)end2Node).forminStandoffTarget(forminStandoffTmp, Env.dtsForminStandoff.getValue());
+				end2Tgt = forminStandoffTmp;
+			} else {
+				end2Tgt = end2Node.coordAsPt3D();
+			}
+			double strainDist = Pt3D.ptDist(end2Tgt,end2Pt);
 			double forceMag = Env.fracMove.getValue()*1.0e-6*strainDist/((1/bTransGam.x + 1/end2Node.bTransGam.x)*Env.deltaT.getValue());
-			toPlasmidUVec.unitVec(end2Node.coordAsPt3D(),end2Pt);
+			toPlasmidUVec.unitVec(end2Tgt,end2Pt);
 			F.scale(forceMag,toPlasmidUVec);
 			incForceSum(F,end2Pt);
 			double axialF = Pt3D.Dot(uVecAsPt3D(),F);  // axial force contribution
 			end2NodeForceThisStep = axialF;
 			end2NodeForce.registerValue(axialF);
-			incEnd2AxialForce(axialF);  
+			incEnd2AxialForce(axialF);
 
 			Fopp.scale(-1,F);
 			end2Node.incForceSum(Fopp);
-			
+
 			// torque to keep a certain alignment with node
 			if (Env.nodeTorqSpring.isActive()) {
 				forminVecInX.xToX(end2Node,forminVecInx);
@@ -2621,7 +2659,7 @@ public class FilSegment extends Thing {
 				R.reverse();
 				end2Node.incTorqueSum(R);
 			}
-			
+
 			// register strainDist and check for filament detachment
 			end2ToPlasStrain.registerValue(strainDist);
 			boolean removeTether = false;

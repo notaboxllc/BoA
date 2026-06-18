@@ -541,12 +541,14 @@ public final class Membrane {
             double halfLen = 0.5*(Env.actinSeed.getIntValue()+1)*Env.actinMonoRadius;   // seed half-length (um)
             FilSegment mother;
             if (Env.dtsForminGrowOut.isActive()) {
-                // FORMIN holds the BARBED end (end2) at the cortex; pointed end (end1) trails into the
-                // cytoplasm. Seat the center so end2 (= center + halfLen*uVec, uVec=outward) lands AT the
-                // vertex (zero initial anchor offset); link the BARBED end to the vertex (formin-membrane bond).
-                Pt3D nucPt = new Pt3D(vx(v) + halfLen*ix, vy(v) + halfLen*iy, vz(v) + halfLen*iz);
+                // FORMIN holds the BARBED end (end2) a STANDOFF distance off the cortex; pointed end (end1)
+                // trails into the cytoplasm. Seat the center so end2 (= center + halfLen*uVec, uVec=outward)
+                // lands at the standoff point (vertex + standoff*inward) -- in agreement with the tether's
+                // rest position, so the bond starts unstrained and never craters the vertex.
+                double standoff = Env.dtsForminStandoff.getValue();
+                Pt3D nucPt = new Pt3D(vx(v) + (halfLen+standoff)*ix, vy(v) + (halfLen+standoff)*iy, vz(v) + (halfLen+standoff)*iz);
                 mother = FilSegment.makeForminMother(nucPt, new Pt3D(-ix, -iy, -iz));   // uVec outward -> barbed toward cortex
-                FilSegment.linkEnd2Node(mother, vert[v]);        // formin holds the barbed end at the membrane
+                FilSegment.linkEnd2Node(mother, vert[v]);        // formin holds the barbed end off the membrane
             } else {
                 // de-novo mother: pointed end held at the cortex, grows inward (the legacy geometry).
                 Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
@@ -575,11 +577,11 @@ public final class Membrane {
     // Anchor-spring magnitude (N), capped so a large offset (e.g. a freshly nucleated mother before the
     // spring relaxes) can never deliver a NaN-inducing kick. k is N/m; offset (ax,ay,az) is in microns,
     // so the linear force is k * (offset_um * 1e-6). Capped at ANCHOR_FMAX.
-    private static final double ANCHOR_FMAX = 1.0e-10;   // ~0.1 pN ceiling on the formin-membrane tether
     private static double anchorMag(double k, double ax, double ay, double az) {
         double off = Math.sqrt(ax*ax+ay*ay+az*az);       // microns
         double f = k * off * 1.0e-6;                     // N
-        return f > ANCHOR_FMAX ? ANCHOR_FMAX : f;
+        double fmax = Env.dtsAnchorForceMax.getValue();  // tunable ceiling on the formin-membrane tether
+        return f > fmax ? fmax : f;
     }
 
     void collideActin() {
@@ -588,7 +590,8 @@ public final class Membrane {
         double ratchet = Env.dtsRatchetForce.getValue();
         double kAnchor = Env.dtsAnchorStiffness.getValue();
         double[] r1 = new double[3], r2 = new double[3];
-        Pt3D force = new Pt3D(), pt = new Pt3D();
+        Pt3D force = new Pt3D(), pt = new Pt3D(), standoffTgt = new Pt3D();
+        double standoff = Env.dtsForminStandoff.getValue();
         int contacts = 0;
         for (int i = 0; i < FilSegment.filSegmentCt; i++) {
             FilSegment fs = FilSegment.theFilSegments[i];
@@ -598,13 +601,20 @@ public final class Membrane {
             if (!(Double.isFinite(e1x)&&Double.isFinite(e2x)&&Double.isFinite(e1y)&&Double.isFinite(e2y)
                   &&Double.isFinite(e1z)&&Double.isFinite(e2z))) { fs.removeMe = true; continue; }  // cull NaN filaments
             if (kAnchor > 0) {
-                // FORMIN holds the BARBED end (end2) at the cortex: a TWO-SIDED spring between end2 and its
-                // vertex. As the barbed end elongates and advances against the membrane, the spring pulls the
-                // vertex OUTWARD (the formin/filopodial push); the vertex (cortex) pulls the barbed end back,
-                // keeping it at the membrane. This is the formin-membrane attachment doing work as it grows.
+                // FORMIN holds the BARBED end (end2) a small STANDOFF distance off the cortex: a TWO-SIDED
+                // spring between end2 and the standoff point (just inside the vertex). Targeting the standoff
+                // -- not the vertex itself -- makes the tether agree with where the steric collision keeps the
+                // filament, so there is no tether-vs-collision battle and the vertex feels ~zero net reaction
+                // (the membrane stays smooth). As the barbed end elongates against the membrane the spring
+                // still pulls the vertex outward (the formin/filopodial push).
                 if (fs.nodeAtEnd2 && fs.end2Node != null && !fs.end2Node.removeMe) {
                     ProteinNode an = fs.end2Node;
-                    double ax = (an.getCoordX()-e2x), ay = (an.getCoordY()-e2y), az = (an.getCoordZ()-e2z);
+                    double tx, ty, tz;
+                    if (an instanceof MembraneVertex) {
+                        ((MembraneVertex)an).forminStandoffTarget(standoffTgt, standoff);
+                        tx = standoffTgt.x; ty = standoffTgt.y; tz = standoffTgt.z;
+                    } else { tx = an.getCoordX(); ty = an.getCoordY(); tz = an.getCoordZ(); }
+                    double ax = (tx-e2x), ay = (ty-e2y), az = (tz-e2z);
                     double m = anchorMag(kAnchor, ax, ay, az);   // N, capped
                     double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
                     double fxA=m*ax/off, fyA=m*ay/off, fzA=m*az/off;
@@ -850,9 +860,22 @@ public final class Membrane {
                 // HARD RECOVERY: any sample that has crossed to the OUTSIDE (signed>0) gets a stiff inward
                 // spring on top, so it is yanked back in within a step or two -- guarantees containment even
                 // under a strong outward drive (the soft term alone equilibrates just past the surface).
-                if (signed > 0) mag += Env.dtsStericRecover.getValue() * signed * 1.0e-6;
-                if (mag > 2.0e-10) mag = 2.0e-10;   // cap: a thin low-drag filament can otherwise overshoot
-                                                    // under the hard recovery -> runaway -> NaN. Bound it.
+                // Two cap regimes:
+                //  - PROTRUSION (sample still inside, signed<=0, pressing out): cap at the actin polymerization
+                //    STALL force (dtsActinPushMax ~5 pN). A growing Arp2/3 daughter then pushes the cortex only
+                //    as hard as a real filament can before stalling (the Mogilner-Oster ratchet throttles its
+                //    growth as the gap closes) -- gentle, self-limiting, no stiff push that convolutes the cortex.
+                //  - CONTAINMENT (sample crossed outside, signed>0): keep the stiff hard recovery, capped at
+                //    2e-10, so a leak is yanked back in (safety; rarely triggered).
+                double pushCap;
+                if (signed > 0) {
+                    mag += Env.dtsStericRecover.getValue() * signed * 1.0e-6;
+                    pushCap = 2.0e-10;   // a thin low-drag filament can otherwise overshoot under the hard
+                                         // recovery -> runaway -> NaN. Bound it.
+                } else {
+                    pushCap = Env.dtsActinPushMax.getValue();   // stall-force-limited protrusion push
+                }
+                if (mag > pushCap) mag = pushCap;
                 double fx = -mag*nx, fy = -mag*ny, fz = -mag*nz;       // push sample INWARD (-n̂)
                 reac1[0]+=(1-t)*fx; reac1[1]+=(1-t)*fy; reac1[2]+=(1-t)*fz;
                 reac2[0]+=t*fx;     reac2[1]+=t*fy;     reac2[2]+=t*fz;

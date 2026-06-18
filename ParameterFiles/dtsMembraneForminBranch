@@ -1,0 +1,85 @@
+<BOA> DTS membrane v2 -- FORMIN BOND + Arp2/3 BRANCHING: a few formin mothers held off the cortex (standoff
+<BOA> bond, no convolution), with activated-Arp2/3-mediated branching turned back ON. Daughters grow toward the
+<BOA> membrane via the Brownian ratchet, but their push on the cortex is capped at the polymerization STALL
+<BOA> force (dtsActinPushMax ~5 pN) -- so they protrude gently instead of shoving the cortex stiffly. Built on
+<BOA> dtsMembraneForminBond.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.15;
+dtsKappaVolume:true:1.0e-13;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+dtsBrownianOff:true:1.0;
+dtsAnchorStiffness:true:0.015;
+
+// --- Arp field: ONE small hot patch -> a few formin mothers + localized branching ---
+dtsArpOn:true:1.0;
+dtsArpHotPatches:true:1;
+dtsArpHotPatchDeg:true:6.0;
+dtsArpDiffusion:true:0.1;
+dtsArpDecay:true:0.015;
+
+// --- formin mothers, barbed end held a STANDOFF off the cortex; NO RELEASE ---
+dtsForminOn:true:1.0;
+dtsForminGrowOut:true:1.0;
+dtsForminPool:true:1.0;
+dtsForminConsume:true:1.0;
+dtsForminNucRate:true:200.0;
+dtsForminRecover:true:0.0;
+forminRelease:true:0.0;
+forminBarbedBrownianFactor:true:0.05;
+dtsForminStandoff:true:0.05;
+actinSeed:true:8;
+
+// --- Arp2/3 JUNCTION: critically-damped gap closure holds the branch point. The daughter also INHERITS its
+//     mother's Brownian damping (FilSegment.heldBrownFactor, applied in moveThing's daughter branch) -- the
+//     real reason mothers+daughters move together: without it a daughter rides the mother's UNDAMPED thermal
+//     (~20x the held mother) and the junction flings both. NOTE: do NOT sub-cycle (arpSubcycleN>1) here --
+//     subcycleAll() freezes the soft forces incl. the DTS membrane steric, so daughters escape THROUGH the
+//     cortex during the inner steps.
+arpTransFracMove:true:1.0;          // critically damped gap closure (1.0; >1 overshoots/spins)
+arpSubcycleN:true:1;                // OFF -- see note above (freezes DTS steric containment -> escape)
+
+// --- Arp2/3 branching ON, gated by the local activated-Arp field; bounded ---
+dtsBranchOn:true:1.0;
+dtsBranchRate:true:20.0;            // moderate (lower than the dendritic demo's 40) for a controlled tuft
+dtsArpConsumePerBranch:true:0.05;   // negative feedback: each branch depletes local Arp -> self-limiting
+dtsMaxFilaments:true:400;           // runaway backstop
+
+// --- actin-membrane collision + Mogilner-Oster ratchet; daughter push capped at the STALL force ---
+dtsActinCollide:true:1.0;
+dtsRatchetForce:true:0.0;
+ratchetOn:true:1.0;
+ratchetForce:true:1.5e-12;          // membrane-normal load in the ratchet exp(-f*(delta-g)/kT)
+dtsActinPushMax:true:5.0e-12;       // <-- protrusion push cap = polymerization stall force (~5 pN)
+actinConc:true:5.0;
+filTipRadiusForCollision:true:0.04;
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.08;
+toFileInterval:true:120.0;
+remoteWriteInterval:true:2000.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+arpConc:true:0.0;

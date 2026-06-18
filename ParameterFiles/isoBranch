@@ -1,0 +1,56 @@
+<BOA> ISOLATED dendritic network (NO membrane): grow a large Arp2/3-branched network in free space and keep it
+<BOA> from SPINNING. Reproduces the old iso_on_11 run (7 -> ~646 filaments, box 6, runTime 0.6). The anti-spin
+<BOA> fix is the fixed-stiffness, sub-cycled Arp2/3 junction (arpFixedStiffnessDt + arpSubcycleN) with a
+<BOA> critically-damped gap closure (arpTransFracMove=1, not the old overshooting 2). No membrane, no steric, so
+<BOA> sub-cycling is safe here (nothing for subcycleAll to freeze).
+
+// --- free-space branched-filament IC (makeTestBranchedFilament): 1 mother (128 mon) + 5 seed branches ---
+buildBranchedFils:true:1.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+buildDtsMembrane:false:0.0;
+
+// --- self-amplifying branching in free space ---
+arpConc:true:10.0;                  // branch density (branch prob/fire = branchRateNearArpFactors*arpConc*biochemDeltaT)
+branchRateNearArpFactors:true:0.4;   // sparser (user-confirmed good)
+branchMembraneDist:true:5.0;        // z-gate: barbed end z > -5 -> ALL filaments in the box are branch-eligible (self-amplify)
+arpLocalField:false:0.0;            // use the global arpConc pool (no membrane nodes in free space)
+nucRateNearArpFactors:true:0.0;     // no de-novo nucleation: growth comes only from the IC mother branching
+kNodeNuc:true:0.0;
+arpDebranchRate:true:0.0;           // no debranching -> the network accumulates (monotonic growth, like iso_on_11)
+membraneCapDist:true:0.0;           // free barbed-end growth (no cortex cap)
+
+// --- ANTI-SPIN: fixed-stiffness, sub-cycled Arp2/3 junction (the iso_on_11 fix) ---
+arpTransFracMove:true:1.0;          // critically damped gap closure (NOT the old overshooting 2.0)
+arpFixedStiffnessDt:true:1.0e-5;    // junction stiffness uses a FIXED reference dt (not live dt -> 1/dt overshoot)
+arpSubcycleN:true:10;               // r-RESPA: integrate the stiff junction at dt/10, soft forces frozen
+filDragMinMonomers:true:200;       // KEY anti-spin: over-damp daughter ROTATION (drag ~ L^3) -> kills coherent junction spin
+arpDaughterBrownianFactor:true:1.0;   // (membrane-case tool; off here -- iso uses uniform damping below)
+
+// --- growth / time ---
+actinConc:true:15.0;                // free G-actin pool drives barbed-end elongation
+biochemDeltaT:true:0.0005;           // faster elongation (was 0.001) -> longer filaments between branches
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+runTime:true:1.0;
+toFileInterval:true:1000.0;
+remoteWriteInterval:true:2000.0;
+
+boxXDim:true:6.0;
+boxYDim:true:6.0;
+boxZDim:true:6.0;
+aeta:true:0.1;
+
+// --- isolate: no membrane, no bug, no other populations ---
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+forminConc:true:0.0;
+
+// --- whole-network Brownian damping (mother + daughters): calm, non-spinning network.
+//     For the JUNCTION-ONLY SPIN TEST set BOTH to 0.0 (Brownian fully off).
+BTransCoeff:true:1.0;    // Brownian back ON (full); branch members damped via filDragMinMonomers
+BRotCoeff:true:0.5;
