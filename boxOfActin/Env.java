@@ -562,6 +562,23 @@ public class Env {
 	static final Parameter dtsMaxDispFrac = new Parameter("dtsMaxDispFrac"," DTS vertex max per-step move (frac of vertex radius)", 0.0, "")
 		.setMutableAtRuntime()
 		.setDescription("0 = off. >0 caps a DTS membrane vertex's per-step translation to this * vertexRadius. Safety net for stiff area/volume constraints and large transients (e.g. a reduced-volume target mismatch) under explicit Euler -- the vertex moves slowly instead of taking one huge step and exploding. ~0.1-0.25 is reasonable.");
+	// **** DTS membrane surface chemistry — activated Arp2/3 field (diffuses over the wing-edge graph) ****
+	static final Parameter dtsArpOn = new Parameter("dtsArpOn"," DTS membrane activated-Arp2/3 field", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When on, a per-vertex activated-Arp2/3 concentration is produced at NPF 'hot' patches and DIFFUSES across the membrane over the wing-edge graph (reaction-diffusion), reaching a halo around each patch. The substrate for membrane-localized branched nucleation (later). Render the heat-map with the viewer 'DTS Arp heatmap' toggle.");
+	static final Parameter dtsArpTarget = new Parameter("dtsArpTarget"," DTS Arp2/3 production target at hot patches", 1.0, "uM")
+		.setMutableAtRuntime()
+		.setDescription("Concentration the NPF (hot-Rho) patches drive the local activated-Arp2/3 field toward. Sets the heat-map peak.");
+	static final Parameter dtsArpDiffusion = new Parameter("dtsArpDiffusion"," DTS Arp2/3 graph diffusion (per step, per edge)", 0.1, "")
+		.setMutableAtRuntime()
+		.setDescription("Per-step graph-Laplacian diffusion coefficient over the wing-edges: c_i += alpha*Sum_neighbors(c_j-c_i). Stability needs alpha*valence < ~1 (valence ~6), so keep <= ~0.15. Larger = the field spreads farther/faster from the patches.");
+	static final Parameter dtsArpDecay = new Parameter("dtsArpDecay"," DTS Arp2/3 decay / bulk-exchange (per step)", 0.002, "")
+		.setMutableAtRuntime()
+		.setDescription("Per-step loss rate (deactivation / escape to bulk) applied everywhere; the same rate drives production at hot patches. Steady-state halo length ~ sqrt(diffusion/decay) edges. Smaller decay = broader halo, slower to settle.");
+	static final Parameter dtsArpHotPatches = new Parameter("dtsArpHotPatches"," DTS Arp2/3 NPF hot-patch count", 6, "", Parameter.INT)
+		.setDescription("Number of NPF (hot-Rho) activator patches, placed on cube-corner directions (off coordinate singularities). 0..8.");
+	static final Parameter dtsArpHotPatchDeg = new Parameter("dtsArpHotPatchDeg"," DTS Arp2/3 hot-patch cap half-angle", 20.0, "degrees")
+		.setDescription("Angular radius of each NPF patch on the sphere. Larger = broader source zones.");
+
 	static final Parameter dtsBrownianOff = new Parameter("dtsBrownianOff"," DTS deterministic (no vertex Brownian)", 0, "", Parameter.BOOLEAN, false)
 		.setDescription("When active, suppresses per-vertex thermal forcing (sets nodeBrownianMotionOff) for a clean deterministic relaxation -- used to validate that the IC sphere is a force-balanced equilibrium. Default off = physical undulations on.");
 

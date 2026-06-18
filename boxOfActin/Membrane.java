@@ -76,6 +76,11 @@ public final class Membrane {
     private double areaTot, volTot;          // current total area (m^2) / signed volume (m^3)
     private double energyBend, energyArea, energyVol;   // last-computed energy components (J)
 
+    // ---- Surface chemistry: activated Arp2/3 field, diffused over the wing-edge graph (Stage 3) ----
+    public double[] arpLocal;                // nv: activated Arp2/3 concentration per vertex (uM); null = off
+    public boolean[] arpHot;                 // nv: NPF (hot-Rho) activator-patch flag
+    private double[] arpNext, arpLap;        // Jacobi scratch (per-vertex)
+
     /**
      * Build a closed icosphere membrane and register it. Creates the vertex Things,
      * derives the wing-edge and vertex-incidence arrays from the faces, and records the
@@ -156,6 +161,7 @@ public final class Membrane {
         }
 
         theMembranes.add(this);
+        if (Env.dtsArpOn.isActive()) initArp();
         report();
     }
 
@@ -297,6 +303,7 @@ public final class Membrane {
             Membrane mem = theMembranes.get(m);
             mem.computeForces();
             if (Env.dtsPushForce.getValue() != 0) mem.applyPushPatch();
+            if (mem.arpLocal != null) mem.diffuseArp();    // surface chemistry (reaction-diffusion)
         }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
@@ -417,6 +424,74 @@ public final class Membrane {
         if (Env.counter % 500 == 0) {
             Thing.talkln(String.format("[DTS-PUSH] step %d  capVerts=%d  forcePerVert=%.3e N  poleX=%.4f  bulgeR=%.4f  (R0=%.3f)",
                     Env.counter, cap, per, bulge, maxRadiusAlongX(), radius));
+        }
+    }
+
+    // ================================================================================
+    // Surface chemistry — activated Arp2/3 reaction-diffusion on the membrane.
+    //   c_i += alpha*Sum_{edges e at i}(c_j - c_i)  +  [hot_i ? ke*target : 0]  -  ke*c_i
+    // Kernel-shaped (per-edge gather into a per-vertex Laplacian, then per-vertex update) — the same
+    // gather pattern as the bending forces, so it ports to the GPU as "register the kernels".
+    // ================================================================================
+
+    private void initArp() {
+        arpLocal = new double[nv]; arpNext = new double[nv]; arpLap = new double[nv];
+        arpHot = new boolean[nv];
+        markArpHotPatches();
+    }
+
+    /** Mark NPF (hot-Rho) activator patches on cube-corner directions (off the coordinate singularities,
+     *  like the legacy StickyNode.markHotPatches) and seed their Arp2/3 to the production target. */
+    private void markArpHotPatches() {
+        int nP = Math.max(0, Math.min(8, Env.dtsArpHotPatches.getIntValue()));
+        double cosCap = Math.cos(Math.toRadians(Env.dtsArpHotPatchDeg.getValue()));
+        double target = Env.dtsArpTarget.getValue();
+        double c = 0.5773502692;
+        double[][] dirs = {{c,c,c},{c,c,-c},{c,-c,c},{c,-c,-c},{-c,c,c},{-c,c,-c},{-c,-c,c},{-c,-c,-c}};
+        int marked = 0;
+        for (int v = 0; v < nv; v++) {
+            double rx = vx(v)-center.x, ry = vy(v)-center.y, rz = vz(v)-center.z;
+            double r = Math.sqrt(rx*rx+ry*ry+rz*rz);
+            if (r < 1e-9) continue;
+            rx/=r; ry/=r; rz/=r;
+            for (int p = 0; p < nP; p++) {
+                if (rx*dirs[p][0] + ry*dirs[p][1] + rz*dirs[p][2] >= cosCap) {
+                    arpHot[v] = true; arpLocal[v] = target; marked++;
+                    break;
+                }
+            }
+        }
+        Thing.talkln("[DTS-ARP] " + nP + " hot patches, " + marked + " hot vertices of " + nv);
+    }
+
+    /** One reaction-diffusion step of the activated-Arp2/3 field (Jacobi, kernel-shaped). */
+    public void diffuseArp() {
+        if (arpLocal == null) return;
+        double alpha = Env.dtsArpDiffusion.getValue();   // per-step graph diffusion
+        double ke = Env.dtsArpDecay.getValue();          // per-step decay / production rate
+        double target = Env.dtsArpTarget.getValue();
+
+        // per-EDGE gather -> per-vertex Laplacian  (Sum_neighbors (c_j - c_i))
+        java.util.Arrays.fill(arpLap, 0.0);
+        for (int e = 0; e < ne; e++) {
+            int p = edgeVert[2*e], q = edgeVert[2*e+1];
+            double diff = arpLocal[q] - arpLocal[p];
+            arpLap[p] += diff; arpLap[q] -= diff;
+        }
+        // per-VERTEX update. Hot (NPF) vertices are a clamped source (held at target); elsewhere the field
+        // diffuses and decays -> a halo of length ~sqrt(alpha/ke) edges around each patch.
+        for (int v = 0; v < nv; v++) {
+            if (arpHot[v]) { arpNext[v] = target; continue; }
+            double c = arpLocal[v] + alpha*arpLap[v] - ke*arpLocal[v];
+            arpNext[v] = (c < 0) ? 0 : c;
+        }
+        double[] tmp = arpLocal; arpLocal = arpNext; arpNext = tmp;
+
+        if (Env.counter % 500 == 0) {
+            double mx = 0, sum = 0; int nz = 0;
+            for (int v = 0; v < nv; v++) { mx = Math.max(mx, arpLocal[v]); sum += arpLocal[v]; if (arpLocal[v] > 0.01*target) nz++; }
+            Thing.talkln(String.format("[DTS-ARP] step %d  maxConc=%.4f  meanConc=%.4f  spread=%d/%d verts >1%%",
+                    Env.counter, mx, sum/nv, nz, nv));
         }
     }
 

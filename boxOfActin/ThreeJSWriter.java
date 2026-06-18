@@ -293,7 +293,17 @@ public class ThreeJSWriter {
                       .append(mem.faceVert[3 * f + 1]).append(",")
                       .append(mem.faceVert[3 * f + 2]);
                 }
-                sb.append("]}");
+                sb.append("]");
+                // Per-vertex activated-Arp2/3 concentration (for the viewer heat-map), when the field is on.
+                if (mem.arpLocal != null) {
+                    sb.append(",\"arp\":[");
+                    for (int v = 0; v < mem.nv; v++) {
+                        if (v > 0) sb.append(",");
+                        sb.append(String.format("%.4g", mem.arpLocal[v]));
+                    }
+                    sb.append("]");
+                }
+                sb.append("}");
             }
             sb.append("]");
         }

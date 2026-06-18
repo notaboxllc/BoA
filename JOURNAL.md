@@ -1,5 +1,26 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 3a: activated-Arp2/3 reaction-diffusion field on the membrane
+
+First piece of actin coupling: a per-vertex **activated-Arp2/3 concentration** that's produced at NPF "hot"
+patches and **diffuses across the membrane over the wing-edge graph** (the substrate Stage-3b branched
+nucleation will read). Ported from the legacy StickyNode `arpLocal` mechanism onto the DTS vertices.
+
+Kept **kernel-shaped** (GPU-portable, per the CPU-now decision): per-EDGE gather of `(c_j−c_i)` into a
+per-vertex Laplacian, then per-vertex update — the same gather pattern as the bending forces.
+`c_i += α·Σ_{e∋i}(c_j−c_i) − k_e·c_i`; NPF hot patches are a **clamped source** (held at target — the soft
+`k_e·target` source was too weak vs. diffusion and flattened the field). Hot patches marked on cube-corner
+directions (like the old `markHotPatches`). Steady-state halo length ≈ `sqrt(α/k_e)` edges; reaches steady
+state in ~`1/k_e` steps. New Env params `dtsArpOn/Target/Diffusion/Decay/HotPatches/HotPatchDeg`
+(diffusion/decay/target runtime-mutable). Diffusion runs each step in `computeAllForces`.
+
+Render: `ThreeJSWriter` emits per-vertex `arp` in the `membranes` JSON; viewer colors the DTS surface by a
+blue→cyan→green→yellow→red heat-map (**DTS Arp heatmap** toggle, opaque). Config `ParameterFiles/dtsMembraneArp`
+(5 patches, 12°, α=0.1, k_e=0.015). Validated: clean diffusion gradient (histogram 817 faded → smooth halo →
+135 clamped sources at 1.0), screenshot shows bright NPF patches with halos fading to blue. **Next (Stage 3b):**
+formin nucleation at hot patches → mother filaments linked to the membrane; then spatial-accelerated
+`segmentVsMembrane` + branch gating reading this Arp field.
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 3 prep: thin-filament containment (segment-vs-triangle) — PASS
 
 Before wiring real actin, de-risked the collision: can the DTS membrane contain a THIN rigid rod (actin
