@@ -80,6 +80,7 @@ public final class Membrane {
     public double[] arpLocal;                // nv: activated Arp2/3 concentration per vertex (uM); null = off
     public boolean[] arpHot;                 // nv: NPF (hot-Rho) activator-patch flag
     private double[] arpNext, arpLap;        // Jacobi scratch (per-vertex)
+    public double[] forminLocal;             // nv: depletable formin pool at hot vertices; null = off
 
     /**
      * Build a closed icosphere membrane and register it. Creates the vertex Things,
@@ -161,7 +162,11 @@ public final class Membrane {
         }
 
         theMembranes.add(this);
-        if (Env.dtsArpOn.isActive()) initArp();
+        if (Env.dtsArpOn.isActive() || Env.dtsForminOn.isActive()) {
+            markHotPatches();
+            if (Env.dtsArpOn.isActive())    initArp();
+            if (Env.dtsForminOn.isActive()) initFormin();
+        }
         report();
     }
 
@@ -304,6 +309,7 @@ public final class Membrane {
             mem.computeForces();
             if (Env.dtsPushForce.getValue() != 0) mem.applyPushPatch();
             if (mem.arpLocal != null) mem.diffuseArp();    // surface chemistry (reaction-diffusion)
+            if (mem.forminLocal != null) mem.forminStep(); // formin nucleation of mother filaments
         }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
@@ -434,18 +440,13 @@ public final class Membrane {
     // gather pattern as the bending forces, so it ports to the GPU as "register the kernels".
     // ================================================================================
 
-    private void initArp() {
-        arpLocal = new double[nv]; arpNext = new double[nv]; arpLap = new double[nv];
-        arpHot = new boolean[nv];
-        markArpHotPatches();
-    }
-
     /** Mark NPF (hot-Rho) activator patches on cube-corner directions (off the coordinate singularities,
-     *  like the legacy StickyNode.markHotPatches) and seed their Arp2/3 to the production target. */
-    private void markArpHotPatches() {
+     *  like the legacy StickyNode.markHotPatches). Shared by the Arp field and formin nucleation. */
+    private void markHotPatches() {
+        if (arpHot != null) return;
+        arpHot = new boolean[nv];
         int nP = Math.max(0, Math.min(8, Env.dtsArpHotPatches.getIntValue()));
         double cosCap = Math.cos(Math.toRadians(Env.dtsArpHotPatchDeg.getValue()));
-        double target = Env.dtsArpTarget.getValue();
         double c = 0.5773502692;
         double[][] dirs = {{c,c,c},{c,c,-c},{c,-c,c},{c,-c,-c},{-c,c,c},{-c,c,-c},{-c,-c,c},{-c,-c,-c}};
         int marked = 0;
@@ -455,13 +456,22 @@ public final class Membrane {
             if (r < 1e-9) continue;
             rx/=r; ry/=r; rz/=r;
             for (int p = 0; p < nP; p++) {
-                if (rx*dirs[p][0] + ry*dirs[p][1] + rz*dirs[p][2] >= cosCap) {
-                    arpHot[v] = true; arpLocal[v] = target; marked++;
-                    break;
-                }
+                if (rx*dirs[p][0] + ry*dirs[p][1] + rz*dirs[p][2] >= cosCap) { arpHot[v] = true; marked++; break; }
             }
         }
-        Thing.talkln("[DTS-ARP] " + nP + " hot patches, " + marked + " hot vertices of " + nv);
+        Thing.talkln("[DTS-HOT] " + nP + " NPF patches, " + marked + " hot vertices of " + nv);
+    }
+
+    private void initArp() {
+        arpLocal = new double[nv]; arpNext = new double[nv]; arpLap = new double[nv];
+        double target = Env.dtsArpTarget.getValue();
+        for (int v = 0; v < nv; v++) if (arpHot[v]) arpLocal[v] = target;
+    }
+
+    private void initFormin() {
+        forminLocal = new double[nv];
+        double pool = Env.dtsForminPool.getValue();
+        for (int v = 0; v < nv; v++) if (arpHot[v]) forminLocal[v] = pool;
     }
 
     /** One reaction-diffusion step of the activated-Arp2/3 field (Jacobi, kernel-shaped). */
@@ -492,6 +502,53 @@ public final class Membrane {
             for (int v = 0; v < nv; v++) { mx = Math.max(mx, arpLocal[v]); sum += arpLocal[v]; if (arpLocal[v] > 0.01*target) nz++; }
             Thing.talkln(String.format("[DTS-ARP] step %d  maxConc=%.4f  meanConc=%.4f  spread=%d/%d verts >1%%",
                     Env.counter, mx, sum/nv, nz, nv));
+        }
+    }
+
+    private int forminMotherCt = 0;   // running count, for the readout
+
+    /**
+     * Formin nucleation step: at each NPF (hot) vertex, recover the formin pool, then with probability
+     * proportional to the remaining pool seed a LINEAR mother filament just inside the cortex, anchored to
+     * the vertex by an ERM-like end1 tether (FilSegment.linkEnd1Node). Each mother spends a formin quantum
+     * (depletion caps mothers per zone). Ported from the legacy StickyNode.deNovoNucleate onto DTS vertices.
+     * Runs every step; the per-step probability uses deltaT so the rate is cadence-correct.
+     */
+    public void forminStep() {
+        if (forminLocal == null) return;
+        double pool = Env.dtsForminPool.getValue();
+        double rate = Env.dtsForminNucRate.getValue();
+        double recover = Env.dtsForminRecover.getValue();
+        double consume = Env.dtsForminConsume.getValue();
+        double dt = Env.deltaT.getValue();
+        double tipR = Env.filTipRadiusForCollisions.getValue();
+        double seedDepth = vertexRadius + (tipR > 0 ? tipR : 0.01) + 0.02;   // seat just inside the cortex
+        for (int v = 0; v < nv; v++) {
+            if (!arpHot[v]) continue;
+            if (recover > 0 && forminLocal[v] < pool) forminLocal[v] = Math.min(pool, forminLocal[v] + recover*dt);
+            double avail = pool > 0 ? forminLocal[v] : 0.0;
+            if (avail <= 0) continue;
+            double prob = rate * (avail/pool) * dt;
+            if (Thing.currentScratch().rng.nextDouble() >= prob) continue;
+            // inward = geometric radial (vertex -> center); grow the mother radially inward (barbed into the
+            // cytoplasm), pointed end held at the inner steric face by the vertex tether.
+            double ix = center.x - vx(v), iy = center.y - vy(v), iz = center.z - vz(v);
+            double il = Math.sqrt(ix*ix+iy*iy+iz*iz);
+            if (il < 1e-9) continue;
+            ix/=il; iy/=il; iz/=il;
+            Pt3D inward = new Pt3D(ix, iy, iz);
+            Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
+            FilSegment mother = FilSegment.makeForminMother(nucPt, inward);
+            FilSegment.linkEnd1Node(mother, vert[v]);           // ERM-like membrane anchor (pointed end)
+            forminLocal[v] -= consume;
+            if (forminLocal[v] < 0) forminLocal[v] = 0;
+            forminMotherCt++;
+        }
+        if (Env.counter % 500 == 0) {
+            double remain = 0; int active = 0;
+            for (int v = 0; v < nv; v++) if (arpHot[v]) { remain += forminLocal[v]; if (forminLocal[v] > 0) active++; }
+            Thing.talkln(String.format("[DTS-FORMIN] step %d  mothers nucleated=%d  pool remaining=%.1f over %d hot verts",
+                    Env.counter, forminMotherCt, remain, active));
         }
     }
 

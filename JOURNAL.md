@@ -1,5 +1,24 @@
 # BoxOfActin Project Journal
 
+## 2026-06-17 — Membrane v2 DTS, STAGE 3b: formin nucleation of mother filaments (actin ON)
+
+NPF (hot) membrane vertices now carry a **depletable per-vertex formin pool** and nucleate **real linear
+mother actin filaments** just inside the cortex, anchored to the vertex by an ERM-like end1 tether — ported
+from the legacy `StickyNode.deNovoNucleate` onto DTS vertices. This turns real actin (`FilSegment`s) on for
+the DTS membrane. `Membrane.forminStep()` (per step, in `computeAllForces`): at each hot vertex, recover the
+pool, then with prob `dtsForminNucRate·(forminLocal/pool)·deltaT` seat a mother at the inner steric face
+(`vertexRadius+filTipR+0.02` inward), growing radially inward, via `FilSegment.makeForminMother` +
+`linkEnd1Node`; spend `dtsForminConsume` (depletion caps mothers per zone). Hot patches shared with the Arp
+field (refactored `markHotPatches`). New Env params `dtsForminOn/Pool/Consume/NucRate/Recover`.
+
+Validated (`ParameterFiles/dtsMembraneFormin`): 135 hot verts, pool 135 → mothers nucleate (43 by step 5000),
+**bounded** as the pool depletes (135→92), no crash, real FilSegments rendered. Made the Arp heat-map
+semi-transparent (0.55) so the interior actin shows through; screenshot shows actin tufts clustered at the
+NPF patches. Notes: a single `FilSegment` can't hold a huge seed (actinSeed~90 gets culled by the segment
+split/length limit) — used actinSeed=40 (~0.11 µm visible static mothers; no free monomers so no growth).
+**Next (Stage 3c):** spatial-accelerated `segmentVsMembrane` in the main loop (bin faces into the Mesh) +
+Arp2/3 branch gating off the mothers reading the Arp field → a real branched network pushing the cortex.
+
 ## 2026-06-17 — Membrane v2 DTS, STAGE 3a: activated-Arp2/3 reaction-diffusion field on the membrane
 
 First piece of actin coupling: a per-vertex **activated-Arp2/3 concentration** that's produced at NPF "hot"

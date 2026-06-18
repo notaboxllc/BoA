@@ -579,6 +579,21 @@ public class Env {
 	static final Parameter dtsArpHotPatchDeg = new Parameter("dtsArpHotPatchDeg"," DTS Arp2/3 hot-patch cap half-angle", 20.0, "degrees")
 		.setDescription("Angular radius of each NPF patch on the sphere. Larger = broader source zones.");
 
+	// **** DTS membrane formin nucleation — depletable per-vertex pool seeds mother filaments at hot patches ****
+	static final Parameter dtsForminOn = new Parameter("dtsForminOn"," DTS membrane formin nucleation", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When on, NPF (hot-Rho) membrane vertices carry a depletable formin pool and nucleate LINEAR mother filaments just inside the cortex, anchored to the vertex (ERM-like end1 tether). Turns real actin on. Arp2/3 then branches off these mothers (later). Needs the hot patches (shared with the Arp field).");
+	static final Parameter dtsForminPool = new Parameter("dtsForminPool"," DTS formin pool per hot vertex", 1.0, "")
+		.setDescription("Formin quanta available at each NPF vertex. Each mother spends dtsForminConsume, so a vertex makes at most ~pool/consume mothers (the hard cap, unless dtsForminRecover>0).");
+	static final Parameter dtsForminConsume = new Parameter("dtsForminConsume"," DTS formin spent per mother", 1.0, "")
+		.setMutableAtRuntime()
+		.setDescription("Formin quanta consumed from a vertex's pool per nucleated mother filament. Caps mothers per zone at ~pool/consume.");
+	static final Parameter dtsForminNucRate = new Parameter("dtsForminNucRate"," DTS formin nucleation rate", 8.0, "1/s")
+		.setMutableAtRuntime()
+		.setDescription("Mother-nucleation rate at a full-pool hot vertex (scaled by pool fraction). Per-step prob = rate*(forminLocal/pool)*deltaT. Higher = a denser actin brush sprouts from the NPF patches.");
+	static final Parameter dtsForminRecover = new Parameter("dtsForminRecover"," DTS formin pool recovery rate", 0.0, "1/s")
+		.setMutableAtRuntime()
+		.setDescription("Re-recruitment rate of the formin pool at hot vertices (toward dtsForminPool). 0 = bounded (each zone makes a fixed number of mothers); >0 = sustained turnover.");
+
 	static final Parameter dtsBrownianOff = new Parameter("dtsBrownianOff"," DTS deterministic (no vertex Brownian)", 0, "", Parameter.BOOLEAN, false)
 		.setDescription("When active, suppresses per-vertex thermal forcing (sets nodeBrownianMotionOff) for a clean deterministic relaxation -- used to validate that the IC sphere is a force-balanced equilibrium. Default off = physical undulations on.");
 
