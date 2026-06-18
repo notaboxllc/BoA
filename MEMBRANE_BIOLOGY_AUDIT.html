@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Biology-Compliance Audit — Membrane / Formin / Arp2/3 Lamellipodium Model</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.5px; line-height: 1.5; color: #1a1a1a; margin: 0;
+  }
+  h1 { font-size: 21px; margin: 0 0 2px; color: #11304e; letter-spacing: -0.2px; }
+  h2 { font-size: 14.5px; margin: 22px 0 6px; color: #11304e;
+       border-bottom: 2px solid #c9d6e3; padding-bottom: 3px; }
+  h3 { font-size: 12px; margin: 14px 0 4px; color: #1f4a6e; }
+  .sub { color: #5a6b7b; font-size: 10px; margin: 0 0 4px; }
+  p { margin: 5px 0; }
+  ul, ol { margin: 5px 0 5px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.3px;
+         background: #f0f3f6; padding: 0.5px 3px; border-radius: 3px; color: #9a2d2d; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9.4px; }
+  th, td { border: 1px solid #cdd7e0; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #11304e; color: #fff; font-weight: 600; }
+  tr:nth-child(even) td { background: #f5f8fb; }
+  .ok    { color: #166534; font-weight: 700; }
+  .flag  { color: #92400e; font-weight: 700; }
+  .bad   { color: #991b1b; font-weight: 700; }
+  .lead { background: #fbf4e6; border-left: 4px solid #c9941f; padding: 8px 12px;
+          margin: 10px 0; border-radius: 0 4px 4px 0; }
+  .verdict { background: #eef6ef; border-left: 4px solid #2f8f4e; padding: 8px 12px;
+             margin: 12px 0; border-radius: 0 4px 4px 0; }
+  .tag { display: inline-block; font-size: 8.3px; font-weight: 700; padding: 1px 6px;
+         border-radius: 9px; color: #fff; vertical-align: middle; }
+  .t-match { background: #2f8f4e; }
+  .t-coarse { background: #c9941f; }
+  .t-mis { background: #b54708; }
+  .t-param { background: #1f6feb; }
+  .t-code { background: #6e40c9; }
+  .meta { color: #5a6b7b; font-size: 9.5px; margin: 0 0 14px; }
+  .pgbreak { page-break-before: always; }
+  ol.q { padding-left: 22px; }
+  ol.q > li { margin: 4px 0; }
+  .hdr-rule { height: 3px; background: linear-gradient(90deg,#11304e,#2f6ea5,#c9d6e3); margin: 8px 0 12px; border-radius: 2px; }
+  footer { margin-top: 18px; padding-top: 6px; border-top: 1px solid #cdd7e0;
+           color: #7a8794; font-size: 8.6px; }
+</style>
+</head>
+<body>
+
+<h1>Biology-Compliance Audit</h1>
+<p class="sub">Membrane / Formin / Arp2/3 Coarse-Grained Lamellipodium Model — BoxOfActin</p>
+<div class="hdr-rule"></div>
+<p class="meta"><strong>Branch:</strong> <code>membrane-render-and-dense-v5</code> &nbsp;·&nbsp;
+<strong>Date:</strong> 2026-06-18 &nbsp;·&nbsp;
+<strong>Scope:</strong> formin-seeded mothers, Arp2/3 branching, capping/localization, membrane collision &amp; yield.<br>
+<strong>Method:</strong> static read of <code>Membrane.java</code>, <code>FilSegment.java</code>, <code>Arp23.java</code>,
+<code>StickyNode.java</code>, <code>Env.java</code>, <code>ActA.java</code>, <code>ProteinNode.java</code>, <code>NodeLink.java</code>;
+cross-checked against the DTS design note and the project journal.</p>
+
+<h2>0. The most important structural finding</h2>
+<div class="lead">
+<strong>There are two membrane models in the tree, and the audit request is written in the vocabulary of the legacy one.</strong>
+Every parameter named in the request <em>exists</em> — but the formin/Arp/capping/align/yield family belongs to the
+<strong>legacy node-lattice membrane</strong>, which <strong>every DTS config explicitly disables</strong>
+(<code>buildMembraneSheet:false; forminConc:true:0.0; arpConc:true:0.0</code>). The live production model is the
+<strong>DTS (dynamically-triangulated surface)</strong> family of <code>dts*</code> parameters. The legacy names are
+present, mostly runtime-mutable and documented, but <strong>dead on the production path</strong>.
+</div>
+
+<table>
+<tr><th style="width:20%"></th><th>Legacy "node-lattice" membrane</th><th>Current DTS membrane (active)</th></tr>
+<tr><td><strong>Builder</strong></td><td><code>StickyNode.makeSheetHexPackedNodes</code> / <code>makeSphereOfNodes</code></td><td><code>Membrane.buildIcosphereMembrane</code></td></tr>
+<tr><td><strong>IC gate</strong></td><td><code>buildMembraneSheet</code> / <code>buildMembraneSphere</code> (default false)</td><td><code>buildDtsMembrane</code> (true in all real configs)</td></tr>
+<tr><td><strong>Formin pool</strong></td><td><code>forminConc</code>, <code>forminConsumePerMother</code>, <code>forminRecover</code>, <code>deNovoNucleate</code></td><td><code>dtsForminPool/Consume/NucRate/Recover</code>, <code>Membrane.forminStep</code></td></tr>
+<tr><td><strong>Arp field</strong></td><td><code>arpLocalField</code>, <code>arpDiffusion</code>, <code>arpBulkExchange</code>, <code>arpConsumePerBranch</code></td><td><code>dtsArpOn/Target/Diffusion/Decay</code>, <code>Membrane.branchStep</code></td></tr>
+<tr><td><strong>Zone / cap / align / yield</strong></td><td><code>branchMembraneDist</code>, <code>membraneCapDist</code>, <code>membraneAlignTorque/Angle</code>, <code>motherTetherDepth</code>, <code>membraneYield</code></td><td><code>dtsForminStandoff</code>, <code>dtsActinPushMax</code>, ratchet, <code>nodeTorqSpring</code>, native area/volume yield</td></tr>
+</table>
+<p>The rest of this audit evaluates the <strong>live DTS path</strong> and flags the legacy duplicates as a clarity hazard.</p>
+
+<h2>1. Matches biology <span class="tag t-match">MATCHES</span></h2>
+<ul>
+<li><strong>Arp2/3 never de-novo nucleates.</strong> <code>Membrane.branchStep</code> only creates a daughter off an existing <code>FilSegment</code> mother whose barbed tip is within ~60 nm of the cortex <em>and</em> sits in a high local-Arp region. No path lets the Arp field alone spawn a filament. <span class="ok">(core requirement #2)</span></li>
+<li><strong>Formin is the sole mother source.</strong> <code>forminStep</code> → <code>makeForminMother</code> builds an uncapped <em>linear</em> seed (no Arp junction) that becomes a branching template. Mother-generation (formin) and daughter-generation (Arp2/3) are cleanly separated.</li>
+<li><strong>Branch angle = 70°</strong> (<code>arp23AlphaAngle</code>), the canonical dendritic Arp2/3 angle, with helical-azimuth modulation so daughters fan around the mother.</li>
+<li><strong>Barbed end held at the cortex.</strong> With <code>dtsForminGrowOut=true</code> the mother is seeded barbed-end-out (<code>uVec = outward</code>), <code>end2</code> linked to the vertex; the pointed end trails into cytoplasm — the correct formin geometry.</li>
+<li><strong>Mogilner–Oster ratchet.</strong> <code>ratchetPolyFactor</code> throttles barbed-end elongation by <code>exp(−F·(δ−gap)/kT)</code> using the tip→membrane clearance (<code>end2TipC</code>) written by the DTS collision. Growth stalls as load → stall force and resumes as the cortex yields — polymerization genuinely becomes protrusion.</li>
+<li><strong>Continuous surface, not a porous lattice.</strong> <code>segmentVsMembrane</code> samples the whole rod against tiled triangles (no face-center gaps) and distributes the push barycentrically to 3 vertices. The Stage-3-prep containment sweep passed in all orientations.</li>
+<li><strong>Finite mother seeding.</strong> <code>dtsForminPool=1</code>, <code>dtsForminConsume=1</code>, <code>dtsForminRecover=0</code> ⇒ ~1 mother per hot vertex, no recovery — a hard, finite cap. <span class="ok">(#3, #4)</span></li>
+<li><strong>Arp reaction–diffusion.</strong> Hot patches are clamped sources; bulk decay (<code>dtsArpDecay</code>) + per-branch consumption (<code>dtsArpConsumePerBranch</code>) are the sinks; halo length ≈ √(D/k). Source-at-NPF / sink-in-bulk is correct. <span class="ok">(#10)</span></li>
+</ul>
+
+<h2>2. Coarse but acceptable <span class="tag t-coarse">COARSE-OK</span></h2>
+<ul>
+<li><strong>Force-sensitive formin release</strong> (<code>forminCanHold</code>): exponential catch under compression, reference force hard-coded at 2 pN. Plausible but uncalibrated; configs set <code>forminRelease:0</code> anyway.</li>
+<li><strong>Daughter network embedding</strong> is approximated by a rotational-drag floor (<code>filDragMinMonomers</code>), critically-damped junctions (<code>arpTransFracMove=1.0</code>), and inherited Brownian damping (<code>heldBrownFactor</code>) rather than explicit geometry. Phenomenological but stable.</li>
+<li><strong>Held-mother thermal damping</strong> (<code>forminBarbedBrownianFactor</code>=0.05, <code>arpHeldBrownianFactor</code>=0.02): a held filament <em>should</em> have suppressed thermal; the 20×/50× factors are unprincipled but qualitatively right.</li>
+<li><strong>DTS "yield" is native, not the legacy <code>membraneYield</code> flag.</strong> Actin push moves vertices through the ordinary overdamped integrator; bending+area+volume energies resist; <code>subcycleRelaxAll</code> is retired. This is <em>more</em> physical than the legacy re-apply-each-Jacobi-pass scheme. <span class="ok">(#12)</span></li>
+<li><strong><code>dtsMaxFilaments</code> hard cap</strong> as a runaway backstop — blunt but harmless if consumption feedback is the real limiter.</li>
+<li><strong>Solid shell, not yet a fluid bilayer</strong> — bond flips (design §4) are unimplemented, so there is no lateral lipid flow / area transport into a finger yet. Acceptable for protrusion tests; state it explicitly.</li>
+</ul>
+
+<h2 class="pgbreak">3. Potential mismatch <span class="tag t-mis">MISMATCH</span></h2>
+<table>
+<tr><th style="width:7%">ID</th><th style="width:30%">Issue</th><th>Detail &amp; impact</th></tr>
+<tr><td><strong>P1</strong></td><td>Cortex-localized capping is <strong>OFF</strong> on the live path</td><td><code>membraneCapDist=0</code> everywhere ⇒ <code>checkCapping</code> never uses the membrane-distance rule; barbed ends cap only stochastically/sterically. <strong>Nothing keeps growth a thin leading-edge layer.</strong> <code>end2TipC</code> is already written by the DTS collision, so the rule would work if enabled. <em>The biggest biological gap; config-only fix.</em> (#8)</td></tr>
+<tr><td><strong>P2</strong></td><td>Mother orientation has no sustained normal bias on DTS</td><td>The clean mechanism (<code>membraneAlignTorque</code>→normal, <code>membraneAlignAngle</code>) is gated on <code>StickyNode.sphericalGeometry</code> — legacy-only. The DTS bond's <code>nodeTorqSpring</code> aligns to the vertex's <em>arbitrary body frame</em> at ~1e-18 N/rad ≈ off. DTS mothers are oriented only by seed geometry. (#6, #7)</td></tr>
+<tr><td><strong>P3</strong></td><td>Legacy <code>membraneNodeDragScale</code> still defaults to the 1e-10 trap</td><td>DTS <code>MembraneVertex</code> bypasses it with physical drag, but enabling the legacy sheet/sphere path re-inherits the known force-swallowing bug. (#11)</td></tr>
+<tr><td><strong>P4</strong></td><td>De-novo nucleators that bypass Arp2/3 exist</td><td><code>ActA.nucleateFilament</code> and generic <code>ProteinNode</code> nucleation. <strong>Off in lamellipodium configs</strong> (no current violation), but <code>ActA</code> is biologically wrong for Listeria (should recruit Arp2/3) and <code>ProteinNode</code> nucleation is test-only. Document, don't ship as dendritic biology. (#2, #13)</td></tr>
+<tr><td><strong>P5</strong></td><td>Pre-existing DTS bending 1/sinθ blow-up</td><td>When actin drives a vertex into a near-degenerate triangle, the exact dihedral gradient → ~1e128 N, bounded only by the <code>dtsMaxDispFrac</code> clamp. This — not the force caps — is the real numerical-stability risk for push→protrusion. (#12)</td></tr>
+<tr><td><strong>P6</strong></td><td>Comment rot</td><td><code>Membrane.forminStep:535–536</code> ("grow radially inward, barbed into the cytoplasm, pointed end at the inner face") describes the <em>legacy</em> branch but sits above both branches — it contradicts the active barbed-out geometry.</td></tr>
+</table>
+
+<h2>4. Answers to the 13 audit questions</h2>
+<ol class="q">
+<li><strong>Separates formin mothers from Arp daughters?</strong> Yes — distinct paths/flags (<code>forminMother</code> vs Arp23 junction). <span class="ok">✔</span></li>
+<li><strong>Arp de-novo nucleation contradicting biology?</strong> Not on the dendritic path. <code>ActA</code>/<code>ProteinNode</code> de-novo exist but are off in lamellipodium configs. <span class="flag">✔/flag (P4)</span></li>
+<li><strong>Does the formin pool cap mothers per node?</strong> Yes — <code>dtsForminPool/Consume</code> give ~1 mother/hot-vertex. <span class="ok">✔</span></li>
+<li><strong><code>forminRecover</code> = optional re-recruitment, not unlimited?</strong> Yes, default 0 = finite. <span class="ok">✔</span></li>
+<li><strong><code>motherTetherDepth</code> biologically useful placement?</strong> Works on the legacy path; the DTS analog <code>dtsForminStandoff</code> (0.05 µm off-surface) is the validated one. <span class="ok">✔ (DTS)</span>; legacy param unused.</li>
+<li><strong><code>membraneAlignAngle</code> = barbed dir vs outward normal, correct?</strong> Legacy mechanism is correct (90°=tangent, &lt;90°=dendritic tilt) but <strong>doesn't run on DTS</strong>. <span class="flag">(P2)</span></li>
+<li><strong><code>membraneAlignTorque</code> too rigid for floppy formin?</strong> Opposite — on DTS it's <em>absent</em>; the DTS torque spring targets the wrong frame at ~zero strength. <span class="flag">(P2)</span></li>
+<li><strong><code>membraneCapDist</code> localizes growth without killing the network?</strong> Mechanism sound but <strong>disabled</strong> (=0) on the live path. <span class="bad">(P1)</span></li>
+<li><strong><code>branchMembraneDist</code> realistic / not too volumetric?</strong> Legacy param unused; DTS uses a fixed ~60 nm barbed-tip-near-cortex gate — appropriately thin, near the membrane. <span class="ok">✔</span></li>
+<li><strong><code>arpLocalField</code> plausible NPF field?</strong> Legacy version superseded; DTS <code>dtsArp*</code> field is a correct source/diffuse/sink. <span class="ok">✔</span></li>
+<li><strong><code>membraneFaceCollideOn</code> makes a real surface?</strong> That flag doesn't exist on DTS; <code>dtsActinCollide</code> drives a genuine continuous-surface collision. <span class="ok">✔</span> (caveat P3 for legacy drag).</li>
+<li><strong><code>membraneYield</code> converts push→protrusion without instability?</strong> DTS yields natively (no flag); the stability risk is the 1/sinθ bending blow-up (P5), not the caps.</li>
+<li><strong>Old params misleading/unused?</strong> Yes — the entire legacy node-lattice param family is live-in-code, dead-on-path. Deprecate/document. <span class="flag">(see §6)</span></li>
+</ol>
+
+<h2 class="pgbreak">5. Recommended parameter-only changes <span class="tag t-param">PARAMS</span></h2>
+<ol>
+<li><strong>Enable cortex-localized capping on dendritic DTS configs (P1).</strong> Set <code>membraneCapDist ≈ 0.1–0.15 µm</code> in <code>dtsMembraneDendritic</code> / <code>dtsMembraneForminBranch</code> so barbed ends cap once they fall &gt;~1 monomer behind the cortex. <code>end2TipC</code> already feeds it. <em>Highest-value biology fix; config-only.</em></li>
+<li><strong>Keep <code>dtsForminRecover:0</code>, <code>dtsForminPool:1</code>, <code>forminRelease:0</code></strong> for bonded studies — already correct in the bond/branch configs; don't raise without intent.</li>
+<li><strong>Leave <code>membraneAlignTorque</code> low/off</strong> as a deliberate floppy-formin choice — but see code change C3 (it does nothing on DTS regardless).</li>
+<li><strong><code>dtsBranchRate</code>: keep moderate (20–40).</strong> Branch count ≈ <code>dtsBranchRate·arp</code> is exponentially sensitive — tune density here, length via <code>biochemDeltaT</code>/<code>actinConc</code>.</li>
+</ol>
+
+<h2>6. Recommended minimal code / documentation changes <span class="tag t-code">CODE / DOC</span></h2>
+<table>
+<tr><th style="width:8%">ID</th><th style="width:22%">Change</th><th>Detail</th></tr>
+<tr><td><strong>C1</strong></td><td>Model note (doc)</td><td>Add to <code>Membrane.java</code> header and design §6: <em>"Formin is implicit: it seeds linear mother filaments at hot Rac/Cdc42 (NPF) vertices and holds their barbed ends a standoff off the cortex. Arp2/3 branches daughters off those mothers; it never de-novo nucleates. Capping localizes growth to the leading edge; collision + ratchet convert polymerization into protrusion. FH1/FH2 mechanics are not resolved — this is a coarse mother-source/anchor."</em></td></tr>
+<tr><td><strong>C2</strong></td><td>Fix comment (doc)</td><td>Correct <code>Membrane.forminStep:535–536</code> (P6) — it describes the legacy pointed-end path; the active path holds the barbed end out.</td></tr>
+<tr><td><strong>C3</strong></td><td>Resolve <code>nodeTorqSpring</code> (small code)</td><td>Either retarget it to the true outward membrane normal (replace the body-frame <code>forminVecInx</code> target with the vertex outward radial) <em>or</em> set it to 0 and document that DTS mother orientation is seed-geometry-only (P2). Current state — "aligns to an arbitrary frame" — is neither. <em>Left for jba to choose direction.</em></td></tr>
+<tr><td><strong>C4</strong></td><td>Deprecate legacy (doc)</td><td>Mark the legacy node-lattice membrane and its param family <code>@deprecated — superseded by buildDtsMembrane</code> in <code>Env.java</code>; change <code>membraneNodeDragScale</code> default to 1.0 (P3) so the legacy path isn't a latent trap.</td></tr>
+<tr><td><strong>C5</strong></td><td>Scope de-novo paths (doc)</td><td>Note that ActA / ProteinNode de-novo nucleation are non-dendritic (Listeria / test) and intentionally off in lamellipodium configs (P4).</td></tr>
+<tr><td><strong>C6</strong></td><td>Diagnostics (small code)</td><td>Extend the <code>[DTS-E]</code> log with: mothers-per-hot-vertex, branches-per-mother, mean local <code>arpLocal</code> over hot patches, barbed-tip→membrane distance histogram, mother &amp; daughter angle-vs-normal distributions, peak radial displacement. Most inputs already exist.</td></tr>
+</table>
+
+<h2>7. Recommended validation run</h2>
+<p>Build on <code>dtsMembraneForminBranch</code> (already: one hot patch, <code>dtsForminPool:1</code>, <code>dtsArpOn</code>, <code>dtsActinCollide</code>, <code>forminRelease:0</code>):</p>
+<ul>
+<li><strong>Run A — capping/orientation baseline:</strong> as-is, add <code>membraneCapDist:0.12</code>, stiff membrane (<code>dtsKappaArea:0.15</code>, <code>dtsTargetReducedVol:1.0</code> — "yield off"). Outputs: mother count, branch count, <strong>capping fraction</strong>, barbed-tip→membrane distance, protrusion displacement (expect ~0).</li>
+<li><strong>Run B — yield on:</strong> same, soften the volume constraint (<code>dtsKappaVolume:1e-14</code>) so the cortex can bulge. Outputs: same metrics + radial displacement (expect a bounded protrusion at the patch).</li>
+</ul>
+<p>Compare A vs B for: finite mothers (≈1/hot-vertex), branches localized to the patch, capping fraction rising away from the cortex, and push→protrusion only in B. Watch <code>[DTS-E] |F|max</code> for the P5 1/sinθ blow-up.</p>
+
+<div class="verdict">
+<strong>Bottom line.</strong> The live DTS lamellipodium module is in good biological shape on the hard requirements —
+formin-only mothers, Arp2/3-only branching off them, a real reaction-diffusion NPF field, a genuine
+continuous-surface collision, and a real Mogilner–Oster ratchet. The gaps are (1) cortex-localized
+<strong>capping is implemented but switched off</strong>, (2) mother <strong>orientation bias toward the normal isn't wired on DTS</strong>
+(the good mechanism is legacy-only; the DTS one points at the wrong frame), and (3) a large, mostly-dead
+<strong>legacy parameter surface</strong> that makes the model hard to read. None require a refactor — one config flag,
+one frame fix, and documentation close most of it.
+</div>
+
+<footer>
+BoxOfActin — biology-compliance audit · branch <code>membrane-render-and-dense-v5</code> · generated 2026-06-18.
+Legend: <span class="tag t-match">MATCHES</span> meets biology · <span class="tag t-coarse">COARSE-OK</span> acceptable abstraction ·
+<span class="tag t-mis">MISMATCH</span> needs attention · <span class="tag t-param">PARAMS</span> config-only ·
+<span class="tag t-code">CODE / DOC</span> minimal code/doc change.
+</footer>
+
+</body>
+</html>
