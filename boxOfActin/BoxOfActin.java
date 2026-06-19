@@ -3235,6 +3235,12 @@ public class BoxOfActin {
 				return;
 			}
 
+			if (Env.twoNodeFormin.isActive()) {
+				ProteinNode.makeForminNodePair();
+				Env.equilNodes.setValue(ProteinNode.nodeCt);  // freeze node number (no spurious add/remove)
+				return;
+			}
+
 			if (Env.twoNodesOneFil) {
 				FilSegment.twoNodesOneFilTst();
 				Env.equilNodes.setValue(ProteinNode.nodeCt);

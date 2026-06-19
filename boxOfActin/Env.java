@@ -261,6 +261,16 @@ public class Env {
 	static final Parameter threeByThreeNodes = new Parameter("threeByThreeNodes", " 3x3 Nodes Test", 0, "", Parameter.BOOLEAN,false);
 	static boolean nodeChain = false;
 	static final double tstNodeOffset = 0.2;
+	// Two formin-bearing protein nodes facing each other: each node carries numNodeMyos surface myosins
+	// and a single formin (set forminsPerNode:1) that nucleates ONE actin mother whose pointed end grows
+	// toward the opposite node (barbed/formin end held at the node). See ProteinNode.makeForminNodePair()
+	// and the twoNodeFormin branch in getNucleationVec(). Needs kNodeNuc active to actually nucleate.
+	static final Parameter twoNodeFormin = new Parameter("twoNodeFormin"," Two formin nodes nucleating toward each other", 0, "", Parameter.BOOLEAN, false)
+		.setDescription("When on, places exactly two ProteinNodes twoNodeForminSep microns apart on the X axis, each carrying numNodeMyos surface myosins and a formin (set forminsPerNode>=1). Each node's formin nucleates a single actin mother whose POINTED end points toward the other node (the barbed/formin end is held at the node). Requires kNodeNuc active to trigger nucleation. Suppresses the random initial node/filament/minifilament populations.");
+	static final Parameter twoNodeForminSep = new Parameter("twoNodeForminSep"," Separation between the two formin nodes", 1.0, " microns")
+		.setDescription("Center-to-center distance (microns) between the two formin-bearing nodes in the twoNodeFormin assay. Default 1.0 = nodes at x = +/-0.5.");
+	static final Parameter twoNodeForminFilSegs = new Parameter("twoNodeForminFilSegs"," Segments per pre-built formin mother", 9, "", Parameter.INT)
+		.setDescription("Number of FilSegments in each pre-built formin mother for the twoNodeFormin assay. Each segment is filSegLength monomers (~0.18 um at 64). 9 segs ~ 1.6 um, so the two antiparallel mothers overlap well across a 1 um gap.");
 	static boolean compressionCritOff = true;
 	static boolean octopusMode = false;
 	// Initial-condition selectors (promoted 2026-06-15 from the compile-time test flags xLinkTesting/

@@ -773,16 +773,27 @@ public class ProteinNode extends Thing {
 	}
 	
 	public Pt3D getNucleationVec () {
+		// twoNodeFormin: aim this node's formin so the mother's POINTED end (end1) grows toward the other
+		// node. spawnNodeFilaments() reverses this vector to set uVec and pins end2 (the barbed/plus end =
+		// formin end) at the node, so the barbed end sits on the +uVec side and the pointed end on -uVec.
+		// Returning unit(other - this) puts the pointed end on the partner's side (verified empirically).
+		if (Env.twoNodeFormin.isActive()) {
+			ProteinNode other = nearestOtherNode();
+			if (other != null) {
+				return Pt3D.UnitVec(other.coordAsPt3D(), coordAsPt3D());
+			}
+		}
+
 		FilSegment nucTo = null;
 		Pt3D nucVec = Pt3D.RandomUnitVec(currentScratch().rng);
-		
+
 		if (Env.twoForminsOpposite) {
 			if (forminCt >= 1) {
 				nucTo = forminFils[0];
 				nucVec.copy(nucTo.uVecAsPt3D());
 			}
 		}
-		
+
 		return Pt3D.RandomUnitVec(currentScratch().rng);
 	}
 	
@@ -836,6 +847,64 @@ public class ProteinNode extends Thing {
 		Pt3D loc2 = new Pt3D (-Env.tstNodeOffset,0,0);
 		new ProteinNode(loc1,false);
 		new ProteinNode(loc2,false);
+	}
+
+	// twoNodeFormin assay: two formin-bearing nodes facing each other along X, twoNodeForminSep apart.
+	// Each node carries numNodeMyos surface myosins (constructor handles that). Rather than wait for
+	// stochastic nucleation + polymerization (slow, and a short seed pivots around its anchor), we
+	// PRE-BUILD one long straight actin mother per node and artificially wire its barbed/plus end (end2
+	// of the first segment) into the node's formin, so the node holds it exactly as if it had nucleated
+	// and grown it. The two mothers are antiparallel: each node's mother has its barbed end at that node
+	// and its pointed end aimed across the gap at the partner node (so they overlap in the middle, where
+	// the surface myosins engage the partner filament = a node-driven contractile unit).
+	public static void makeForminNodePair () {
+		Env.nodeBrownianMotionOff = true;   // deterministic node bodies so the held mothers stay aimed at the partner
+		double half = Env.twoNodeForminSep.getValue()/2.0;
+		int nSegs = Env.twoNodeForminFilSegs.getIntValue();
+
+		ProteinNode nodeA = new ProteinNode(new Pt3D( half,0,0), false);  // +x node
+		ProteinNode nodeB = new ProteinNode(new Pt3D(-half,0,0), false);  // -x node
+
+		// Filament A: plus/barbed end held at node A (+half); body laid toward -x; uVec=+x puts the plus
+		// end (end2) on the +x side = at the node, and the pointed end (end1) toward -x = at the partner.
+		nodeA.attachForminMother(new Pt3D(-1,0,0), new Pt3D( 1,0,0), nSegs);
+		// Filament B: mirror — plus end at node B (-half), pointed end toward +x = at the partner.
+		nodeB.attachForminMother(new Pt3D( 1,0,0), new Pt3D(-1,0,0), nSegs);
+
+		talkln("*twoNodeFormin: 2 nodes at x=+/-" + half + " um, " + Env.numNodeMyos.getIntValue()
+			+ " myosins each, " + nSegs + "-seg antiparallel formin mothers*");
+	}
+
+	// Build a straight n-segment mother whose barbed end (end2 of segs[0]) sits at this node, and wire
+	// segs[0] into this node's formin: the nodeAtEnd2 tether (addNodeForces) holds the barbed end at the
+	// node and transmits filament force back to the node; forminVecInx + nodeTorqSpring hold the mother
+	// aimed along its build axis (at the partner). forminMother flags it as a linear, barbed-held mother
+	// (no branches, reduced Brownian).
+	public void attachForminMother (Pt3D buildDir, Pt3D uVec, int nSegs) {
+		FilSegment[] segs = FilSegment.makeStraightChain(nSegs, coordAsPt3D(), buildDir, uVec, true);
+		FilSegment barbed = segs[0];                              // sits at this node, end2 (plus end) at the node center
+		barbed.forminMother = true;
+		barbed.nodeAtEnd2 = true;
+		barbed.end2Node = this;
+		barbed.end2PAttachPt.XToxFromxOrigin(this, barbed.end2AsPt3D());
+		barbed.end2PAttachPt.zero();                             // formin at node center
+		barbed.forminVecInx.XTox(this, barbed.uVecAsPt3D());     // remember the aim direction in node body frame
+		barbed.setGlobalEnd2Node(true);
+		filamentOn();
+		registerWithNode(barbed);
+	}
+
+	// Nearest other protein node (used to aim this node's formin at its partner).
+	public ProteinNode nearestOtherNode () {
+		ProteinNode best = null;
+		double bestDist = Double.MAX_VALUE;
+		for (int i=0;i<nodeCt;i++) {
+			ProteinNode other = theNodes[i];
+			if (other == this) { continue; }
+			double d = Pt3D.ptDist(coordAsPt3D(), other.coordAsPt3D());
+			if (d < bestDist) { bestDist = d; best = other; }
+		}
+		return best;
 	}
 	
 	public static void makeTestNode () {

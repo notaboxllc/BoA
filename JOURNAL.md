@@ -1,5 +1,47 @@
 # BoxOfActin Project Journal
 
+## 2026-06-19 — Node Coalescence Assay (two formin nodes pulled together by their myosins)
+
+New standalone assay. Two ProteinNodes 1 µm apart (x = ±0.5), each carrying 60 surface myosins and one
+formin that holds the BARBED/plus end of a long actin mother. The two mothers are ANTIPARALLEL — each
+node's mother has its barbed end at that node and its pointed end aimed across the gap at the partner — so
+they overlap in the middle. Each node's surface myosins engage the *partner's* filament and power-stroke
+toward its barbed end (at the partner node), dragging the two nodes together: the nodes **coalesce**.
+Verified: inter-node gap closes (1.0 → 0.92 µm in the first ~15 k steps), ~6 heads bound on average
+(`meanBoundMotors=5.778`), motors cycle NONE→ATP→ADPPi→ADP. Full run = 201 frames, CPU, no NaNs.
+
+**Key design choice (per planner):** don't wait for stochastic nucleation + polymerization (slow; a short
+seed pivots wildly around its single barbed anchor under Brownian torque). Instead **pre-build** each mother
+as a straight `makeStraightChain` and **artificially wire** its barbed-end segment into the node's formin so
+the node holds it as if it had grown it. Wiring (in `ProteinNode.attachForminMother`): set `forminMother`,
+`nodeAtEnd2`, `end2Node`, `end2PAttachPt`(zeroed = formin at node centre), `forminVecInx`(aim, in node body
+frame), `setGlobalEnd2Node(true)`, `filamentOn()`, `registerWithNode()`. The per-step `addNodeForces()`
+tether then holds the barbed end at the node AND feeds the filament's force back onto the node (= the
+contraction); `nodeTorqSpring` + `forminVecInx` keep the mother aimed at the partner; node body Brownian is
+forced off so the aim is stable.
+
+**How to run it again:**
+```
+java -Xmx800M -cp ".:libs/*" BoxOfActin -r -pf ParameterFiles/nodeCoalescenceAssay -3js <dir>
+```
+(on aorus use `bash run_cpu.sh -r -pf ParameterFiles/nodeCoalescenceAssay -3js <dir>`). RUN ON CPU (omit
+`-gpu` — like the contractility assay this IC + node tether path is CPU). Sample output watched:
+`~/Code/threejs_output/twoNodeFormin.001` (201 frames).
+
+**Where it lives:**
+- Param file: `ParameterFiles/nodeCoalescenceAssay` (self-documenting header).
+- Flags (`Env.java`): `twoNodeFormin` (on/off), `twoNodeForminSep` (gap µm, def 1.0), `twoNodeForminFilSegs`
+  (segments/mother, def 9 ≈ 1.6 µm). Myosins/node via `numNodeMyos` (60).
+- Setup: `ProteinNode.makeForminNodePair()` + `attachForminMother()`; dispatched from the `twoNodeFormin`
+  branch in `BoxOfActin.makeCrucible()` (before the other node-test branches).
+- Mechanism reused: `FilSegment.makeStraightChain` (same antiparallel scaffold as the contractility assay),
+  `FilSegment.addNodeForces()` (the barbed-end formin tether + node reaction + `nodeTorqSpring` aim hold).
+
+**Tuning knobs:** more contraction → raise `numNodeMyos`, lower `myosinStallForce` cutoffs, or shrink
+`twoNodeForminSep`. Stiffer aim → raise `nodeTorqSpring`. Longer overlap → raise `twoNodeForminFilSegs`.
+`getNucleationVec()` also has a `twoNodeFormin` branch that aims stochastic node nucleation at the partner —
+unused by this assay (kNodeNuc off) but correct if someone turns nucleation back on.
+
 ## 2026-06-18 — STATE OF PLAY (commit / rollback point): formin-membrane bond + isolated dendritic anti-spin
 
 Snapshot before a planned "compare to biological reality" survey. Two threads landed this session; this entry
