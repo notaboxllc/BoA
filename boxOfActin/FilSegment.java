@@ -169,6 +169,9 @@ public class FilSegment extends Thing {
 	// rode the cortex outward. A fixed reference makes the bond a cortex tether: the barbed end stays pinned at
 	// the cortex (filament elongates inward) and protrusion comes from the daughters' ratchet push, not the bond.
 	public Pt3D forminAnchorRef = null;
+	public Pt3D forminAnchorDir = null;   // fixed angular "address" (unit dir from cell center) for the SLIDING anchor:
+	                                      // the bond re-selects the membrane vertex nearest this direction each step,
+	                                      // so the anchor stays at a fixed angular position while the mesh flows under it.
 	public double dbgAnchorF = 0, dbgAnchorOff = 0;   // last formin-bond force/offset, for the single-filament diagnostic
 	Pt3D end2Pt = new Pt3D();
 	// Inc 1 (2026-06-09): A1 conversion. Neighbour endpoint identity used to be

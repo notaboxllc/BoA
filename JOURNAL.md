@@ -34,10 +34,16 @@ with no spin / blow-up / pop / drift / involution; `|F|max`~1e-11 N, volume ~nom
 **Open:** (a) the validated knobs (light membrane, PAIRS bond) are still env-gated — promote to real params + bake
 into the config; default behavior is currently still the original (capped spring, heavy membrane). (b) **Lateral
 flow**: anchored filaments surf the tangential mesh flow (vertices are material points without bond-flips; ~20 nm
-mean cumulative, up to ~edge-length locally, `scripts/tangential_flow.py`). NEXT: a **sliding anchor** — re-project
-the bond to the membrane surface at a fixed angular address each step, transferring across faces (reuses the
-steric's nearest-face + barycentric machinery); principled long-term answer is membrane fluidity (bond/edge flips).
-(c) single-filament isolation tool: `BOA_MAX_MOTHERS=1` + `BOA_MOM_DIAG`.
+mean cumulative, up to ~edge-length locally, `scripts/tangential_flow.py`). TRIED a **sliding anchor**
+(`BOA_SLIDE_ANCHOR`, gated): each step re-select the bonded vertex nearest the mother's fixed angular address
+(stored `forminAnchorDir` at nucleation), so the anchor stays put in angle while the mesh flows under it. Result:
+stable (no involution/blow-up, growth normal) but only ~11% mother-drift reduction (1.23→1.09 deg) AND visibly
+*more* unphysical motion in these sims — the discrete nearest-vertex snap is too coarse for the sub-edge-length
+flow (edge ~90 nm ≫ ~20 nm flow), so it rarely transfers and just adds jitter; and the gentle PAIRS bond is a minor
+player vs the network forces setting a mother's tangential position. **Kept gated/off; revisit** with the SMOOTH
+version (continuous re-projection to a barycentric point on the face at the fixed angular address — raycast
+center→surface, force to the face's 3 verts) or the principled fix, membrane fluidity (bond/edge flips).
+(c) single-filament isolation tool: `BOA_MAX_MOTHERS=1` + `BOA_MOM_DIAG` (+ `angDrift` readout vs `forminAnchorDir`).
 
 New `scripts/`: seg_spin, branch_spin, containment, drift_distort, involution, fold, com_drift, tangential_flow.
 New env knobs (all default to original/off): BOA_VERTEX_DRAG_SCALE, BOA_BOND_PAIRS, BOA_DTS_FMAX (cap on, value

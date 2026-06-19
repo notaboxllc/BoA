@@ -578,6 +578,7 @@ public final class Membrane {
                 // Capture the bond rest target FIXED in space (= the barbed end's birth position, vertex+standoff*inward).
                 // The bond pulls toward THIS, not the live (bulging) vertex -> no anchor-follows-vertex drift feedback.
                 mother.forminAnchorRef = new Pt3D(vx(v)+standoff*ix, vy(v)+standoff*iy, vz(v)+standoff*iz);
+                mother.forminAnchorDir = new Pt3D(-ix, -iy, -iz);   // outward unit dir = the SLIDING anchor's fixed angular address
             } else {
                 // de-novo mother: pointed end held at the cortex, grows inward (the legacy geometry).
                 Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
@@ -639,6 +640,13 @@ public final class Membrane {
                 // (the membrane stays smooth). As the barbed end elongates against the membrane the spring
                 // still pulls the vertex outward (the formin/filopodial push).
                 if (fs.nodeAtEnd2 && fs.end2Node != null && !fs.end2Node.removeMe) {
+                    // SLIDING anchor: re-select the bonded vertex as the one now nearest the mother's FIXED angular
+                    // address, so the anchor stays put in angle while the mesh flows under it (instead of surfing the
+                    // tangential mesh flow). Needs the gentle PAIRS bond so the vertex hand-offs don't jump.
+                    if (System.getenv("BOA_SLIDE_ANCHOR") != null && fs.forminAnchorDir != null) {
+                        int sv = nearestVertexToDir(fs.forminAnchorDir.x, fs.forminAnchorDir.y, fs.forminAnchorDir.z);
+                        if (sv >= 0 && vert[sv] != fs.end2Node) { fs.end2Node = vert[sv]; fs.forminAnchorRef = null; }
+                    }
                     ProteinNode an = fs.end2Node;
                     double tx, ty, tz;
                     if (an instanceof MembraneVertex) {
@@ -708,8 +716,11 @@ public final class Membrane {
                 double rB = Math.sqrt((e2x-center.x)*(e2x-center.x)+(e2y-center.y)*(e2y-center.y)+(e2z-center.z)*(e2z-center.z));
                 double tR = (fs.forminAnchorRef!=null)? Pt3D.ptDist(fs.forminAnchorRef, center) : -1;
                 ProteinNode vn = fs.end2Node; double vR = (vn!=null)? Math.sqrt((vn.getCoordX()-center.x)*(vn.getCoordX()-center.x)+(vn.getCoordY()-center.y)*(vn.getCoordY()-center.y)+(vn.getCoordZ()-center.z)*(vn.getCoordZ()-center.z)) : -1;
-                Thing.talkln(String.format("[MOM] step %d barbedR=%.4f targetR=%.4f vertR=%.4f radialOff=%+.4f anchorF=%.3e steric=%.3e len=%.4f",
-                    Env.counter, rB, tR, vR, rB-tR, fs.dbgAnchorF, sMag, fs.length));
+                double angD = -1;
+                if (fs.forminAnchorDir != null) { double bx=(e2x-center.x),by=(e2y-center.y),bz=(e2z-center.z),bl=Math.sqrt(bx*bx+by*by+bz*bz);
+                    if (bl>1e-12) angD = Math.toDegrees(Math.acos(Math.max(-1,Math.min(1,(bx*fs.forminAnchorDir.x+by*fs.forminAnchorDir.y+bz*fs.forminAnchorDir.z)/bl)))); }
+                Thing.talkln(String.format("[MOM] step %d barbedR=%.4f targetR=%.4f vertR=%.4f radialOff=%+.4f anchorF=%.3e steric=%.3e len=%.4f angDrift=%.2f",
+                    Env.counter, rB, tR, vR, rB-tR, fs.dbgAnchorF, sMag, fs.length, angD));
               } }
             boolean hit = false;
             if (r1[0]!=0||r1[1]!=0||r1[2]!=0) { force.setVals(r1[0],r1[1],r1[2]); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force,pt); hit=true; }
@@ -746,6 +757,19 @@ public final class Membrane {
 
     private int branchCt = 0;
     private final Pt3D scratchTip = new Pt3D();
+
+    /** Index of the vertex whose outward radial direction is closest to (dx,dy,dz) (a unit dir from center).
+     *  Used by the SLIDING anchor to re-select the bonded vertex at a fixed angular address as the mesh flows. */
+    public int nearestVertexToDir(double dx, double dy, double dz) {
+        int best = -1; double bestDot = -2;
+        for (int v = 0; v < nv; v++) {
+            double ox=vx(v)-center.x, oy=vy(v)-center.y, oz=vz(v)-center.z;
+            double l=Math.sqrt(ox*ox+oy*oy+oz*oz); if (l<1e-12) continue;
+            double d=(ox*dx+oy*dy+oz*dz)/l;
+            if (d>bestDot) { bestDot=d; best=v; }
+        }
+        return best;
+    }
 
     /** Signed distance of a point to the membrane surface along the nearest face normal: &gt;0 outside,
      *  &lt;0 inside. Returns a large negative (deep inside) if no face resolves. Uses {@code scratchCp}. */
