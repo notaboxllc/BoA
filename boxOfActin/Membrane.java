@@ -315,6 +315,30 @@ public final class Membrane {
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
         if (Env.dtsBranchOn.getValue() != 0) branchAllActin();        // Arp2/3 branching (gated by local Arp)
         if (Env.dtsActinCollide.getValue() != 0) collideAllActin();   // actin <-> membrane (containment + push)
+        netForceDiag();
+    }
+
+    /** Diagnostic: sum ALL forces in the system after the actin phase. If total|F| ~ 0, momentum is conserved
+     *  (any outward filament motion is force-partition + drag asymmetry, not a leak). If total|F| is large and
+     *  radial, there is a genuine non-equal-and-opposite leak. Gated by BOA_FORCE_DIAG. */
+    static void netForceDiag() {
+        if (System.getenv("BOA_FORCE_DIAG") == null || Env.counter % 500 != 0 || theMembranes.isEmpty()) return;
+        Pt3D C = theMembranes.get(0).center;
+        double tfx=0,tfy=0,tfz=0, ffx=0,ffy=0,ffz=0, vfx=0,vfy=0,vfz=0, fcx=0,fcy=0,fcz=0; int nf=0;
+        for (int i=0;i<Thing.thingCt;i++) {
+            Thing t = Thing.theThings[i];
+            if (t==null || t.removeMe) continue;
+            int b = t.myThingNumber*3;
+            double fx=Thing.soaForceSum[b], fy=Thing.soaForceSum[b+1], fz=Thing.soaForceSum[b+2];
+            tfx+=fx; tfy+=fy; tfz+=fz;
+            if (t instanceof FilSegment) { ffx+=fx; ffy+=fy; ffz+=fz; fcx+=t.getCoordX(); fcy+=t.getCoordY(); fcz+=t.getCoordZ(); nf++; }
+            else if (t instanceof MembraneVertex) { vfx+=fx; vfy+=fy; vfz+=fz; }
+        }
+        double frad=0;
+        if (nf>0){ double cx=fcx/nf-C.x, cy=fcy/nf-C.y, cz=fcz/nf-C.z; double l=Math.sqrt(cx*cx+cy*cy+cz*cz); if(l>0) frad=(ffx*cx+ffy*cy+ffz*cz)/l; }
+        Thing.talkln(String.format("[NETF] step %d  total|F|=%.3e  fil|F|=%.3e(rad %+.3e)  vert|F|=%.3e  nfil=%d",
+            Env.counter, Math.sqrt(tfx*tfx+tfy*tfy+tfz*tfz), Math.sqrt(ffx*ffx+ffy*ffy+ffz*ffz), frad,
+            Math.sqrt(vfx*vfx+vfy*vfy+vfz*vfz), nf));
     }
 
     // ---- Bouncers: free nodes that shoot around inside the membrane, ricochet off it (pushing transient
@@ -527,6 +551,8 @@ public final class Membrane {
         double seedDepth = vertexRadius + (tipR > 0 ? tipR : 0.01) + 0.02;   // seat just inside the cortex
         for (int v = 0; v < nv; v++) {
             if (!arpHot[v]) continue;
+            // TEST (BOA_MAX_MOTHERS): hard cap on total formin mothers, for single-filament isolation runs.
+            { String mm = System.getenv("BOA_MAX_MOTHERS"); if (mm != null && forminMotherCt >= Integer.parseInt(mm)) break; }
             if (recover > 0 && forminLocal[v] < pool) forminLocal[v] = Math.min(pool, forminLocal[v] + recover*dt);
             double avail = pool > 0 ? forminLocal[v] : 0.0;
             if (avail <= 0) continue;
@@ -549,6 +575,9 @@ public final class Membrane {
                 Pt3D nucPt = new Pt3D(vx(v) + (halfLen+standoff)*ix, vy(v) + (halfLen+standoff)*iy, vz(v) + (halfLen+standoff)*iz);
                 mother = FilSegment.makeForminMother(nucPt, new Pt3D(-ix, -iy, -iz));   // uVec outward -> barbed toward cortex
                 FilSegment.linkEnd2Node(mother, vert[v]);        // formin holds the barbed end off the membrane
+                // Capture the bond rest target FIXED in space (= the barbed end's birth position, vertex+standoff*inward).
+                // The bond pulls toward THIS, not the live (bulging) vertex -> no anchor-follows-vertex drift feedback.
+                mother.forminAnchorRef = new Pt3D(vx(v)+standoff*ix, vy(v)+standoff*iy, vz(v)+standoff*iz);
             } else {
                 // de-novo mother: pointed end held at the cortex, grows inward (the legacy geometry).
                 Pt3D nucPt = new Pt3D(vx(v) + seedDepth*ix, vy(v) + seedDepth*iy, vz(v) + seedDepth*iz);
@@ -586,6 +615,8 @@ public final class Membrane {
 
     void collideActin() {
         buildFaceGrid();
+        double anchorTrackLambda = 1.0;   // 1=instant vertex tracking (legacy); <1 low-passes the drift feedback
+        { String al = System.getenv("BOA_ANCHOR_LAMBDA"); if (al != null) anchorTrackLambda = Double.parseDouble(al); }
         double rad = FilSegment.radius;
         double ratchet = Env.dtsRatchetForce.getValue();
         double kAnchor = Env.dtsAnchorStiffness.getValue();
@@ -611,15 +642,44 @@ public final class Membrane {
                     ProteinNode an = fs.end2Node;
                     double tx, ty, tz;
                     if (an instanceof MembraneVertex) {
-                        ((MembraneVertex)an).forminStandoffTarget(standoffTgt, standoff);
-                        tx = standoffTgt.x; ty = standoffTgt.y; tz = standoffTgt.z;
+                        // LOW-PASS anchor: the bond rest target tracks the live (bulging) vertex, but only at
+                        // rate lambda per step. lambda=1 -> instant tracking (legacy; stable but the daughter
+                        // push feeds back step-to-step -> the pair rides the bulge outward = the drift).
+                        // lambda<1 -> the target lags fast membrane motion, damping the feedback, while still
+                        // following slow legitimate protrusion (so it stays low-strain -> stable, unlike a
+                        // space-fixed anchor which builds huge strain and blows up).
+                        ((MembraneVertex)an).forminStandoffTarget(standoffTgt, standoff);   // live standoff target
+                        double lam = anchorTrackLambda;
+                        if (fs.forminAnchorRef == null) fs.forminAnchorRef = new Pt3D(standoffTgt.x,standoffTgt.y,standoffTgt.z);
+                        else {
+                            fs.forminAnchorRef.x += lam*(standoffTgt.x - fs.forminAnchorRef.x);
+                            fs.forminAnchorRef.y += lam*(standoffTgt.y - fs.forminAnchorRef.y);
+                            fs.forminAnchorRef.z += lam*(standoffTgt.z - fs.forminAnchorRef.z);
+                        }
+                        tx = fs.forminAnchorRef.x; ty = fs.forminAnchorRef.y; tz = fs.forminAnchorRef.z;
                     } else { tx = an.getCoordX(); ty = an.getCoordY(); tz = an.getCoordZ(); }
                     double ax = (tx-e2x), ay = (ty-e2y), az = (tz-e2z);
-                    double m = anchorMag(kAnchor, ax, ay, az);   // N, capped
                     double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
+                    double m;
+                    // TEST (#2): PAIRS drag-weighted bond with a tunable membrane-side effective drag, instead of
+                    // the fixed-stiffness spring. BOA_BOND_PAIRS=<scale> uses m=(strain/dt)/(1/gFil + 1/(scale*gVert)).
+                    // A small scale makes the membrane the "light" element so the bond conforms the membrane rather
+                    // than dragging the filament network outward (see drift discussion). Default (env unset) = legacy spring.
+                    String pairsEnv = System.getenv("BOA_BOND_PAIRS");
+                    if (pairsEnv != null) {
+                        double scale = Double.parseDouble(pairsEnv);
+                        double gMemEff = Math.max(1e-30, scale * an.bTransGam.x);   // effective membrane drag for the bond
+                        double cdt = Env.collisionDeltaT.getValue();
+                        m = (1.0e-6 * off / cdt) / (1.0/fs.bTransGam.y + 1.0/gMemEff);
+                        double fmaxc = Env.dtsAnchorForceMax.getValue();
+                        if (m > fmaxc) m = fmaxc;
+                    } else {
+                        m = anchorMag(kAnchor, ax, ay, az);   // legacy fixed-stiffness spring, N, capped
+                    }
                     double fxA=m*ax/off, fyA=m*ay/off, fzA=m*az/off;
                     force.setVals(fxA,fyA,fzA); pt.setVals(e2x,e2y,e2z); fs.incForceSum(force, pt);   // barbed end -> vertex
                     an.incForceSumSlot(-fxA,-fyA,-fzA);                                                // vertex -> barbed end (push cortex out)
+                    fs.dbgAnchorF = m; fs.dbgAnchorOff = off;   // for the single-filament force-state diagnostic
                 }
                 // de-novo (pointed-end) mother: one-sided tether (don't load the cortex inward).
                 else if (fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
@@ -630,8 +690,27 @@ public final class Membrane {
                     force.setVals(m*ax/off, m*ay/off, m*az/off); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
                 }
             }
+            if (System.getenv("BOA_BRANCH_DIAG") != null && fs.forminMother && fs.arpChildCt > 0 && Env.counter % 200 == 0) {
+                double rB = Math.sqrt((e2x-center.x)*(e2x-center.x)+(e2y-center.y)*(e2y-center.y)+(e2z-center.z)*(e2z-center.z));
+                double rRef = (fs.forminAnchorRef!=null)? Pt3D.ptDist(fs.forminAnchorRef, center) : -1;
+                Thing.talkln(String.format("[BR-TRAJ] step %d motherId=%d kids=%d  barbedR=%.4f anchorRefR=%.4f strain=%.5f",
+                    Env.counter, fs.thingInstanceId, fs.arpChildCt, rB, rRef, Math.abs(rB-rRef)));
+            }
             double gSeg = fs.bTransGam.y;                              // perpendicular filament drag
-            segmentVsMembrane(e1x,e1y,e1z, e2x,e2y,e2z, rad, gSeg, r1, r2);
+            if (fs.childOfArp23 && System.getenv("BOA_NO_DAUGHTER_STERIC") != null) { r1[0]=r1[1]=r1[2]=0; r2[0]=r2[1]=r2[2]=0; }
+            else segmentVsMembrane(e1x,e1y,e1z, e2x,e2y,e2z, rad, gSeg, r1, r2);
+            // SINGLE-FILAMENT force-state diagnostic (BOA_MOM_DIAG): log every formin mother each output frame so a
+            // reported "frame interval" can be mapped to its force state (anchor force, steric reaction, tip clearance,
+            // length, drag, cap/bond flags) -- to catch the occasional "force state jump".
+            { int momInt = 0; { String s = System.getenv("BOA_MOM_DIAG"); if (s != null) momInt = Integer.parseInt(s); }
+              if (momInt > 0 && fs.forminMother && Env.counter % momInt == 0) {
+                double sMag = Math.sqrt((r1[0]+r2[0])*(r1[0]+r2[0])+(r1[1]+r2[1])*(r1[1]+r2[1])+(r1[2]+r2[2])*(r1[2]+r2[2]));
+                double rB = Math.sqrt((e2x-center.x)*(e2x-center.x)+(e2y-center.y)*(e2y-center.y)+(e2z-center.z)*(e2z-center.z));
+                double tR = (fs.forminAnchorRef!=null)? Pt3D.ptDist(fs.forminAnchorRef, center) : -1;
+                ProteinNode vn = fs.end2Node; double vR = (vn!=null)? Math.sqrt((vn.getCoordX()-center.x)*(vn.getCoordX()-center.x)+(vn.getCoordY()-center.y)*(vn.getCoordY()-center.y)+(vn.getCoordZ()-center.z)*(vn.getCoordZ()-center.z)) : -1;
+                Thing.talkln(String.format("[MOM] step %d barbedR=%.4f targetR=%.4f vertR=%.4f radialOff=%+.4f anchorF=%.3e steric=%.3e len=%.4f",
+                    Env.counter, rB, tR, vR, rB-tR, fs.dbgAnchorF, sMag, fs.length));
+              } }
             boolean hit = false;
             if (r1[0]!=0||r1[1]!=0||r1[2]!=0) { force.setVals(r1[0],r1[1],r1[2]); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force,pt); hit=true; }
             if (r2[0]!=0||r2[1]!=0||r2[2]!=0) { force.setVals(r2[0],r2[1],r2[2]); pt.setVals(e2x,e2y,e2z); fs.incForceSum(force,pt); hit=true; }
@@ -666,6 +745,15 @@ public final class Membrane {
     }
 
     private int branchCt = 0;
+    private final Pt3D scratchTip = new Pt3D();
+
+    /** Signed distance of a point to the membrane surface along the nearest face normal: &gt;0 outside,
+     *  &lt;0 inside. Returns a large negative (deep inside) if no face resolves. Uses {@code scratchCp}. */
+    public double signedDistanceToSurface(double x, double y, double z) {
+        int f = nearestFace(x, y, z, scratchCp);
+        if (f < 0) return -1e30;
+        return (x-scratchCp[0])*fNx[f] + (y-scratchCp[1])*fNy[f] + (z-scratchCp[2])*fNz[f];
+    }
 
     /** Arp2/3 branch nucleation off membrane-proximal filaments, gated by the local Arp field. A filament
      *  whose barbed tip is near the cortex in a high-Arp region branches: a daughter nucleates at the branch
@@ -689,7 +777,7 @@ public final class Membrane {
         int cap = Env.dtsMaxFilaments.getIntValue();
         int n0 = FilSegment.filSegmentCt;   // snapshot: a daughter can't branch the same step it's born
         int made = 0;
-        int cand=0, nearCortex=0;   // gate counters (pipeline-health diagnostics)
+        int cand=0, nearCortex=0, rejBorn=0;   // gate counters (pipeline-health diagnostics)
         for (int i = 0; i < n0; i++) {
             if (FilSegment.filSegmentCt >= cap) break;
             FilSegment fs = FilSegment.theFilSegments[i];
@@ -710,15 +798,32 @@ public final class Membrane {
             // tilt + the mother-daughter linkage). The membrane-facing daughters then grow + ratchet + push.
             double bLoc = fs.length - Thing.currentScratch().rng.nextDouble() * Math.min(0.05, 0.6*fs.length);
             if (bLoc < 0.1*fs.length) bLoc = 0.1*fs.length;
+            // BIRTH-CLEARANCE GATE: refuse a branch whose SEED daughter would be born already loading the
+            // cortex. Such daughters (held at the ~70deg geometry, partway through the surface) drive a
+            // sustained steric push on the compliant membrane -> the formin-anchored pair rides the bulge
+            // outward (the directional drift). Require the seed barbed tip to start at least one steric
+            // contact distance INSIDE the surface, so the daughter loads the membrane only as it GROWS
+            // (the Mogilner-Oster ratchet then throttles it) -- a gentle, growth-driven push, not a static shove.
+            if (System.getenv("BOA_BRANCH_BIRTH_GATE") != null) {   // opt-in; over-prunes near-cortex branches (see journal)
+                double tipClear = FilSegment.radius + vertexRadius + 0.005;   // born this far inside, minimum
+                fs.prospectiveDaughterTipInto(bLoc, scratchTip);
+                if (signedDistanceToSurface(scratchTip.x, scratchTip.y, scratchTip.z) > -tipClear) { rejBorn++; continue; }
+            }
             fs.makeArpBranch(bLoc);
+            // TEST (BOA_BREAK_BOND_ON_BRANCH): sever the mother's formin-membrane bond the moment it branches.
+            // The mother keeps its high-drag daughter, so it shouldn't diffuse far. If it STILL shows directed
+            // outward motion, the bond is not the driver.
+            if (System.getenv("BOA_BREAK_BOND_ON_BRANCH") != null && fs.nodeAtEnd2 && fs.end2Node != null) {
+                fs.end2Node.filamentOff(); fs.end2Node = null; fs.nodeAtEnd2 = false; fs.forminAnchorRef = null;
+            }
             arpLocal[a]=Math.max(0,arpLocal[a]-consume);
             arpLocal[b]=Math.max(0,arpLocal[b]-consume);
             arpLocal[c]=Math.max(0,arpLocal[c]-consume);
             made++; branchCt++;
         }
         if (Env.counter % 1000 == 0) {
-            Thing.talkln(String.format("[DTS-BRANCH] step %d  fils=%d nearCortex=%d  totalBranches=%d",
-                    Env.counter, cand, nearCortex, branchCt));
+            Thing.talkln(String.format("[DTS-BRANCH] step %d  fils=%d nearCortex=%d rejBorn=%d  totalBranches=%d",
+                    Env.counter, cand, nearCortex, rejBorn, branchCt));
         }
     }
 
@@ -1111,6 +1216,11 @@ public final class Membrane {
                 double dot = fNx[f1]*fNx[f2]+fNy[f1]*fNy[f2]+fNz[f1]*fNz[f2];
                 dot = Math.max(-1.0, Math.min(1.0, dot));
                 double sinT = Math.sqrt(Math.max(1e-300, 1.0 - dot*dot));
+                if (sinT < 1.0e-2) sinT = 1.0e-2;   // FLOOR the dihedral sine (~0.57deg). Without this, when actin
+                                                    // folds two faces toward coplanar (dot->+-1) the exact gradient's
+                                                    // 1/sinT term explodes to ~1e150 N -> the cortex flings outward
+                                                    // ("superman"). Normal nu=4 dihedrals have sinT~0.04, so this
+                                                    // floor never touches the FD-validated regime.
                 double thetaFac = (theta >= 0 ? 1.0 : -1.0) * (-1.0 / sinT);   // s*(-1/sin)
                 double fscale = -coeff * le * thetaFac;       // force = -coeff*l * d(theta)/dx
                 double r1x=fNx[f2]-dot*fNx[f1], r1y=fNy[f2]-dot*fNy[f1], r1z=fNz[f2]-dot*fNz[f1];
@@ -1147,13 +1257,24 @@ public final class Membrane {
             }
         }
 
-        // ---- Write per-vertex force into soaForceSum (N) ----
+        // ---- Write per-vertex force into soaForceSum (N), with a backstop cap ----
+        // Hard-cap the assembled per-vertex membrane force. Legitimate bending/area/volume forces are ~1e-11 N;
+        // this 1e-9 ceiling is 100x above them yet bounds any residual degenerate-triangle blow-up (the sinT
+        // floor above is the primary guard; this is the safety net the journal flagged -- "cap the assembled
+        // per-vertex membrane force like the actin caps"). Tunable via BOA_DTS_FMAX.
+        double FMAX = 1.0e-9;
+        { String fx = System.getenv("BOA_DTS_FMAX"); if (fx != null) FMAX = Double.parseDouble(fx); }
         double maxF = 0;
+        int capped = 0;
         for (int v = 0; v < nv; v++) {
-            vert[v].incForceSumSlot(fX[v], fY[v], fZ[v]);
-            double fm = fX[v]*fX[v]+fY[v]*fY[v]+fZ[v]*fZ[v];
+            double fx=fX[v], fy=fY[v], fz=fZ[v];
+            double fm = fx*fx+fy*fy+fz*fz;
+            if (fm > FMAX*FMAX) { double s = FMAX/Math.sqrt(fm); fx*=s; fy*=s; fz*=s; fm=FMAX*FMAX; capped++; }
+            vert[v].incForceSumSlot(fx, fy, fz);
             if (fm > maxF) maxF = fm;
         }
+        if (capped > 0 && Env.counter % 500 == 0)
+            Thing.talkln(String.format("[DTS-E] step %d  WARNING %d vertices hit the force cap (FMAX=%.1e N) -- degenerate triangles", Env.counter, capped, FMAX));
         if (Env.counter % 500 == 0) {
             Thing.talkln(String.format(
                 "[DTS-E] step %d  E bend=%.3e area=%.3e vol=%.3e tot=%.3e J   A=%.4f/%.4f  V=%.4f/%.4f um  |F|max=%.2e N",

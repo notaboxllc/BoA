@@ -1,0 +1,88 @@
+<BOA> DTS membrane v2 -- DENDRITIC NETWORK, ANTI-SPIN. dtsMembraneForminBranch (standoff bond, no release,
+<BOA> held-mother + inherited-daughter Brownian damping, critically-damped junction) SCALED UP to a real
+<BOA> branched network, PLUS the KEY anti-spin lever back-ported from isoBranch: filDragMinMonomers:200
+<BOA> (over-damps daughter ROTATION, drag ~ L^3), AND -- the decisive lever -- the sub-cycled fixed-stiffness
+<BOA> Arp junction (arpSubcycleN:10). MEASURED (scripts/seg_spin.py, frames 5-50): per-segment axis rotation
+<BOA> dropped 8.1 -> 0.68 deg/frame (p90 31.7 -> 1.5) when subcycling was turned back ON -- as calm as the
+<BOA> validated free-space isoBranch network. The old note "do NOT subcycle on the membrane (daughters escape
+<BOA> the cortex)" does NOT hold here: with the daughter push capped at the polymerization stall force
+<BOA> (dtsActinPushMax 5 pN) daughters don't ram the cortex during the inner steps, so containment holds
+<BOA> (scripts/containment.py: maxActinR 1.18 < maxMembR 1.21, 0 endpoints outside). drag floor +
+<BOA> arpTransFracMove=1 ALONE (subcycle off) was NOT enough -- they are present in the spinning run too.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.15;
+dtsKappaVolume:true:1.0e-13;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.2;
+dtsBrownianOff:true:1.0;
+dtsAnchorStiffness:true:0.015;
+
+// --- Arp field: a few hot patches -> a few formin mothers + localized branching ---
+dtsArpOn:true:1.0;
+dtsArpHotPatches:true:3;
+dtsArpHotPatchDeg:true:8.0;
+dtsArpDiffusion:true:0.1;
+dtsArpDecay:true:0.015;
+
+// --- formin mothers, barbed end held a STANDOFF off the cortex; NO RELEASE ---
+dtsForminOn:true:1.0;
+dtsForminGrowOut:true:1.0;
+dtsForminPool:true:1.0;
+dtsForminConsume:true:1.0;
+dtsForminNucRate:true:50.0;        // moderate seeding; pool=1/vert caps mothers at ~one per hot vertex
+dtsForminRecover:true:0.0;
+forminRelease:true:0.0;            // mothers stay bonded (default 1/s makes them detach + fly)
+forminBarbedBrownianFactor:true:0.05;   // 20x-down thermal on held mothers
+dtsForminStandoff:true:0.05;
+actinSeed:true:8;
+
+// --- ANTI-SPIN: critically-damped junction + daughter rotational-drag floor (the KEY lever) ---
+arpTransFracMove:true:1.0;          // critically damped gap closure (1.0; >1 overshoots/spins)
+arpSubcycleN:true:10;              // <-- DECISIVE anti-spin: r-RESPA sub-cycle the stiff Arp junction at dt/10
+filDragMinMonomers:true:200;       // over-damp daughter ROTATION (drag ~ L^3); helps but NOT sufficient alone
+arpDaughterBrownianFactor:true:1.0; // daughters also inherit the mother's heldBrownFactor in moveThing
+
+// --- Arp2/3 branching ON, gated by the local activated-Arp field; bounded ---
+dtsBranchOn:true:1.0;
+dtsBranchRate:true:20.0;            // moderate -> a controlled, bounded network (well below the blow-up wall)
+dtsArpConsumePerBranch:true:0.05;
+dtsMaxFilaments:true:400;
+
+// --- actin-membrane collision + Mogilner-Oster ratchet; daughter push capped at the STALL force ---
+dtsActinCollide:true:1.0;
+dtsRatchetForce:true:0.0;
+ratchetOn:true:1.0;
+ratchetForce:true:1.5e-12;
+dtsActinPushMax:true:5.0e-12;       // protrusion push cap = polymerization stall force (~5 pN)
+actinConc:true:8.0;
+filTipRadiusForCollision:true:0.04;
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.08;
+toFileInterval:true:120.0;
+remoteWriteInterval:true:2000.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+arpConc:true:0.0;

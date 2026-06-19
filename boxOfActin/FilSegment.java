@@ -164,6 +164,12 @@ public class FilSegment extends Thing {
 	// CPU value-readers in collision/link/biochem/output paths; the SoA arrays
 	// remain canonical.
 	Pt3D end1Pt = new Pt3D();
+	// Formin-membrane bond rest target, FIXED in space at nucleation (not chasing the live, bulging vertex).
+	// Anchoring to the live vertex created a daughter-push -> vertex-out -> target-out -> pair-out feedback that
+	// rode the cortex outward. A fixed reference makes the bond a cortex tether: the barbed end stays pinned at
+	// the cortex (filament elongates inward) and protrusion comes from the daughters' ratchet push, not the bond.
+	public Pt3D forminAnchorRef = null;
+	public double dbgAnchorF = 0, dbgAnchorOff = 0;   // last formin-bond force/offset, for the single-filament diagnostic
 	Pt3D end2Pt = new Pt3D();
 	// Inc 1 (2026-06-09): A1 conversion. Neighbour endpoint identity used to be
 	// encoded by the reference-identity check `ptAtEnd? == endNFil.end?Pt`, with
@@ -1304,7 +1310,29 @@ public class FilSegment extends Thing {
 		}
 	}
 
+	/** Where the barbed tip of a daughter branched at {@code bLoc} would be BORN (before any growth).
+	 *  Mirrors the placement in {@link #makeArpBranch}: daughter end1 (pointed) sits at the branch point,
+	 *  the seed extends along nucUVec, so tip = branchPoint + seedLen*nucUVec. Used by the membrane branch
+	 *  gate to refuse branches whose seed would already load the cortex (it should push only via growth). */
+	public void prospectiveDaughterTipInto(double bLoc, Pt3D out) {
+		double theta = getHelixAngleAtLoc(bLoc);
+		double yPart = Math.cos(theta)*Env.sinArp23Alpha;
+		double zPart = Math.sin(theta)*Env.sinArp23Alpha;
+		Pt3D nucUVec = new Pt3D(Env.cosArp23Alpha,yPart,zPart);
+		nucUVec.xToX(this);
+		Pt3D nucLoc = Pt3D.Add(end1Pt,bLoc,uVecAsPt3D());           // branch point = daughter end1
+		double seedLen = (Env.actinSeed.getIntValue()+1)*Env.actinMonoRadius;   // = 2*dHalf in makeArpBranch
+		out.setVals(nucLoc.x + seedLen*nucUVec.x, nucLoc.y + seedLen*nucUVec.y, nucLoc.z + seedLen*nucUVec.z);
+	}
+
 	public FilSegment makeArpBranch(double bLoc) {
+		if (System.getenv("BOA_BRANCH_DIAG") != null && forminMother && !Membrane.theMembranes.isEmpty()) {
+			Pt3D C = Membrane.theMembranes.get(0).center;
+			double rB = Pt3D.ptDist(end2Pt, C);
+			double rRef = (forminAnchorRef != null) ? Pt3D.ptDist(forminAnchorRef, C) : -1;
+			Thing.talkln(String.format("[BR-EVENT] step %d motherId=%d childCt %d->%d  barbedR=%.4f anchorRefR=%.4f  len=%.4f dragX=%.3e",
+				Env.counter, thingInstanceId, arpChildCt, arpChildCt+1, rB, rRef, length, bTransGam.x));
+		}
 		double theta = getHelixAngleAtLoc(bLoc); // assume helixAng is angle with mother filament's body-fixed y-axis
 		double yPart = Math.cos(theta)*Env.sinArp23Alpha;
 		double zPart = Math.sin(theta)*Env.sinArp23Alpha;

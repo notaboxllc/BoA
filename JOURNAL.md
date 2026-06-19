@@ -1,5 +1,50 @@
 # BoxOfActin Project Journal
 
+## 2026-06-19 — DTS dendritic-at-membrane: five distinct pathologies diagnosed + fixed (validated combo still env-gated)
+
+Worked the dendritic network ON the DTS membrane (the unverified bond/branch interaction flagged 06-18). Five
+separate problems, each isolated with a metric + a seed-controlled A/B (`BOA_RNG_SEED`; new `scripts/`):
+
+1. **Branch spin** (filaments whirl the instant a branch forms). Cause: Arp-junction sub-cycling was OFF on the
+   membrane (`arpSubcycleN:1`) on a *disproven* assumption it broke containment. Re-enabling `arpSubcycleN:10`
+   drops per-segment rotation **8.1→0.68 deg/frame** (`scripts/seg_spin.py`); containment holds (stall-force-capped
+   daughter push → no escape during inner steps). Baked into `ParameterFiles/dtsMembraneDendriticNoSpin`.
+2. **Bending 1/sinθ blow-up** (the violent "superman"). `|F|max`→1e129 N when actin folds two faces toward
+   coplanar. Fixed in `Membrane.computeForces`: floor `sinT` at 1e-2 + cap the assembled per-vertex membrane force
+   at 1e-9 N (`BOA_DTS_FMAX`). `|F|max` now bounded ~1e-11 N for full runs (previously capped every run at step
+   ~6000). **Always on.**
+3. **Directed outward drift of a tiny mother+daughter.** NOT a momentum leak (measured via `netForceDiag`), NOT the
+   bending blow-up. It's the heavy formin bond dragging the network through a too-soft membrane. Fix: make the
+   membrane physically LIGHT so it FOLLOWS the actin instead of being dragged — `BOA_VERTEX_DRAG_SCALE=0.01`. Drift
+   gone (filRmax flat), containment kept. Falsified along the way: low-pass / fixed anchor (destabilize), birth-gate
+   (over-prunes 88% of branches), drag-floor. **Env-gated; promote to `dtsVertexDragScale`.**
+4. **Force-state "pop"** (barbed end flips ±0.045 µm every step). Cause: the formin bond is a fixed-stiffness spring
+   SATURATED at its 1e-10 cap → constant-force bang-bang → explicit-Euler ringing on the short low-drag filament.
+   Fix: drag-weighted critically-damped PAIRS bond (same form as the Arp junction) — `BOA_BOND_PAIRS=1.0`. barbedR
+   stable ±0.0005, anchorF gentle ~4e-13. **Env-gated; promote / make the default bond.**
+5. **Membrane involution** (one zone buckles inward, rMin→0.95, inverted faces). Cause: an unrealistically dense
+   (cap 4000) network over-compresses the soft shell (volume −7%) → buckling; the force cap bounds the force but
+   can't undo the fold (no mesh conditioning yet). Fix: realistic density via **capping** (`membraneCapDist:0.1`) →
+   thin self-limiting brush, volume −1.5%, **0 inverted faces**. In `ParameterFiles/dtsMembraneDendriticNoSpin_capped`.
+
+**Validated full-stack** (light membrane + PAIRS bond + capping + spin + bending): a 1000+ filament dendritic brush
+with no spin / blow-up / pop / drift / involution; `|F|max`~1e-11 N, volume ~nominal. Launch:
+`BOA_BOND_PAIRS=1.0 BOA_VERTEX_DRAG_SCALE=0.01 BOA_RNG_SEED=7 java … -pf dtsMembraneDendriticNoSpin_capped`.
+
+**Open:** (a) the validated knobs (light membrane, PAIRS bond) are still env-gated — promote to real params + bake
+into the config; default behavior is currently still the original (capped spring, heavy membrane). (b) **Lateral
+flow**: anchored filaments surf the tangential mesh flow (vertices are material points without bond-flips; ~20 nm
+mean cumulative, up to ~edge-length locally, `scripts/tangential_flow.py`). NEXT: a **sliding anchor** — re-project
+the bond to the membrane surface at a fixed angular address each step, transferring across faces (reuses the
+steric's nearest-face + barycentric machinery); principled long-term answer is membrane fluidity (bond/edge flips).
+(c) single-filament isolation tool: `BOA_MAX_MOTHERS=1` + `BOA_MOM_DIAG`.
+
+New `scripts/`: seg_spin, branch_spin, containment, drift_distort, involution, fold, com_drift, tangential_flow.
+New env knobs (all default to original/off): BOA_VERTEX_DRAG_SCALE, BOA_BOND_PAIRS, BOA_DTS_FMAX (cap on, value
+tunable), BOA_BRANCH_BIRTH_GATE, BOA_ANCHOR_LAMBDA, BOA_MAX_MOTHERS, BOA_MOM_DIAG, BOA_FORCE_DIAG, BOA_BRANCH_DIAG,
+BOA_NO_DAUGHTER_STERIC, BOA_BREAK_BOND_ON_BRANCH. Run logs `RUN_LOGS/2026-06-18_*`,`RUN_LOGS/2026-06-19_*` (not
+committed); viewer runs `~/Code/threejs_output/dendritic_capped_pairs`, `onefil`/`onefil_pairs`.
+
 ## 2026-06-19 — Node Coalescence Assay (two formin nodes pulled together by their myosins)
 
 New standalone assay. Two ProteinNodes 1 µm apart (x = ±0.5), each carrying 60 surface myosins and one

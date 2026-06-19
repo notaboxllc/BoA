@@ -42,11 +42,14 @@ public final class MembraneVertex extends ProteinNode {
     public void calculateProperties() {
         double radiusM = getRadius() * 1.0e-6;          // microns -> metres
         double eta = Env.aeta.getValue();               // BoA effective viscosity (Pa.s)
-        bTransGam.x = 6 * Math.PI * eta * radiusM;
+        // TEST (BOA_VERTEX_DRAG_SCALE): make the membrane physically LIGHT so it FOLLOWS the actin (moves freely
+        // out of the way) rather than hard-containing it. Default 1.0 = physical drag (the DTS-fix value).
+        double scale = 1.0; { String s = System.getenv("BOA_VERTEX_DRAG_SCALE"); if (s != null) scale = Double.parseDouble(s); }
+        bTransGam.x = scale * 6 * Math.PI * eta * radiusM;
         bTransGam.y = bTransGam.x;
         bTransGam.z = bTransGam.x;
         bTransDiff.div(Env.Boltz * Env.tempK, bTransGam);   // Einstein D = kT/gamma
-        bRotGam.x = 8 * Math.PI * eta * (radiusM * radiusM * radiusM);
+        bRotGam.x = scale * 8 * Math.PI * eta * (radiusM * radiusM * radiusM);
         bRotGam.y = bRotGam.x;
         bRotGam.z = bRotGam.x;
         bRotDiff.div(Env.Boltz * Env.tempK, bRotGam);
