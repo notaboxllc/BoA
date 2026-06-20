@@ -23,6 +23,20 @@ incidence with headroom). Likely also need **edge split/collapse** afterward —
 redistribution that *no* flip fixes (clustered vertices); split/collapse maintains ~uniform edge length and
 enables area transport into protrusions. New diagnostic `scripts/tri_quality.py`. Runs `RUN_LOGS/2026-06-20_flips/`.
 
+**Metropolis-on-bending — DONE and VALIDATED (the fluid works at equilibrium).** Replaced Delaunay with the
+physical rule: `tryFlip` computes local ΔE_bend at the flip's 4 quad vertices (`vertexBendEnergy`/`signedDihedral`
+matching the computeForces convention exactly), accepts with `min(1, exp(-ΔE/kT))`, and **reverts a rejected move
+by re-flipping** (the surgery `doFlipSurgery` is self-inverse). Revived `vertEdge` incidence (maintained across
+flips; `maxVal` bumped to ≥12 for headroom). KEY conditioners: tight tether bound on the new diagonal
+(`0.67–1.5·l0`; `l_max<√3·l0` rejects the regular-hex flip so the pristine mesh barely flips), and a **min-angle
+quality guard** (≥12°) so a flip can't create a sliver even when bending favours it. **Validation — resting
+vesicle (`dtsMembrane2`): E_bend pinned at 8πκ=2.52e-18 J over the whole run, A/V held exactly, |F|max ~6e-13,
+verify=true, steady thermal ~55 flips/sweep** = a true fluid bilayer (connectivity fluctuates, shape/energy
+preserved). The ΔE is correct (a buggy one drifts E). **Open — strong deformation needs split/collapse:** under a
+big push bleb, flips correctly let area FLOW into the protrusion (vs the inextensible solid that stalls — the
+fluid signature) but the growing bleb stretches triangles beyond what flips can fix → degrades ~step 10k (guard
+delays it to ~9k). NEXT STAGE: edge split/collapse to remesh growing protrusions. Env-gated `BOA_FLIP_N` (off).
+
 ## 2026-06-19 — DTS dendritic-at-membrane: five distinct pathologies diagnosed + fixed (validated combo still env-gated)
 
 Worked the dendritic network ON the DTS membrane (the unverified bond/branch interaction flagged 06-18). Five

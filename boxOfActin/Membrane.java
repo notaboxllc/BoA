@@ -143,7 +143,7 @@ public final class Membrane {
 
         int mv = 0;
         for (int i = 0; i < nv; i++) mv = Math.max(mv, valence[i]);
-        this.maxVal = mv;
+        this.maxVal = Math.max(mv, 12);   // headroom: edge flips raise valence past the icosphere's 6 (cap VAL_MAX)
         this.vertEdge = new int[nv * maxVal];
         this.vertEdgeCt = new int[nv];
         for (int e = 0; e < ne; e++) {
@@ -310,22 +310,22 @@ public final class Membrane {
     // GPU gather port). Acceptance here = Delaunay/quality (robust first cut); Metropolis-on-bending is the
     // physical refinement (next stage).
     private java.util.HashMap<Long,Integer> edgeIndex;   // ekey -> edge index, maintained across flips
-    private int[] valence;                                // per-vertex valence, maintained across flips
     int flipAccepted, flipTried;                         // diagnostics (per sweep)
+    private final java.util.Random flipRng = new java.util.Random(20260620L);
     private static final int VAL_MAX = 9, VAL_MIN = 3;
 
     private long ekey(int u, int v) { int lo=Math.min(u,v), hi=Math.max(u,v); return (long)lo*nv + hi; }
     private int findEdge(int u, int v) { Integer e = edgeIndex.get(ekey(u,v)); return e==null?-1:e; }
 
-    private void buildFlipIndex() {
+    private void buildFlipIndex() {   // edge lookup; valence is tracked by vertEdgeCt (built in the ctor)
         if (edgeIndex != null) return;
         edgeIndex = new java.util.HashMap<>(ne*2);
         for (int e=0;e<ne;e++) edgeIndex.put(ekey(edgeVert[2*e], edgeVert[2*e+1]), e);
-        valence = new int[nv];
-        for (int e=0;e<ne;e++) { valence[edgeVert[2*e]]++; valence[edgeVert[2*e+1]]++; }
     }
-
-    // re-point perimeter edge pe's slot that referenced oldFace -> (newFace, newWing)
+    private void removeIncidence(int v, int e) {   // swap-remove e from v's incidence row
+        int base = v*maxVal, ct = vertEdgeCt[v];
+        for (int k=0;k<ct;k++) if (vertEdge[base+k]==e) { vertEdge[base+k]=vertEdge[base+ct-1]; vertEdgeCt[v]=ct-1; return; }
+    }
     private void setEdgeFaceWing(int pe, int oldFace, int newFace, int newWing) {
         if      (edgeFace[2*pe]  ==oldFace) { edgeFace[2*pe]  =newFace; edgeWing[2*pe]  =newWing; }
         else if (edgeFace[2*pe+1]==oldFace) { edgeFace[2*pe+1]=newFace; edgeWing[2*pe+1]=newWing; }
@@ -341,45 +341,109 @@ public final class Membrane {
         double ux=vx(b)-vx(a),uy=vy(b)-vy(a),uz=vz(b)-vz(a), wx=vx(c)-vx(a),wy=vy(c)-vy(a),wz=vz(c)-vz(a);
         double nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx; return 0.5*Math.sqrt(nx*nx+ny*ny+nz*nz);
     }
-    private double angleAt(int o,int p,int q){
-        double ax=vx(p)-vx(o),ay=vy(p)-vy(o),az=vz(p)-vz(o), bx=vx(q)-vx(o),by=vy(q)-vy(o),bz=vz(q)-vz(o);
-        double d=(ax*bx+ay*by+az*bz)/(Math.sqrt(ax*ax+ay*ay+az*az)*Math.sqrt(bx*bx+by*by+bz*bz)+1e-30);
-        return Math.acos(Math.max(-1,Math.min(1,d)));
-    }
     private double edgeLen(int u,int v){ double dx=vx(u)-vx(v),dy=vy(u)-vy(v),dz=vz(u)-vz(v); return Math.sqrt(dx*dx+dy*dy+dz*dz); }
+    private double angAt(int o,int p,int q){
+        double ax=vx(p)-vx(o),ay=vy(p)-vy(o),az=vz(p)-vz(o), bx=vx(q)-vx(o),by=vy(q)-vy(o),bz=vz(q)-vz(o);
+        double dn=(ax*bx+ay*by+az*bz)/(Math.sqrt(ax*ax+ay*ay+az*az)*Math.sqrt(bx*bx+by*by+bz*bz)+1e-30);
+        return Math.acos(Math.max(-1,Math.min(1,dn)));
+    }
+    private double triMinAngle(int a,int b,int c){ return Math.min(angAt(a,b,c), Math.min(angAt(b,a,c), angAt(c,a,b))); }
 
-    /** Attempt to flip edge e by the Delaunay (min-angle/quality) criterion, with manifold + geometry guards.
-     *  Returns true if the flip was committed. */
-    boolean tryFlip(int e) {
+    // ---- local bending energy (J), for the Metropolis flip acceptance (matches computeForces' convention) ----
+    private final double[] nA=new double[4], nB=new double[4];   // {nx,ny,nz, area(m^2)}
+    private final int[] facesTmp = new int[32];
+    private void faceNormalArea(int f, double[] out) {
+        int a=faceVert[3*f],b=faceVert[3*f+1],c=faceVert[3*f+2];
+        double ax=vx(a)*UM_TO_M,ay=vy(a)*UM_TO_M,az=vz(a)*UM_TO_M;
+        double ux=vx(b)*UM_TO_M-ax,uy=vy(b)*UM_TO_M-ay,uz=vz(b)*UM_TO_M-az;
+        double wx=vx(c)*UM_TO_M-ax,wy=vy(c)*UM_TO_M-ay,wz=vz(c)*UM_TO_M-az;
+        double nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx, n=Math.sqrt(nx*nx+ny*ny+nz*nz)+1e-300;
+        out[0]=nx/n; out[1]=ny/n; out[2]=nz/n; out[3]=0.5*n;
+    }
+    private double signedDihedral(int e) {   // same convention as computeForces (sign via f1 CCW winding)
+        int p=edgeVert[2*e],q=edgeVert[2*e+1], f1=edgeFace[2*e], f2=edgeFace[2*e+1];
+        faceNormalArea(f1,nA); faceNormalArea(f2,nB);
+        double dot=Math.max(-1,Math.min(1, nA[0]*nB[0]+nA[1]*nB[1]+nA[2]*nB[2]));
+        double ex,ey,ez;
+        if (edgeDirInFaceIsPtoQ(f1,p,q)) { ex=(vx(q)-vx(p))*UM_TO_M; ey=(vy(q)-vy(p))*UM_TO_M; ez=(vz(q)-vz(p))*UM_TO_M; }
+        else                              { ex=(vx(p)-vx(q))*UM_TO_M; ey=(vy(p)-vy(q))*UM_TO_M; ez=(vz(p)-vz(q))*UM_TO_M; }
+        double crx=nA[1]*nB[2]-nA[2]*nB[1], cry=nA[2]*nB[0]-nA[0]*nB[2], crz=nA[0]*nB[1]-nA[1]*nB[0];
+        return Math.acos(dot)*((ex*crx+ey*cry+ez*crz)>=0?1.0:-1.0);
+    }
+    private double vertexBendEnergy(int v, double kappa, double C0) {
+        int base=v*maxVal, ct=vertEdgeCt[v];
+        double cv=0;
+        for (int k=0;k<ct;k++){ int e=vertEdge[base+k];
+            double le=edgeLen(edgeVert[2*e],edgeVert[2*e+1])*UM_TO_M;
+            cv += 0.25*le*signedDihedral(e);
+        }
+        int nfc=0;
+        for (int k=0;k<ct;k++){ int e=vertEdge[base+k];
+            for (int s=0;s<2;s++){ int f=edgeFace[2*e+s]; boolean seen=false;
+                for(int j=0;j<nfc;j++) if(facesTmp[j]==f){seen=true;break;}
+                if(!seen && nfc<facesTmp.length) facesTmp[nfc++]=f; } }
+        double Av=0; for(int j=0;j<nfc;j++){ faceNormalArea(facesTmp[j],nA); Av+=nA[3]; } Av/=3.0;
+        double dev = cv/Av - 0.5*C0;
+        return 2.0*kappa*dev*dev*Av;
+    }
+    private double localBendEnergy(int va,int vb,int vc,int vd, double kappa, double C0) {
+        int[] vs={va,vb,vc,vd}; double E=0;
+        for (int i=0;i<4;i++){ boolean dup=false; for(int j=0;j<i;j++) if(vs[j]==vs[i]) dup=true;
+            if(!dup) E += vertexBendEnergy(vs[i],kappa,C0); }
+        return E;
+    }
+
+    /** The array surgery for flipping edge e from diagonal (a,b) to (c,d). Assumes the flip is valid.
+     *  SELF-INVERSE: running it again on the same edge flips back (used to revert a rejected Metropolis move). */
+    private void doFlipSurgery(int e) {
         int a=edgeVert[2*e], b=edgeVert[2*e+1], f0=edgeFace[2*e], f1=edgeFace[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
-        if (c==d) return false;
-        if (findEdge(c,d) != -1) return false;                              // would duplicate an existing edge
-        if (valence[a]<=VAL_MIN || valence[b]<=VAL_MIN) return false;
-        if (valence[c]>=VAL_MAX || valence[d]>=VAL_MAX) return false;
-        if (angleAt(c,a,b)+angleAt(d,a,b) <= Math.PI + 1e-9) return false;  // Delaunay: flip only if it improves
-        if (triArea(a,c,d) < 1e-12 || triArea(b,c,d) < 1e-12) return false; // no degenerate new triangle
-        double lcd = edgeLen(c,d);
-        if (lcd < 0.3*l0 || lcd > 2.2*l0) return false;                     // tether bounds on the new edge
         int eac=findEdge(a,c), ecb=findEdge(c,b), ebd=findEdge(b,d), eda=findEdge(d,a);
-        if (eac<0||ecb<0||ebd<0||eda<0) return false;                       // non-manifold neighbourhood, abort
-        // --- commit: rewire the 4 perimeter edges, the 2 faces, and the flipped edge ---
-        setEdgeFaceWing(eac, f0, f0, d);   // (a,c): stays in f0, apex now d
-        setEdgeFaceWing(ecb, f0, f1, d);   // (c,b): moves f0->f1, apex d
-        setEdgeFaceWing(ebd, f1, f1, c);   // (b,d): stays in f1, apex c
-        setEdgeFaceWing(eda, f1, f0, c);   // (d,a): moves f1->f0, apex c
-        faceVert[3*f0]=a; faceVert[3*f0+1]=c; faceVert[3*f0+2]=d; orientFaceOutward(f0);  // f0 = (a,c,d)
-        faceVert[3*f1]=b; faceVert[3*f1+1]=c; faceVert[3*f1+2]=d; orientFaceOutward(f1);  // f1 = (b,c,d)
+        setEdgeFaceWing(eac, f0, f0, d);
+        setEdgeFaceWing(ecb, f0, f1, d);
+        setEdgeFaceWing(ebd, f1, f1, c);
+        setEdgeFaceWing(eda, f1, f0, c);
+        faceVert[3*f0]=a; faceVert[3*f0+1]=c; faceVert[3*f0+2]=d; orientFaceOutward(f0);
+        faceVert[3*f1]=b; faceVert[3*f1+1]=c; faceVert[3*f1+2]=d; orientFaceOutward(f1);
         edgeIndex.remove(ekey(a,b)); edgeIndex.put(ekey(c,d), e);
         edgeVert[2*e]=Math.min(c,d); edgeVert[2*e+1]=Math.max(c,d);
-        edgeFace[2*e]=f0; edgeFace[2*e+1]=f1; edgeWing[2*e]=a; edgeWing[2*e+1]=b;  // apex a in f0, b in f1
-        valence[a]--; valence[b]--; valence[c]++; valence[d]++;
-        return true;
+        edgeFace[2*e]=f0; edgeFace[2*e+1]=f1; edgeWing[2*e]=a; edgeWing[2*e+1]=b;
+        removeIncidence(a,e); removeIncidence(b,e); addIncidence(c,e); addIncidence(d,e);
     }
 
-    /** One Delaunay flip sweep over all edges; returns #accepted (also sets flipAccepted/flipTried). */
+    /** Attempt edge flip by Metropolis on the bending energy: accept with prob min(1, exp(-dE/kT)).
+     *  Manifold + valence + geometry guards; reverts (re-flips) on rejection. */
+    boolean tryFlip(int e, double kT) {
+        int a=edgeVert[2*e], b=edgeVert[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
+        if (c==d || findEdge(c,d) != -1) return false;                          // degenerate / would duplicate
+        if (vertEdgeCt[a]<=VAL_MIN || vertEdgeCt[b]<=VAL_MIN) return false;
+        if (vertEdgeCt[c]>=VAL_MAX || vertEdgeCt[d]>=VAL_MAX) return false;
+        if (triArea(a,c,d) < 1e-12 || triArea(b,c,d) < 1e-12) return false;     // no degenerate new triangle
+        // Tether bounds on the NEW diagonal. l_max < sqrt(3)*l0 ~ 1.73*l0 is essential: it rejects the
+        // regular-hex flip (whose new diagonal is ~sqrt(3)*l0), so flips fire ONLY where the geometry is
+        // distorted enough that the new edge is short -- the standard DTS mesh-conditioning that keeps the
+        // triangulation regular instead of melting it into slivers.
+        double lcd=edgeLen(c,d); if (lcd<0.67*l0 || lcd>1.5*l0) return false;
+        // QUALITY guard: don't let a flip CREATE a sliver even if the bending energy favours it (bending doesn't
+        // penalize thin triangles). Reject if either new triangle's min angle is too small. This is what keeps
+        // flips from degrading the mesh in strongly-deformed regions (e.g. a bleb neck).
+        final double MIN_ANG = Math.toRadians(12.0);
+        if (triMinAngle(a,c,d) < MIN_ANG || triMinAngle(b,c,d) < MIN_ANG) return false;
+        if (findEdge(a,c)<0||findEdge(c,b)<0||findEdge(b,d)<0||findEdge(d,a)<0) return false;
+        double kappa=Env.dtsKappaBend.getValue(), C0=spontCurv;
+        double E0 = localBendEnergy(a,b,c,d,kappa,C0);
+        doFlipSurgery(e);
+        double E1 = localBendEnergy(a,b,c,d,kappa,C0);
+        double dE = E1 - E0;
+        if (dE <= 0 || flipRng.nextDouble() < Math.exp(-dE/kT)) return true;    // accept
+        doFlipSurgery(e);                                                       // reject -> revert
+        return false;
+    }
+
+    /** One Metropolis-on-bending flip sweep over all edges; returns #accepted. */
     int flipSweep() {
         buildFlipIndex();
-        int acc=0; for (int e=0;e<ne;e++) { if (tryFlip(e)) acc++; }
+        double kT = Env.Boltz * Env.tempK;
+        int acc=0; for (int e=0;e<ne;e++) { if (tryFlip(e, kT)) acc++; }
         flipTried=ne; flipAccepted=acc; return acc;
     }
 
