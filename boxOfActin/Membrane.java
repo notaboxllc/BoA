@@ -302,6 +302,102 @@ public final class Membrane {
      *  stand-in for Stage-3 actin steric push). A plain ProteinNode, NOT a MembraneVertex. */
     public static ProteinNode dtsProbe = null;
 
+    // ===================== Bond (edge) flips — bilayer FLUIDITY (design doc §4) =====================
+    // A fluid bilayer has no fixed connectivity: lipids rearrange so the surface resists bending+area but NOT
+    // shear. We fluidize the (otherwise solid, fixed-connectivity) DTS mesh by flipping edges: an interior edge
+    // shared by two triangles (quad a-c-b-d) is reconnected along the other diagonal (c-d). Updates the flat
+    // arrays in place; vertEdge incidence is NOT maintained (currently unused by the force path -- restore for the
+    // GPU gather port). Acceptance here = Delaunay/quality (robust first cut); Metropolis-on-bending is the
+    // physical refinement (next stage).
+    private java.util.HashMap<Long,Integer> edgeIndex;   // ekey -> edge index, maintained across flips
+    private int[] valence;                                // per-vertex valence, maintained across flips
+    int flipAccepted, flipTried;                         // diagnostics (per sweep)
+    private static final int VAL_MAX = 9, VAL_MIN = 3;
+
+    private long ekey(int u, int v) { int lo=Math.min(u,v), hi=Math.max(u,v); return (long)lo*nv + hi; }
+    private int findEdge(int u, int v) { Integer e = edgeIndex.get(ekey(u,v)); return e==null?-1:e; }
+
+    private void buildFlipIndex() {
+        if (edgeIndex != null) return;
+        edgeIndex = new java.util.HashMap<>(ne*2);
+        for (int e=0;e<ne;e++) edgeIndex.put(ekey(edgeVert[2*e], edgeVert[2*e+1]), e);
+        valence = new int[nv];
+        for (int e=0;e<ne;e++) { valence[edgeVert[2*e]]++; valence[edgeVert[2*e+1]]++; }
+    }
+
+    // re-point perimeter edge pe's slot that referenced oldFace -> (newFace, newWing)
+    private void setEdgeFaceWing(int pe, int oldFace, int newFace, int newWing) {
+        if      (edgeFace[2*pe]  ==oldFace) { edgeFace[2*pe]  =newFace; edgeWing[2*pe]  =newWing; }
+        else if (edgeFace[2*pe+1]==oldFace) { edgeFace[2*pe+1]=newFace; edgeWing[2*pe+1]=newWing; }
+    }
+    private void orientFaceOutward(int f) {
+        int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
+        double ux=vx(b)-vx(a),uy=vy(b)-vy(a),uz=vz(b)-vz(a), wx=vx(c)-vx(a),wy=vy(c)-vy(a),wz=vz(c)-vz(a);
+        double nx=uy*wz-uz*wy, ny=uz*wx-ux*wz, nz=ux*wy-uy*wx;
+        double cx=(vx(a)+vx(b)+vx(c))/3-center.x, cy=(vy(a)+vy(b)+vy(c))/3-center.y, cz=(vz(a)+vz(b)+vz(c))/3-center.z;
+        if (nx*cx+ny*cy+nz*cz < 0) { faceVert[3*f+1]=c; faceVert[3*f+2]=b; }   // swap -> CCW outward
+    }
+    private double triArea(int a,int b,int c){
+        double ux=vx(b)-vx(a),uy=vy(b)-vy(a),uz=vz(b)-vz(a), wx=vx(c)-vx(a),wy=vy(c)-vy(a),wz=vz(c)-vz(a);
+        double nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx; return 0.5*Math.sqrt(nx*nx+ny*ny+nz*nz);
+    }
+    private double angleAt(int o,int p,int q){
+        double ax=vx(p)-vx(o),ay=vy(p)-vy(o),az=vz(p)-vz(o), bx=vx(q)-vx(o),by=vy(q)-vy(o),bz=vz(q)-vz(o);
+        double d=(ax*bx+ay*by+az*bz)/(Math.sqrt(ax*ax+ay*ay+az*az)*Math.sqrt(bx*bx+by*by+bz*bz)+1e-30);
+        return Math.acos(Math.max(-1,Math.min(1,d)));
+    }
+    private double edgeLen(int u,int v){ double dx=vx(u)-vx(v),dy=vy(u)-vy(v),dz=vz(u)-vz(v); return Math.sqrt(dx*dx+dy*dy+dz*dz); }
+
+    /** Attempt to flip edge e by the Delaunay (min-angle/quality) criterion, with manifold + geometry guards.
+     *  Returns true if the flip was committed. */
+    boolean tryFlip(int e) {
+        int a=edgeVert[2*e], b=edgeVert[2*e+1], f0=edgeFace[2*e], f1=edgeFace[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
+        if (c==d) return false;
+        if (findEdge(c,d) != -1) return false;                              // would duplicate an existing edge
+        if (valence[a]<=VAL_MIN || valence[b]<=VAL_MIN) return false;
+        if (valence[c]>=VAL_MAX || valence[d]>=VAL_MAX) return false;
+        if (angleAt(c,a,b)+angleAt(d,a,b) <= Math.PI + 1e-9) return false;  // Delaunay: flip only if it improves
+        if (triArea(a,c,d) < 1e-12 || triArea(b,c,d) < 1e-12) return false; // no degenerate new triangle
+        double lcd = edgeLen(c,d);
+        if (lcd < 0.3*l0 || lcd > 2.2*l0) return false;                     // tether bounds on the new edge
+        int eac=findEdge(a,c), ecb=findEdge(c,b), ebd=findEdge(b,d), eda=findEdge(d,a);
+        if (eac<0||ecb<0||ebd<0||eda<0) return false;                       // non-manifold neighbourhood, abort
+        // --- commit: rewire the 4 perimeter edges, the 2 faces, and the flipped edge ---
+        setEdgeFaceWing(eac, f0, f0, d);   // (a,c): stays in f0, apex now d
+        setEdgeFaceWing(ecb, f0, f1, d);   // (c,b): moves f0->f1, apex d
+        setEdgeFaceWing(ebd, f1, f1, c);   // (b,d): stays in f1, apex c
+        setEdgeFaceWing(eda, f1, f0, c);   // (d,a): moves f1->f0, apex c
+        faceVert[3*f0]=a; faceVert[3*f0+1]=c; faceVert[3*f0+2]=d; orientFaceOutward(f0);  // f0 = (a,c,d)
+        faceVert[3*f1]=b; faceVert[3*f1+1]=c; faceVert[3*f1+2]=d; orientFaceOutward(f1);  // f1 = (b,c,d)
+        edgeIndex.remove(ekey(a,b)); edgeIndex.put(ekey(c,d), e);
+        edgeVert[2*e]=Math.min(c,d); edgeVert[2*e+1]=Math.max(c,d);
+        edgeFace[2*e]=f0; edgeFace[2*e+1]=f1; edgeWing[2*e]=a; edgeWing[2*e+1]=b;  // apex a in f0, b in f1
+        valence[a]--; valence[b]--; valence[c]++; valence[d]++;
+        return true;
+    }
+
+    /** One Delaunay flip sweep over all edges; returns #accepted (also sets flipAccepted/flipTried). */
+    int flipSweep() {
+        buildFlipIndex();
+        int acc=0; for (int e=0;e<ne;e++) { if (tryFlip(e)) acc++; }
+        flipTried=ne; flipAccepted=acc; return acc;
+    }
+
+    /** Re-derive edges from faceVert and check manifold (every edge borders 2 faces), edge count, and Euler=2.
+     *  An independent integrity check on the flip surgery. Returns true if valid. */
+    boolean verifyMesh() {
+        java.util.HashMap<Long,Integer> m = new java.util.HashMap<>(nf*3);
+        for (int f=0; f<nf; f++) {
+            int a=faceVert[3*f],b=faceVert[3*f+1],c=faceVert[3*f+2];
+            m.merge(ekey(a,b),1,Integer::sum); m.merge(ekey(b,c),1,Integer::sum); m.merge(ekey(c,a),1,Integer::sum);
+        }
+        int bad=0; for (int v: m.values()) if (v!=2) bad++;
+        int E=m.size(), euler=nv-E+nf;
+        boolean ok = (bad==0 && E==ne && euler==2);
+        if (!ok) Thing.talkln(String.format("[FLIP-VERIFY] FAIL edges=%d/%d nonmanifold=%d euler=%d", E, ne, bad, euler));
+        return ok;
+    }
+
     /** Drive every membrane's Stage-2 forces into its vertices' soaForceSum (pre-move hook), then any demo push. */
     public static void computeAllForces() {
         for (int m = 0; m < theMembranes.size(); m++) {
@@ -311,6 +407,17 @@ public final class Membrane {
             if (mem.arpLocal != null) mem.diffuseArp();    // surface chemistry (reaction-diffusion)
             if (mem.forminLocal != null) mem.forminStep(); // formin nucleation of mother filaments
         }
+        // Bilayer fluidity: periodic edge-flip sweep (design doc §4). Env-gated (BOA_FLIP_N = steps per sweep).
+        { int flipN = 0; String s=System.getenv("BOA_FLIP_N"); if(s!=null) flipN=Integer.parseInt(s);
+          if (flipN>0 && Env.counter % flipN == 0) {
+            for (int m=0;m<theMembranes.size();m++) {
+                Membrane mem=theMembranes.get(m);
+                int acc=mem.flipSweep();
+                boolean ok = (Env.counter % (flipN*20)==0) ? mem.verifyMesh() : true;
+                if (Env.counter % 500 == 0) Thing.talkln(String.format("[FLIP] step %d membrane#%d flips=%d/%d verify=%b",
+                    Env.counter, m, acc, mem.flipTried, ok));
+            }
+          } }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
         if (!bouncers.isEmpty() && !theMembranes.isEmpty()) theMembranes.get(0).applyBouncers();
         if (Env.dtsBranchOn.getValue() != 0) branchAllActin();        // Arp2/3 branching (gated by local Arp)

@@ -1,5 +1,28 @@
 # BoxOfActin Project Journal
 
+## 2026-06-20 — Membrane v2 DTS, STAGE 4 (start): bilayer FLUIDITY via edge flips — mechanics done, criterion next
+
+Starting membrane fluidity (design doc §4) — the prerequisite for the nested implicit-cortex plan and the cure for
+the lateral-flow/anchor-surfing and the involution (a fluid mesh relieves shear + buckles less). A fluid bilayer
+has no fixed connectivity: edges **flip** so the surface resists bending+area but NOT shear.
+
+**Flip mechanics — DONE and validated.** `Membrane.tryFlip/flipSweep/verifyMesh` (+ `edgeIndex`, `valence`).
+A flip reconnects the quad a-c-b-d from diagonal (a,b) to (c,d): rewire the 2 faces (`faceVert`), the flipped edge
+and the 4 perimeter edges (`edgeVert/edgeFace/edgeWing`), the `edgeIndex` map, and valences. KEY simplification:
+the `vertEdge` incidence is **unused by the force path** (bending is a per-edge *scatter*, not a per-vertex gather),
+so flips needn't maintain it and `maxVal=6` is no blocker. `verifyMesh()` re-derives edges from `faceVert` and
+checks manifold + edge count + Euler=2 — **PASS through thousands of flips under bouncer + push deformation**,
+`|F|max` bounded, no NaN. Env-gated `BOA_FLIP_N` (steps/sweep, default off).
+
+**Acceptance criterion — first cut (flat Delaunay) is WRONG for a curved surface.** Deterministic push A/B
+(`dtsMembranePush`, no RNG): flips OFF held p5 min-angle ~47° (only the bleb tip slivers); flips ON *degraded* it
+to ~22° once they started firing (10→37/sweep late) — the flat min-angle test flips edges that are fine on the
+sphere/bleb but look non-Delaunay in-plane. **NEXT: Metropolis on the bending energy** (`exp(-ΔE_bend/kT)`) —
+curvature-aware and the physical thermal fluid; needs local `c_v` at the flip's 4 quad vertices (revive vertex
+incidence with headroom). Likely also need **edge split/collapse** afterward — the bleb makes slivers from area
+redistribution that *no* flip fixes (clustered vertices); split/collapse maintains ~uniform edge length and
+enables area transport into protrusions. New diagnostic `scripts/tri_quality.py`. Runs `RUN_LOGS/2026-06-20_flips/`.
+
 ## 2026-06-19 — DTS dendritic-at-membrane: five distinct pathologies diagnosed + fixed (validated combo still env-gated)
 
 Worked the dendritic network ON the DTS membrane (the unverified bond/branch interaction flagged 06-18). Five
