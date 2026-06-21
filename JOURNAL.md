@@ -1,5 +1,28 @@
 # BoxOfActin Project Journal
 
+## 2026-06-21 — Membrane v2 DTS, STAGE 5 (start): edge SPLIT remesh -- growing protrusions stay healthy
+
+Built growable membrane storage + edge split (the remeshing companion to flips). Context: single shell + dendritic
+actin with flips ON *shredded* (924 inverted faces) -- flips relieve shear but can't add vertices to a growing
+protrusion, so triangles stretch without bound. Edge split fixes that.
+
+- **Growable storage:** nv/nf/ne are now mutable; the flat topology arrays are capacity-backed (CAP=4x) and the
+  force scratch is sized to capacity. The ~100 read-usages of nv/nf/ne are unchanged (they read the live counts).
+  A MembraneVertex created mid-step is a real Thing (picked up by next step's computeForces/move).
+- **edgeSplit(e):** insert a midpoint vertex, 2 triangles -> 4 (+1 vertex, +3 edges, +2 faces; Euler-preserving).
+  Rewires faceVert + wing-edge arrays + edgeIndex + incidence. remeshSweep splits edges > BOA_REMESH_LEN*l0 (1.5).
+- **BUG found+fixed:** ekey used the MUTABLE nv as the hash modulus, but edgeSplit increments nv before computing
+  keys -> after the first split every key mismatched the stored ones -> lookups failed -> only ONE split ever
+  fired. Now uses the FIXED capV. (Flip-only runs were unaffected; nv is constant there.)
+- **Validated (soft growing finger, dtsMembranePushSoft):** WITHOUT remesh the finger stretches edges to 87x l0,
+  E_bend->6e-16, 9 force-cap hits, p5 min-angle 7deg, dies ~step16k. WITH split: edges bounded to 1.5x l0, nv
+  2562->4200+, verify=true through hundreds of splits, E_bend stays ~3e-18 (baseline), |F|max ~4e-11, 0 cap hits,
+  runs clean. Edge split lets a growing protrusion remesh with fresh fine triangles instead of stretching.
+- **Remaining: edge COLLAPSE.** Split bounds the MAX edge, but compressed regions keep short-edge slivers (p5
+  min-angle ~10deg); collapse removes them and recovers vertices / conserves density. (Forces stay healthy
+  without it -- functional for qualitative use, but collapse completes the remesher.) Env-gated BOA_REMESH_N (off).
+  New scripts/edge_len.py. Runs RUN_LOGS/2026-06-21_remesh/.
+
 ## 2026-06-20 — Membrane v2 DTS, STAGE 4 (start): bilayer FLUIDITY via edge flips — mechanics done, criterion next
 
 Starting membrane fluidity (design doc §4) — the prerequisite for the nested implicit-cortex plan and the cure for

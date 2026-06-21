@@ -41,10 +41,11 @@ public final class Membrane {
     public final Pt3D center;      // initial center (microns)
 
     // ---- counts ----
-    public final int nv;           // vertices
-    public final int nf;           // faces
-    public final int ne;           // edges  (= 3*nf/2 for a closed manifold)
+    public int nv;                 // vertices (MUTABLE: edge split/collapse change it; arrays are capacity-backed)
+    public int nf;                 // faces   (MUTABLE)
+    public int ne;                 // edges   (MUTABLE; = 3*nf/2 for a closed manifold)
     public final int maxVal;       // fixed width of the vertex-incidence array
+    private final int capV, capF, capE;   // array capacities (logical counts nv/nf/ne grow within these)
 
     // ---- flat SoA topology (device-portable; kernel-shaped) ----
     public final int[] faceVert;   // 3*nf : CCW vertex indices per face
@@ -97,7 +98,10 @@ public final class Membrane {
         this.nv = geom.nv;
         this.nf = geom.nf;
         this.ne = 3 * nf / 2;          // Euler, closed orientable manifold (verified below)
-        this.faceVert = geom.face.clone();
+        final int CAP = 4;             // capacity factor: edge split/collapse grow/shrink nv/nf/ne within these
+        this.capV = CAP*nv; this.capF = CAP*nf; this.capE = CAP*ne;
+        this.faceVert = new int[3*capF];
+        System.arraycopy(geom.face, 0, faceVert, 0, 3*nf);
 
         // Scaled/placed vertex positions: center + radius * unit-sphere direction.
         double[] px = new double[nv], py = new double[nv], pz = new double[nv];
@@ -119,7 +123,7 @@ public final class Membrane {
         this.vertexRadius = (Env.dtsVertexRadiusFrac.getValue() > 0 ? Env.dtsVertexRadiusFrac.getValue() : 0.5) * l0;
 
         // Create the vertex Things (registered into theThings/theNodes/SoA by the ctor chain).
-        this.vert = new MembraneVertex[nv];
+        this.vert = new MembraneVertex[capV];
         for (int i = 0; i < nv; i++) {
             vert[i] = new MembraneVertex(new Pt3D(px[i], py[i], pz[i]), vertexRadius, this, i);
         }
@@ -131,9 +135,9 @@ public final class Membrane {
             throw new IllegalStateException("membrane edge count " + edges.size() + " != expected " + ne
                     + " (non-manifold or open mesh?)");
         }
-        this.edgeVert = new int[2 * ne];
-        this.edgeFace = new int[2 * ne];
-        this.edgeWing = new int[2 * ne];
+        this.edgeVert = new int[2 * capE];
+        this.edgeFace = new int[2 * capE];
+        this.edgeWing = new int[2 * capE];
         for (int e = 0; e < ne; e++) {
             int[] rec = edges.get(e);
             edgeVert[2 * e] = rec[0]; edgeVert[2 * e + 1] = rec[1];
@@ -144,8 +148,8 @@ public final class Membrane {
         int mv = 0;
         for (int i = 0; i < nv; i++) mv = Math.max(mv, valence[i]);
         this.maxVal = Math.max(mv, 12);   // headroom: edge flips raise valence past the icosphere's 6 (cap VAL_MAX)
-        this.vertEdge = new int[nv * maxVal];
-        this.vertEdgeCt = new int[nv];
+        this.vertEdge = new int[capV * maxVal];
+        this.vertEdgeCt = new int[capV];
         for (int e = 0; e < ne; e++) {
             addIncidence(edgeVert[2 * e], e);
             addIncidence(edgeVert[2 * e + 1], e);
@@ -314,7 +318,7 @@ public final class Membrane {
     private final java.util.Random flipRng = new java.util.Random(20260620L);
     private static final int VAL_MAX = 9, VAL_MIN = 3;
 
-    private long ekey(int u, int v) { int lo=Math.min(u,v), hi=Math.max(u,v); return (long)lo*nv + hi; }
+    private long ekey(int u, int v) { int lo=Math.min(u,v), hi=Math.max(u,v); return (long)lo*capV + hi; }  // capV (fixed!) not nv -- nv changes on split/collapse
     private int findEdge(int u, int v) { Integer e = edgeIndex.get(ekey(u,v)); return e==null?-1:e; }
 
     private void buildFlipIndex() {   // edge lookup; valence is tracked by vertEdgeCt (built in the ctor)
@@ -452,6 +456,53 @@ public final class Membrane {
         flipTried=ne; flipAccepted=acc; return acc;
     }
 
+    // ===================== Edge SPLIT — remesh growing protrusions (design doc §5) =====================
+    // A growing protrusion (bleb, actin finger) stretches the existing triangles; flips can't fix that (they only
+    // re-choose the diagonal). Split inserts a midpoint vertex on a too-long edge: 2 triangles -> 4, adding the
+    // vertex, 3 edges, 2 faces (Euler-preserving). Grows nv/nf/ne within the capacity arrays. The new vertex is a
+    // real MembraneVertex Thing (gets forces from next step's computeForces).
+
+    /** Split edge e at its midpoint. Returns the new vertex index, or -1 if at capacity / invalid. */
+    int edgeSplit(int e) {
+        if (nv >= capV-1 || nf >= capF-2 || ne >= capE-3) return -1;             // capacity guard
+        int a=edgeVert[2*e], b=edgeVert[2*e+1], f0=edgeFace[2*e], f1=edgeFace[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
+        if (c==d) return -1;
+        int eac=findEdge(a,c), ebc=findEdge(b,c), ead=findEdge(a,d), ebd=findEdge(b,d);
+        if (eac<0||ebc<0||ead<0||ebd<0) return -1;
+        int m = nv;                                                              // new midpoint vertex (append)
+        vert[m] = new MembraneVertex(new Pt3D(0.5*(vx(a)+vx(b)),0.5*(vy(a)+vy(b)),0.5*(vz(a)+vz(b))), vertexRadius, this, m);
+        nv++;
+        int fA=nf, fB=nf+1; nf+=2;                                              // new faces (m,b,c),(m,b,d)
+        int eMB=ne, eMC=ne+1, eMD=ne+2; ne+=3;                                   // new edges (m,b),(m,c),(m,d); reuse e=(a,m)
+        faceVert[3*f0]=a; faceVert[3*f0+1]=m; faceVert[3*f0+2]=c; orientFaceOutward(f0);  // f0 -> (a,m,c)
+        faceVert[3*f1]=a; faceVert[3*f1+1]=m; faceVert[3*f1+2]=d; orientFaceOutward(f1);  // f1 -> (a,m,d)
+        faceVert[3*fA]=m; faceVert[3*fA+1]=b; faceVert[3*fA+2]=c; orientFaceOutward(fA);  // fA = (m,b,c)
+        faceVert[3*fB]=m; faceVert[3*fB+1]=b; faceVert[3*fB+2]=d; orientFaceOutward(fB);  // fB = (m,b,d)
+        edgeVert[2*e]=Math.min(a,m); edgeVert[2*e+1]=Math.max(a,m); edgeFace[2*e]=f0; edgeFace[2*e+1]=f1; edgeWing[2*e]=c; edgeWing[2*e+1]=d;
+        edgeVert[2*eMB]=Math.min(m,b); edgeVert[2*eMB+1]=Math.max(m,b); edgeFace[2*eMB]=fA; edgeFace[2*eMB+1]=fB; edgeWing[2*eMB]=c; edgeWing[2*eMB+1]=d;
+        edgeVert[2*eMC]=Math.min(m,c); edgeVert[2*eMC+1]=Math.max(m,c); edgeFace[2*eMC]=f0; edgeFace[2*eMC+1]=fA; edgeWing[2*eMC]=a; edgeWing[2*eMC+1]=b;
+        edgeVert[2*eMD]=Math.min(m,d); edgeVert[2*eMD+1]=Math.max(m,d); edgeFace[2*eMD]=f1; edgeFace[2*eMD+1]=fB; edgeWing[2*eMD]=a; edgeWing[2*eMD+1]=b;
+        setEdgeFaceWing(eac, f0, f0, m);   // (a,c): stays in f0, apex b->m
+        setEdgeFaceWing(ebc, f0, fA, m);   // (b,c): f0->fA, apex a->m
+        setEdgeFaceWing(ead, f1, f1, m);   // (a,d): stays in f1, apex b->m
+        setEdgeFaceWing(ebd, f1, fB, m);   // (b,d): f1->fB, apex a->m
+        edgeIndex.remove(ekey(a,b));
+        edgeIndex.put(ekey(a,m), e); edgeIndex.put(ekey(m,b), eMB); edgeIndex.put(ekey(m,c), eMC); edgeIndex.put(ekey(m,d), eMD);
+        removeIncidence(b, e); addIncidence(b, eMB); addIncidence(c, eMC); addIncidence(d, eMD);
+        addIncidence(m, e); addIncidence(m, eMB); addIncidence(m, eMC); addIncidence(m, eMD);
+        if (arpLocal != null && m < arpLocal.length) arpLocal[m] = 0.5*(arpLocal[a]+arpLocal[b]);
+        return m;
+    }
+
+    /** Split every edge longer than splitLen (remesh stretched/growing regions). Returns #splits. */
+    int remeshSweep(double splitLen) {
+        buildFlipIndex();
+        if (arpLocal != null && arpLocal.length < capV) return 0;   // per-vertex fields not capacity-sized yet -> skip
+        int ne0=ne, ns=0;                                           // snapshot: don't re-split this sweep's new edges
+        for (int e=0;e<ne0;e++) if (edgeLen(edgeVert[2*e],edgeVert[2*e+1]) > splitLen) { if (edgeSplit(e)>=0) ns++; }
+        return ns;
+    }
+
     /** Re-derive edges from faceVert and check manifold (every edge borders 2 faces), edge count, and Euler=2.
      *  An independent integrity check on the flip surgery. Returns true if valid. */
     boolean verifyMesh() {
@@ -485,6 +536,17 @@ public final class Membrane {
                 boolean ok = (Env.counter % (flipN*20)==0) ? mem.verifyMesh() : true;
                 if (Env.counter % 500 == 0) Thing.talkln(String.format("[FLIP] step %d membrane#%d flips=%d/%d verify=%b",
                     Env.counter, m, acc, mem.flipTried, ok));
+            }
+          } }
+        // Edge split remesh: subdivide stretched edges so growing protrusions get new vertices (design doc §5).
+        // Env-gated BOA_REMESH_N = steps/sweep; BOA_REMESH_LEN = split threshold in units of l0 (default 1.5).
+        { int rN=0; String s=System.getenv("BOA_REMESH_N"); if(s!=null) rN=Integer.parseInt(s);
+          if (rN>0 && Env.counter % rN == 0) {
+            double f=1.5; String s2=System.getenv("BOA_REMESH_LEN"); if(s2!=null) f=Double.parseDouble(s2);
+            for (int m=0;m<theMembranes.size();m++) { Membrane mem=theMembranes.get(m);
+                int ns=mem.remeshSweep(f*mem.l0);
+                if (ns>0 && Env.counter % 500 == 0) Thing.talkln(String.format(
+                    "[REMESH] step %d split=%d -> nv=%d nf=%d ne=%d verify=%b", Env.counter, ns, mem.nv, mem.nf, mem.ne, mem.verifyMesh()));
             }
           } }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
@@ -1268,12 +1330,12 @@ public final class Membrane {
     }
 
     private void ensureScratch() {
-        if (mPx != null) return;
-        mPx = new double[nv]; mPy = new double[nv]; mPz = new double[nv];
-        fNx = new double[nf]; fNy = new double[nf]; fNz = new double[nf]; fArea = new double[nf];
-        eLen = new double[ne]; eTheta = new double[ne];
-        vA = new double[nv]; vC = new double[nv]; vAlpha = new double[nv]; vBeta = new double[nv];
-        fX = new double[nv]; fY = new double[nv]; fZ = new double[nv];
+        if (mPx != null) return;   // sized to CAPACITY so split/collapse growth never outruns them
+        mPx = new double[capV]; mPy = new double[capV]; mPz = new double[capV];
+        fNx = new double[capF]; fNy = new double[capF]; fNz = new double[capF]; fArea = new double[capF];
+        eLen = new double[capE]; eTheta = new double[capE];
+        vA = new double[capV]; vC = new double[capV]; vAlpha = new double[capV]; vBeta = new double[capV];
+        fX = new double[capV]; fY = new double[capV]; fZ = new double[capV];
     }
 
     private static final double UM_TO_M = 1.0e-6;
