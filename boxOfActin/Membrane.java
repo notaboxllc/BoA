@@ -439,10 +439,15 @@ public final class Membrane {
         return false;
     }
 
-    /** One Metropolis-on-bending flip sweep over all edges; returns #accepted. */
+    /** One flip sweep over all edges; returns #accepted. The acceptance "temperature" is an EFFECTIVE
+     *  fluidity/stability knob (NOT the physical T): kT_flip = BOA_FLIP_KT * (Boltz*tempK), default 0.1.
+     *  -> 0 = quench (accept only energy-decreasing flips: max stability, reactive fluidity, deterministic);
+     *  -> 1 = full thermal (samples the Boltzmann triangulation ensemble; accepts uphill flips, less stable
+     *         under strong deformation). We only want qualitative fluidity + stability, so default near-quench. */
     int flipSweep() {
         buildFlipIndex();
-        double kT = Env.Boltz * Env.tempK;
+        double factor = 0.0; String s=System.getenv("BOA_FLIP_KT"); if(s!=null) factor=Double.parseDouble(s);  // default QUENCH (stable)
+        double kT = factor * Env.Boltz * Env.tempK;   // factor=0 -> exp(-dE/0)=0 for dE>0 -> pure quench
         int acc=0; for (int e=0;e<ne;e++) { if (tryFlip(e, kT)) acc++; }
         flipTried=ne; flipAccepted=acc; return acc;
     }

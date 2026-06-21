@@ -37,6 +37,16 @@ big push bleb, flips correctly let area FLOW into the protrusion (vs the inexten
 fluid signature) but the growing bleb stretches triangles beyond what flips can fix → degrades ~step 10k (guard
 delays it to ~9k). NEXT STAGE: edge split/collapse to remesh growing protrusions. Env-gated `BOA_FLIP_N` (off).
 
+**Flip-T → QUENCH (the chosen mode for this model's goals).** Per jba: only *qualitative* fluidity is needed
+(the membrane organizes/locates signals + coarsely gauges response; flow-rate needn't be defensible), and
+*stability* matters. So the flip "temperature" is now an EFFECTIVE knob `BOA_FLIP_KT` = factor·(Boltz·tempK),
+**default 0 = quench** (accept only energy-decreasing flips). This decouples it from the (athermal) vertices —
+sidestepping the thermal-consistency concern — and is dramatically more stable: push-bleb A/B held triangle p5
+min-angle ~44° at quench vs collapse to ~7° at kT=1 (even kT=0.1 collapsed — uphill flips are the culprit), cap
+hits 2 vs 9. Resting vesicle at quench: E_bend pinned 8πκ, |F|max DECAYS to ~1e-15 (cleaner than thermal), 0 flips
+(optimal mesh, nothing to improve — flips only fire reactively under deformation). Quench gets the bleb much
+further; the residual end-of-bleb area spike is the genuine area-redistribution that needs split/collapse next.
+
 ## 2026-06-19 — DTS dendritic-at-membrane: five distinct pathologies diagnosed + fixed (validated combo still env-gated)
 
 Worked the dendritic network ON the DTS membrane (the unverified bond/branch interaction flagged 06-18). Five
