@@ -1,5 +1,30 @@
 # BoxOfActin Project Journal
 
+## 2026-06-22 — Membrane v2 DTS: continuous-surface bead collision (infra + grid coarse-gate) — WIP finding
+
+Implemented a continuous-surface (point-vs-triangle) steric for a node vs the membrane, to kill the small-bead
+punch-through (the per-vertex steric has face-center gaps a marginally-engaged bead slips through). Plus the
+EFFICIENCY scaffold the question called for.
+
+- **stericNodeVsMembraneSurface(node):** closest-point-on-triangle over the faces near the bead, push distributed to
+  the face's 3 vertices by barycentric weights (no gaps). Two-level cost: (1) COARSE GATE — centroid + nearest-vertex
+  radius (computed in buildFaceGrid, O(nv)); a node closer to the centroid than rMinVert−reach provably can't touch
+  anything → O(1) skip (matters for a population of interior nodes). (2) NARROW PHASE — only faces in the few grid
+  cells the bead overlaps (existing face grid), ~O(1) faces/node vs O(nf). Cost ≈ one extra buildFaceGrid pass
+  (O(nf)) per step for a bead-only run; free when actin collision already builds the grid.
+- **WIP — does NOT yet robustly contain a FREE-DRIVEN sphere.** Both magnitude forms punch: the drag-coupled stiff
+  wall (segmentVsMembrane's form) splits gap-closure by drag, so the lighter membrane vertex (γ ~4.4× < the r=0.1
+  bead) takes ~80% of the motion → the bulge is blasted outward and the constant-force bead chases it through; a soft
+  kSteric spring has the mirror failure (low-drag vertices outrun the bead). The reason the per-vertex steric works
+  at adequate force: it CUPS the bead (a 3D ball of contacts within `contact` of the bead center that re-captures new
+  vertices as it advances), giving axial containment a single closest-FACE push can't. segmentVsMembrane contains
+  ACTIN because segments are sampled along their length AND anchored at the base (grown, not free-driven).
+- **Resolution path (next):** for a self-driven sphere, either a signed-distance HARD one-sided constraint (project
+  the bead to stay inside each step, nearest point from a slightly larger search) or — more physical for a real
+  tether — an ADHERED bead (a spring bond to the nearest membrane point; that's how tethers are actually pulled,
+  biotin-streptavidin), which can't punch because it's bonded. Kept opt-in (BOA_PROBE_SURFACE); default stays the
+  per-vertex cup (robust ≥~150 pN). Runs: RUN_LOGS/2026-06-22_tip/surf_*, surf2_*.
+
 ## 2026-06-22 — Membrane v2 DTS: a small bead DRAWS A THIN FINGER, fed by in-plane flow (tether harness)
 
 Resolved the "how do we get a finger instead of a bleb/stall" question. A thin finger is a membrane TETHER — a

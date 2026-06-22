@@ -1299,7 +1299,20 @@ public final class Membrane {
     void applyProbeForces(ProteinNode probe) {
         probe.incForceSumSlot(Env.dtsProbeForce.getValue(), 0, 0);   // constant +x drive
         double[] reac = new double[3];
-        double reaction = stericNodeVsMembrane(probe, reac);
+        double reaction;
+        if (System.getenv("BOA_PROBE_SURFACE") != null) {
+            // EXPERIMENTAL continuous-surface (no vertex gaps). WIP: a FREE-DRIVEN sphere is not yet robustly
+            // contained by closest-face steric -- the bead chases the fleeing contact (the drag-coupled split moves
+            // the lighter membrane vertex ~80% of the gap closure, so the bulge flees rather than the bead stopping;
+            // a soft spring has the mirror failure). The per-vertex steric below CUPS the bead (3D ball of contacts
+            // that re-captures as it advances) and contains it at adequate force. Robust surface containment for a
+            // self-driven sphere needs a signed-distance hard one-sided constraint or an ADHERED (bonded) bead --
+            // see JOURNAL 2026-06-22. Kept opt-in for that follow-up.
+            buildFaceGrid();
+            reaction = stericNodeVsMembraneSurface(probe, reac);
+        } else {
+            reaction = stericNodeVsMembrane(probe, reac);            // per-vertex cup (default; robust at adequate force)
+        }
         if (Env.counter % 500 == 0) {
             Thing.talkln(String.format("[DTS-PROBE] step %d  x=%.4f  reaction=%.3e N  drive=%.3e N  bulgeR=%.4f",
                     Env.counter, probe.getCoordX(), reaction, Env.dtsProbeForce.getValue(), maxRadiusAlongX()));
@@ -1346,6 +1359,75 @@ public final class Membrane {
         return Math.sqrt(rx*rx + ry*ry + rz*rz);
     }
     private double stericContactMaxR = 0;   // local membrane surface radius the last node touched (0 = no contact)
+
+    /**
+     * CONTINUOUS-SURFACE steric: a sphere (node) vs the TRIANGULATED surface — the robust replacement for the
+     * per-vertex {@link #stericNodeVsMembrane} (which has face-center gaps a small/marginally-engaged bead slips
+     * through, esp. while split/collapse reshuffle the contact cap — see RUN_LOGS 2026-06-22 tether_F6e-11). Here
+     * the bead is pushed back against the closest point on every nearby FACE (point-vs-triangle, no gaps), the
+     * reaction distributed to that face's 3 vertices by the closest-point barycentric weights. There is no force
+     * regime where the bead can slip between vertices: the faces tile the surface continuously.
+     *
+     * EFFICIENCY: two-level. (1) COARSE GATE — if the bead is closer to the membrane centroid than its nearest
+     * surface vertex minus the bead's reach, it provably can't contact anything: return immediately (O(1), no grid
+     * query). (2) NARROW PHASE — only the faces in the few grid cells the bead overlaps are tested (grid built by
+     * {@link #buildFaceGrid}), ~O(1) faces per node instead of O(nf). Requires fresh face normals (computeForces)
+     * and a current face grid (caller builds it). Soft penetration spring (dtsStericStiffness) + hard inward
+     * recovery if the center has crossed outside (dtsStericRecover), matching segmentVsMembrane's containment.
+     */
+    double stericNodeVsMembraneSurface(ProteinNode node, double[] reacOut) {
+        double pr = node.getRadius();
+        double px = node.getCoordX(), py = node.getCoordY(), pz = node.getCoordZ();
+        double contact = pr + vertexRadius;
+        reacOut[0]=reacOut[1]=reacOut[2]=0;
+        stericContactMaxR = 0;
+        if (gHead == null) return 0;                                   // grid not built -> caller error; no-op
+        // (1) coarse gate: deep inside -> no possible contact (l0 margin covers a face bulging in past its vertices)
+        double dcx=px-bgCx, dcy=py-bgCy, dcz=pz-bgCz;
+        double dc = Math.sqrt(dcx*dcx+dcy*dcy+dcz*dcz);
+        if (dc + contact + l0 < bgRminVert) return 0;
+        // (2) narrow phase: faces in the cells the bead's reach overlaps (centroid within contact+l0 of the bead)
+        int reach = (int)Math.ceil((contact + l0) / gCell);
+        int ix=axisIdx(px,gx0,gnx), iy=axisIdx(py,gy0,gny), iz=axisIdx(pz,gz0,gnz);
+        double rx=0, ry=0, rz=0, maxContactR=0;
+        double[] cp = new double[6];
+        double recover = Env.dtsStericRecover.getValue();
+        double cdt = Env.collisionDeltaT.getValue();
+        double gb = node.bTransGam.x;                                 // bead translational drag (N.s/m)
+        for (int dx=-reach; dx<=reach; dx++) for (int dy=-reach; dy<=reach; dy++) for (int dz=-reach; dz<=reach; dz++) {
+            int cx=ix+dx, cy=iy+dy, cz=iz+dz;
+            if (cx<0||cx>=gnx||cy<0||cy>=gny||cz<0||cz>=gnz) continue;
+            for (int f=gHead[(cx*gny+cy)*gnz+cz]; f>=0; f=gNext[f]) {
+                int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
+                closestPtTri(px,py,pz, a,b,c, cp);
+                double ddx=px-cp[0], ddy=py-cp[1], ddz=pz-cp[2];
+                if (ddx*ddx+ddy*ddy+ddz*ddz >= contact*contact) continue;
+                double nx=fNx[f], ny=fNy[f], nz=fNz[f];
+                double signed = ddx*nx + ddy*ny + ddz*nz;             // >0 = bead center outside this face
+                if (signed <= -contact) continue;
+                double pen = signed + contact;                        // >0
+                // DRAG-COUPLED stiff wall (same form as segmentVsMembrane, which reliably contains actin): the force
+                // that would close the penetration in one collision step, shared by the bead/vertex drags. A SOFT
+                // kSteric spring instead lets the low-drag vertices outrun the heavier bead -> the bulge flees, the
+                // gap opens past `contact`, and the bead is lost (the punch-through this method exists to kill).
+                double gv = vert[a].bTransGam.x;
+                double mag = (1.0e-6 * pen / cdt) / (1.0/gb + 1.0/gv);
+                if (signed > 0) mag += recover * signed * 1.0e-6;     // hard recovery once the center has crossed
+                if (mag > 2.0e-10) mag = 2.0e-10;                     // bound (low-drag overshoot -> NaN otherwise)
+                double wa=cp[3], wb=cp[4], wc=cp[5];
+                vert[a].incForceSumSlot(mag*nx*wa, mag*ny*wa, mag*nz*wa);   // push membrane OUTWARD (+n),
+                vert[b].incForceSumSlot(mag*nx*wb, mag*ny*wb, mag*nz*wb);   // distributed by closest-point
+                vert[c].incForceSumSlot(mag*nx*wc, mag*ny*wc, mag*nz*wc);   // barycentric weights
+                node.incForceSumSlot(-mag*nx, -mag*ny, -mag*nz);           // reaction pushes the bead INWARD
+                rx -= mag*nx; ry -= mag*ny; rz -= mag*nz;
+                double cr=Math.sqrt((cp[0]-center.x)*(cp[0]-center.x)+(cp[1]-center.y)*(cp[1]-center.y)+(cp[2]-center.z)*(cp[2]-center.z));
+                if (cr>maxContactR) maxContactR=cr;
+            }
+        }
+        stericContactMaxR = maxContactR;
+        reacOut[0]=rx; reacOut[1]=ry; reacOut[2]=rz;
+        return Math.sqrt(rx*rx+ry*ry+rz*rz);
+    }
 
     // Closest point on triangle (a,b,c) to point p, in microns. Writes {cx,cy,cz, wa,wb,wc} into out
     // (the point and its barycentric weights). Ericson, "Real-Time Collision Detection".
@@ -1449,6 +1531,7 @@ public final class Membrane {
     private int[] gHead, gNext;                  // uniform-grid bucket heads + per-face next (linked list)
     private double gCell, gx0, gy0, gz0;
     private int gnx, gny, gnz;
+    private double bgCx, bgCy, bgCz, bgRminVert; // coarse-gate: membrane centroid + nearest-vertex radius
     private final double[] scratchCp = new double[7];
 
     private int axisIdx(double v, double v0, int n) { int i=(int)((v-v0)/gCell); return i<0?0:(i>=n?n-1:i); }
@@ -1457,11 +1540,20 @@ public final class Membrane {
      *  neighbourhood is covered by the 3x3x3 cells around any query point. O(nf), rebuilt each collision step. */
     public void buildFaceGrid() {
         double minx=1e30,miny=1e30,minz=1e30,maxx=-1e30,maxy=-1e30,maxz=-1e30;
+        double sumx=0,sumy=0,sumz=0;
         for (int v=0; v<nv; v++) {
             double x=vx(v),y=vy(v),z=vz(v);
             if(x<minx)minx=x; if(y<miny)miny=y; if(z<minz)minz=z;
             if(x>maxx)maxx=x; if(y>maxy)maxy=y; if(z>maxz)maxz=z;
+            sumx+=x; sumy+=y; sumz+=z;
         }
+        // COARSE-GATE (broad phase): membrane centroid + nearest surface-vertex radius. A node closer to the
+        // centroid than (rMinVert - its reach) provably can't touch any face -> skip the narrow phase entirely.
+        // Cheap O(nv), reused by stericNodeVsMembraneSurface; matters most for a population of interior nodes.
+        bgCx=sumx/nv; bgCy=sumy/nv; bgCz=sumz/nv;
+        double rmin2=1e30;
+        for (int v=0; v<nv; v++) { double ax=vx(v)-bgCx, ay=vy(v)-bgCy, az=vz(v)-bgCz; double r2=ax*ax+ay*ay+az*az; if(r2<rmin2)rmin2=r2; }
+        bgRminVert=Math.sqrt(rmin2);
         gCell = 2.0*l0;
         gx0=minx-gCell; gy0=miny-gCell; gz0=minz-gCell;
         gnx=(int)((maxx-minx)/gCell)+3; gny=(int)((maxy-miny)/gCell)+3; gnz=(int)((maxz-minz)/gCell)+3;
