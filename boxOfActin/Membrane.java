@@ -503,6 +503,164 @@ public final class Membrane {
         return ns;
     }
 
+    // ===================== Edge COLLAPSE — recover slivers / recycle vertices (design doc §5) =====================
+    // The inverse of split: merge the two endpoints of a too-short edge into one vertex (placed at the midpoint),
+    // removing 1 vertex, 3 edges, 2 faces (Euler-preserving). Split feeds vertices into a growing protrusion; collapse
+    // recycles them from the depleting reservoir / the protrusion neck -- TOGETHER they are the discrete realization of
+    // lipid FLOW (area streaming front-ward at ~constant total area), and collapse is what keeps the triangulation clean
+    // (removes the compression slivers a deflating reservoir accumulates -- see RUN_LOGS bead_deflate: worst angle ->1.2
+    // deg without it). Unlike split (which appends), collapse REMOVES from the middle of the flat arrays: we edit only
+    // faceVert + the vert[] object array, then REDERIVE the whole edge/incidence/index structure from faces (the proven
+    // ctor path) -- far less error-prone than maintaining wing-edges incrementally through a removal. The deleted vertex
+    // Thing leaves theNodes immediately (removeNode) and theThings/SoA at the next cleanup (removeMe).
+    //
+    // GUARDED OFF whenever surface chemistry / formin is active: the per-vertex arpLocal/forminLocal pools (and actin
+    // formin-anchor references) are not remapped here, so collapse currently serves the membrane-only protrusion tests.
+
+    /** Re-derive edgeVert/edgeFace/edgeWing + vertEdge incidence + edgeIndex from the current faceVert (same
+     *  derivation the ctor uses). Called after a collapse renumbers vertices/faces. Manifold-checks via deriveEdges. */
+    private void rebuildTopologyFromFaces() {
+        int[] valence = new int[nv];
+        ArrayList<int[]> edges = deriveEdges(valence);   // throws on non-manifold (link condition should prevent)
+        ne = edges.size();
+        for (int e = 0; e < ne; e++) {
+            int[] rec = edges.get(e);
+            edgeVert[2*e]=rec[0]; edgeVert[2*e+1]=rec[1];
+            edgeFace[2*e]=rec[2]; edgeFace[2*e+1]=rec[3];
+            edgeWing[2*e]=rec[4]; edgeWing[2*e+1]=rec[5];
+        }
+        for (int v = 0; v < nv; v++) vertEdgeCt[v] = 0;
+        for (int e = 0; e < ne; e++) { addIncidence(edgeVert[2*e], e); addIncidence(edgeVert[2*e+1], e); }
+        edgeIndex = null; buildFlipIndex();
+    }
+
+    private double cco(int i,int u,int v,double m,int axis){
+        if (i==u||i==v) return m;
+        return axis==0?vx(i):axis==1?vy(i):vz(i);
+    }
+    /** Min interior angle (radians) of triangle given explicit coords. */
+    private double triMinAngleCoords(double ax,double ay,double az,double bx,double by,double bz,double cx,double cy,double cz){
+        double aa=ang(bx-ax,by-ay,bz-az, cx-ax,cy-ay,cz-az);
+        double ab=ang(ax-bx,ay-by,az-bz, cx-bx,cy-by,cz-bz);
+        double ac=ang(ax-cx,ay-cy,az-cz, bx-cx,by-cy,bz-cz);
+        return Math.min(aa, Math.min(ab, ac));
+    }
+    private double ang(double ux,double uy,double uz,double wx,double wy,double wz){
+        double d=(ux*wx+uy*wy+uz*wz)/(Math.sqrt(ux*ux+uy*uy+uz*uz)*Math.sqrt(wx*wx+wy*wy+wz*wz)+1e-30);
+        return Math.acos(Math.max(-1,Math.min(1,d)));
+    }
+
+    /** Would collapsing (u,v) to (mx,my,mz) keep every RETAINED incident face non-inverted, non-degenerate, and
+     *  above a min-angle floor? Evaluates each face around u or v (except the two deleted faces f0,f1) with both
+     *  u and v placed at the midpoint. */
+    private boolean collapseGeomOK(int u,int v,int f0,int f1,double mx,double my,double mz){
+        int[] fl = new int[2*maxVal+8]; int n=0;
+        for (int pass=0; pass<2; pass++){
+            int vv = (pass==0)?u:v; int base=vv*maxVal, ct=vertEdgeCt[vv];
+            for (int k=0;k<ct;k++){ int e=vertEdge[base+k];
+                for (int s=0;s<2;s++){ int f=edgeFace[2*e+s];
+                    if (f==f0||f==f1) continue;
+                    boolean seen=false; for(int j=0;j<n;j++) if(fl[j]==f){seen=true;break;}
+                    if(!seen){ if(n>=fl.length) return false; fl[n++]=f; }
+                }
+            }
+        }
+        final double MINA = Math.toRadians(8.0);
+        for (int j=0;j<n;j++){ int f=fl[j];
+            int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
+            double ax=cco(a,u,v,mx,0),ay=cco(a,u,v,my,1),az=cco(a,u,v,mz,2);
+            double bx=cco(b,u,v,mx,0),by=cco(b,u,v,my,1),bz=cco(b,u,v,mz,2);
+            double cx=cco(c,u,v,mx,0),cy=cco(c,u,v,my,1),cz=cco(c,u,v,mz,2);
+            double ux=bx-ax,uy=by-ay,uz=bz-az, wx=cx-ax,wy=cy-ay,wz=cz-az;
+            double nx=uy*wz-uz*wy,ny=uz*wx-ux*wz,nz=ux*wy-uy*wx;
+            if (0.5*Math.sqrt(nx*nx+ny*ny+nz*nz) < 1e-8) return false;            // near-degenerate
+            double gx=(ax+bx+cx)/3-center.x, gy=(ay+by+cy)/3-center.y, gz=(az+bz+cz)/3-center.z;
+            if (nx*gx+ny*gy+nz*gz <= 0) return false;                             // inverted (normal points inward)
+            if (triMinAngleCoords(ax,ay,az,bx,by,bz,cx,cy,cz) < MINA) return false;
+        }
+        return true;
+    }
+
+    /** Swap-compact face fR out of faceVert (last live face moves into the hole). Edges are rederived afterward,
+     *  so no edgeFace fix is needed here. */
+    private void removeFaceCompact(int fR){
+        int last=nf-1;
+        if (fR!=last){ faceVert[3*fR]=faceVert[3*last]; faceVert[3*fR+1]=faceVert[3*last+1]; faceVert[3*fR+2]=faceVert[3*last+2]; }
+        nf--;
+    }
+    /** Swap-compact vertex vR out of vert[]/faceVert (last live vertex moves into the hole), and retire the dead
+     *  vertex Thing (theNodes now, theThings/SoA at cleanup). Assumes no LIVE face still references vR. */
+    private void removeVertexCompact(int vR){
+        MembraneVertex dead = vert[vR];
+        int last=nv-1;
+        if (vR!=last){
+            vert[vR]=vert[last]; vert[vR].localIndex=vR;
+            for (int f=0; f<nf; f++){
+                if(faceVert[3*f]==last)faceVert[3*f]=vR;
+                if(faceVert[3*f+1]==last)faceVert[3*f+1]=vR;
+                if(faceVert[3*f+2]==last)faceVert[3*f+2]=vR;
+            }
+        }
+        vert[last]=null;
+        nv--;
+        ProteinNode.removeNode(dead, dead.myNodeNumber);   // out of theNodes now; removeMe -> theThings/SoA at cleanup
+    }
+
+    /** Collapse edge e=(u,v): merge v into u at the edge midpoint. Returns true if performed. Validates the manifold
+     *  LINK CONDITION (common neighbours of u,v == exactly the two wing vertices), valence bounds, and geometry (no
+     *  inverted / degenerate / sliver retained face). On success the mesh is fully rederived from faces. */
+    boolean edgeCollapse(int e){
+        if (arpLocal != null || forminLocal != null) return false;     // per-vertex chem / anchors not remapped
+        int u=edgeVert[2*e], v=edgeVert[2*e+1];
+        int f0=edgeFace[2*e], f1=edgeFace[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
+        if (u==v || c==d) return false;
+        int valU=vertEdgeCt[u], valV=vertEdgeCt[v];
+        int mergedVal = valU + valV - 4;                               // u keeps its edges + v's, less e and the two merges
+        if (mergedVal < VAL_MIN || mergedVal > Math.min(VAL_MAX, maxVal-1)) return false;
+        if (vertEdgeCt[c]-1 < VAL_MIN || vertEdgeCt[d]-1 < VAL_MIN) return false;
+        // LINK CONDITION: the only neighbours u and v share must be c and d (else collapse folds the surface).
+        int baseV=v*maxVal, baseU=u*maxVal, common=0;
+        for (int kv=0; kv<valV; kv++){ int ev=vertEdge[baseV+kv];
+            int w = (edgeVert[2*ev]==v)?edgeVert[2*ev+1]:edgeVert[2*ev];
+            if (w==u) continue;
+            boolean nbU=false;
+            for (int ku=0; ku<valU; ku++){ int eu=vertEdge[baseU+ku];
+                int wu=(edgeVert[2*eu]==u)?edgeVert[2*eu+1]:edgeVert[2*eu]; if (wu==w){nbU=true;break;} }
+            if (nbU){ if (w!=c && w!=d) return false; common++; }
+        }
+        if (common != 2) return false;
+        double mx=0.5*(vx(u)+vx(v)), my=0.5*(vy(u)+vy(v)), mz=0.5*(vz(u)+vz(v));
+        if (!collapseGeomOK(u,v,f0,f1,mx,my,mz)) return false;
+        // ---- commit ----
+        vert[u].setCoord(mx,my,mz);                                    // merged vertex sits at the midpoint
+        for (int f=0; f<nf; f++){ if (f==f0||f==f1) continue;          // retarget v -> u in every retained face
+            if (faceVert[3*f]==v)   faceVert[3*f]=u;
+            if (faceVert[3*f+1]==v) faceVert[3*f+1]=u;
+            if (faceVert[3*f+2]==v) faceVert[3*f+2]=u;
+        }
+        removeFaceCompact(Math.max(f0,f1));                            // descending: the mover is always a live face
+        removeFaceCompact(Math.min(f0,f1));
+        removeVertexCompact(v);                                        // u may have moved slot if u was the last vertex
+        rebuildTopologyFromFaces();
+        return true;
+    }
+
+    /** Collapse short edges (< minLen) until none remain collapsible. Returns #collapses. Restarts the scan after each
+     *  success (indices renumber on rederive); terminates when a full pass collapses nothing. */
+    int collapseSweep(double minLen){
+        if (arpLocal != null || forminLocal != null) return 0;
+        buildFlipIndex();
+        int done=0, guard=0;
+        boolean progress=true;
+        while (progress && guard++ < 2000){
+            progress=false;
+            for (int e=0;e<ne;e++){
+                if (edgeLen(edgeVert[2*e],edgeVert[2*e+1]) < minLen && edgeCollapse(e)){ done++; progress=true; break; }
+            }
+        }
+        return done;
+    }
+
     /** Re-derive edges from faceVert and check manifold (every edge borders 2 faces), edge count, and Euler=2.
      *  An independent integrity check on the flip surgery. Returns true if valid. */
     boolean verifyMesh() {
@@ -524,6 +682,7 @@ public final class Membrane {
             Membrane mem = theMembranes.get(m);
             mem.computeForces();
             if (Env.dtsPushForce.getValue() != 0) mem.applyPushPatch();
+            if (System.getenv("BOA_TIPVEL") != null) mem.applyTipForce();
             if (mem.arpLocal != null) mem.diffuseArp();    // surface chemistry (reaction-diffusion)
             if (mem.forminLocal != null) mem.forminStep(); // formin nucleation of mother filaments
         }
@@ -547,6 +706,18 @@ public final class Membrane {
                 int ns=mem.remeshSweep(f*mem.l0);
                 if (ns>0 && Env.counter % 500 == 0) Thing.talkln(String.format(
                     "[REMESH] step %d split=%d -> nv=%d nf=%d ne=%d verify=%b", Env.counter, ns, mem.nv, mem.nf, mem.ne, mem.verifyMesh()));
+            }
+          } }
+        // Edge collapse remesh: recycle vertices from compressed/depleting regions (the inverse of split -- removes the
+        // slivers a deflating reservoir / protrusion neck accumulates). BOA_COLLAPSE_N = steps/sweep; BOA_COLLAPSE_LEN =
+        // collapse threshold in units of l0 (default 0.6). Pair with BOA_REMESH_* for a split+collapse [0.6,1.5]*l0 band.
+        { int cN=0; String s=System.getenv("BOA_COLLAPSE_N"); if(s!=null) cN=Integer.parseInt(s);
+          if (cN>0 && Env.counter % cN == 0) {
+            double f=0.6; String s2=System.getenv("BOA_COLLAPSE_LEN"); if(s2!=null) f=Double.parseDouble(s2);
+            for (int m=0;m<theMembranes.size();m++) { Membrane mem=theMembranes.get(m);
+                int nc=mem.collapseSweep(f*mem.l0);
+                if (nc>0 && Env.counter % 500 == 0) Thing.talkln(String.format(
+                    "[COLLAPSE] step %d collapse=%d -> nv=%d nf=%d ne=%d verify=%b", Env.counter, nc, mem.nv, mem.nf, mem.ne, mem.verifyMesh()));
             }
           } }
         if (dtsProbe != null && !theMembranes.isEmpty()) theMembranes.get(0).applyProbeForces(dtsProbe);
@@ -670,6 +841,26 @@ public final class Membrane {
      * and STALLS when the membrane's bending + area + volume reaction balances the push. Added on top of the
      * membrane forces (computeForces already wrote them).
      */
+    /** TIP-tracking driver (clean filopodial driver, decoupled from actin/branching): the vertices within a
+     *  SPATIAL radius of the current leading tip are advanced at a fixed VELOCITY along +x. As the tip advances
+     *  the region tracks it, so the membrane behind flows into a tube of radius ~tipR -- unlike the fixed-angular
+     *  cap push (bulb-on-stalk) or a fixed FORCE (runaway: all force lands on the lone leading vertex).
+     *  Velocity control (per-vertex F = vel*gamma) avoids the runaway. Env: BOA_TIPVEL (um/s), BOA_TIPR (um). */
+    void applyTipForce() {
+        double vel = Double.parseDouble(System.getenv("BOA_TIPVEL"));   // um/s
+        double tipR = 0.15; { String s=System.getenv("BOA_TIPR"); if(s!=null) tipR=Double.parseDouble(s); }
+        double r2 = tipR*tipR;
+        int L=-1; double maxx=-1e30;
+        for (int v=0;v<nv;v++) if (vx(v)>maxx) { maxx=vx(v); L=v; }   // leading tip = max-x vertex
+        if (L<0) return;
+        double tx=vx(L),ty=vy(L),tz=vz(L);
+        int n=0;
+        for (int v=0;v<nv;v++){ double dx=vx(v)-tx,dy=vy(v)-ty,dz=vz(v)-tz;
+            if(dx*dx+dy*dy+dz*dz<=r2){ vert[v].incForceSumSlot(vel*vert[v].bTransGam.x/1.0e6, 0, 0); n++; } }  // F=vel*gamma -> moves at ~vel
+        if (Env.counter % 500 == 0)
+            Thing.talkln(String.format("[DTS-TIP] step %d tipX=%.4f tipVerts=%d vel=%.1f nv=%d", Env.counter, maxx, n, vel, nv));
+    }
+
     void applyPushPatch() {
         double total = Env.dtsPushForce.getValue();
         double cosCap = Math.cos(Math.toRadians(Env.dtsPushCapDeg.getValue()));

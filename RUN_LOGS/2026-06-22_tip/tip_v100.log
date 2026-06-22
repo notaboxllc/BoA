@@ -1,0 +1,451 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/dtsMembraneTip...
+     Parameter assigned: buildDtsMembrane set to true
+     Parameter assigned: dtsMembraneSubdiv set to 4
+     Parameter assigned: dtsMembraneRadius set to 1.2
+     Parameter assigned: dtsVertexRadiusFrac set to 0.5
+     Parameter assigned: dtsKappaBend set to 1.0E-19
+     Parameter assigned: dtsKappaArea set to 0.1
+     Parameter assigned: dtsKappaVolume set to 1.0E-13
+     Parameter assigned: dtsTargetReducedVol set to 1.0
+     Parameter assigned: dtsMaxDispFrac set to 0.2
+     Parameter assigned: dtsPushForce set to 0.0
+     Parameter assigned: dtsPushCapDeg set to 22.0
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: biochemDeltaT set to 0.001
+     Parameter assigned: runTime set to 0.3
+     Parameter assigned: toFileInterval set to 150
+     Parameter assigned: remoteWriteInterval set to 2000
+     Parameter assigned: dtsBrownianOff set to true
+     Parameter assigned: boxXDim set to 6.0
+     Parameter assigned: boxYDim set to 6.0
+     Parameter assigned: boxZDim set to 6.0
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: fillNodeCt set to 0
+     Parameter assigned: buildBranchedFils set to false
+     Parameter assigned: buildMembraneSheet set to false
+     Parameter assigned: buildMembraneSphere set to false
+     Parameter assigned: forminConc set to 0.0
+     Parameter assigned: ratchetOn set to false
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=4933372461475492444 (BOA_RNG_SEED unset)
+[DTS] membrane #0 built: nu=4  nv=2562  nf=5120  ne=7680  maxVal=12  R=1.200 um  l0=0.0906 um  rVert=0.0453 um  A0=18.0739 um^2  V0=7.2226 um^3
+[DTS]   continuum sphere: A=18.0956 (mesh 99.9%)  V=7.2382 (mesh 99.8%)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 31; xBinWidth = 0.2 µm
+nYBins = 31; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 31 x 31 x 31 cells (0.2 µm each)
+[06:14] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[06:14]   ON   ThingStep Threads
+[06:14]   ON   ThingBrownian Threads
+[06:14]   ON   Myosin Threads
+[06:14]   OFF  MyoDimer Threads
+[06:14]   ON   Protein Node Threads
+[06:14]   OFF  MyoMiniFil Threads
+[06:14]   OFF  Chamber Myo Threads
+[06:14]   OFF  Chamber MyoDimer Threads
+[06:14]   ON   Mesh Threads
+[06:14]   ON   Ck Mesh Threads
+[06:14]   ON   Ck Mots Threads
+[06:14]   OFF  XLink Threads
+[06:14]   OFF  Arp23 Threads
+[06:14]   OFF  NodeLink Threads
+[06:14]   ON   Membrane Node Threads
+[06:14]   OFF  ActA Threads
+[06:14]   ON   MotorBindGrid3D Fill
+[06:14] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/tip_v100
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/tip_v100
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.dtsMembraneTip
+ThreeJSWriter: wrote params_effective.txt (357 parameters)
+[DTS-E] step 0  E bend=2.514e-18 area=3.495e-42 vol=3.550e-43 tot=2.514e-18 J   A=18.0739/18.0739  V=7.2226/7.2226 um  |F|max=8.81e-14 N
+[DTS-TIP] step 0 tipX=1.2000 tipVerts=19 vel=100.0 nv=2562
+[FLIP] step 0 membrane#0 flips=0/7680 verify=true
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=1314.4 cumMaxPerThread=442
+[DTS-E] step 500  E bend=3.912e-18 area=6.142e-19 vol=4.273e-18 tot=8.798e-18 J   A=18.0888/18.0739  V=7.1558/7.2226 um  |F|max=4.42e-11 N
+[DTS-TIP] step 500 tipX=1.5703 tipVerts=19 vel=100.0 nv=2592
+[FLIP] step 500 membrane#0 flips=2/7770 verify=true
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=1330.3 cumMaxPerThread=442
+[DTS-E] step 1000  E bend=1.297e-17 area=1.083e-18 vol=1.134e-17 tot=2.539e-17 J   A=18.0937/18.0739  V=7.1138/7.2226 um  |F|max=1.63e-10 N
+[DTS-TIP] step 1000 tipX=1.8096 tipVerts=21 vel=100.0 nv=2614
+[FLIP] step 1000 membrane#0 flips=4/7836 verify=true
+[REMESH] step 1000 split=2 -> nv=2616 nf=5228 ne=7842 verify=true
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=1336.8 cumMaxPerThread=446
+[DTS-E] step 1500  E bend=1.809e-17 area=4.634e-18 vol=1.645e-17 tot=3.918e-17 J   A=18.1149/18.0739  V=7.0916/7.2226 um  |F|max=2.03e-10 N
+[DTS-TIP] step 1500 tipX=1.9780 tipVerts=17 vel=100.0 nv=2629
+[FLIP] step 1500 membrane#0 flips=4/7881 verify=true
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=1342.5 cumMaxPerThread=446
+Sim. time=00.02....~07.34 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 2000  E bend=1.380e-17 area=1.289e-18 vol=1.515e-17 tot=3.024e-17 J   A=18.0955/18.0739  V=7.0969/7.2226 um  |F|max=2.57e-10 N
+[DTS-TIP] step 2000 tipX=2.2080 tipVerts=9 vel=100.0 nv=2642
+[FLIP] step 2000 membrane#0 flips=0/7920 verify=true
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=1345.1 cumMaxPerThread=446
+[DTS-E] step 2500  WARNING 2 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 2500  E bend=2.273e-17 area=4.454e-19 vol=1.157e-17 tot=3.474e-17 J   A=18.0866/18.0739  V=7.1127/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 2500 tipX=2.3585 tipVerts=4 vel=100.0 nv=2646
+[FLIP] step 2500 membrane#0 flips=0/7932 verify=true
+[REMESH] step 2500 split=1 -> nv=2647 nf=5290 ne=7935 verify=true
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=1346.7 cumMaxPerThread=446
+[DTS-E] step 3000  E bend=1.138e-17 area=9.175e-20 vol=9.319e-18 tot=2.079e-17 J   A=18.0682/18.0739  V=7.1240/7.2226 um  |F|max=8.71e-10 N
+[DTS-TIP] step 3000 tipX=2.4878 tipVerts=3 vel=100.0 nv=2656
+[FLIP] step 3000 membrane#0 flips=2/7962 verify=true
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=1347.8 cumMaxPerThread=446
+[DTS-E] step 3500  E bend=6.307e-18 area=7.675e-18 vol=5.711e-18 tot=1.969e-17 J   A=18.1266/18.0739  V=7.1454/7.2226 um  |F|max=1.43e-10 N
+[DTS-TIP] step 3500 tipX=2.6770 tipVerts=4 vel=100.0 nv=2663
+[FLIP] step 3500 membrane#0 flips=2/7983 verify=true
+[REMESH] step 3500 split=2 -> nv=2665 nf=5326 ne=7989 verify=true
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=1349.0 cumMaxPerThread=446
+Sim. time=00.04....~06.49 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 4000  E bend=6.239e-18 area=8.794e-18 vol=5.010e-18 tot=2.004e-17 J   A=18.1303/18.0739  V=7.1503/7.2226 um  |F|max=1.14e-10 N
+[DTS-TIP] step 4000 tipX=2.8626 tipVerts=4 vel=100.0 nv=2673
+[FLIP] step 4000 membrane#0 flips=4/8013 verify=true
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=1349.8 cumMaxPerThread=446
+[DTS-E] step 4500  E bend=8.663e-18 area=1.039e-17 vol=5.129e-18 tot=2.418e-17 J   A=18.1352/18.0739  V=7.1494/7.2226 um  |F|max=1.90e-10 N
+[DTS-TIP] step 4500 tipX=3.0436 tipVerts=4 vel=100.0 nv=2679
+[FLIP] step 4500 membrane#0 flips=1/8031 verify=true
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=1350.6 cumMaxPerThread=446
+[DTS-E] step 5000  E bend=6.774e-18 area=1.060e-17 vol=3.383e-18 tot=2.076e-17 J   A=18.1359/18.0739  V=7.1632/7.2226 um  |F|max=1.59e-10 N
+[DTS-TIP] step 5000 tipX=3.2129 tipVerts=3 vel=100.0 nv=2686
+[FLIP] step 5000 membrane#0 flips=3/8052 verify=true
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=1351.3 cumMaxPerThread=446
+[DTS-E] step 5500  E bend=5.957e-18 area=1.215e-17 vol=1.298e-18 tot=1.941e-17 J   A=18.1402/18.0739  V=7.1858/7.2226 um  |F|max=1.89e-10 N
+[DTS-TIP] step 5500 tipX=3.3561 tipVerts=4 vel=100.0 nv=2692
+[FLIP] step 5500 membrane#0 flips=2/8070 verify=true
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=1352.0 cumMaxPerThread=450
+Sim. time=00.06....~06.60 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 6000  E bend=6.192e-18 area=1.363e-17 vol=5.925e-19 tot=2.042e-17 J   A=18.1441/18.0739  V=7.1977/7.2226 um  |F|max=2.21e-10 N
+[DTS-TIP] step 6000 tipX=3.5733 tipVerts=3 vel=100.0 nv=2697
+[FLIP] step 6000 membrane#0 flips=1/8085 verify=true
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=1352.6 cumMaxPerThread=454
+[DTS-E] step 6500  E bend=4.966e-18 area=1.335e-17 vol=1.304e-19 tot=1.844e-17 J   A=18.1434/18.0739  V=7.2109/7.2226 um  |F|max=2.36e-10 N
+[DTS-TIP] step 6500 tipX=3.6103 tipVerts=3 vel=100.0 nv=2701
+[FLIP] step 6500 membrane#0 flips=1/8097 verify=true
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=1353.5 cumMaxPerThread=458
+[DTS-E] step 7000  E bend=5.623e-18 area=1.186e-17 vol=3.419e-21 tot=1.749e-17 J   A=18.1394/18.0739  V=7.2207/7.2226 um  |F|max=2.27e-10 N
+[DTS-TIP] step 7000 tipX=3.6267 tipVerts=3 vel=100.0 nv=2704
+[FLIP] step 7000 membrane#0 flips=1/8106 verify=true
+[REMESH] step 7000 split=1 -> nv=2705 nf=5406 ne=8109 verify=true
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=1354.6 cumMaxPerThread=462
+[DTS-E] step 7500  E bend=5.529e-18 area=1.578e-17 vol=2.525e-20 tot=2.134e-17 J   A=18.1495/18.0739  V=7.2277/7.2226 um  |F|max=2.47e-10 N
+[DTS-TIP] step 7500 tipX=3.8718 tipVerts=3 vel=100.0 nv=2710
+[FLIP] step 7500 membrane#0 flips=2/8124 verify=true
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=1356.4 cumMaxPerThread=464
+Sim. time=00.08....~06.55 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 8000  E bend=6.191e-18 area=1.494e-17 vol=4.772e-20 tot=2.118e-17 J   A=18.1474/18.0739  V=7.2296/7.2226 um  |F|max=2.69e-10 N
+[DTS-TIP] step 8000 tipX=3.9237 tipVerts=3 vel=100.0 nv=2716
+[FLIP] step 8000 membrane#0 flips=4/8142 verify=true
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=1359.6 cumMaxPerThread=472
+[DTS-E] step 8500  E bend=5.309e-18 area=1.603e-17 vol=1.265e-19 tot=2.147e-17 J   A=18.1501/18.0739  V=7.2341/7.2226 um  |F|max=2.85e-10 N
+[DTS-TIP] step 8500 tipX=4.0969 tipVerts=6 vel=100.0 nv=2724
+[FLIP] step 8500 membrane#0 flips=3/8166 verify=true
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=1364.6 cumMaxPerThread=510
+[DTS-E] step 9000  E bend=5.498e-18 area=2.091e-17 vol=5.520e-19 tot=2.696e-17 J   A=18.1609/18.0739  V=7.2466/7.2226 um  |F|max=2.72e-10 N
+[DTS-TIP] step 9000 tipX=4.3656 tipVerts=5 vel=100.0 nv=2734
+[FLIP] step 9000 membrane#0 flips=3/8196 verify=true
+[REMESH] step 9000 split=1 -> nv=2735 nf=5466 ne=8199 verify=true
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=1371.7 cumMaxPerThread=530
+[DTS-E] step 9500  E bend=6.256e-18 area=2.709e-17 vol=1.231e-18 tot=3.457e-17 J   A=18.1729/18.0739  V=7.2584/7.2226 um  |F|max=3.10e-10 N
+[DTS-TIP] step 9500 tipX=4.6063 tipVerts=6 vel=100.0 nv=2748
+[FLIP] step 9500 membrane#0 flips=2/8238 verify=true
+[REMESH] step 9500 split=1 -> nv=2749 nf=5494 ne=8241 verify=true
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=1380.5 cumMaxPerThread=550
+Sim. time=00.10....~06.96 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 10000  E bend=8.196e-18 area=3.206e-17 vol=1.806e-18 tot=4.206e-17 J   A=18.1816/18.0739  V=7.2660/7.2226 um  |F|max=3.55e-10 N
+[DTS-TIP] step 10000 tipX=4.9261 tipVerts=3 vel=100.0 nv=2764
+[FLIP] step 10000 membrane#0 flips=8/8286 verify=true
+[REMESH] step 10000 split=2 -> nv=2766 nf=5528 ne=8292 verify=true
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=1390.8 cumMaxPerThread=562
+[DTS-E] step 10500  E bend=1.223e-17 area=4.131e-17 vol=2.412e-18 tot=5.596e-17 J   A=18.1962/18.0739  V=7.2728/7.2226 um  |F|max=4.12e-10 N
+[DTS-TIP] step 10500 tipX=5.1072 tipVerts=2 vel=100.0 nv=2778
+[FLIP] step 10500 membrane#0 flips=1/8328 verify=true
+[REMESH] step 10500 split=1 -> nv=2779 nf=5554 ne=8331 verify=true
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=1402.9 cumMaxPerThread=576
+[DTS-E] step 11000  E bend=1.161e-17 area=5.538e-17 vol=4.203e-18 tot=7.118e-17 J   A=18.2154/18.0739  V=7.2888/7.2226 um  |F|max=4.51e-10 N
+[DTS-TIP] step 11000 tipX=5.1420 tipVerts=3 vel=100.0 nv=2801
+[FLIP] step 11000 membrane#0 flips=3/8397 verify=true
+[REMESH] step 11000 split=1 -> nv=2802 nf=5600 ne=8400 verify=true
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=1415.2 cumMaxPerThread=578
+[DTS-E] step 11500  E bend=1.570e-17 area=6.354e-17 vol=5.252e-18 tot=8.449e-17 J   A=18.2255/18.0739  V=7.2966/7.2226 um  |F|max=4.51e-10 N
+[DTS-TIP] step 11500 tipX=5.2286 tipVerts=3 vel=100.0 nv=2815
+[FLIP] step 11500 membrane#0 flips=4/8439 verify=true
+[REMESH] step 11500 split=1 -> nv=2816 nf=5628 ne=8442 verify=true
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=1427.4 cumMaxPerThread=588
+Sim. time=00.12....~07.84 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 12000  E bend=1.641e-17 area=7.565e-17 vol=6.428e-18 tot=9.848e-17 J   A=18.2393/18.0739  V=7.3045/7.2226 um  |F|max=4.87e-10 N
+[DTS-TIP] step 12000 tipX=5.3011 tipVerts=2 vel=100.0 nv=2831
+[FLIP] step 12000 membrane#0 flips=5/8487 verify=true
+[REMESH] step 12000 split=1 -> nv=2832 nf=5660 ne=8490 verify=true
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=1439.1 cumMaxPerThread=598
+[DTS-E] step 12500  E bend=1.872e-17 area=9.084e-17 vol=1.020e-17 tot=1.198e-16 J   A=18.2552/18.0739  V=7.3257/7.2226 um  |F|max=5.83e-10 N
+[DTS-TIP] step 12500 tipX=5.3059 tipVerts=3 vel=100.0 nv=2851
+[FLIP] step 12500 membrane#0 flips=0/8547 verify=true
+[REMESH] step 12500 split=4 -> nv=2855 nf=5706 ne=8559 verify=true
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=1450.7 cumMaxPerThread=614
+[DTS-E] step 13000  E bend=2.128e-17 area=1.180e-16 vol=1.304e-17 tot=1.523e-16 J   A=18.2805/18.0739  V=7.3392/7.2226 um  |F|max=7.93e-10 N
+[DTS-TIP] step 13000 tipX=5.3652 tipVerts=4 vel=100.0 nv=2882
+[FLIP] step 13000 membrane#0 flips=4/8640 verify=true
+[REMESH] step 13000 split=1 -> nv=2883 nf=5762 ne=8643 verify=true
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=1461.5 cumMaxPerThread=636
+[DTS-E] step 13500  E bend=2.892e-17 area=1.568e-16 vol=1.447e-17 tot=2.002e-16 J   A=18.3120/18.0739  V=7.3455/7.2226 um  |F|max=8.71e-10 N
+[DTS-TIP] step 13500 tipX=5.4101 tipVerts=5 vel=100.0 nv=2912
+[FLIP] step 13500 membrane#0 flips=4/8730 verify=true
+[REMESH] step 13500 split=5 -> nv=2917 nf=5830 ne=8745 verify=true
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=1471.6 cumMaxPerThread=658
+Sim. time=00.14....~09.36 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 14000  E bend=2.854e-17 area=2.015e-16 vol=2.390e-17 tot=2.539e-16 J   A=18.3438/18.0739  V=7.3805/7.2226 um  |F|max=9.55e-10 N
+[DTS-TIP] step 14000 tipX=5.4851 tipVerts=5 vel=100.0 nv=2945
+[FLIP] step 14000 membrane#0 flips=81/8829 verify=true
+[REMESH] step 14000 split=4 -> nv=2949 nf=5894 ne=8841 verify=true
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=1481.6 cumMaxPerThread=716
+[DTS-E] step 14500  WARNING 112 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 14500  E bend=1.348e-16 area=1.671e-15 vol=9.647e-17 tot=1.902e-15 J   A=18.8512/18.0739  V=7.5398/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 14500 tipX=5.4686 tipVerts=5 vel=100.0 nv=2965
+[FLIP] step 14500 membrane#0 flips=422/8889 verify=true
+[REMESH] step 14500 split=5 -> nv=2970 nf=5936 ne=8904 verify=true
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=1490.6 cumMaxPerThread=716
+[DTS-E] step 15000  WARNING 114 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 15000  E bend=1.920e-16 area=1.666e-15 vol=9.424e-17 tot=1.953e-15 J   A=18.8501/18.0739  V=7.5362/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 15000 tipX=5.5181 tipVerts=6 vel=100.0 nv=3005
+[FLIP] step 15000 membrane#0 flips=305/9009 verify=true
+[REMESH] step 15000 split=4 -> nv=3009 nf=6014 ne=9021 verify=true
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=1497.8 cumMaxPerThread=716
+[DTS-E] step 15500  WARNING 144 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 15500  E bend=2.728e-16 area=1.941e-15 vol=1.059e-16 tot=2.320e-15 J   A=18.9116/18.0739  V=7.5550/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 15500 tipX=5.5609 tipVerts=10 vel=100.0 nv=3051
+[FLIP] step 15500 membrane#0 flips=203/9147 verify=true
+[REMESH] step 15500 split=3 -> nv=3054 nf=6104 ne=9156 verify=true
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=1504.5 cumMaxPerThread=716
+Sim. time=00.16....~10.20 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 16000  WARNING 201 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 16000  E bend=3.268e-16 area=2.432e-15 vol=1.336e-16 tot=2.893e-15 J   A=19.0116/18.0739  V=7.5960/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 16000 tipX=5.5948 tipVerts=11 vel=100.0 nv=3104
+[FLIP] step 16000 membrane#0 flips=197/9306 verify=true
+[REMESH] step 16000 split=5 -> nv=3109 nf=6214 ne=9321 verify=true
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=1511.6 cumMaxPerThread=716
+[DTS-E] step 16500  WARNING 190 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 16500  E bend=3.433e-16 area=2.376e-15 vol=1.136e-16 tot=2.833e-15 J   A=19.0007/18.0739  V=7.5669/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 16500 tipX=5.6553 tipVerts=12 vel=100.0 nv=3148
+[FLIP] step 16500 membrane#0 flips=179/9438 verify=true
+[REMESH] step 16500 split=9 -> nv=3157 nf=6310 ne=9465 verify=true
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=1519.1 cumMaxPerThread=752
+[DTS-E] step 17000  WARNING 214 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 17000  E bend=3.934e-16 area=2.498e-15 vol=1.199e-16 tot=3.011e-15 J   A=19.0242/18.0739  V=7.5763/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 17000 tipX=5.7291 tipVerts=13 vel=100.0 nv=3207
+[FLIP] step 17000 membrane#0 flips=177/9615 verify=true
+[REMESH] step 17000 split=9 -> nv=3216 nf=6428 ne=9642 verify=true
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=1526.7 cumMaxPerThread=797
+[DTS-E] step 17500  WARNING 257 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 17500  E bend=4.229e-16 area=2.733e-15 vol=1.096e-16 tot=3.265e-15 J   A=19.0678/18.0739  V=7.5608/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 17500 tipX=5.6786 tipVerts=15 vel=100.0 nv=3267
+[FLIP] step 17500 membrane#0 flips=130/9795 verify=true
+[REMESH] step 17500 split=2 -> nv=3269 nf=6534 ne=9801 verify=true
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=1534.7 cumMaxPerThread=845
+Sim. time=00.18....~12.44 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 18000  WARNING 283 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 18000  E bend=4.507e-16 area=2.869e-15 vol=1.060e-16 tot=3.426e-15 J   A=19.0923/18.0739  V=7.5552/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 18000 tipX=5.6256 tipVerts=17 vel=100.0 nv=3311
+[FLIP] step 18000 membrane#0 flips=152/9927 verify=true
+[REMESH] step 18000 split=3 -> nv=3314 nf=6624 ne=9936 verify=true
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=1543.1 cumMaxPerThread=933
+[DTS-E] step 18500  WARNING 308 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 18500  E bend=4.457e-16 area=3.089e-15 vol=1.039e-16 tot=3.639e-15 J   A=19.1307/18.0739  V=7.5518/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 18500 tipX=5.5726 tipVerts=18 vel=100.0 nv=3351
+[FLIP] step 18500 membrane#0 flips=141/10047 verify=true
+[REMESH] step 18500 split=6 -> nv=3357 nf=6710 ne=10065 verify=true
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=1551.5 cumMaxPerThread=963
+[DTS-E] step 19000  WARNING 313 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 19000  E bend=5.105e-16 area=3.280e-15 vol=1.168e-16 tot=3.907e-15 J   A=19.1628/18.0739  V=7.5717/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 19000 tipX=5.4969 tipVerts=20 vel=100.0 nv=3406
+[FLIP] step 19000 membrane#0 flips=111/10212 verify=true
+[REMESH] step 19000 split=5 -> nv=3411 nf=6818 ne=10227 verify=true
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=1559.6 cumMaxPerThread=1038
+[DTS-E] step 19500  WARNING 322 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 19500  E bend=5.482e-16 area=3.309e-15 vol=1.175e-16 tot=3.974e-15 J   A=19.1676/18.0739  V=7.5726/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 19500 tipX=5.4239 tipVerts=21 vel=100.0 nv=3444
+[FLIP] step 19500 membrane#0 flips=102/10326 verify=true
+[REMESH] step 19500 split=9 -> nv=3453 nf=6902 ne=10353 verify=true
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=1568.0 cumMaxPerThread=1067
+Sim. time=00.20....~17.63 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 20000  WARNING 334 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 20000  E bend=5.997e-16 area=3.282e-15 vol=1.068e-16 tot=3.989e-15 J   A=19.1632/18.0739  V=7.5565/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 20000 tipX=5.4078 tipVerts=23 vel=100.0 nv=3494
+[FLIP] step 20000 membrane#0 flips=83/10476 verify=true
+[REMESH] step 20000 split=2 -> nv=3496 nf=6988 ne=10482 verify=true
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=1576.9 cumMaxPerThread=1085
+[DTS-E] step 20500  WARNING 352 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 20500  E bend=6.426e-16 area=3.551e-15 vol=1.017e-16 tot=4.296e-15 J   A=19.2069/18.0739  V=7.5483/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 20500 tipX=5.4026 tipVerts=23 vel=100.0 nv=3545
+[FLIP] step 20500 membrane#0 flips=90/10629 verify=true
+[REMESH] step 20500 split=6 -> nv=3551 nf=7098 ne=10647 verify=true
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=1586.8 cumMaxPerThread=1140
+[DTS-E] step 21000  WARNING 356 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 21000  E bend=6.822e-16 area=3.600e-15 vol=1.013e-16 tot=4.383e-15 J   A=19.2146/18.0739  V=7.5476/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 21000 tipX=5.4213 tipVerts=23 vel=100.0 nv=3594
+[FLIP] step 21000 membrane#0 flips=99/10776 verify=true
+[REMESH] step 21000 split=3 -> nv=3597 nf=7190 ne=10785 verify=true
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=1597.0 cumMaxPerThread=1259
+[DTS-E] step 21500  WARNING 351 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 21500  E bend=6.767e-16 area=3.681e-15 vol=8.790e-17 tot=4.446e-15 J   A=19.2275/18.0739  V=7.5254/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 21500 tipX=5.4028 tipVerts=24 vel=100.0 nv=3638
+[FLIP] step 21500 membrane#0 flips=90/10908 verify=true
+[REMESH] step 21500 split=5 -> nv=3643 nf=7282 ne=10923 verify=true
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=1608.0 cumMaxPerThread=1373
+Sim. time=00.22....~22.94 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 22000  WARNING 380 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 22000  E bend=7.491e-16 area=3.879e-15 vol=8.788e-17 tot=4.716e-15 J   A=19.2581/18.0739  V=7.5254/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 22000 tipX=5.4188 tipVerts=29 vel=100.0 nv=3688
+[FLIP] step 22000 membrane#0 flips=78/11058 verify=true
+[REMESH] step 22000 split=12 -> nv=3700 nf=7396 ne=11094 verify=true
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=1620.1 cumMaxPerThread=1420
+[DTS-E] step 22500  WARNING 438 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 22500  E bend=7.620e-16 area=4.206e-15 vol=9.379e-17 tot=5.062e-15 J   A=19.3070/18.0739  V=7.5354/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 22500 tipX=5.4477 tipVerts=22 vel=100.0 nv=3746
+[FLIP] step 22500 membrane#0 flips=62/11232 verify=true
+[REMESH] step 22500 split=10 -> nv=3756 nf=7508 ne=11262 verify=true
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=1630.9 cumMaxPerThread=1445
+[DTS-E] step 23000  WARNING 454 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 23000  E bend=7.883e-16 area=4.411e-15 vol=1.081e-16 tot=5.307e-15 J   A=19.3367/18.0739  V=7.5584/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 23000 tipX=5.4449 tipVerts=24 vel=100.0 nv=3809
+[FLIP] step 23000 membrane#0 flips=73/11421 verify=true
+[REMESH] step 23000 split=9 -> nv=3818 nf=7632 ne=11448 verify=true
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=1641.0 cumMaxPerThread=1445
+[DTS-E] step 23500  WARNING 455 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 23500  E bend=8.166e-16 area=4.474e-15 vol=9.241e-17 tot=5.383e-15 J   A=19.3457/18.0739  V=7.5331/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 23500 tipX=5.4376 tipVerts=25 vel=100.0 nv=3862
+[FLIP] step 23500 membrane#0 flips=76/11580 verify=true
+[REMESH] step 23500 split=3 -> nv=3865 nf=7726 ne=11589 verify=true
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=1650.4 cumMaxPerThread=1445
+Sim. time=00.24....~36.45 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[DTS-E] step 24000  WARNING 468 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 24000  E bend=8.378e-16 area=4.541e-15 vol=1.025e-16 tot=5.481e-15 J   A=19.3551/18.0739  V=7.5496/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 24000 tipX=5.4344 tipVerts=25 vel=100.0 nv=3902
+[FLIP] step 24000 membrane#0 flips=60/11700 verify=true
+[REMESH] step 24000 split=4 -> nv=3906 nf=7808 ne=11712 verify=true
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=1659.5 cumMaxPerThread=1445
+[DTS-E] step 24500  WARNING 468 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 24500  E bend=8.768e-16 area=4.519e-15 vol=1.088e-16 tot=5.504e-15 J   A=19.3520/18.0739  V=7.5595/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 24500 tipX=5.4433 tipVerts=25 vel=100.0 nv=3955
+[FLIP] step 24500 membrane#0 flips=72/11859 verify=true
+[REMESH] step 24500 split=3 -> nv=3958 nf=7912 ne=11868 verify=true
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=1669.2 cumMaxPerThread=1445
+[DTS-E] step 25000  WARNING 502 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 25000  E bend=9.177e-16 area=4.903e-15 vol=1.152e-16 tot=5.936e-15 J   A=19.4053/18.0739  V=7.5693/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 25000 tipX=5.4432 tipVerts=28 vel=100.0 nv=4011
+[FLIP] step 25000 membrane#0 flips=64/12027 verify=true
+[REMESH] step 25000 split=5 -> nv=4016 nf=8028 ne=12042 verify=true
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=1678.6 cumMaxPerThread=1445
+[DTS-E] step 25500  WARNING 523 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 25500  E bend=9.362e-16 area=5.134e-15 vol=1.067e-16 tot=6.177e-15 J   A=19.4362/18.0739  V=7.5563/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 25500 tipX=5.4307 tipVerts=31 vel=100.0 nv=4061
+[FLIP] step 25500 membrane#0 flips=78/12177 verify=true
+[REMESH] step 25500 split=5 -> nv=4066 nf=8128 ne=12192 verify=true
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=1688.4 cumMaxPerThread=1445
+Sim. time=00.26....~46.93 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 26000  WARNING 539 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 26000  E bend=9.281e-16 area=5.269e-15 vol=1.334e-16 tot=6.330e-15 J   A=19.4540/18.0739  V=7.5956/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 26000 tipX=5.4559 tipVerts=32 vel=100.0 nv=4122
+[FLIP] step 26000 membrane#0 flips=78/12360 verify=true
+[REMESH] step 26000 split=10 -> nv=4132 nf=8260 ne=12390 verify=true
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=1698.4 cumMaxPerThread=1445
+[DTS-E] step 26500  WARNING 592 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 26500  E bend=9.704e-16 area=5.803e-15 vol=1.447e-16 tot=6.918e-15 J   A=19.5223/18.0739  V=7.6111/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 26500 tipX=5.4561 tipVerts=32 vel=100.0 nv=4172
+[FLIP] step 26500 membrane#0 flips=69/12510 verify=true
+[REMESH] step 26500 split=5 -> nv=4177 nf=8350 ne=12525 verify=true
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=1708.5 cumMaxPerThread=1445
+[DTS-E] step 27000  WARNING 558 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 27000  E bend=9.427e-16 area=5.750e-15 vol=9.240e-17 tot=6.786e-15 J   A=19.5157/18.0739  V=7.5331/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 27000 tipX=5.4627 tipVerts=33 vel=100.0 nv=4222
+[FLIP] step 27000 membrane#0 flips=74/12660 verify=true
+[REMESH] step 27000 split=6 -> nv=4228 nf=8452 ne=12678 verify=true
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=1718.5 cumMaxPerThread=1445
+[DTS-E] step 27500  WARNING 640 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 27500  E bend=1.048e-15 area=5.930e-15 vol=9.340e-17 tot=7.072e-15 J   A=19.5381/18.0739  V=7.5347/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 27500 tipX=5.4689 tipVerts=35 vel=100.0 nv=4268
+[FLIP] step 27500 membrane#0 flips=94/12798 verify=true
+[REMESH] step 27500 split=3 -> nv=4271 nf=8538 ne=12807 verify=true
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=1729.6 cumMaxPerThread=1463
+Sim. time=00.28....~52.63 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 28000  WARNING 598 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 28000  E bend=1.010e-15 area=6.096e-15 vol=1.013e-16 tot=7.208e-15 J   A=19.5584/18.0739  V=7.5477/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 28000 tipX=5.4561 tipVerts=35 vel=100.0 nv=4306
+[FLIP] step 28000 membrane#0 flips=106/12912 verify=true
+[REMESH] step 28000 split=5 -> nv=4311 nf=8618 ne=12927 verify=true
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=1741.2 cumMaxPerThread=1480
+[DTS-E] step 28500  WARNING 614 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 28500  E bend=1.060e-15 area=6.125e-15 vol=1.046e-16 tot=7.290e-15 J   A=19.5620/18.0739  V=7.5529/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 28500 tipX=5.4828 tipVerts=35 vel=100.0 nv=4351
+[FLIP] step 28500 membrane#0 flips=73/13047 verify=true
+[REMESH] step 28500 split=7 -> nv=4358 nf=8712 ne=13068 verify=true
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=1753.6 cumMaxPerThread=1607
+[DTS-E] step 29000  WARNING 622 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 29000  E bend=1.066e-15 area=6.296e-15 vol=1.009e-16 tot=7.462e-15 J   A=19.5825/18.0739  V=7.5470/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 29000 tipX=5.4857 tipVerts=36 vel=100.0 nv=4409
+[FLIP] step 29000 membrane#0 flips=81/13221 verify=true
+[REMESH] step 29000 split=10 -> nv=4419 nf=8834 ne=13251 verify=true
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=1766.8 cumMaxPerThread=1659
+[DTS-E] step 29500  WARNING 636 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 29500  E bend=1.087e-15 area=6.588e-15 vol=9.664e-17 tot=7.771e-15 J   A=19.6172/18.0739  V=7.5401/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 29500 tipX=5.4893 tipVerts=36 vel=100.0 nv=4464
+[FLIP] step 29500 membrane#0 flips=60/13386 verify=true
+[REMESH] step 29500 split=4 -> nv=4468 nf=8932 ne=13398 verify=true
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=1779.8 cumMaxPerThread=1659
+Sim. time=00.30....~65.83 minutes computation to simulate 1 sec, run finished in ~-00.00 hours
+[DTS-E] step 30000  WARNING 622 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 30000  E bend=1.190e-15 area=6.177e-15 vol=1.116e-16 tot=7.478e-15 J   A=19.5682/18.0739  V=7.5638/7.2226 um  |F|max=1.00e-09 N
+[DTS-TIP] step 30000 tipX=5.5207 tipVerts=38 vel=100.0 nv=4502
+[FLIP] step 30000 membrane#0 flips=66/13500 verify=true
+[REMESH] step 30000 split=8 -> nv=4510 nf=9016 ne=13524 verify=true
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=30100) linkCtMeanSettled=0.00 (samples=15101) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=0 monomers=0 fActinUM=0.00 meanSegLenUM=0.000 freePoolUM=15.00
+[STATS] mem usedHeapMB=2081.9 maxHeapMB=5368.7
+[STATS] percolation filaments=0 activeLinks=0 linksPerFil=0.000 largestComp=0 (0.0% of fils) spanX=0.00 spanY=0.00 spanZ=0.00 spanFrac=0.00 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+ThingStep Threads took 40.697000 seconds.
+ThingBrownian Threads took 12.125000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 6.859000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 10.284000 seconds.
+Ck Mesh Threads took 227.623000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 4.609000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!

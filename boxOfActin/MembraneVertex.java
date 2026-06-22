@@ -20,8 +20,9 @@ public final class MembraneVertex extends ProteinNode {
 
     /** The membrane this vertex belongs to (multi-instance: a sim may hold several). */
     public final Membrane owner;
-    /** This vertex's index within {@code owner}'s flat topology arrays. */
-    public final int localIndex;
+    /** This vertex's index within {@code owner}'s flat topology arrays. Updated on edge-collapse
+     *  swap-compaction (a survivor vertex moved into a freed slot), so NOT final. */
+    public int localIndex;
 
     public MembraneVertex(Pt3D initCoord, double radius, Membrane owner, int localIndex) {
         super(initCoord, radius, false);   // no myosins

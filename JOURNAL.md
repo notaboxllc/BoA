@@ -1,5 +1,40 @@
 # BoxOfActin Project Journal
 
+## 2026-06-22 — Membrane v2 DTS, STAGE 5 (done): edge COLLAPSE remesh + the deflation-budding diagnosis
+
+Completed the remesher: **edge collapse** (the inverse of split), and in stress-testing it on a force-driven bead
+diagnosed why a "deflated" membrane blebs unnaturally ahead of the pusher.
+
+- **edgeCollapse(e):** merge the two endpoints of a too-short edge into one vertex at the midpoint (−1 vertex,
+  −3 edges, −2 faces; Euler-preserving). Validates the manifold LINK CONDITION (common neighbours of u,v ==
+  exactly the two wing vertices), valence bounds, and geometry (no inverted / degenerate / sub-8° retained face).
+  Implementation trick: collapse edits ONLY `faceVert` + the `vert[]` object array, then **rederives the entire
+  edge/incidence/edgeIndex structure from faces** via the ctor's `deriveEdges` — far less bug-prone than
+  maintaining wing-edges through a mid-array removal. Dead vertex leaves `theNodes` immediately (`removeNode`),
+  `theThings`/SoA at next cleanup (`removeMe`). `localIndex` made non-final (updated on swap-compaction).
+  Env-gated: BOA_COLLAPSE_N (steps/sweep), BOA_COLLAPSE_LEN (×l0, default 0.6). GUARDED OFF when arpLocal/forminLocal
+  active (per-vertex chem + actin anchors not remapped yet) — serves membrane-only protrusion tests for now.
+- **Validated (deflated bead, split+collapse band [0.6,1.5]×l0):** WITHOUT collapse the deflating reservoir
+  accumulates slivers — worst min-angle stuck ~1.5°, #tris<20° climbs to ~108 and stays. WITH collapse: worst angle
+  recovers to ~5–9°, #tris<20° peaks ~53 then DECLINES to ~27 (cleared faster than formed), nv settles into a
+  split↔collapse steady-state oscillation (~2780–2870) instead of monotonic growth — the lipid-streaming signature.
+  verify=true on every sweep, Euler=2 throughout. Small cost: bulk p5 min-angle 40°→35° (still healthy).
+- **DIAGNOSIS — "bead blebs ahead of itself" was the deflation, not the driver.** A force-driven bead on a vt=0.9
+  membrane forms a large bead-shaped bleb that LEADS the bead, which then enters it. Tracing the geometry per
+  frame: contacts are all in FRONT (no engulfment), penetration tiny (~0.005 µm), yet the membrane front sits
+  0.49 µm beyond the bead's steric reach — a force with no contact. The cause: **area stays dead-constant (~18.07)
+  while volume falls 7.22→6.67** (toward 0.9·V0=6.5), maxR↑1.75 **and** minR↓1.13 — the vesicle is deflating at
+  constant area by BUDDING, and the bead's contact merely picks where the bud forms. Root: a full sphere (V=V0) with
+  vt=0.9 starts 10% over its target volume → forced budding transient the instant symmetry breaks. **vt=1.0 control
+  (same bead/flips/collapse): gap stays ~0.045 the whole run, volume steady, membrane conforms and protrudes
+  locally tracking the bead — no bleb, no parking.** So the "flow" deflation gave two turns ago was a global
+  deflation instability, not in-plane flow. RULE: don't use a volume deficit to get flow; keep vt≈1.0 and get flow
+  from in-plane redistribution (flips+split+collapse). For a genuine slack reservoir (vt<1), initialize at the
+  deflated equilibrium shape (pre-relax before engaging the bead) so the budding transient is over first.
+- **OPEN:** the bead conforms but draws a finger only on a longer time-scale than it pushes (in-plane flow is slow);
+  speeding that up (so a small bead pulls a real tether) is the next question. Collapse not yet extended to the
+  dendritic/formin config. Runs: RUN_LOGS/2026-06-22_tip/ (bead_deflate, bead_collapse, bead_vt1).
+
 ## 2026-06-21 — Membrane v2 DTS, STAGE 5 (start): edge SPLIT remesh -- growing protrusions stay healthy
 
 Built growable membrane storage + edge split (the remeshing companion to flips). Context: single shell + dendritic
