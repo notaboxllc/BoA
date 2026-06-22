@@ -1,0 +1,277 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /tmp/tether_F1.5e-10...
+     Parameter assigned: buildDtsMembrane set to true
+     Parameter assigned: dtsMembraneSubdiv set to 5
+     Parameter assigned: dtsMembraneRadius set to 1.2
+     Parameter assigned: dtsVertexRadiusFrac set to 0.5
+     Parameter assigned: dtsKappaBend set to 1.0E-19
+     Parameter assigned: dtsKappaArea set to 0.5
+     Parameter assigned: dtsKappaVolume set to 5.0E-15
+     Parameter assigned: dtsTargetReducedVol set to 1.0
+     Parameter assigned: dtsMaxDispFrac set to 0.15
+     Parameter assigned: dtsProbeForce set to 1.5E-10
+     Parameter assigned: dtsProbeRadius set to 0.1
+     Parameter assigned: dtsProbeStartX set to 0.9
+     Parameter assigned: dtsStericStiffness set to 0.0015
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: biochemDeltaT set to 0.001
+     Parameter assigned: runTime set to 0.15
+     Parameter assigned: toFileInterval set to 150
+     Parameter assigned: remoteWriteInterval set to 2000
+     Parameter assigned: dtsBrownianOff set to true
+     Parameter assigned: boxXDim set to 5.0
+     Parameter assigned: boxYDim set to 5.0
+     Parameter assigned: boxZDim set to 5.0
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: fillNodeCt set to 0
+     Parameter assigned: buildBranchedFils set to false
+     Parameter assigned: buildMembraneSheet set to false
+     Parameter assigned: buildMembraneSphere set to false
+     Parameter assigned: forminConc set to 0.0
+     Parameter assigned: ratchetOn set to false
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=7819840479672275363 (BOA_RNG_SEED unset)
+[DTS] membrane #0 built: nu=5  nv=10242  nf=20480  ne=30720  maxVal=12  R=1.200 um  l0=0.0453 um  rVert=0.0227 um  A0=18.0902 um^2  V0=7.2343 um^3
+[DTS]   continuum sphere: A=18.0956 (mesh 100.0%)  V=7.2382 (mesh 99.9%)
+Node trans/rot diff =2.184E-14 / 1.638E0
+[DTS-PROBE] created at x=0.900 r=0.100 driveF=1.500e-10 N
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 26; xBinWidth = 0.2 µm
+nYBins = 26; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 26 x 26 x 26 cells (0.2 µm each)
+[12:28] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[12:28]   ON   ThingStep Threads
+[12:28]   ON   ThingBrownian Threads
+[12:28]   ON   Myosin Threads
+[12:28]   OFF  MyoDimer Threads
+[12:28]   ON   Protein Node Threads
+[12:28]   OFF  MyoMiniFil Threads
+[12:28]   OFF  Chamber Myo Threads
+[12:28]   OFF  Chamber MyoDimer Threads
+[12:28]   ON   Mesh Threads
+[12:28]   ON   Ck Mesh Threads
+[12:28]   ON   Ck Mots Threads
+[12:28]   OFF  XLink Threads
+[12:28]   OFF  Arp23 Threads
+[12:28]   OFF  NodeLink Threads
+[12:28]   ON   Membrane Node Threads
+[12:28]   OFF  ActA Threads
+[12:28]   ON   MotorBindGrid3D Fill
+[12:28] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/tether_F1.5e-10
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/tether_F1.5e-10
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.tether_F1.5e-10
+ThreeJSWriter: wrote params_effective.txt (357 parameters)
+[DTS-E] step 0  E bend=2.514e-18 area=2.309e-40 vol=1.923e-43 tot=2.514e-18 J   A=18.0902/18.0902  V=7.2343/7.2343 um  |F|max=8.83e-14 N
+[FLIP] step 0 membrane#0 flips=0/30720 verify=true
+[DTS-PROBE] step 0  x=0.9000  reaction=0.000e+00 N  drive=1.500e-10 N  bulgeR=1.2000
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=4688.4 cumMaxPerThread=1554
+[DTS-E] step 500  E bend=3.811e-18 area=1.133e-20 vol=3.086e-19 tot=4.131e-18 J   A=18.0911/18.0902  V=7.1539/7.2343 um  |F|max=2.57e-12 N
+[FLIP] step 500 membrane#0 flips=3/31011 verify=true
+[DTS-PROBE] step 500  x=1.3800  reaction=5.332e-11 N  drive=1.500e-10 N  bulgeR=1.5005
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=4736.8 cumMaxPerThread=1570
+[DTS-E] step 1000  E bend=5.215e-18 area=3.003e-18 vol=8.341e-19 tot=9.053e-18 J   A=18.1049/18.0902  V=7.1022/7.2343 um  |F|max=4.54e-11 N
+[FLIP] step 1000 membrane#0 flips=29/31407 verify=true
+[REMESH] step 1000 split=9 -> nv=10480 nf=20956 ne=31434 verify=true
+[COLLAPSE] step 1000 collapse=14 -> nv=10466 nf=20928 ne=31392 verify=true
+[DTS-PROBE] step 1000  x=1.5563  reaction=1.127e-11 N  drive=1.500e-10 N  bulgeR=1.6746
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=4771.2 cumMaxPerThread=1570
+[DTS-E] step 1500  E bend=8.171e-18 area=7.267e-18 vol=8.633e-19 tot=1.630e-17 J   A=18.1131/18.0902  V=7.0999/7.2343 um  |F|max=8.65e-11 N
+[FLIP] step 1500 membrane#0 flips=58/31548 verify=true
+[DTS-PROBE] step 1500  x=1.5965  reaction=1.295e-10 N  drive=1.500e-10 N  bulgeR=1.7217
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=4791.5 cumMaxPerThread=1570
+Sim. time=00.02....~39.36 minutes computation to simulate 1 sec, run finished in ~00.09 hours
+[DTS-E] step 2000  E bend=5.577e-18 area=8.401e-18 vol=1.070e-18 tot=1.505e-17 J   A=18.1148/18.0902  V=7.0847/7.2343 um  |F|max=1.09e-10 N
+[FLIP] step 2000 membrane#0 flips=65/31632 verify=true
+[REMESH] step 2000 split=11 -> nv=10557 nf=21110 ne=31665 verify=true
+[COLLAPSE] step 2000 collapse=17 -> nv=10540 nf=21076 ne=31614 verify=true
+[DTS-PROBE] step 2000  x=1.6053  reaction=6.618e-11 N  drive=1.500e-10 N  bulgeR=1.7424
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=4804.6 cumMaxPerThread=1570
+[DTS-E] step 2500  E bend=6.931e-18 area=1.024e-17 vol=1.084e-18 tot=1.825e-17 J   A=18.1174/18.0902  V=7.0837/7.2343 um  |F|max=1.13e-10 N
+[FLIP] step 2500 membrane#0 flips=62/31689 verify=true
+[DTS-PROBE] step 2500  x=1.6437  reaction=2.018e-11 N  drive=1.500e-10 N  bulgeR=1.7623
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=4816.2 cumMaxPerThread=1572
+[DTS-E] step 3000  E bend=6.873e-18 area=1.245e-17 vol=1.209e-18 tot=2.053e-17 J   A=18.1202/18.0902  V=7.0752/7.2343 um  |F|max=1.47e-10 N
+[FLIP] step 3000 membrane#0 flips=80/31725 verify=true
+[REMESH] step 3000 split=8 -> nv=10585 nf=21166 ne=31749 verify=true
+[COLLAPSE] step 3000 collapse=9 -> nv=10576 nf=21148 ne=31722 verify=true
+[DTS-PROBE] step 3000  x=1.6593  reaction=2.989e-12 N  drive=1.500e-10 N  bulgeR=1.7787
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=4831.1 cumMaxPerThread=1609
+[DTS-E] step 3500  E bend=6.516e-18 area=5.880e-18 vol=1.339e-18 tot=1.373e-17 J   A=18.0695/18.0902  V=7.0669/7.2343 um  |F|max=8.95e-11 N
+[FLIP] step 3500 membrane#0 flips=137/31605 verify=true
+[DTS-PROBE] step 3500  x=1.6932  reaction=2.215e-10 N  drive=1.500e-10 N  bulgeR=1.8064
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=4841.8 cumMaxPerThread=1609
+Sim. time=00.04....~39.80 minutes computation to simulate 1 sec, run finished in ~00.07 hours
+[DTS-E] step 4000  E bend=6.789e-18 area=5.633e-18 vol=1.218e-18 tot=1.364e-17 J   A=18.0700/18.0902  V=7.0746/7.2343 um  |F|max=1.03e-10 N
+[FLIP] step 4000 membrane#0 flips=75/31614 verify=true
+[REMESH] step 4000 split=15 -> nv=10555 nf=21106 ne=31659 verify=true
+[COLLAPSE] step 4000 collapse=15 -> nv=10540 nf=21076 ne=31614 verify=true
+[DTS-PROBE] step 4000  x=1.7252  reaction=2.498e-10 N  drive=1.500e-10 N  bulgeR=1.8348
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=4850.7 cumMaxPerThread=1609
+[DTS-E] step 4500  E bend=8.189e-18 area=5.229e-18 vol=1.168e-18 tot=1.459e-17 J   A=18.0707/18.0902  V=7.0780/7.2343 um  |F|max=8.17e-11 N
+[FLIP] step 4500 membrane#0 flips=50/31617 verify=true
+[DTS-PROBE] step 4500  x=1.7856  reaction=9.192e-11 N  drive=1.500e-10 N  bulgeR=1.9018
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=4858.2 cumMaxPerThread=1609
+[DTS-E] step 5000  E bend=5.556e-18 area=3.326e-18 vol=1.073e-18 tot=9.956e-18 J   A=18.0746/18.0902  V=7.0844/7.2343 um  |F|max=7.49e-11 N
+[FLIP] step 5000 membrane#0 flips=36/31560 verify=true
+[REMESH] step 5000 split=10 -> nv=10532 nf=21060 ne=31590 verify=true
+[COLLAPSE] step 5000 collapse=10 -> nv=10522 nf=21040 ne=31560 verify=true
+[DTS-PROBE] step 5000  x=1.8333  reaction=1.982e-10 N  drive=1.500e-10 N  bulgeR=1.9466
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=4864.1 cumMaxPerThread=1609
+[DTS-E] step 5500  E bend=7.464e-18 area=5.070e-18 vol=1.110e-18 tot=1.364e-17 J   A=18.0710/18.0902  V=7.0819/7.2343 um  |F|max=8.78e-11 N
+[FLIP] step 5500 membrane#0 flips=49/31623 verify=true
+[DTS-PROBE] step 5500  x=1.8900  reaction=1.174e-10 N  drive=1.500e-10 N  bulgeR=2.0064
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=4869.3 cumMaxPerThread=1609
+Sim. time=00.06....~37.10 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[DTS-E] step 6000  E bend=6.886e-18 area=5.133e-18 vol=1.033e-18 tot=1.305e-17 J   A=18.0709/18.0902  V=7.0873/7.2343 um  |F|max=6.51e-11 N
+[FLIP] step 6000 membrane#0 flips=39/31587 verify=true
+[REMESH] step 6000 split=10 -> nv=10541 nf=21078 ne=31617 verify=true
+[COLLAPSE] step 6000 collapse=18 -> nv=10523 nf=21042 ne=31563 verify=true
+[DTS-PROBE] step 6000  x=1.9530  reaction=2.779e-10 N  drive=1.500e-10 N  bulgeR=2.0670
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=4874.2 cumMaxPerThread=1609
+[DTS-E] step 6500  E bend=7.674e-18 area=5.292e-18 vol=8.774e-19 tot=1.384e-17 J   A=18.0706/18.0902  V=7.0988/7.2343 um  |F|max=9.09e-11 N
+[FLIP] step 6500 membrane#0 flips=51/31635 verify=true
+[DTS-PROBE] step 6500  x=1.9890  reaction=9.006e-12 N  drive=1.500e-10 N  bulgeR=2.1148
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=4877.8 cumMaxPerThread=1609
+[DTS-E] step 7000  E bend=8.464e-18 area=5.444e-18 vol=9.025e-19 tot=1.481e-17 J   A=18.0703/18.0902  V=7.0969/7.2343 um  |F|max=7.37e-11 N
+[FLIP] step 7000 membrane#0 flips=47/31617 verify=true
+[REMESH] step 7000 split=11 -> nv=10552 nf=21100 ne=31650 verify=true
+[COLLAPSE] step 7000 collapse=14 -> nv=10538 nf=21072 ne=31608 verify=true
+[DTS-PROBE] step 7000  x=2.0460  reaction=2.501e-10 N  drive=1.500e-10 N  bulgeR=2.1596
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=4880.9 cumMaxPerThread=1609
+[DTS-E] step 7500  E bend=6.511e-18 area=5.602e-18 vol=9.572e-19 tot=1.307e-17 J   A=18.0700/18.0902  V=7.0928/7.2343 um  |F|max=8.95e-11 N
+[FLIP] step 7500 membrane#0 flips=57/31623 verify=true
+[DTS-PROBE] step 7500  x=2.0823  reaction=2.844e-10 N  drive=1.500e-10 N  bulgeR=2.1929
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=4884.0 cumMaxPerThread=1609
+Sim. time=00.08....~37.89 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[DTS-E] step 8000  E bend=6.590e-18 area=5.061e-18 vol=9.741e-19 tot=1.263e-17 J   A=18.0710/18.0902  V=7.0915/7.2343 um  |F|max=7.65e-11 N
+[FLIP] step 8000 membrane#0 flips=43/31611 verify=true
+[REMESH] step 8000 split=7 -> nv=10546 nf=21088 ne=31632 verify=true
+[COLLAPSE] step 8000 collapse=5 -> nv=10541 nf=21078 ne=31617 verify=true
+[DTS-PROBE] step 8000  x=2.1121  reaction=2.390e-10 N  drive=1.500e-10 N  bulgeR=2.2279
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=4887.1 cumMaxPerThread=1609
+[DTS-E] step 8500  E bend=7.078e-18 area=6.242e-18 vol=9.504e-19 tot=1.427e-17 J   A=18.0689/18.0902  V=7.0933/7.2343 um  |F|max=7.96e-11 N
+[FLIP] step 8500 membrane#0 flips=62/31671 verify=true
+[DTS-PROBE] step 8500  x=2.1437  reaction=7.965e-11 N  drive=1.500e-10 N  bulgeR=2.2625
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=4889.7 cumMaxPerThread=1609
+[DTS-E] step 9000  E bend=7.236e-18 area=5.656e-18 vol=8.526e-19 tot=1.374e-17 J   A=18.0699/18.0902  V=7.1007/7.2343 um  |F|max=7.78e-11 N
+[FLIP] step 9000 membrane#0 flips=57/31647 verify=true
+[REMESH] step 9000 split=10 -> nv=10561 nf=21118 ne=31677 verify=true
+[COLLAPSE] step 9000 collapse=14 -> nv=10547 nf=21090 ne=31635 verify=true
+[DTS-PROBE] step 9000  x=2.1900  reaction=2.867e-10 N  drive=1.500e-10 N  bulgeR=2.2991
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=4891.5 cumMaxPerThread=1609
+[DTS-E] step 9500  E bend=7.779e-18 area=5.477e-18 vol=8.725e-19 tot=1.413e-17 J   A=18.0703/18.0902  V=7.0992/7.2343 um  |F|max=8.29e-11 N
+[FLIP] step 9500 membrane#0 flips=83/31623 verify=true
+[DTS-PROBE] step 9500  x=2.2068  reaction=6.830e-12 N  drive=1.500e-10 N  bulgeR=2.3331
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=4892.9 cumMaxPerThread=1609
+Sim. time=00.10....~38.50 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 10000  E bend=6.394e-18 area=3.869e-18 vol=8.485e-19 tot=1.111e-17 J   A=18.0734/18.0902  V=7.1010/7.2343 um  |F|max=6.40e-11 N
+[FLIP] step 10000 membrane#0 flips=41/31596 verify=true
+[REMESH] step 10000 split=8 -> nv=10542 nf=21080 ne=31620 verify=true
+[COLLAPSE] step 10000 collapse=8 -> nv=10534 nf=21064 ne=31596 verify=true
+[DTS-PROBE] step 10000  x=2.2546  reaction=1.818e-11 N  drive=1.500e-10 N  bulgeR=2.3792
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=4894.3 cumMaxPerThread=1609
+[DTS-E] step 10500  E bend=6.706e-18 area=5.322e-18 vol=7.639e-19 tot=1.279e-17 J   A=18.0705/18.0902  V=7.1079/7.2343 um  |F|max=7.43e-11 N
+[FLIP] step 10500 membrane#0 flips=63/31662 verify=true
+[DTS-PROBE] step 10500  x=2.2977  reaction=6.574e-11 N  drive=1.500e-10 N  bulgeR=2.4199
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=4895.8 cumMaxPerThread=1609
+[DTS-E] step 11000  E bend=6.712e-18 area=6.282e-18 vol=8.583e-19 tot=1.385e-17 J   A=18.0688/18.0902  V=7.1003/7.2343 um  |F|max=7.43e-11 N
+[FLIP] step 11000 membrane#0 flips=83/31644 verify=true
+[REMESH] step 11000 split=11 -> nv=10561 nf=21118 ne=31677 verify=true
+[COLLAPSE] step 11000 collapse=12 -> nv=10549 nf=21094 ne=31641 verify=true
+[DTS-PROBE] step 11000  x=2.3414  reaction=2.173e-10 N  drive=1.500e-10 N  bulgeR=2.4529
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=4897.2 cumMaxPerThread=1609
+[DTS-E] step 11500  E bend=7.660e-18 area=7.022e-18 vol=8.792e-19 tot=1.556e-17 J   A=18.0676/18.0902  V=7.0986/7.2343 um  |F|max=8.47e-11 N
+[FLIP] step 11500 membrane#0 flips=68/31647 verify=true
+[DTS-PROBE] step 11500  x=2.3633  reaction=2.118e-10 N  drive=1.500e-10 N  bulgeR=2.4752
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=4898.5 cumMaxPerThread=1609
+Sim. time=00.12....~38.65 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 12000  E bend=7.373e-18 area=7.111e-18 vol=8.452e-19 tot=1.533e-17 J   A=18.0675/18.0902  V=7.1013/7.2343 um  |F|max=8.81e-11 N
+[FLIP] step 12000 membrane#0 flips=67/31629 verify=true
+[REMESH] step 12000 split=17 -> nv=10562 nf=21120 ne=31680 verify=true
+[COLLAPSE] step 12000 collapse=9 -> nv=10553 nf=21102 ne=31653 verify=true
+[DTS-PROBE] step 12000  x=2.3877  reaction=2.445e-10 N  drive=1.500e-10 N  bulgeR=2.4999
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=4899.5 cumMaxPerThread=1609
+[DTS-E] step 12500  E bend=8.040e-18 area=7.888e-18 vol=9.240e-19 tot=1.685e-17 J   A=18.0663/18.0902  V=7.0952/7.2343 um  |F|max=1.06e-10 N
+[FLIP] step 12500 membrane#0 flips=64/31641 verify=true
+[DTS-PROBE] step 12500  x=2.4028  reaction=2.252e-10 N  drive=1.500e-10 N  bulgeR=2.5167
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=4900.4 cumMaxPerThread=1609
+[DTS-E] step 13000  E bend=7.205e-18 area=5.133e-18 vol=8.773e-19 tot=1.322e-17 J   A=18.0709/18.0902  V=7.0988/7.2343 um  |F|max=6.44e-11 N
+[FLIP] step 13000 membrane#0 flips=57/31596 verify=true
+[REMESH] step 13000 split=13 -> nv=10547 nf=21090 ne=31635 verify=true
+[COLLAPSE] step 13000 collapse=14 -> nv=10533 nf=21062 ne=31593 verify=true
+[DTS-PROBE] step 13000  x=2.4108  reaction=7.546e-11 N  drive=1.500e-10 N  bulgeR=2.5297
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=4901.0 cumMaxPerThread=1609
+[DTS-E] step 13500  E bend=7.806e-18 area=3.973e-18 vol=8.368e-19 tot=1.262e-17 J   A=18.0732/18.0902  V=7.1020/7.2343 um  |F|max=6.00e-11 N
+[FLIP] step 13500 membrane#0 flips=45/31602 verify=true
+[DTS-PROBE] step 13500  x=2.4150  reaction=4.217e-10 N  drive=1.500e-10 N  bulgeR=2.5387
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=4901.5 cumMaxPerThread=1609
+Sim. time=00.14....~36.99 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[DTS-E] step 14000  E bend=6.768e-18 area=4.151e-18 vol=7.956e-19 tot=1.171e-17 J   A=18.0728/18.0902  V=7.1053/7.2343 um  |F|max=5.58e-11 N
+[FLIP] step 14000 membrane#0 flips=46/31587 verify=true
+[REMESH] step 14000 split=11 -> nv=10542 nf=21080 ne=31620 verify=true
+[COLLAPSE] step 14000 collapse=13 -> nv=10529 nf=21054 ne=31581 verify=true
+[DTS-PROBE] step 14000  x=2.4141  reaction=4.041e-11 N  drive=1.500e-10 N  bulgeR=2.5370
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=4901.9 cumMaxPerThread=1609
+[DTS-E] step 14500  E bend=8.777e-18 area=5.424e-18 vol=7.854e-19 tot=1.499e-17 J   A=18.0704/18.0902  V=7.1061/7.2343 um  |F|max=7.57e-11 N
+[FLIP] step 14500 membrane#0 flips=59/31587 verify=true
+[DTS-PROBE] step 14500  x=2.4146  reaction=1.281e-11 N  drive=1.500e-10 N  bulgeR=2.5398
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=4902.2 cumMaxPerThread=1609
+[DTS-E] step 15000  E bend=6.558e-18 area=4.268e-18 vol=7.862e-19 tot=1.161e-17 J   A=18.0726/18.0902  V=7.1060/7.2343 um  |F|max=6.70e-11 N
+[FLIP] step 15000 membrane#0 flips=51/31572 verify=true
+[REMESH] step 15000 split=12 -> nv=10538 nf=21072 ne=31608 verify=true
+[COLLAPSE] step 15000 collapse=10 -> nv=10528 nf=21052 ne=31578 verify=true
+[DTS-PROBE] step 15000  x=2.4138  reaction=8.612e-11 N  drive=1.500e-10 N  bulgeR=2.5428
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=15100) linkCtMeanSettled=0.00 (samples=7601) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=0 monomers=0 fActinUM=0.00 meanSegLenUM=0.000 freePoolUM=15.00
+[STATS] mem usedHeapMB=1308.1 maxHeapMB=6442.5
+[STATS] percolation filaments=0 activeLinks=0 linksPerFil=0.000 largestComp=0 (0.0% of fils) spanX=0.00 spanY=0.00 spanZ=0.00 spanFrac=0.00 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+ThingStep Threads took 42.872000 seconds.
+ThingBrownian Threads took 11.959000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 5.496000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 10.793000 seconds.
+Ck Mesh Threads took 52.457000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 3.493000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!

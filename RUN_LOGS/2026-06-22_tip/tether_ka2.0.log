@@ -1,0 +1,1021 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /tmp/tether_ka2.0...
+     Parameter assigned: buildDtsMembrane set to true
+     Parameter assigned: dtsMembraneSubdiv set to 5
+     Parameter assigned: dtsMembraneRadius set to 1.2
+     Parameter assigned: dtsVertexRadiusFrac set to 0.5
+     Parameter assigned: dtsKappaBend set to 1.0E-19
+     Parameter assigned: dtsKappaArea set to 2.0
+     Parameter assigned: dtsKappaVolume set to 5.0E-15
+     Parameter assigned: dtsTargetReducedVol set to 1.0
+     Parameter assigned: dtsMaxDispFrac set to 0.15
+     Parameter assigned: dtsProbeForce set to 3.0E-11
+     Parameter assigned: dtsProbeRadius set to 0.1
+     Parameter assigned: dtsProbeStartX set to 0.9
+     Parameter assigned: dtsStericStiffness set to 0.008
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: biochemDeltaT set to 0.001
+     Parameter assigned: runTime set to 0.15
+     Parameter assigned: toFileInterval set to 150
+     Parameter assigned: remoteWriteInterval set to 2000
+     Parameter assigned: dtsBrownianOff set to true
+     Parameter assigned: boxXDim set to 5.0
+     Parameter assigned: boxYDim set to 5.0
+     Parameter assigned: boxZDim set to 5.0
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: fillNodeCt set to 0
+     Parameter assigned: buildBranchedFils set to false
+     Parameter assigned: buildMembraneSheet set to false
+     Parameter assigned: buildMembraneSphere set to false
+     Parameter assigned: forminConc set to 0.0
+     Parameter assigned: ratchetOn set to false
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=7180827504703660368 (BOA_RNG_SEED unset)
+[DTS] membrane #0 built: nu=5  nv=10242  nf=20480  ne=30720  maxVal=12  R=1.200 um  l0=0.0453 um  rVert=0.0227 um  A0=18.0902 um^2  V0=7.2343 um^3
+[DTS]   continuum sphere: A=18.0956 (mesh 100.0%)  V=7.2382 (mesh 99.9%)
+Node trans/rot diff =2.184E-14 / 1.638E0
+[DTS-PROBE] created at x=0.900 r=0.100 driveF=3.000e-11 N
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 26; xBinWidth = 0.2 µm
+nYBins = 26; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 26 x 26 x 26 cells (0.2 µm each)
+[12:22] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[12:22]   ON   ThingStep Threads
+[12:22]   ON   ThingBrownian Threads
+[12:22]   ON   Myosin Threads
+[12:22]   OFF  MyoDimer Threads
+[12:22]   ON   Protein Node Threads
+[12:22]   OFF  MyoMiniFil Threads
+[12:22]   OFF  Chamber Myo Threads
+[12:22]   OFF  Chamber MyoDimer Threads
+[12:22]   ON   Mesh Threads
+[12:22]   ON   Ck Mesh Threads
+[12:22]   ON   Ck Mots Threads
+[12:22]   OFF  XLink Threads
+[12:22]   OFF  Arp23 Threads
+[12:22]   OFF  NodeLink Threads
+[12:22]   ON   Membrane Node Threads
+[12:22]   OFF  ActA Threads
+[12:22]   ON   MotorBindGrid3D Fill
+[12:22] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/tether_ka2.0
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/tether_ka2.0
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.tether_ka2.0
+ThreeJSWriter: wrote params_effective.txt (357 parameters)
+[DTS-E] step 0  E bend=2.514e-18 area=9.234e-40 vol=1.923e-43 tot=2.514e-18 J   A=18.0902/18.0902  V=7.2343/7.2343 um  |F|max=8.83e-14 N
+[FLIP] step 0 membrane#0 flips=0/30720 verify=true
+[DTS-PROBE] step 0  x=0.9000  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2000
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=4994.1 cumMaxPerThread=1852
+[DTS-E] step 500  WARNING 6 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 500  E bend=4.786e-17 area=2.131e-15 vol=2.595e-20 tot=2.179e-15 J   A=18.2865/18.0902  V=7.2110/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 500 membrane#0 flips=250/30105 verify=true
+[DTS-PROBE] step 500  x=1.0976  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2249
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=5209.0 cumMaxPerThread=1867
+[DTS-E] step 1000  E bend=1.968e-17 area=4.320e-18 vol=1.650e-19 tot=2.416e-17 J   A=18.0813/18.0902  V=7.1755/7.2343 um  |F|max=3.30e-11 N
+[FLIP] step 1000 membrane#0 flips=109/29790 verify=true
+[REMESH] step 1000 split=10 -> nv=9942 nf=19880 ne=29820 verify=true
+[COLLAPSE] step 1000 collapse=13 -> nv=9929 nf=19854 ne=29781 verify=true
+[DTS-PROBE] step 1000  x=1.1089  reaction=5.443e-11 N  drive=3.000e-11 N  bulgeR=1.2308
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=5258.6 cumMaxPerThread=1867
+[DTS-E] step 1500  E bend=2.241e-17 area=6.068e-18 vol=1.796e-19 tot=2.866e-17 J   A=18.0797/18.0902  V=7.1730/7.2343 um  |F|max=6.97e-11 N
+[FLIP] step 1500 membrane#0 flips=209/29706 verify=true
+[DTS-PROBE] step 1500  x=1.1120  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2374
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=5291.0 cumMaxPerThread=1867
+Sim. time=00.02....~37.97 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[DTS-E] step 2000  E bend=1.731e-17 area=1.644e-18 vol=1.639e-19 tot=1.912e-17 J   A=18.0847/18.0902  V=7.1757/7.2343 um  |F|max=3.87e-11 N
+[FLIP] step 2000 membrane#0 flips=111/29598 verify=true
+[REMESH] step 2000 split=2 -> nv=9870 nf=19736 ne=29604 verify=true
+[COLLAPSE] step 2000 collapse=16 -> nv=9854 nf=19704 ne=29556 verify=true
+[DTS-PROBE] step 2000  x=1.1241  reaction=4.938e-11 N  drive=3.000e-11 N  bulgeR=1.2417
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=5303.4 cumMaxPerThread=1867
+[DTS-E] step 2500  WARNING 2912 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 2500  E bend=1.143e-16 area=8.490e-15 vol=1.619e-19 tot=8.605e-15 J   A=18.4821/18.0902  V=7.1761/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 2500 membrane#0 flips=98/29535 verify=true
+[DTS-PROBE] step 2500  x=1.1167  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2421
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=5308.7 cumMaxPerThread=1867
+[DTS-E] step 3000  E bend=2.222e-17 area=2.597e-18 vol=1.674e-19 tot=2.498e-17 J   A=18.0833/18.0902  V=7.1751/7.2343 um  |F|max=1.82e-11 N
+[FLIP] step 3000 membrane#0 flips=117/29541 verify=true
+[DTS-PROBE] step 3000  x=1.1114  reaction=7.377e-12 N  drive=3.000e-11 N  bulgeR=1.2357
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=5311.6 cumMaxPerThread=1867
+[DTS-E] step 3500  E bend=1.722e-17 area=5.052e-20 vol=1.413e-19 tot=1.741e-17 J   A=18.0892/18.0902  V=7.1799/7.2343 um  |F|max=9.26e-12 N
+[FLIP] step 3500 membrane#0 flips=116/29346 verify=true
+[DTS-PROBE] step 3500  x=1.1269  reaction=6.607e-11 N  drive=3.000e-11 N  bulgeR=1.2451
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=5315.7 cumMaxPerThread=1867
+Sim. time=00.04....~31.35 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[DTS-E] step 4000  WARNING 3223 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 4000  E bend=1.095e-16 area=9.177e-15 vol=1.602e-19 tot=9.287e-15 J   A=18.4976/18.0902  V=7.1764/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 4000 membrane#0 flips=95/29265 verify=true
+[REMESH] step 4000 split=7 -> nv=9764 nf=19524 ne=29286 verify=true
+[COLLAPSE] step 4000 collapse=11 -> nv=9753 nf=19502 ne=29253 verify=true
+[DTS-PROBE] step 4000  x=1.1318  reaction=3.145e-11 N  drive=3.000e-11 N  bulgeR=1.2547
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=5322.3 cumMaxPerThread=1867
+[DTS-E] step 4500  WARNING 3205 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 4500  E bend=1.104e-16 area=9.074e-15 vol=1.392e-19 tot=9.185e-15 J   A=18.4953/18.0902  V=7.1803/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 4500 membrane#0 flips=74/29181 verify=true
+[DTS-PROBE] step 4500  x=1.1285  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2543
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=5324.6 cumMaxPerThread=1867
+[DTS-E] step 5000  E bend=1.766e-17 area=1.157e-17 vol=2.068e-19 tot=2.944e-17 J   A=18.0757/18.0902  V=7.1685/7.2343 um  |F|max=9.82e-11 N
+[FLIP] step 5000 membrane#0 flips=64/28974 verify=true
+[REMESH] step 5000 split=9 -> nv=9669 nf=19334 ne=29001 verify=true
+[COLLAPSE] step 5000 collapse=15 -> nv=9654 nf=19304 ne=28956 verify=true
+[DTS-PROBE] step 5000  x=1.1347  reaction=5.758e-11 N  drive=3.000e-11 N  bulgeR=1.2547
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=5322.2 cumMaxPerThread=1867
+[DTS-E] step 5500  E bend=2.302e-17 area=4.392e-19 vol=2.081e-19 tot=2.367e-17 J   A=18.0930/18.0902  V=7.1683/7.2343 um  |F|max=2.29e-11 N
+[FLIP] step 5500 membrane#0 flips=208/28992 verify=true
+[DTS-PROBE] step 5500  x=1.1337  reaction=6.296e-12 N  drive=3.000e-11 N  bulgeR=1.2592
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=5318.1 cumMaxPerThread=1867
+Sim. time=00.06....~39.48 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[DTS-E] step 6000  E bend=1.991e-17 area=1.117e-17 vol=2.329e-19 tot=3.132e-17 J   A=18.0759/18.0902  V=7.1645/7.2343 um  |F|max=4.26e-11 N
+[FLIP] step 6000 membrane#0 flips=74/28902 verify=true
+[REMESH] step 6000 split=3 -> nv=9639 nf=19274 ne=28911 verify=true
+[DTS-PROBE] step 6000  x=1.1407  reaction=6.390e-11 N  drive=3.000e-11 N  bulgeR=1.2585
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=5312.6 cumMaxPerThread=1867
+[DTS-E] step 6500  WARNING 211 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 6500  E bend=6.948e-17 area=4.426e-15 vol=5.014e-20 tot=4.495e-15 J   A=18.3731/18.0902  V=7.2019/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 6500 membrane#0 flips=97/28887 verify=true
+[DTS-PROBE] step 6500  x=1.1361  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2620
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=5314.1 cumMaxPerThread=1867
+[DTS-E] step 7000  E bend=1.932e-17 area=1.795e-17 vol=2.275e-19 tot=3.750e-17 J   A=18.0721/18.0902  V=7.1653/7.2343 um  |F|max=1.12e-10 N
+[FLIP] step 7000 membrane#0 flips=207/28899 verify=true
+[REMESH] step 7000 split=3 -> nv=9638 nf=19272 ne=28908 verify=true
+[COLLAPSE] step 7000 collapse=7 -> nv=9631 nf=19258 ne=28887 verify=true
+[DTS-PROBE] step 7000  x=1.1453  reaction=4.377e-11 N  drive=3.000e-11 N  bulgeR=1.2686
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=5309.5 cumMaxPerThread=1867
+[DTS-E] step 7500  E bend=1.953e-17 area=6.383e-19 vol=2.143e-19 tot=2.038e-17 J   A=18.0868/18.0902  V=7.1673/7.2343 um  |F|max=1.93e-11 N
+[FLIP] step 7500 membrane#0 flips=67/28953 verify=true
+[DTS-PROBE] step 7500  x=1.1415  reaction=7.895e-11 N  drive=3.000e-11 N  bulgeR=1.2621
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=5304.2 cumMaxPerThread=1867
+Sim. time=00.08....~33.11 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[DTS-E] step 8000  WARNING 1121 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 8000  E bend=9.155e-17 area=6.414e-15 vol=4.562e-20 tot=6.506e-15 J   A=18.4308/18.0902  V=7.2034/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 8000 membrane#0 flips=155/28890 verify=true
+[REMESH] step 8000 split=3 -> nv=9635 nf=19266 ne=28899 verify=true
+[COLLAPSE] step 8000 collapse=6 -> nv=9629 nf=19254 ne=28881 verify=true
+[DTS-PROBE] step 8000  x=1.1408  reaction=3.821e-11 N  drive=3.000e-11 N  bulgeR=1.2647
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=5299.1 cumMaxPerThread=1867
+[DTS-E] step 8500  E bend=1.799e-17 area=2.198e-17 vol=2.134e-19 tot=4.018e-17 J   A=18.0702/18.0902  V=7.1675/7.2343 um  |F|max=5.22e-11 N
+[FLIP] step 8500 membrane#0 flips=18/28833 verify=true
+[DTS-PROBE] step 8500  x=1.1398  reaction=5.888e-11 N  drive=3.000e-11 N  bulgeR=1.2583
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=5299.0 cumMaxPerThread=1867
+[DTS-E] step 9000  E bend=1.893e-17 area=2.552e-17 vol=2.648e-19 tot=4.471e-17 J   A=18.0687/18.0902  V=7.1599/7.2343 um  |F|max=6.65e-11 N
+[FLIP] step 9000 membrane#0 flips=57/28866 verify=true
+[REMESH] step 9000 split=7 -> nv=9631 nf=19258 ne=28887 verify=true
+[COLLAPSE] step 9000 collapse=8 -> nv=9623 nf=19242 ne=28863 verify=true
+[DTS-PROBE] step 9000  x=1.1452  reaction=1.150e-10 N  drive=3.000e-11 N  bulgeR=1.2636
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=5297.9 cumMaxPerThread=1867
+[DTS-E] step 9500  E bend=1.837e-17 area=5.699e-18 vol=2.273e-19 tot=2.429e-17 J   A=18.0800/18.0902  V=7.1653/7.2343 um  |F|max=7.65e-11 N
+[FLIP] step 9500 membrane#0 flips=43/28788 verify=true
+[DTS-PROBE] step 9500  x=1.1530  reaction=3.856e-11 N  drive=3.000e-11 N  bulgeR=1.2778
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=5291.5 cumMaxPerThread=1867
+Sim. time=00.10....~32.92 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 10000  E bend=1.791e-17 area=7.454e-19 vol=1.901e-19 tot=1.884e-17 J   A=18.0865/18.0902  V=7.1712/7.2343 um  |F|max=8.24e-12 N
+[FLIP] step 10000 membrane#0 flips=78/28767 verify=true
+[REMESH] step 10000 split=4 -> nv=9595 nf=19186 ne=28779 verify=true
+[COLLAPSE] step 10000 collapse=20 -> nv=9575 nf=19146 ne=28719 verify=true
+[DTS-PROBE] step 10000  x=1.1513  reaction=5.973e-11 N  drive=3.000e-11 N  bulgeR=1.2725
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=5289.5 cumMaxPerThread=1867
+[DTS-E] step 10500  E bend=2.118e-17 area=4.436e-20 vol=1.784e-19 tot=2.140e-17 J   A=18.0911/18.0902  V=7.1732/7.2343 um  |F|max=1.67e-11 N
+[FLIP] step 10500 membrane#0 flips=106/28728 verify=true
+[DTS-PROBE] step 10500  x=1.1514  reaction=4.100e-11 N  drive=3.000e-11 N  bulgeR=1.2712
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=5283.7 cumMaxPerThread=1867
+[DTS-E] step 11000  E bend=1.914e-17 area=6.174e-18 vol=2.414e-19 tot=2.556e-17 J   A=18.0796/18.0902  V=7.1632/7.2343 um  |F|max=3.52e-11 N
+[FLIP] step 11000 membrane#0 flips=77/28728 verify=true
+[REMESH] step 11000 split=7 -> nv=9585 nf=19166 ne=28749 verify=true
+[COLLAPSE] step 11000 collapse=17 -> nv=9568 nf=19132 ne=28698 verify=true
+[DTS-PROBE] step 11000  x=1.1597  reaction=5.549e-11 N  drive=3.000e-11 N  bulgeR=1.2805
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=5274.6 cumMaxPerThread=1867
+[DTS-E] step 11500  WARNING 2006 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 11500  E bend=9.506e-17 area=7.768e-15 vol=8.088e-20 tot=7.864e-15 J   A=18.4650/18.0902  V=7.1932/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 11500 membrane#0 flips=49/28719 verify=true
+[DTS-PROBE] step 11500  x=1.1497  reaction=2.035e-12 N  drive=3.000e-11 N  bulgeR=1.2752
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=5269.7 cumMaxPerThread=1867
+Sim. time=00.12....~36.68 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 12000  E bend=1.948e-17 area=1.810e-17 vol=2.176e-19 tot=3.780e-17 J   A=18.0721/18.0902  V=7.1668/7.2343 um  |F|max=5.52e-11 N
+[FLIP] step 12000 membrane#0 flips=142/28683 verify=true
+[REMESH] step 12000 split=2 -> nv=9565 nf=19126 ne=28689 verify=true
+[DTS-PROBE] step 12000  x=1.1451  reaction=4.188e-11 N  drive=3.000e-11 N  bulgeR=1.2678
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=5265.7 cumMaxPerThread=1867
+[DTS-E] step 12500  WARNING 1884 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 12500  E bend=1.003e-16 area=7.366e-15 vol=1.067e-19 tot=7.467e-15 J   A=18.4552/18.0902  V=7.1871/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 12500 membrane#0 flips=101/28677 verify=true
+[DTS-PROBE] step 12500  x=1.1441  reaction=5.673e-11 N  drive=3.000e-11 N  bulgeR=1.2711
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=5261.9 cumMaxPerThread=1867
+[DTS-E] step 13000  E bend=1.625e-17 area=2.759e-18 vol=9.936e-20 tot=1.911e-17 J   A=18.0972/18.0902  V=7.1887/7.2343 um  |F|max=4.77e-11 N
+[FLIP] step 13000 membrane#0 flips=65/28632 verify=true
+[REMESH] step 13000 split=3 -> nv=9549 nf=19094 ne=28641 verify=true
+[DTS-PROBE] step 13000  x=1.1601  reaction=9.141e-12 N  drive=3.000e-11 N  bulgeR=1.2827
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=5258.2 cumMaxPerThread=1867
+[DTS-E] step 13500  E bend=1.375e-17 area=5.078e-18 vol=8.651e-20 tot=1.891e-17 J   A=18.0997/18.0902  V=7.1918/7.2343 um  |F|max=4.13e-11 N
+[FLIP] step 13500 membrane#0 flips=114/28650 verify=true
+[DTS-PROBE] step 13500  x=1.1538  reaction=4.237e-11 N  drive=3.000e-11 N  bulgeR=1.2757
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+Node trans/rot diff =4.368E-14 / 1.310E1
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=5259.0 cumMaxPerThread=1867
+Sim. time=00.14....~35.12 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[DTS-E] step 14000  E bend=1.874e-17 area=2.400e-17 vol=2.550e-19 tot=4.299e-17 J   A=18.0693/18.0902  V=7.1613/7.2343 um  |F|max=1.44e-10 N
+[FLIP] step 14000 membrane#0 flips=51/28614 verify=true
+[REMESH] step 14000 split=4 -> nv=9544 nf=19084 ne=28626 verify=true
+[COLLAPSE] step 14000 collapse=6 -> nv=9538 nf=19072 ne=28608 verify=true
+[DTS-PROBE] step 14000  x=1.1521  reaction=1.112e-11 N  drive=3.000e-11 N  bulgeR=1.2737
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=5255.1 cumMaxPerThread=1867
+[DTS-E] step 14500  E bend=1.269e-17 area=1.348e-17 vol=1.428e-19 tot=2.631e-17 J   A=18.0745/18.0902  V=7.1796/7.2343 um  |F|max=9.51e-11 N
+[FLIP] step 14500 membrane#0 flips=84/28653 verify=true
+[DTS-PROBE] step 14500  x=1.1630  reaction=6.098e-11 N  drive=3.000e-11 N  bulgeR=1.2813
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=5252.6 cumMaxPerThread=1867
+[DTS-E] step 15000  WARNING 2035 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 15000  E bend=9.769e-17 area=7.619e-15 vol=1.321e-19 tot=7.717e-15 J   A=18.4614/18.0902  V=7.1817/7.2343 um  |F|max=1.00e-09 N
+[FLIP] step 15000 membrane#0 flips=45/28614 verify=true
+[REMESH] step 15000 split=1 -> nv=9541 nf=19078 ne=28617 verify=true
+[COLLAPSE] step 15000 collapse=2 -> nv=9539 nf=19074 ne=28611 verify=true
+[DTS-PROBE] step 15000  x=1.1621  reaction=0.000e+00 N  drive=3.000e-11 N  bulgeR=1.2880
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=15100) linkCtMeanSettled=0.00 (samples=7601) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=0 monomers=0 fActinUM=0.00 meanSegLenUM=0.000 freePoolUM=15.00
+[STATS] mem usedHeapMB=1677.0 maxHeapMB=6442.5
+[STATS] percolation filaments=0 activeLinks=0 linksPerFil=0.000 largestComp=0 (0.0% of fils) spanX=0.00 spanY=0.00 spanZ=0.00 spanFrac=0.00 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+ThingStep Threads took 46.954000 seconds.
+ThingBrownian Threads took 12.726000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 5.336000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 11.898000 seconds.
+Ck Mesh Threads took 53.715000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 4.158000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 0.000000 seconds.
+Finished closing JSON plots!

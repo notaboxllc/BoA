@@ -1,0 +1,52 @@
+<BOA> DTS membrane v2 -- TETHER PULL (WORKING): a SMALL bead (r=0.1) at ~150 pN draws a THIN finger (~1.3um long,
+<BOA> ~0.36um wide) from the sphere, fed by IN-PLANE FLOW -- area stays conserved (~18.1) while the sphere body
+<BOA> shrinks (back-hemi radius 1.20->1.18) donating area into the finger; split+collapse remesh the streaming
+<BOA> surface (verify=true throughout). A tether is a HIGH-tension object: r_t=sqrt(kappa/2 sigma),
+<BOA> f_t=2 pi sqrt(2 kappa sigma) -- tension makes the tube thin and couples the local pull to the whole reservoir.
+<BOA> RUN WITH (env): BOA_FLIP_N=10 BOA_REMESH_N=8 BOA_REMESH_LEN=1.5 BOA_COLLAPSE_N=8 BOA_COLLAPSE_LEN=0.6
+<BOA> Force regime: 60 pN punches through (steric gap), ~150 pN clean finger, 300 pN finger but fatter. Raise
+<BOA> dtsKappaArea to thin the finger. NUMERICS: keep dtsStericStiffness*deltaT/gamma_vertex < ~0.5 (a stiffer
+<BOA> steric on lighter vertices -- BOA_VERTEX_DRAG_SCALE<1 -- blows up; 1.5e-3 is stable at physical drag, dt=1e-5).
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:5;           // nu=5 -> 10242 vertices, l0~0.045 um (resolve a thin tube)
+dtsMembraneRadius:true:1.2;
+dtsVertexRadiusFrac:true:0.5;
+
+// --- membrane mechanics: vt=1.0, modest tension (swept), bending sets the tube radius ---
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.5;             // TENSION knob: raise to thin the finger (r_t ~ sqrt(kappa/2 sigma))
+dtsKappaVolume:true:5.0e-15;        // soft: the tether draws volume, sphere body relaxes
+dtsTargetReducedVol:true:1.0;       // NO deflation deficit (avoid the budding artifact)
+dtsMaxDispFrac:true:0.15;
+
+// --- small bead, modest force (near the tether threshold), stiff steric to stay coupled ---
+dtsProbeForce:true:1.5e-10;       // ~150 pN: clean thin finger (60 punches, 300 fatter)
+dtsProbeRadius:true:0.1;            // SMALL bead
+dtsProbeStartX:true:0.9;
+dtsStericStiffness:true:1.5e-3;     // stable at physical drag, dt=1e-5 (k*dt/gamma < ~0.5)
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.15;
+toFileInterval:true:150.0;
+remoteWriteInterval:true:2000.0;
+dtsBrownianOff:true:1.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+ratchetOn:false:0.0;

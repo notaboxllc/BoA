@@ -1,5 +1,34 @@
 # BoxOfActin Project Journal
 
+## 2026-06-22 — Membrane v2 DTS: a small bead DRAWS A THIN FINGER, fed by in-plane flow (tether harness)
+
+Resolved the "how do we get a finger instead of a bleb/stall" question. A thin finger is a membrane TETHER — a
+HIGH-tension object (r_t=√(κ/2σ), f_t=2π√(2κσ)): tension makes the tube thin AND couples the local pull to the whole
+reservoir. So the route is tension + fast remesh + force above the bud→tube barrier — NOT deflation slack (that
+budded, see below). Flow comes from the in-plane redistribution machinery (flips+split+collapse), not from area
+stretch or a volume deficit.
+
+- **Working recipe (ParameterFiles/dtsMembraneTether):** ν=5 (l0≈0.045, resolves the tube) · vt=1.0 · K_A=0.5
+  (tension) · small bead r=0.1 · force ~150 pN · stable steric 1.5e-3 · fast split+collapse (BOA_REMESH_N=8,
+  BOA_COLLAPSE_N=8, BOA_FLIP_N=10). Result: a **1.3 µm long, 0.36 µm wide finger**, bead capping the tip (gap 0.02).
+- **It's genuine in-plane flow:** area conserved (~18.1 throughout) while the sphere body shrinks (back-hemi radius
+  1.20→1.18) donating area into the finger; collapse fires 9–12/sweep, nv steady ~10500, verify=true throughout, no
+  NaN. Lipid streaming from reservoir to tip — the physically correct mechanism.
+- **Force regime (K_A=0.5, fixed):** 30 pN stalls (sub-threshold dimple); **60 pN PUNCHES THROUGH** (small-bead
+  steric gap — counter-intuitive: low force punches, see next bullet); 150 pN clean thin finger; 300 pN finger but
+  fatter (0.52 µm). Raising K_A thins the finger (next sweep).
+- **Why LOW force punches but HIGH force doesn't (hypothesis, to confirm):** the per-vertex steric only captures the
+  bead when penetration is deep enough that a full ring/cap of vertices engages and wraps it. At 60 pN the bead sits
+  shallow, brushing a sparse front patch; before a cap forms the bead nudges between vertices through a face-center
+  gap. At 150+ pN it penetrates deep, a robust cap engages and drags forward (split keeps the tip capped) → finger.
+  The real fix is the continuous-surface (triangle) collision (closestPtTri, no face-center gaps) — the actin path
+  already uses it via buildFaceGrid; routing the bead through it removes the punch/stall force-threading.
+- **NUMERICS lesson:** an explicit overdamped contact spring needs k_steric·dt/γ_vertex ≲ 0.5. A stiffer steric
+  (8e-3) on LIGHTER vertices (BOA_VERTEX_DRAG_SCALE=0.1 → γ cut 10×) hit ratio ~18 and blew the bead to NaN. 1.5e-3
+  at physical drag (dt=1e-5) is stable. Lighter drag ⇒ proportionally softer steric (or smaller dt).
+- Runs: RUN_LOGS/2026-06-22_tip/ (tether_ka*, tether_F*). OPEN: thin the finger (K_A↑); continuous-surface bead
+  collision for robustness; velocity-clamped pull + bigger box so the finger draws further without hitting the wall.
+
 ## 2026-06-22 — Membrane v2 DTS, STAGE 5 (done): edge COLLAPSE remesh + the deflation-budding diagnosis
 
 Completed the remesher: **edge collapse** (the inverse of split), and in stress-testing it on a force-driven bead
