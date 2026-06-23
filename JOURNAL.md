@@ -1,5 +1,28 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — Membrane v2 DTS: actin pushes via END-SPHERES; the REMESHER kills the 1/sinθ blow-up
+
+Reframed the outer shell as a compliant SIGNALING + STERIC surface (tracks growth, gates polymerization), NOT a hard
+force wall — which dissolves the free-bead punch-through grief (that was a high-force test driver, not the actin
+regime: actin pushes stall-capped ~5 pN AND is anchored). Then changed the actin→membrane push model and found the
+real stabilizer.
+
+- **Actin push = END-SPHERES (both ends of every segment).** `segmentVsMembrane` already distributes each capsule
+  sample's reaction to end1/end2 by its parameter t; forcing **K=2** samples exactly the two endpoints (t=0=pointed,
+  t=1=barbed), each pushed as a tiny sphere through the existing continuous-surface face logic (barycentric to 3
+  vertices, stall-capped, hard-recovery). A filament is a chain of short segments, so the per-segment endpoint
+  spheres tile the whole filament — tip pushes, pointed/free end also blocks, no dense body-spear. Default now;
+  BOA_ACTIN_CAPSULE restores dense whole-capsule sampling. Cheaper (2 vs ~10 samples/segment) and more physical.
+- **THE BLOW-UP IS GONE — and it's the remesher, not the push model.** Dendritic config (dtsMembraneDendriticNoSpin),
+  which used to die step 4500–7000 via the 1/sinθ bending instability, now runs clean to 12000 steps with flips+split
+  ON, for BOTH endpoint AND capsule push (control). |F|max ~1.3–2.2e-11, E_bend at baseline ~3e-18, no NaN. The
+  flip/split remesher keeps triangles non-degenerate → removes the 1/sinθ source regardless of how actin pushes. (The
+  memory note "dendritic blows up 4500–7000 on most seeds" predates the remesher.)
+- **Containment unchanged (both models):** maxActinR 1.178 < maxMembR 1.208, 0 endpoints outside; network grows
+  normally (~240 segments). So end-spheres match the capsule on containment + stability while being cheaper/physical.
+- NOTE: collapse stays guarded off when arp/formin active (per-vertex pools not remapped) — dendritic gets flips+split
+  only; that already suffices here. Seed-robustness (3/5/11) running. Runs: RUN_LOGS/2026-06-23_endsphere/.
+
 ## 2026-06-22 — Membrane v2 DTS: continuous-surface bead collision (infra + grid coarse-gate) — WIP finding
 
 Implemented a continuous-surface (point-vs-triangle) steric for a node vs the membrane, to kill the small-bead

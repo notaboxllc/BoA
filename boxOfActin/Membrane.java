@@ -1476,7 +1476,13 @@ public final class Membrane {
                              double rad, double gSeg, double[] reac1, double[] reac2) {
         double ex = p2x-p1x, ey = p2y-p1y, ez = p2z-p1z;
         double sLen = Math.sqrt(ex*ex + ey*ey + ez*ez);
-        int K = Math.max(2, (int)Math.ceil(sLen / (0.4*l0)) + 1);   // sample finer than the triangle size
+        // DEFAULT: collide only the two ENDPOINTS as tiny spheres (K=2 -> samples at t=0=end1 and t=1=end2, each
+        // pushed through the continuous-surface face logic below). A filament is a chain of short segments, so the
+        // per-segment endpoint spheres together tile the whole filament: the BARBED tip pushes the cortex, a POINTED
+        // (or free) end also blocks, and there is no dense body-spearing of the membrane -- which (with the
+        // flip/split/collapse remesher) removes the sharp-push-into-degenerate-triangle source of the 1/sinTheta
+        // bending blow-up. BOA_ACTIN_CAPSULE restores dense whole-capsule sampling (the old containment-wall behaviour).
+        int K = (System.getenv("BOA_ACTIN_CAPSULE") != null) ? Math.max(2, (int)Math.ceil(sLen / (0.4*l0)) + 1) : 2;
         double cdt = Env.collisionDeltaT.getValue();
         double contact = rad + vertexRadius;
         double maxLeak = -1e30;
