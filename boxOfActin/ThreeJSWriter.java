@@ -308,6 +308,23 @@ public class ThreeJSWriter {
             sb.append("]");
         }
 
+        // Sliding MCA linkers (bilayer vertex -> nearest cortex point), strided by dtsMcaLinkViz (0 = off).
+        // Flat [x1,y1,z1,x2,y2,z2,...] per emitted linker -> the viewer draws them as LineSegments.
+        int mcaStride = Env.dtsMcaLinkViz.getIntValue();
+        if (mcaStride > 0 && Membrane.mcaLinkCount > 0 && Membrane.mcaLinkBuf != null) {
+            sb.append(",\"mcaLinks\":[");
+            boolean mcaFirst = true;
+            for (int i = 0; i < Membrane.mcaLinkCount; i += mcaStride) {
+                int o = i * 6;
+                if (!mcaFirst) sb.append(",");
+                mcaFirst = false;
+                sb.append(String.format("%.5g,%.5g,%.5g,%.5g,%.5g,%.5g",
+                    Membrane.mcaLinkBuf[o], Membrane.mcaLinkBuf[o+1], Membrane.mcaLinkBuf[o+2],
+                    Membrane.mcaLinkBuf[o+3], Membrane.mcaLinkBuf[o+4], Membrane.mcaLinkBuf[o+5]));
+            }
+            sb.append("]");
+        }
+
         // Benchmark overlay: pinned endpoint anchors and force arrows (absent in non-benchmark frames).
         if (Env.benchmarkFilament) {
             sb.append(",\"pinnedEndpoints\":");

@@ -333,8 +333,14 @@ public final class Membrane {
      * TANGENTIAL force (the bilayer flows over the cortex) — the ERM/ezrin sliding-anchor. Two-sided, force-limited
      * (dtsMcaForceMax ~ few pN). Reaction distributed to the cortex face's 3 vertices by barycentric weights.
      */
+    // MCA linker geometry for the viewer: flat [bx,by,bz, cx,cy,cz] per active linker (bilayer vertex -> cortex
+    // point). Filled every step by applyMcaLinkers; ThreeJSWriter emits a strided subset when dtsMcaLinkViz>0.
+    public static double[] mcaLinkBuf = null;
+    public static int mcaLinkCount = 0;
+
     public static void applyMcaLinkers() {
         Membrane bilayer = bilayer(), cortex = cortex();
+        mcaLinkCount = 0;
         if (bilayer == null || cortex == null) return;
         cortex.buildFaceGrid();                       // narrow-phase grid for nearestFace (face normals are fresh from computeForces)
         double k = Env.dtsMcaStiffness.getValue();
@@ -343,6 +349,7 @@ public final class Membrane {
         if (h <= 0) h = Env.dtsMembraneRadius.getValue() - Env.dtsCortexRadius.getValue();
         double[] cp = new double[7];
         int linked = 0;
+        if (mcaLinkBuf == null || mcaLinkBuf.length < bilayer.nv * 6) mcaLinkBuf = new double[bilayer.nv * 6];
         for (int vi = 0; vi < bilayer.nv; vi++) {
             double px = bilayer.vx(vi), py = bilayer.vy(vi), pz = bilayer.vz(vi);
             int f = cortex.nearestFace(px, py, pz, cp);
@@ -360,6 +367,10 @@ public final class Membrane {
             cortex.vert[a].incForceSumSlot(mag*ux*wa, mag*uy*wa, mag*uz*wa); // equal-opposite on the cortex
             cortex.vert[b].incForceSumSlot(mag*ux*wb, mag*uy*wb, mag*uz*wb);
             cortex.vert[c].incForceSumSlot(mag*ux*wc, mag*uy*wc, mag*uz*wc);
+            int o = mcaLinkCount * 6;                  // record this linker (bilayer vertex -> cortex closest point)
+            mcaLinkBuf[o]=px; mcaLinkBuf[o+1]=py; mcaLinkBuf[o+2]=pz;
+            mcaLinkBuf[o+3]=cp[0]; mcaLinkBuf[o+4]=cp[1]; mcaLinkBuf[o+5]=cp[2];
+            mcaLinkCount++;
             linked++;
         }
         if (Env.counter % 500 == 0) {

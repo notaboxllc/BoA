@@ -697,6 +697,7 @@
   <div class="pLabel" style="margin-top:6px;color:#9cf;border-top:1px solid #444;padding-top:4px">DTS membrane shells</div>
   <div id="dtsShellControls"></div>
   <label><span class="pLabel">DTS Arp heatmap</span> <input id="chkDtsArp"     type="checkbox" checked></label>
+  <label><span class="pLabel">MCA linkers</span> <input id="chkMcaLinks" type="checkbox" checked> <input id="colMcaLinks" type="color" value="#ffe066" title="MCA linker color" style="width:22px;height:16px;padding:0;border:1px solid #555;background:none;vertical-align:middle;cursor:pointer"></label>
   <label><span class="pLabel">Legacy memb opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
 </div>
 
@@ -1043,6 +1044,25 @@ function buildDtsShellControls() {
   }));
 }
 buildDtsShellControls();
+
+// MCA linker lines (bilayer vertex -> nearest cortex point), from frame.mcaLinks (flat [x1,y1,z1,x2,y2,z2,...]).
+let showMcaLinks = true;
+const mcaLinkGeo = new THREE.BufferGeometry();
+let mcaLinkPos = new Float32Array(0);
+const mcaLinkMesh = new THREE.LineSegments(mcaLinkGeo,
+  new THREE.LineBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.7 }));
+mcaLinkMesh.frustumCulled = false; mcaLinkMesh.renderOrder = 4; mcaLinkMesh.visible = false;
+scene.add(mcaLinkMesh);
+function updateMcaLinks(arr) {
+  const has = showMcaLinks && Array.isArray(arr) && arr.length >= 6;
+  if (!has) { mcaLinkMesh.visible = false; return; }
+  const n = arr.length;                       // 6 values per linker (two endpoints)
+  if (mcaLinkPos.length < n) { mcaLinkPos = new Float32Array(n); mcaLinkGeo.setAttribute('position', new THREE.BufferAttribute(mcaLinkPos, 3)); }
+  for (let i = 0; i < n; i++) mcaLinkPos[i] = arr[i];
+  mcaLinkGeo.getAttribute('position').needsUpdate = true;
+  mcaLinkGeo.setDrawRange(0, n / 3);          // n/3 vertices = n/6 segments
+  mcaLinkMesh.visible = true;
+}
 
 const motorColors = {
   'NONE':  new THREE.Color(0x4444ff),
@@ -1521,6 +1541,7 @@ function applyFrameData(data) {
   updateMyosinData(data.myosins, data.minifilaments, data.nodes, data.crosslinks);
   updateMembraneSurface(data.nodes, data.membraneLinks);
   updateDtsMembranes(data.membranes);
+  updateMcaLinks(data.mcaLinks);
   updateAxisLines(data.segments);
   updateBarbedEnds(data.segments);
   updateBenchmarkScene(data);
@@ -2264,6 +2285,13 @@ document.getElementById('chkMembraneLinks').addEventListener('change', e => {
 document.getElementById('chkDtsArp').addEventListener('change', e => {
   showDtsArp = e.target.checked;
   if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
+});
+document.getElementById('chkMcaLinks').addEventListener('change', e => {
+  showMcaLinks = e.target.checked;
+  if (currentFrameData) updateMcaLinks(currentFrameData.mcaLinks);
+});
+document.getElementById('colMcaLinks').addEventListener('input', e => {
+  mcaLinkMesh.material.color.setHex(parseInt(e.target.value.slice(1), 16));
 });
 document.getElementById('sMembOpacity').addEventListener('input', e => {
   membraneOpacity = Number(e.target.value);

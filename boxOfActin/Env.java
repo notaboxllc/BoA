@@ -597,6 +597,9 @@ public class Env {
 	static final Parameter dtsCortexVolScale = new Parameter("dtsCortexVolScale"," DTS cortex volume-modulus scale", 1.0, "x bilayer")
 		.setMutableAtRuntime()
 		.setDescription("Cortex volume-constraint modulus K_V as a multiple of the bilayer dtsKappaVolume. Raise (with dtsCortexTargetRedVol<1) so the cortex actually contracts against its bending/area stiffness.");
+	static final Parameter dtsMcaLinkViz = new Parameter("dtsMcaLinkViz"," DTS MCA linker viz stride", 0, "", Parameter.INT)
+		.setMutableAtRuntime()
+		.setDescription("Emit the sliding MCA linkers (bilayer vertex -> nearest cortex point) into the frame JSON for the viewer, every Nth linker. 0 = off (no emission, keeps frame files small); 1 = all (~one per bilayer vertex); 2-8 = subsample for a lighter view. Each is a short line spanning the bilayer-cortex gap.");
 	static final Parameter dtsMaxDispFrac = new Parameter("dtsMaxDispFrac"," DTS vertex max per-step move (frac of vertex radius)", 0.0, "")
 		.setMutableAtRuntime()
 		.setDescription("0 = off. >0 caps a DTS membrane vertex's per-step translation to this * vertexRadius. Safety net for stiff area/volume constraints and large transients (e.g. a reduced-volume target mismatch) under explicit Euler -- the vertex moves slowly instead of taking one huge step and exploding. ~0.1-0.25 is reasonable.");
