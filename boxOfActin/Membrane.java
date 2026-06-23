@@ -1387,17 +1387,21 @@ public final class Membrane {
             // tilt + the mother-daughter linkage). The membrane-facing daughters then grow + ratchet + push.
             double bLoc = fs.length - Thing.currentScratch().rng.nextDouble() * Math.min(0.05, 0.6*fs.length);
             if (bLoc < 0.1*fs.length) bLoc = 0.1*fs.length;
-            // BIRTH-CLEARANCE GATE: refuse a branch whose SEED daughter would be born already loading the
-            // cortex. Such daughters (held at the ~70deg geometry, partway through the surface) drive a
-            // sustained steric push on the compliant membrane -> the formin-anchored pair rides the bulge
-            // outward (the directional drift). Require the seed barbed tip to start at least one steric
-            // contact distance INSIDE the surface, so the daughter loads the membrane only as it GROWS
-            // (the Mogilner-Oster ratchet then throttles it) -- a gentle, growth-driven push, not a static shove.
-            if (System.getenv("BOA_BRANCH_BIRTH_GATE") != null) {   // opt-in; over-prunes near-cortex branches (see journal)
-                double tipClear = FilSegment.radius + vertexRadius + 0.005;   // born this far inside, minimum
+            // BIRTH-CLEARANCE GATE: refuse a branch whose SEED daughter would be born already loading the surface
+            // it pushes. Such a daughter (held at the ~70deg geometry, partway through the surface) drives a sudden
+            // steric shove the instant it appears -> the Arp junction LEAPS the mother outward (the "jump on first
+            // branch"). Require the seed barbed tip to start at least one steric contact distance INSIDE the surface,
+            // so the daughter loads the membrane only as it GROWS (Mogilner-Oster ratchet-throttled) -- a gentle
+            // growth-driven push, not a static shove. Two-shell (Stage 2): gate against the BILAYER (the surface the
+            // daughter pushes), ON by default. Single-shell: opt-in (BOA_BRANCH_BIRTH_GATE) against this membrane.
+            { Membrane pushShell = bilayer();
+              boolean twoShell = (pushShell != null && pushShell != this);
+              if (twoShell || System.getenv("BOA_BRANCH_BIRTH_GATE") != null) {
+                Membrane gs = twoShell ? pushShell : this;
+                double tipClear = FilSegment.radius + gs.vertexRadius + 0.005;   // born this far inside, minimum
                 fs.prospectiveDaughterTipInto(bLoc, scratchTip);
-                if (signedDistanceToSurface(scratchTip.x, scratchTip.y, scratchTip.z) > -tipClear) { rejBorn++; continue; }
-            }
+                if (gs.signedDistanceToSurface(scratchTip.x, scratchTip.y, scratchTip.z) > -tipClear) { rejBorn++; continue; }
+              } }
             fs.makeArpBranch(bLoc);
             // TEST (BOA_BREAK_BOND_ON_BRANCH): sever the mother's formin-membrane bond the moment it branches.
             // The mother keeps its high-drag daughter, so it shouldn't diffuse far. If it STILL shows directed

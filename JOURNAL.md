@@ -37,7 +37,15 @@ free-ride (actin + membrane co-drifting outward, ~0.12 µm unbounded, single she
 - **DENDRITIC validated (ParameterFiles/dtsMembraneStage2Dendritic, MCA cap 2.5 pN, long run):** significant
   branching -- 387 filaments (near the 400 cap) -- STABLE (0 errors, both shells verify=true; the dendritic config
   that used to 1/sinθ-blow-up now runs clean two-shell), cortex bulk held (mean 1.100), gap opening at the bulge.
-- **OPEN:** the local cortex still distends ~0.045 at a protrusion base (further reducible via a lower MCA cap or
+- **BRANCH-BIRTH LEAP fixed.** A filament jumped position on its FIRST side branch: the daughter (branching near the
+  barbed end, which in Stage 2 sits at the bilayer) was born ALREADY loading the bilayer steric -> a sudden shove the
+  Arp junction leapt the mother outward with (the daughter also appeared "past the barbed end"). It was NOT a birth
+  gap (calculateProperties only resizes drag, not geometric length) -- it's the born-loading kick. Fix: the
+  birth-clearance gate (require the seed daughter tip born >=1 steric distance INSIDE the surface it pushes) is now
+  ON by default in two-shell mode and gates against the BILAYER (was opt-in + gated on the cortex). Daughters load
+  the bilayer only as they GROW (ratchet-throttled, gentle). Branches still form (80+ vs ~102 ungated), cortex bulk
+  steady (mean 1.100), no leap. Run: stage2dend_gate.
+- **OPEN:** the local cortex still distends ~0.04 at a protrusion base (further reducible via a lower MCA cap or
   rung-D breaking linkers -> true bleb); MCA cap is the main residual-superman knob.
 
 ## 2026-06-23 — Two-shell membrane STAGE 1: bilayer + cortex + sliding MCA linkers — STABLE
