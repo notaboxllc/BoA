@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Two-Shell Membrane Model — Design Sketch</title>
+<style>
+  @page { size: letter; margin: 18mm 16mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #1a1a1a; line-height: 1.5;
+         font-size: 10.5pt; max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 22pt; color: #14304a; margin: 0 0 2px; line-height: 1.15; }
+  h2 { font-size: 14pt; color: #14304a; border-bottom: 2px solid #cfe0ee; padding-bottom: 3px;
+       margin-top: 26px; }
+  h3 { font-size: 11.5pt; color: #2a5577; margin-top: 18px; margin-bottom: 4px; }
+  .sub { color: #5a6b78; font-size: 10pt; margin: 2px 0 0; }
+  .lead { background: #f3f8fc; border-left: 4px solid #3a78ad; padding: 10px 14px; margin: 16px 0;
+          border-radius: 0 4px 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.3pt; }
+  th, td { border: 1px solid #cdd8e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #e7f0f7; color: #14304a; }
+  tr:nth-child(even) td { background: #f7fafc; }
+  code { background: #eef2f5; padding: 1px 4px; border-radius: 3px; font-size: 9pt;
+         font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .diagram { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.6pt; line-height: 1.25;
+             background: #fbfcfd; border: 1px solid #dce5ec; border-radius: 5px; padding: 12px 14px;
+             white-space: pre; overflow-x: auto; color: #243744; }
+  .rec { background: #eef8f0; border-left: 4px solid #4a9a5e; padding: 8px 13px; margin: 10px 0;
+         border-radius: 0 4px 4px 0; }
+  .note { background: #fcf6ec; border-left: 4px solid #cc9a3a; padding: 8px 13px; margin: 10px 0;
+          border-radius: 0 4px 4px 0; font-size: 9.6pt; }
+  ul, ol { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  .refs { font-size: 8.8pt; color: #36474f; }
+  .refs li { margin: 4px 0; }
+  .tag { display: inline-block; background: #14304a; color: #fff; font-size: 7.5pt; padding: 1px 6px;
+         border-radius: 3px; vertical-align: middle; letter-spacing: .04em; }
+  .small { font-size: 9pt; color: #5a6b78; }
+  b.k { color: #14304a; }
+</style>
+</head>
+<body>
+
+<h1>A Two-Shell Membrane Model for BoxOfActin</h1>
+<p class="sub">Fluid lipid bilayer (outer) + actin cortex (inner) — design sketch, rooted in cell biology</p>
+<p class="sub">BoxOfActin DTS membrane v2 · 2026-06-23 · branch <code>membrane-render-and-dense-v5</code></p>
+
+<div class="lead">
+<b>One sentence.</b> Split the single DTS membrane into two coupled shells — a compliant <b>fluid bilayer</b>
+that actin <i>pushes</i> and signals through, and a stiffer <b>actin cortex</b> that actin <i>anchors</i> to and
+draws its reaction from — because the cell does exactly this, and because conflating the two is the direct cause
+of the non-physical "superman" free-ride we keep hitting.
+</div>
+
+<h2>1 · Why one shell fails — the mechanical argument</h2>
+
+<p>In the current single-shell model a formin-nucleated filament both <b>pushes</b> the membrane (steric, via its
+tip-spheres) <i>and</i> is <b>tethered</b> to that same membrane (the formin–membrane bond). The membrane is
+therefore the filament's <i>own</i> reaction anchor. In overdamped dynamics that is unstable in a specific way:</p>
+
+<ul>
+<li>Pushing alone would send the filament <i>inward</i> (equal-and-opposite recoil) — harmless.</li>
+<li>But the bond's rest target tracks the very vertex the filament pushes <i>out</i>, so the bond hauls the
+filament outward after it. With no <i>external</i> reaction, filament + membrane inflate together — measured at
+~0.12&nbsp;µm of co-drift over a 12k-step dendritic run (actin 95th-percentile radius and membrane radius rising
+in lockstep). This is the "superman" ride-out.</li>
+<li>Removing the coupling kinematically does not work: an instantly-tracking anchor rides out; a lagging anchor
+builds unrelieved bond strain and <b>blows up</b> (a vertex flung to r≈6.6&nbsp;µm in test). The two failure
+modes <i>bracket</i> the problem and show that the fix must be a <b>physical reaction surface with its own
+dynamics</b>, not an anchor trick.</li>
+</ul>
+
+<p>That surface, in a real cell, is not the lipid bilayer. It is the actin cortex.</p>
+
+<h2>2 · The biology: two distinct structures, two distinct jobs</h2>
+
+<p>The cell surface is a <b>composite</b>: a fluid lipid bilayer floating on, and tethered to, a thin
+load-bearing actin cortex <span class="small">[1,2,5]</span>. They have different compositions, thicknesses,
+stiffnesses, and dynamics — and they do different mechanical jobs. The single DTS shell has been trying to be both.</p>
+
+<table>
+<tr><th style="width:20%">Property</th><th style="width:33%">Lipid bilayer (plasma membrane)</th>
+    <th style="width:33%">Actin cortex</th><th>Maps to</th></tr>
+<tr><td><b>What it is</b></td>
+    <td>~4–5 nm fluid phospholipid bilayer + embedded/peripheral proteins</td>
+    <td>Cross-linked F-actin meshwork + myosin II, just under the membrane</td>
+    <td>—</td></tr>
+<tr><td><b>Thickness</b></td>
+    <td>~4–5 nm</td>
+    <td>~100–400 nm (measured 116–143 nm); mesh 50–200 nm <span class="small">[3,4]</span></td>
+    <td>shell separation</td></tr>
+<tr><td><b>In-plane mechanics</b></td>
+    <td>2D <b>fluid</b>: no shear resistance, lipids diffuse freely; total area nearly inextensible
+        (K<sub>A</sub> ≈ 0.2–0.3 N/m)</td>
+    <td>2D <b>solid/gel</b>: resists shear, cross-linked; remodels by turnover</td>
+    <td>outer = flips/remesh; inner = stiffer</td></tr>
+<tr><td><b>Bending / stiffness</b></td>
+    <td>Low bending rigidity κ ≈ 10–25 k<sub>B</sub>T (~0.4–1.0×10⁻¹⁹ J)</td>
+    <td>Much stiffer in bulk; bears the mechanical load and sets cell shape <span class="small">[5]</span></td>
+    <td>κ<sub>inner</sub> ≫ κ<sub>outer</sub></td></tr>
+<tr><td><b>Tension</b></td>
+    <td>Membrane tension ≈ 3×10⁻⁶ – 3×10⁻⁴ N/m; buffered by reservoirs (folds, caveolae)</td>
+    <td>Cortical tension ≈ ζΔμ·h/2 (myosin active stress × thickness); typically 10⁻⁴–10⁻³ N/m, often dominant
+        <span class="small">[3,6]</span></td>
+    <td>tension knobs per shell</td></tr>
+<tr><td><b>Dynamics</b></td>
+    <td>Fast lipid diffusion; passively follows; flows to relieve local tension</td>
+    <td>Turns over on ~seconds–minutes; actively contractile (myosin); generates pressure</td>
+    <td>outer fast, inner slow</td></tr>
+<tr><td><b>Mechanical role</b></td>
+    <td>Barrier; <b>signaling platform</b>; steric surface; deforms (blebs, ruffles)</td>
+    <td><b>Load-bearing</b>; reaction surface for polymerization; shape; contractility</td>
+    <td>see §3</td></tr>
+</table>
+
+<h2>3 · Functional assignment in the model</h2>
+
+<div class="diagram">    OUTSIDE
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   outer shell = LIPID BILAYER
+   |    |    |    |    |    |     fluid, compliant: flips + split/collapse
+   o    o    o    o    o    o     MCA linkers: ERM-like
+  ===========================     (sliding, force-limited, breakable)
+  /|\   /|\        \|/   /|\      inner shell = ACTIN CORTEX
+   |     |          |     |       stiff, slow-remodel = reaction surface
+   |     |          |     |
+   |   explicit formin / Arp2/3 filaments:
+   |     - ANCHOR to the cortex   (reaction, bond)
+   |     - PUSH the bilayer       (steric tip-spheres, no bond)
+    CYTOPLASM (interior)
+</div>
+
+<h3>Outer shell — the lipid bilayer</h3>
+<ul>
+<li><b>Compliant signaling &amp; steric surface.</b> This is the surface that locates/organizes signals and
+coarsely gauges response (bleb vs. protrusion) — the role you actually want from it.</li>
+<li><b>Fluid:</b> edge flips + split/collapse give in-plane redistribution (area streams; no shear stiffness).</li>
+<li><b>Pushed, never bonded.</b> Actin tip-spheres exert steric force on it (stall-capped); it deforms and tracks
+growth but is <i>not</i> an anchor — so it cannot drag actin.</li>
+<li>Already built: Jülicher bending, area/volume constraints, flips, split, collapse, end-sphere steric.</li>
+</ul>
+
+<h3>Inner shell — the actin cortex</h3>
+<ul>
+<li><b>The reaction surface.</b> Formin/Arp2/3 anchors bond <i>here</i>. Being stiff, it resists fast ride-out;
+having its own overdamped dynamics, it relieves strain by moving slowly (no blow-up) — the property the
+kinematic anchor lacked.</li>
+<li><b>Stiffer + slower:</b> higher κ and K<sub>A</sub>, heavier vertices (more drag), slower/less-frequent
+remesh; optionally myosin-like contractility later (cortical tension).</li>
+<li><b>Coarse-grained.</b> It stands in for the dense cross-linked meshwork (mesh 50–200 nm) — not every cortical
+filament, but the load-bearing continuum the active protrusive filaments push off of.</li>
+</ul>
+
+<div class="note"><b>Design decision A — what <i>is</i> the cortex, explicitly?</b> Two readings:
+(a) the inner shell is a coarse continuum cortex and the explicit dendritic filaments are <i>active protrusive</i>
+actin that anchors into it (recommended — clean separation of "bulk load-bearing" vs "active pushing"); or
+(b) the explicit filament network <i>is</i> the cortex and the inner shell is only the cell-body boundary they
+nucleate from. (a) matches the biology of a persistent cortex feeding transient protrusions and is the simpler
+mechanical story.</div>
+
+<h2>4 · Coupling the two shells — the membrane–cortex attachment (MCA)</h2>
+
+<p>This is the crux, and the biology is unusually specific and helpful. The bilayer is held to the cortex by
+discrete linker proteins — chiefly the <b>ERM family (ezrin, radixin, moesin)</b> and myosin-I — whose FERM
+domain binds membrane PI(4,5)P₂ and whose tail binds F-actin <span class="small">[1,2]</span>. Their measured
+behavior dictates the coupling model:</p>
+
+<ul>
+<li><b>Force-limited &amp; transient.</b> A single ezrin lasts ~0.1 s and bears ~0.5–4 pN; small assemblies sustain
+~4 pN for seconds–minutes <span class="small">[7]</span>. The link is a <i>population</i> of weak bonds, not a
+weld.</li>
+<li><b>Sliding anchor.</b> Linker complexes <i>slide along F-actin, relaxing force parallel to the surface to ~0</i>
+while still bearing perpendicular load <span class="small">[7]</span>. So the bilayer can <b>flow tangentially</b>
+over the cortex while staying attached normally — exactly the in-plane fluidity we want, with normal containment.</li>
+<li><b>Breakable → blebs.</b> When local load exceeds attachment (high cortical tension / myosin pressure), the
+membrane <b>detaches</b> and a bleb herniates out under cytoplasmic hydrostatic pressure
+<span class="small">[3,4,6]</span>. Detachment is not a bug — it is a modeled cellular event.</li>
+</ul>
+
+<p>That gives a natural spectrum of coupling models, from crude to faithful:</p>
+
+<table>
+<tr><th style="width:16%">Option</th><th style="width:30%">Mechanism</th><th style="width:27%">Biological basis</th>
+    <th>Behavior / cost</th></tr>
+<tr><td><b>A. Rigid co-move</b></td>
+    <td>Outer vertices slaved to nearest inner vertex (or shared)</td>
+    <td>None (limit of infinitely strong MCA)</td>
+    <td>Trivial; kills superman but also kills bleb/ruffle and bilayer fluidity. Baseline only.</td></tr>
+<tr><td><b>B. Normal confinement</b></td>
+    <td>Soft one-sided springs keeping the gap near a rest separation (cortex thickness); no tangential force</td>
+    <td>MCA holds the membrane ~tens of nm off the cortex</td>
+    <td>Bilayer free to flow in-plane; cortex sets the radius. Simple; no explicit linkers.</td></tr>
+<tr><td><b>C. Sliding linkers</b> <span class="tag">ERM</span></td>
+    <td>Discrete tethers, inner↔outer, that bear <b>normal</b> load but relax <b>tangential</b> force (re-select
+        the attachment point as the mesh flows)</td>
+    <td>Ezrin sliding-anchor <span class="small">[7]</span></td>
+    <td>Bilayer flows over a held cortex; normal coupling without tangential drag. Reuses our
+        <code>BOA_SLIDE_ANCHOR</code> + PAIRS drag-weighted bond.</td></tr>
+<tr><td><b>D. Breakable sliding linkers</b> <span class="tag">ERM + bleb</span></td>
+    <td>As C, plus a per-linker detachment force; broken patches lose normal coupling</td>
+    <td>MCA rupture under load → bleb nucleation <span class="small">[3,6]</span></td>
+    <td>Everything in C <i>plus</i> emergent blebbing where load &gt; attachment. The faithful model.</td></tr>
+<tr><td><b>E. + cytoplasmic pressure</b></td>
+    <td>D, plus an outward hydrostatic pressure term inside (volume/osmotic)</td>
+    <td>Myosin-driven cytoplasmic pressure inflates detached membrane</td>
+    <td>Lets a detached patch actually balloon into a bleb. Add only when blebs are the target.</td></tr>
+</table>
+
+<div class="rec"><b>Recommendation.</b> Build toward <b>C → D</b>: <b>sliding, force-limited linkers</b> as the
+MCA. C alone already (i) fixes superman (reaction goes to the stiff cortex, not the pushed bilayer), (ii) preserves
+bilayer in-plane fluidity (tangential force relaxes to ~0 — the sliding anchor), and (iii) keeps the bilayer near
+the cortex (normal load borne). Adding a detachment force (D) then yields <b>blebbing for free</b>, which is one of
+the emergent behaviors you named as a goal. Start at C; promote to D/E when blebs are wanted. Options A/B are useful
+sanity baselines on the way.</div>
+
+<h2>5 · Why this resolves "superman" by construction</h2>
+<ul>
+<li><b>Push and reaction live on different surfaces.</b> Actin's anchor (reaction) is on the stiff cortex; its
+push (deformation) is on the fluid bilayer, which it does not bond to. The feedback loop that inflated both
+together is severed.</li>
+<li><b>The cortex resists fast, yields slow.</b> As a physical overdamped shell it bears the anchor load on the
+step timescale (no ride-out) but can remodel under sustained force (no strain blow-up) — precisely the
+"stiff-but-yielding" reaction surface the bracketing experiments demanded.</li>
+<li><b>Tangential flow is allowed, normal containment kept.</b> The sliding linker relaxes in-plane force (so the
+bilayer flows and the anchor does not surf the mesh) while bearing normal load (so the bilayer stays on the
+cortex). This is also the cleaner cure for the older anchor-surfing/drift artifacts.</li>
+</ul>
+
+<h2>6 · Implementation sketch</h2>
+<p>Most pieces already exist; this is mostly wiring two instances together.</p>
+<ol>
+<li><b>Two <code>Membrane</code> instances</b> (the <code>theMembranes</code> list is already multi-instance):
+an outer bilayer (R≈1.2 µm, current parameters) and an inner cortex (R≈1.1 µm — the ~100 nm gap is the cortex
+thickness), with stiffer κ/K<sub>A</sub>, heavier vertex drag, and slower remesh cadence.</li>
+<li><b>Route the anchor:</b> formin/Arp2/3 bonds target the nearest <i>cortex</i> vertex, not the bilayer
+(one-line change in <code>collideActin</code>'s anchor selection).</li>
+<li><b>Route the push:</b> actin end-spheres steric-push the <i>bilayer</i> only (already the default surface);
+the cortex need not collide with actin, or collides weakly.</li>
+<li><b>MCA linkers (the new piece):</b> a set of inner↔outer tethers built from the existing PAIRS drag-weighted
+bond + sliding re-selection (<code>BOA_SLIDE_ANCHOR</code>), bearing normal load and relaxing tangential; later
+add a per-linker break force for blebs (option D).</li>
+<li><b>Reuse:</b> bilayer fluidity (flips/split/collapse) and end-sphere steric are done; the cortex uses the same
+DTS machinery with stiffer parameters and slower remeshing.</li>
+</ol>
+
+<table>
+<tr><th>Quantity</th><th>Biological value</th><th>Model handle (proposed)</th></tr>
+<tr><td>Shell separation (cortex thickness)</td><td>~100–150 nm</td><td>R<sub>outer</sub> − R<sub>inner</sub> ≈ 0.1 µm</td></tr>
+<tr><td>Bilayer bending κ</td><td>10–25 k<sub>B</sub>T</td><td><code>dtsKappaBend</code> ≈ 1e-19 J (current)</td></tr>
+<tr><td>Cortex stiffness</td><td>≫ bilayer (load-bearing)</td><td>higher κ/K<sub>A</sub>, ↑ vertex drag, slow remesh</td></tr>
+<tr><td>MCA linker force</td><td>~4 pN per ERM complex; population</td><td>PAIRS bond cap per linker (≈ few pN)</td></tr>
+<tr><td>MCA tangential</td><td>relaxes to ~0 (sliding)</td><td>sliding re-selection (<code>BOA_SLIDE_ANCHOR</code>)</td></tr>
+<tr><td>Bleb threshold</td><td>MCA rupture under cortical tension</td><td>per-linker break force (option D)</td></tr>
+</table>
+
+<h2>7 · Open decisions before building</h2>
+<ul>
+<li><b>Cortex identity</b> (Design Decision A above): coarse continuum cortex + active filaments (recommended), or
+filament-network-as-cortex.</li>
+<li><b>Coupling rung:</b> start at C (sliding linkers) — agreed? Or first stand up A/B as a scaffold to verify the
+two-shell plumbing before adding linker physics.</li>
+<li><b>Does actin also sterically clear the cortex,</b> or only anchor to it and push the bilayer? (Biology: actin
+<i>is</i> the cortex region, so likely anchor-only, no self-steric.)</li>
+<li><b>Cortex remodeling:</b> does the inner shell turn over / flow (cortex treadmills on ~min), or is it quasi-static
+for now? Quasi-static is fine for a first cut.</li>
+<li><b>Cytoplasmic pressure</b> (option E): defer until blebbing is the explicit target.</li>
+</ul>
+
+<h2>References</h2>
+<ol class="refs">
+<li>Membrane–cortex attachment overview — ERM/myosin-I linkage of plasma membrane to cortical actin.
+<a href="https://www.sciencedirect.com/science/article/abs/pii/S0955067423000224">Exploring membrane mechanics: the role of membrane-cortex attachment in cell dynamics</a> (Curr. Opin. Cell Biol., 2023).</li>
+<li>Ezrin as a major regulator of membrane tension via the actin-to-membrane link.
+<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4592969/">Ezrin is a Major Regulator of Membrane Tension in Epithelial Cells</a> (Sci. Rep., 2015).</li>
+<li>Cortical tension and bleb growth (tension = ζΔμ·h/2; pressure-driven herniation).
+<a href="https://www.pnas.org/doi/full/10.1073/pnas.0903353106">Role of cortical tension in bleb growth</a> (PNAS, 2009).</li>
+<li>Cortex thickness/mesh and bleb cortex architecture.
+<a href="https://www.biorxiv.org/content/10.1101/2024.03.30.587413.full.pdf">Cryo-ET of the actin cortex in cellular blebs</a> (bioRxiv, 2024).</li>
+<li>Actin cortex architecture sets cell surface tension.
+<a href="https://www.nature.com/articles/ncb3525">Actin cortex architecture regulates cell surface tension</a> (Nat. Cell Biol., 2017).</li>
+<li>Direct measurement of cortical tension during bleb growth.
+<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4213671/">Direct Measurement of the Cortical Tension during the Growth of Membrane Blebs</a> (Biophys. J., 2014).</li>
+<li>Ezrin sliding anchor — bears perpendicular load, relaxes parallel force to ~0, lifetimes/forces.
+<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC9355349/">The membrane–actin linker ezrin acts as a sliding anchor</a> (Sci. Adv., 2022).</li>
+<li>Membrane–cortex linkers and membrane-tube extrusion mechanics.
+<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC7896025/">Influence of membrane-cortex linkers on the extrusion of membrane tubes</a> (Biophys. J., 2021).</li>
+</ol>
+
+<p class="small" style="margin-top:18px; border-top:1px solid #dce5ec; padding-top:8px;">
+BoxOfActin · two-shell DTS membrane design sketch · prepared for review before implementation. Companion to
+<code>MEMBRANE_DTS_DESIGN.md</code> and the 2026-06-22/23 JOURNAL entries (end-sphere actin push, remesher,
+superman diagnosis).</p>
+
+</body>
+</html>
