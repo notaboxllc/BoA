@@ -322,3 +322,81 @@ Sim. time=00.10....~32.40 minutes computation to simulate 1 sec, run finished in
 [FLIP] step 10500 membrane#0 flips=0/7695 verify=true
 [FLIP] step 10500 membrane#1 flips=0/7680 verify=true
 [DTS-ACTIN] step 10500  filaments contacting membrane = 16 / 36
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=2799.1 cumMaxPerThread=935
+[DTS-E] step 11000  E bend=2.562e-18 area=8.671e-21 vol=6.692e-20 tot=2.638e-18 J   A=18.0754/18.0739  V=7.2142/7.2226 um  |F|max=1.48e-12 N
+[DTS-E] step 11000  E bend=5.117e-17 area=5.167e-21 vol=9.114e-20 tot=5.127e-17 J   A=15.1875/15.1871  V=5.5557/5.5632 um  |F|max=1.55e-11 N
+[DTS-FORMIN] step 11000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 11000 linked=2568/2568  gap=0.100  bilayerMaxR=1.269 cortexMaxR=1.167
+[FLIP] step 11000 membrane#0 flips=0/7698 verify=true
+[FLIP] step 11000 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 11000  filaments contacting membrane = 16 / 36
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=2800.8 cumMaxPerThread=936
+[DTS-E] step 11500  E bend=2.563e-18 area=8.763e-21 vol=7.065e-20 tot=2.643e-18 J   A=18.0754/18.0739  V=7.2140/7.2226 um  |F|max=1.49e-12 N
+[DTS-E] step 11500  E bend=5.118e-17 area=2.641e-21 vol=9.771e-20 tot=5.128e-17 J   A=15.1874/15.1871  V=5.5555/5.5632 um  |F|max=1.57e-11 N
+[DTS-FORMIN] step 11500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 11500 linked=2568/2568  gap=0.100  bilayerMaxR=1.271 cortexMaxR=1.169
+[FLIP] step 11500 membrane#0 flips=1/7698 verify=true
+[FLIP] step 11500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 11500  filaments contacting membrane = 16 / 36
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=2802.4 cumMaxPerThread=936
+Sim. time=00.12....~33.04 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+[DTS-E] step 12000  E bend=2.563e-18 area=9.075e-21 vol=7.433e-20 tot=2.647e-18 J   A=18.0754/18.0739  V=7.2138/7.2226 um  |F|max=1.43e-12 N
+[DTS-E] step 12000  E bend=5.119e-17 area=2.144e-21 vol=1.034e-19 tot=5.129e-17 J   A=15.1873/15.1871  V=5.5552/5.5632 um  |F|max=1.60e-11 N
+[DTS-FORMIN] step 12000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 12000 linked=2569/2569  gap=0.100  bilayerMaxR=1.272 cortexMaxR=1.170
+[FLIP] step 12000 membrane#0 flips=0/7701 verify=true
+[FLIP] step 12000 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 12000  filaments contacting membrane = 17 / 36
+[RATCHET] poly vs gap g to membrane (delta=monomer, f=1.50e-12 N). meanFactor=closure output; relRate=realized:
+  g<0 (overlap)  samples=1446      events=50       meanFactor=0.374  relRate=0.387
+  0.0-0.2d       samples=12        events=1        meanFactor=0.417  relRate=0.933
+  0.2-0.4d       samples=9         events=1        meanFactor=0.503  relRate=1.244
+  0.4-0.6d       samples=15        events=2        meanFactor=0.609  relRate=1.493
+  0.6-0.8d       samples=10        events=0        meanFactor=0.719  relRate=0.000
+  0.8-1.0d       samples=12        events=1        meanFactor=0.889  relRate=0.933
+  1-2d           samples=61        events=7        meanFactor=1.000  relRate=1.285
+  g>=2d (free)   samples=907       events=81       meanFactor=1.000  relRate=1.000
+  TOTAL eligible tip-fires=2472  poly events=143  (boundary g<delta share=60.8%)
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=12101) linkCtMeanSettled=0.00 (samples=6102) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=36 monomers=458 fActinUM=0.00 meanSegLenUM=0.037 freePoolUM=8.00
+[STATS] mem usedHeapMB=1760.9 maxHeapMB=5368.7
+[STATS] percolation filaments=36 activeLinks=0 linksPerFil=0.000 largestComp=1 (2.8% of fils) spanX=0.00 spanY=0.00 spanZ=0.00 spanFrac=0.00 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+ThingStep Threads took 44.139000 seconds.
+ThingBrownian Threads took 5.483000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 4.505000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 13.925000 seconds.
+Ck Mesh Threads took 18.741000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 6.224000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 5.712000 seconds.
+Finished closing JSON plots!

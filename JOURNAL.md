@@ -26,9 +26,19 @@ free-ride (actin + membrane co-drifting outward, ~0.12 µm unbounded, single she
   stays fixed-topology (the cortex), only the bilayer remeshes.
 - **Validated (ParameterFiles/dtsMembraneStage2, formin-only, arp/branch off):** 0 errors, both shells verify=true,
   cortex mean R steady at 1.100, bounded protrusion. Runs: RUN_LOGS/2026-06-23_stage2/.
-- **OPEN:** re-enable Arp branching on the cortex (branch gating currently keys on cortex proximity, but Stage-2
-  barbed tips grow toward the BILAYER -> revisit the branch zone); tune MCA cap if a more bleb-like (cortex-flat)
-  protrusion is wanted; the local cortex tracking the protrusion base is physical but its degree is MCA-tunable.
+- **RESIDUAL SUPERMAN diagnosed + mitigated.** Both shells still distended slightly wherever actin pushed. Cause:
+  the MCA rigidly held the gap (measured 0.100 EVERYWHERE, even at the bulge) and its force cap (6 pN) EXCEEDED the
+  actin push cap (5 pN), so the linkers out-pulled the push and dragged the cortex out under every protrusion. Fix:
+  drop dtsMcaForceMax BELOW the push (2.5 pN) -> at a protrusion the linkers max out and the bilayer SEPARATES from
+  the cortex (gap opens to ~0.126 vs 0.100 resting), the cortex distends less, mean stays 1.100.
+- **Branch gate fixed for two shells.** branchStep keyed on cortex proximity, but Stage-2 barbed tips grow toward
+  the BILAYER. Now the proximity gate uses bilayer().signedDistanceToSurface (leading edge) while the Arp rate is
+  still sampled from the cortex base below the tip; branchStep builds the bilayer grid for the gate.
+- **DENDRITIC validated (ParameterFiles/dtsMembraneStage2Dendritic, MCA cap 2.5 pN, long run):** significant
+  branching -- 387 filaments (near the 400 cap) -- STABLE (0 errors, both shells verify=true; the dendritic config
+  that used to 1/sinθ-blow-up now runs clean two-shell), cortex bulk held (mean 1.100), gap opening at the bulge.
+- **OPEN:** the local cortex still distends ~0.045 at a protrusion base (further reducible via a lower MCA cap or
+  rung-D breaking linkers -> true bleb); MCA cap is the main residual-superman knob.
 
 ## 2026-06-23 — Two-shell membrane STAGE 1: bilayer + cortex + sliding MCA linkers — STABLE
 

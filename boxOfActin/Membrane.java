@@ -1348,7 +1348,9 @@ public final class Membrane {
     }
 
     void branchStep() {
-        buildFaceGrid();
+        buildFaceGrid();                                   // cortex grid (this) -> Arp field lookup
+        Membrane gateBi = bilayer();
+        if (gateBi != null && gateBi != this) gateBi.buildFaceGrid();   // bilayer grid -> leading-edge proximity gate
         double rate = Env.dtsBranchRate.getValue();
         double consume = Env.dtsArpConsumePerBranch.getValue();
         double ang = Math.toRadians(Env.dtsBranchAngle.getValue());
@@ -1365,10 +1367,16 @@ public final class Membrane {
             if (fs == null || fs.removeMe) continue;
             cand++;
             double e2x=fs.getEnd2X(), e2y=fs.getEnd2Y(), e2z=fs.getEnd2Z();   // barbed tip
-            int f = nearestFace(e2x,e2y,e2z, scratchCp);
+            int f = nearestFace(e2x,e2y,e2z, scratchCp);                      // nearest CORTEX face (for the Arp field)
             if (f < 0) continue;
-            double signed = (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
-            if (signed < -band || signed > band) continue;                   // tip not near the cortex
+            // PROXIMITY GATE: branch where the barbed tip is near the surface it PUSHES. Two-shell (Stage 2): the
+            // tips grow toward the BILAYER (the leading edge), so gate on bilayer proximity; the Arp rate is still
+            // sampled from the cortex base below the tip. Single-shell: gate on this (the sole) membrane.
+            Membrane gateShell = bilayer();
+            double signed = (gateShell != null && gateShell != this)
+                ? gateShell.signedDistanceToSurface(e2x,e2y,e2z)
+                : (e2x-scratchCp[0])*fNx[f] + (e2y-scratchCp[1])*fNy[f] + (e2z-scratchCp[2])*fNz[f];
+            if (signed < -band || signed > band) continue;                   // tip not near the leading-edge surface
             nearCortex++;
             int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
             double arp = (arpLocal[a]+arpLocal[b]+arpLocal[c]) / 3.0;
