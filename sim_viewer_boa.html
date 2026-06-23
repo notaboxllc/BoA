@@ -694,10 +694,10 @@
   <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
   <label><span class="pLabel">Membrane links</span>  <input id="chkMembraneLinks" type="checkbox"></label>
-  <label><span class="pLabel">DTS surface</span>     <input id="chkDtsSurface" type="checkbox" checked></label>
-  <label><span class="pLabel">DTS wireframe</span>   <input id="chkDtsWire"    type="checkbox"></label>
+  <div class="pLabel" style="margin-top:6px;color:#9cf;border-top:1px solid #444;padding-top:4px">DTS membrane shells</div>
+  <div id="dtsShellControls"></div>
   <label><span class="pLabel">DTS Arp heatmap</span> <input id="chkDtsArp"     type="checkbox" checked></label>
-  <label><span class="pLabel">Membrane opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
+  <label><span class="pLabel">Legacy memb opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
 </div>
 
 <button id="renderToggle">Render ▶</button>
@@ -919,14 +919,16 @@ scene.add(membraneLinkMesh);
 // uploads it into a BufferGeometry — no normal-inference / disc-flattening heuristics
 // (those are the legacy StickyNode membrane above). A solid translucent Mesh plus a
 // wireframe Mesh share one geometry; the two checkboxes toggle their visibility.
-// For now a single membrane object is rendered (theMembranes[0]); multi-instance is a
-// straightforward extension (one geometry per object).
-let showDtsSurface = true, showDtsWire = false, showDtsArp = true;
-const dtsGeo = new THREE.BufferGeometry();
-let dtsPosArr = null, dtsColArr = null, dtsVertCap = 0;
-const dtsSurfaceMesh = new THREE.Mesh(dtsGeo,
-  new THREE.MeshPhongMaterial({ color: 0x55bbdd, transparent: true, opacity: membraneOpacity,
-    side: THREE.DoubleSide, depthWrite: false, flatShading: false, vertexColors: false }));
+// MULTI-SHELL render: one geometry + surface mesh + wireframe mesh per membrane in the frame's
+// "membranes" array (index 0 = outer lipid bilayer, 1 = inner actin cortex). Each shell has its own
+// color, opacity, and surface/wireframe toggles, all editable in the Display panel (#dtsShellControls).
+let showDtsArp = true;
+const dtsShellCfg = [   // defaults; index = shell. Bilayer = translucent cyan surface; cortex = orange wireframe.
+  { name:'Bilayer (outer)', color:0x55bbdd, surface:true,  wire:false, opacity:0.35 },
+  { name:'Cortex (inner)',  color:0xff8844, surface:false, wire:true,  opacity:0.45 },
+];
+const dtsShells = [];   // per-shell { geo, surf, wire, posArr, colArr, vertCap }
+
 // Map an Arp concentration in [0,1] to a blue->cyan->green->yellow->red heat color (r,g,b in 0..1).
 function arpHeat(t) {
   t = Math.max(0, Math.min(1, t));
@@ -935,71 +937,108 @@ function arpHeat(t) {
   const a = stops[i], b = stops[i+1];
   return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
 }
-dtsSurfaceMesh.frustumCulled = false;
-dtsSurfaceMesh.renderOrder = 2;
-dtsSurfaceMesh.visible = false;
-scene.add(dtsSurfaceMesh);
-const dtsWireMesh = new THREE.Mesh(dtsGeo,
-  new THREE.MeshBasicMaterial({ color: 0x113344, wireframe: true, transparent: true, opacity: 0.5 }));
-dtsWireMesh.frustumCulled = false;
-dtsWireMesh.renderOrder = 3;
-dtsWireMesh.visible = false;
-scene.add(dtsWireMesh);
 
-// Build/update the DTS surface geometry from the frame's "membranes" array.
-function updateDtsMembranes(membranes) {
-  const hasData = Array.isArray(membranes) && membranes.length > 0
-                  && membranes[0].vertices && membranes[0].vertices.length > 0;
-  if (!hasData) { dtsSurfaceMesh.visible = false; dtsWireMesh.visible = false; return; }
-  const mem = membranes[0];                       // single-membrane render (Stage 1)
-  const verts = mem.vertices, faces = mem.faces;  // faces is a FLAT index array [a,b,c,...]
-  const nv = verts.length;
-
-  if (dtsVertCap < nv) {                           // (re)allocate position buffer if needed
-    dtsVertCap = nv;
-    dtsPosArr = new Float32Array(nv * 3);
-    dtsColArr = new Float32Array(nv * 3);
-    dtsGeo.setAttribute('position', new THREE.BufferAttribute(dtsPosArr, 3));
-    dtsGeo.setAttribute('color', new THREE.BufferAttribute(dtsColArr, 3));
-  }
-  for (let i = 0; i < nv; i++) {
-    const v = verts[i];
-    dtsPosArr[3 * i] = v[0]; dtsPosArr[3 * i + 1] = v[1]; dtsPosArr[3 * i + 2] = v[2];
-  }
-  dtsGeo.getAttribute('position').needsUpdate = true;
-
-  // Arp2/3 heat-map: color each vertex by its activated-Arp concentration (sent as mem.arp).
-  const arp = mem.arp;
-  const heatOn = showDtsArp && Array.isArray(arp) && arp.length === nv;
-  if (heatOn) {
-    let amax = 1e-6; for (let i = 0; i < nv; i++) if (arp[i] > amax) amax = arp[i];
-    for (let i = 0; i < nv; i++) {
-      const col = arpHeat(arp[i] / amax);
-      dtsColArr[3*i] = col[0]; dtsColArr[3*i+1] = col[1]; dtsColArr[3*i+2] = col[2];
-    }
-    dtsGeo.getAttribute('color').needsUpdate = true;
-  }
-  if (dtsSurfaceMesh.material.vertexColors !== heatOn) {
-    dtsSurfaceMesh.material.vertexColors = heatOn;
-    // semi-transparent so interior actin (formin mothers) shows through, but opaque enough to read the field
-    dtsSurfaceMesh.material.opacity   = heatOn ? 0.55 : membraneOpacity;
-    dtsSurfaceMesh.material.transparent = true;
-    dtsSurfaceMesh.material.depthWrite  = false;
-    dtsSurfaceMesh.material.needsUpdate = true;
-  }
-
-  // Index (topology) only changes on a rebuild; upload when absent or size-changed.
-  const idx = dtsGeo.getIndex();
-  if (!idx || idx.count !== faces.length) {
-    dtsGeo.setIndex(new THREE.BufferAttribute(new Uint32Array(faces), 1));
-  }
-  dtsGeo.setDrawRange(0, faces.length);
-  dtsGeo.computeVertexNormals();
-  dtsGeo.computeBoundingSphere();
-
-  dtsSurfaceMesh.visible = showDtsSurface;
-  dtsWireMesh.visible = showDtsWire;
+function makeDtsShell(idx) {
+  const cfg = dtsShellCfg[idx] || dtsShellCfg[dtsShellCfg.length - 1];
+  const geo = new THREE.BufferGeometry();
+  const surf = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: cfg.color, transparent: true,
+    opacity: cfg.opacity, side: THREE.DoubleSide, depthWrite: false, flatShading: false, vertexColors: false }));
+  surf.frustumCulled = false; surf.renderOrder = 2; surf.visible = false; scene.add(surf);
+  const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: cfg.color, wireframe: true,
+    transparent: true, opacity: Math.min(1, cfg.opacity + 0.25), depthWrite: false }));
+  wire.frustumCulled = false; wire.renderOrder = 3; wire.visible = false; scene.add(wire);
+  const s = { geo, surf, wire, posArr: null, colArr: null, vertCap: 0 };
+  dtsShells[idx] = s;
+  return s;
 }
+
+// Build/update one geometry per membrane in the frame's "membranes" array.
+function updateDtsMembranes(membranes) {
+  const n = Array.isArray(membranes) ? membranes.length : 0;
+  for (let si = 0; si < Math.max(n, dtsShells.length); si++) {
+    const mem = (si < n) ? membranes[si] : null;
+    const has = mem && mem.vertices && mem.vertices.length > 0;
+    if (!has) { if (dtsShells[si]) { dtsShells[si].surf.visible = false; dtsShells[si].wire.visible = false; } continue; }
+    const s = dtsShells[si] || makeDtsShell(si);
+    const cfg = dtsShellCfg[si] || dtsShellCfg[dtsShellCfg.length - 1];
+    const verts = mem.vertices, faces = mem.faces, nv = verts.length;
+
+    if (s.vertCap < nv) {
+      s.vertCap = nv;
+      s.posArr = new Float32Array(nv * 3);
+      s.colArr = new Float32Array(nv * 3);
+      s.geo.setAttribute('position', new THREE.BufferAttribute(s.posArr, 3));
+      s.geo.setAttribute('color', new THREE.BufferAttribute(s.colArr, 3));
+    }
+    for (let i = 0; i < nv; i++) {
+      const v = verts[i];
+      s.posArr[3*i] = v[0]; s.posArr[3*i+1] = v[1]; s.posArr[3*i+2] = v[2];
+    }
+    s.geo.getAttribute('position').needsUpdate = true;
+
+    // Arp2/3 heat-map: color this shell's vertices by activated-Arp concentration (if it carries the field).
+    const arp = mem.arp;
+    const heatOn = showDtsArp && Array.isArray(arp) && arp.length === nv;
+    if (heatOn) {
+      let amax = 1e-6; for (let i = 0; i < nv; i++) if (arp[i] > amax) amax = arp[i];
+      for (let i = 0; i < nv; i++) {
+        const c = arpHeat(arp[i] / amax);
+        s.colArr[3*i] = c[0]; s.colArr[3*i+1] = c[1]; s.colArr[3*i+2] = c[2];
+      }
+      s.geo.getAttribute('color').needsUpdate = true;
+    }
+    if (s.surf.material.vertexColors !== heatOn) { s.surf.material.vertexColors = heatOn; s.surf.material.needsUpdate = true; }
+    s.surf.material.opacity = heatOn ? Math.max(cfg.opacity, 0.55) : cfg.opacity;
+
+    const idx = s.geo.getIndex();
+    if (!idx || idx.count !== faces.length) s.geo.setIndex(new THREE.BufferAttribute(new Uint32Array(faces), 1));
+    s.geo.setDrawRange(0, faces.length);
+    s.geo.computeVertexNormals();
+    s.geo.computeBoundingSphere();
+
+    s.surf.visible = cfg.surface;
+    s.wire.visible = cfg.wire;
+  }
+}
+
+// Build the per-shell Display-panel controls (color / surface / wireframe / opacity) from dtsShellCfg.
+function buildDtsShellControls() {
+  const host = document.getElementById('dtsShellControls');
+  if (!host) return;
+  host.innerHTML = '';
+  dtsShellCfg.forEach((cfg, si) => {
+    const colHex = '#' + cfg.color.toString(16).padStart(6, '0');
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:3px 0;border-bottom:1px solid #333';
+    row.innerHTML =
+      `<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#ccc">`
+      + `<input type="color" value="${colHex}" data-shell="${si}" class="dtsCol" title="${cfg.name} color" style="width:22px;height:16px;padding:0;border:1px solid #555;background:none;cursor:pointer">`
+      + `<b style="flex:1">${cfg.name}</b>`
+      + `<label style="cursor:pointer"><input type="checkbox" class="dtsSurf" data-shell="${si}" ${cfg.surface?'checked':''}> surf</label>`
+      + `<label style="cursor:pointer"><input type="checkbox" class="dtsWire" data-shell="${si}" ${cfg.wire?'checked':''}> wire</label>`
+      + `</div>`
+      + `<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#999;margin-top:2px"><span style="width:48px">opacity</span>`
+      + `<input type="range" class="dtsOpac" data-shell="${si}" min="0.05" max="1" step="0.05" value="${cfg.opacity}" style="flex:1">`
+      + `<span class="dtsOpacVal" style="width:30px;text-align:right">${cfg.opacity.toFixed(2)}</span></label>`;
+    host.appendChild(row);
+  });
+  host.querySelectorAll('.dtsCol').forEach(el => el.addEventListener('input', e => {
+    const si = +e.target.dataset.shell; dtsShellCfg[si].color = parseInt(e.target.value.slice(1), 16);
+    if (dtsShells[si]) { dtsShells[si].surf.material.color.setHex(dtsShellCfg[si].color); dtsShells[si].wire.material.color.setHex(dtsShellCfg[si].color); }
+  }));
+  host.querySelectorAll('.dtsSurf').forEach(el => el.addEventListener('change', e => {
+    const si = +e.target.dataset.shell; dtsShellCfg[si].surface = e.target.checked; if (dtsShells[si]) dtsShells[si].surf.visible = e.target.checked;
+  }));
+  host.querySelectorAll('.dtsWire').forEach(el => el.addEventListener('change', e => {
+    const si = +e.target.dataset.shell; dtsShellCfg[si].wire = e.target.checked; if (dtsShells[si]) dtsShells[si].wire.visible = e.target.checked;
+  }));
+  host.querySelectorAll('.dtsOpac').forEach(el => el.addEventListener('input', e => {
+    const si = +e.target.dataset.shell; const v = parseFloat(e.target.value); dtsShellCfg[si].opacity = v;
+    e.target.parentElement.querySelector('.dtsOpacVal').textContent = v.toFixed(2);
+    if (dtsShells[si]) { dtsShells[si].surf.material.opacity = v; dtsShells[si].wire.material.opacity = Math.min(1, v + 0.25); }
+  }));
+}
+buildDtsShellControls();
 
 const motorColors = {
   'NONE':  new THREE.Color(0x4444ff),
@@ -2218,22 +2257,13 @@ document.getElementById('chkMembraneLinks').addEventListener('change', e => {
   showMembraneLinks = e.target.checked;
   membraneLinkMesh.visible = showMembraneLinks;
 });
-document.getElementById('chkDtsSurface').addEventListener('change', e => {
-  showDtsSurface = e.target.checked;
-  if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
-});
-document.getElementById('chkDtsWire').addEventListener('change', e => {
-  showDtsWire = e.target.checked;
-  if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
-});
 document.getElementById('chkDtsArp').addEventListener('change', e => {
   showDtsArp = e.target.checked;
   if (currentFrameData) updateDtsMembranes(currentFrameData.membranes);
 });
 document.getElementById('sMembOpacity').addEventListener('input', e => {
   membraneOpacity = Number(e.target.value);
-  membraneMesh.material.opacity = membraneOpacity;
-  dtsSurfaceMesh.material.opacity = membraneOpacity;
+  membraneMesh.material.opacity = membraneOpacity;   // legacy StickyNode membrane (DTS shells use per-shell opacity)
   document.getElementById('vMembOpacity').textContent = membraneOpacity.toFixed(2);
 });
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {
