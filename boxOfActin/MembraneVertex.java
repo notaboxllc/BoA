@@ -45,7 +45,11 @@ public final class MembraneVertex extends ProteinNode {
         double eta = Env.aeta.getValue();               // BoA effective viscosity (Pa.s)
         // TEST (BOA_VERTEX_DRAG_SCALE): make the membrane physically LIGHT so it FOLLOWS the actin (moves freely
         // out of the way) rather than hard-containing it. Default 1.0 = physical drag (the DTS-fix value).
-        double scale = 1.0; { String s = System.getenv("BOA_VERTEX_DRAG_SCALE"); if (s != null) scale = Double.parseDouble(s); }
+        // Per-shell drag multiplier: bilayer owner.dragScale=1, inner cortex >1 (heavier = slower = stiff on the
+        // fast timescale, remodels slowly). owner is null during the super() ctor call -> defaults to 1.0; the
+        // two-shell builder re-runs calculateProperties on the cortex once owner/dragScale are set.
+        double scale = (owner != null) ? owner.dragScale : 1.0;
+        { String s = System.getenv("BOA_VERTEX_DRAG_SCALE"); if (s != null) scale *= Double.parseDouble(s); }
         bTransGam.x = scale * 6 * Math.PI * eta * radiusM;
         bTransGam.y = bTransGam.x;
         bTransGam.z = bTransGam.x;

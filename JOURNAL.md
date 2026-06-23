@@ -1,5 +1,32 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — Two-shell membrane STAGE 1: bilayer + cortex + sliding MCA linkers — STABLE
+
+First cut of the two-shell model (design: TWO_SHELL_MEMBRANE_DESIGN.pdf): outer fluid LIPID BILAYER + inner stiff
+ACTIN CORTEX, coupled by sliding membrane-cortex-attachment (MCA) linkers (coupling rung C). No actin yet — this
+isolates the new coupling physics and answers "is it stable". It is.
+
+- **Per-instance mechanics:** Membrane now carries its own kappaBend/kappaArea/kappaVolume/targetRedVol/dragScale/
+  isCortex (force code uses the fields, not Env globals). The bilayer refreshes them from the runtime-mutable Env
+  each step; the cortex keeps its (stiffer) overrides. MembraneVertex drag reads owner.dragScale (cortex heavier).
+- **Two-shell build** (dtsCortexOn): bilayer = index 0 (R=1.2, current params); cortex = index 1 (R=1.1, kappa x20,
+  K_A x10, drag x5). Helpers Membrane.bilayer()/cortex().
+- **Sliding MCA linkers** (Membrane.applyMcaLinkers, rung C): each bilayer vertex is held at the rest gap off the
+  NEAREST point on the cortex surface (reuse nearestFace grid + closestPtTri). Nearest point re-selected each step
+  => bears NORMAL load, ~no tangential force (the ERM/ezrin sliding anchor); two-sided, force-limited
+  (dtsMcaForceMax ~6 pN). Reaction barycentric to the cortex face. k*dt/gamma ~0.12 -> stable.
+- **STABLE (ParameterFiles/dtsMembraneTwoShell):** REST 10000 steps — both shells sit at IC (bilayer E_bend
+  2.51e-18=8πκ, cortex 5.03e-17=8π·20κ), all 2562 linkers holding, gap pinned 0.100, |F|max ~1e-15. LOAD (push the
+  bilayer pole 80 pN) 10000 steps — bilayer bulges to 1.31, the MCA transmits to the cortex (tracks to 1.21), gap
+  held at 0.10, both verify=true (bilayer flips=28 [fluid], cortex flips=0 [stiff]), no blow-up. Runs:
+  RUN_LOGS/2026-06-23_twoshell/.
+- **Finding (resolves design §7):** a probe pushed into the membrane STALLS at the cortex (node-node mesh collision
+  blocks it) — confirming actin/probe must NOT sterically clear the cortex; they should anchor to it and push the
+  bilayer (the load test above pushes the bilayer directly via the cortex-gated push-patch to avoid this).
+- **STAGE 2 (next):** route actin — formin/Arp2/3 anchor bonds to the CORTEX (reaction), end-spheres push the
+  BILAYER, no actin↔cortex steric — and check the superman ride-out is gone. May need MCA stiffness/cap tuning (the
+  cortex currently co-moves with a bilayer bulge; softer/more force-limited linkers give more bleb-like independence).
+
 ## 2026-06-23 — Membrane v2 DTS: actin pushes via END-SPHERES; the REMESHER kills the 1/sinθ blow-up
 
 Reframed the outer shell as a compliant SIGNALING + STERIC surface (tracks growth, gates polymerization), NOT a hard

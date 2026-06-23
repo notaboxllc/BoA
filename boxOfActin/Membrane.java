@@ -63,7 +63,15 @@ public final class Membrane {
     public double l0;              // mean initial edge length (microns)
     public double area0;           // initial total surface area (um^2)
     public double vol0;            // initial enclosed volume (um^3)
+    // Per-instance mechanics (init from Env defaults; the inner cortex shell overrides them to be stiffer).
+    // The force code uses THESE fields, not Env globals, so the two shells can differ. Mutable Env params
+    // (dtsKappaArea etc.) are re-read each step in computeForces for the BILAYER; the cortex keeps its overrides.
     public double kappaBend = Env.dtsKappaBend.getValue();   // bending rigidity (J)
+    public double kappaArea = Env.dtsKappaArea.getValue();   // area-stretch modulus K_A (N/m)
+    public double kappaVolume = Env.dtsKappaVolume.getValue(); // volume modulus K_V (J)
+    public double targetRedVol = Env.dtsTargetReducedVol.getValue(); // target reduced volume vt
+    public double dragScale = 1.0;                            // per-vertex Stokes-drag multiplier (cortex > 1)
+    public boolean isCortex = false;                          // true = inner actin-cortex shell
     public double spontCurv = 0.0;                            // spontaneous curvature C̄ (0 = symmetric bilayer)
 
     // ---- Stage-2 force scratch (allocated once; all SI: positions in metres) ----
@@ -288,7 +296,75 @@ public final class Membrane {
     public static void buildIcosphereMembrane() {
         int nu = Env.dtsMembraneSubdiv.getIntValue();
         double r = Env.dtsMembraneRadius.getValue();
-        new Membrane(nu, r, new Pt3D(0, 0, 0));
+        new Membrane(nu, r, new Pt3D(0, 0, 0));                 // index 0 = outer LIPID BILAYER (fluid)
+        if (Env.dtsCortexOn.getValue() != 0) {
+            double rc = Env.dtsCortexRadius.getValue();
+            Membrane cortex = new Membrane(nu, rc, new Pt3D(0, 0, 0));   // index 1 = inner ACTIN CORTEX (stiff)
+            cortex.isCortex = true;
+            cortex.kappaBend *= Env.dtsCortexKappaScale.getValue();
+            cortex.kappaArea  = Env.dtsKappaArea.getValue() * Env.dtsCortexAreaScale.getValue();
+            cortex.dragScale  = Env.dtsCortexDragScale.getValue();
+            // calculateProperties ran with owner==null (drag scale 1) during construction; re-run now that
+            // dragScale is set so the cortex vertices get their heavier (slower) Stokes drag.
+            for (int i = 0; i < cortex.nv; i++) cortex.vert[i].calculateProperties();
+            Thing.talkln(String.format(
+                "[DTS] two-shell: bilayer R=%.3f + cortex R=%.3f  (cortex kappa x%.0f, K_A=%.3g, drag x%.1f)",
+                r, rc, Env.dtsCortexKappaScale.getValue(), cortex.kappaArea, cortex.dragScale));
+        }
+    }
+
+    /** The outer fluid bilayer (the non-cortex shell), or the sole shell in single-shell mode. */
+    public static Membrane bilayer() {
+        for (Membrane m : theMembranes) if (!m.isCortex) return m;
+        return theMembranes.isEmpty() ? null : theMembranes.get(0);
+    }
+    /** The inner actin-cortex shell, or null if single-shell. */
+    public static Membrane cortex() {
+        for (Membrane m : theMembranes) if (m.isCortex) return m;
+        return null;
+    }
+
+    /**
+     * Sliding membrane–cortex-attachment (MCA) linkers — coupling rung C (TWO_SHELL_MEMBRANE_DESIGN §4).
+     * Holds each BILAYER vertex at a rest gap off the NEAREST point on the CORTEX surface: the nearest surface
+     * point is re-selected every step, so the linker bears NORMAL load (maintains the gap) but exerts ~no
+     * TANGENTIAL force (the bilayer flows over the cortex) — the ERM/ezrin sliding-anchor. Two-sided, force-limited
+     * (dtsMcaForceMax ~ few pN). Reaction distributed to the cortex face's 3 vertices by barycentric weights.
+     */
+    public static void applyMcaLinkers() {
+        Membrane bilayer = bilayer(), cortex = cortex();
+        if (bilayer == null || cortex == null) return;
+        cortex.buildFaceGrid();                       // narrow-phase grid for nearestFace (face normals are fresh from computeForces)
+        double k = Env.dtsMcaStiffness.getValue();
+        double fmax = Env.dtsMcaForceMax.getValue();
+        double h = Env.dtsMcaRestGap.getValue();
+        if (h <= 0) h = Env.dtsMembraneRadius.getValue() - Env.dtsCortexRadius.getValue();
+        double[] cp = new double[7];
+        int linked = 0;
+        for (int vi = 0; vi < bilayer.nv; vi++) {
+            double px = bilayer.vx(vi), py = bilayer.vy(vi), pz = bilayer.vz(vi);
+            int f = cortex.nearestFace(px, py, pz, cp);
+            if (f < 0) continue;
+            double dx = px-cp[0], dy = py-cp[1], dz = pz-cp[2];
+            double d = Math.sqrt(dx*dx+dy*dy+dz*dz);
+            if (d < 1e-9) continue;
+            double ux = dx/d, uy = dy/d, uz = dz/d;   // cortex surface -> bilayer vertex (~ outward normal)
+            double mag = k * (d - h) * 1.0e-6;         // two-sided: d>h pulls in, d<h pushes out (N)
+            if (mag >  fmax) mag =  fmax;
+            if (mag < -fmax) mag = -fmax;
+            bilayer.vert[vi].incForceSumSlot(-mag*ux, -mag*uy, -mag*uz);   // bilayer pulled toward the gap
+            int a = cortex.faceVert[3*f], b = cortex.faceVert[3*f+1], c = cortex.faceVert[3*f+2];
+            double wa = cp[3], wb = cp[4], wc = cp[5];
+            cortex.vert[a].incForceSumSlot(mag*ux*wa, mag*uy*wa, mag*uz*wa); // equal-opposite on the cortex
+            cortex.vert[b].incForceSumSlot(mag*ux*wb, mag*uy*wb, mag*uz*wb);
+            cortex.vert[c].incForceSumSlot(mag*ux*wc, mag*uy*wc, mag*uz*wc);
+            linked++;
+        }
+        if (Env.counter % 500 == 0) {
+            double rb = bilayer.maxRadiusAlongX(), rcx = cortex.maxRadiusAlongX();
+            Thing.talkln(String.format("[MCA] step %d linked=%d/%d  gap=%.3f  bilayerMaxR=%.3f cortexMaxR=%.3f",
+                Env.counter, linked, bilayer.nv, h, rb, rcx));
+        }
     }
 
     // ================================================================================
@@ -433,7 +509,7 @@ public final class Membrane {
         final double MIN_ANG = Math.toRadians(12.0);
         if (triMinAngle(a,c,d) < MIN_ANG || triMinAngle(b,c,d) < MIN_ANG) return false;
         if (findEdge(a,c)<0||findEdge(c,b)<0||findEdge(b,d)<0||findEdge(d,a)<0) return false;
-        double kappa=Env.dtsKappaBend.getValue(), C0=spontCurv;
+        double kappa=this.kappaBend, C0=spontCurv;   // per-instance (refreshed in computeForces each step)
         double E0 = localBendEnergy(a,b,c,d,kappa,C0);
         doFlipSurgery(e);
         double E1 = localBendEnergy(a,b,c,d,kappa,C0);
@@ -681,11 +757,12 @@ public final class Membrane {
         for (int m = 0; m < theMembranes.size(); m++) {
             Membrane mem = theMembranes.get(m);
             mem.computeForces();
-            if (Env.dtsPushForce.getValue() != 0) mem.applyPushPatch();
+            if (Env.dtsPushForce.getValue() != 0 && !mem.isCortex) mem.applyPushPatch();   // push the BILAYER only
             if (System.getenv("BOA_TIPVEL") != null) mem.applyTipForce();
             if (mem.arpLocal != null) mem.diffuseArp();    // surface chemistry (reaction-diffusion)
             if (mem.forminLocal != null) mem.forminStep(); // formin nucleation of mother filaments
         }
+        applyMcaLinkers();   // two-shell coupling: sliding membrane-cortex linkers (no-op if single shell)
         // Bilayer fluidity: periodic edge-flip sweep (design doc §4). Env-gated (BOA_FLIP_N = steps per sweep).
         { int flipN = 0; String s=System.getenv("BOA_FLIP_N"); if(s!=null) flipN=Integer.parseInt(s);
           if (flipN>0 && Env.counter % flipN == 0) {
@@ -1635,9 +1712,19 @@ public final class Membrane {
      * scratch arrays and {@link #areaTot}/{@link #volTot}. Positions are pulled in metres.
      * Returns total energy (J). Shared by {@link #totalEnergy} and {@link #computeForces}.
      */
+    /** Bilayer tracks runtime-mutable Env stiffness each step; the cortex keeps its (stiffer) overrides. */
+    private void refreshMechFromEnvIfBilayer() {
+        if (isCortex) return;
+        kappaBend   = Env.dtsKappaBend.getValue();
+        kappaArea   = Env.dtsKappaArea.getValue();
+        kappaVolume = Env.dtsKappaVolume.getValue();
+        targetRedVol= Env.dtsTargetReducedVol.getValue();
+    }
+
     private double computeGeometryAndEnergy() {
         ensureScratch();
-        double kappa = Env.dtsKappaBend.getValue();
+        refreshMechFromEnvIfBilayer();
+        double kappa = kappaBend;
         double C0 = spontCurv;
 
         for (int i = 0; i < nv; i++) {
@@ -1710,9 +1797,9 @@ public final class Membrane {
         }
 
         // Area + volume constraint energies.
-        double KA = Env.dtsKappaArea.getValue();
-        double KV = Env.dtsKappaVolume.getValue();
-        double vt = Env.dtsTargetReducedVol.getValue();
+        double KA = kappaArea;
+        double KV = kappaVolume;
+        double vt = targetRedVol;
         double A0 = area0 * 1.0e-12;     // um^2 -> m^2
         double V0 = vol0  * 1.0e-18;     // um^3 -> m^3
         energyArea = (KA > 0) ? 0.5 * KA * (areaTot - A0) * (areaTot - A0) / A0 : 0.0;
@@ -1727,10 +1814,11 @@ public final class Membrane {
 
     /** Compute Stage-2 forces and add them to each vertex's soaForceSum (Newtons). */
     public void computeForces() {
-        double kappa = Env.dtsKappaBend.getValue();
-        double KA = Env.dtsKappaArea.getValue();
-        double KV = Env.dtsKappaVolume.getValue();
-        double vt = Env.dtsTargetReducedVol.getValue();
+        refreshMechFromEnvIfBilayer();
+        double kappa = kappaBend;
+        double KA = kappaArea;
+        double KV = kappaVolume;
+        double vt = targetRedVol;
         if (kappa <= 0 && KA <= 0 && KV <= 0) return;
 
         // computeForces OWNS the DTS vertex force: zero each vertex's soaForceSum, then write only the

@@ -569,6 +569,28 @@ public class Env {
 	static final Parameter dtsStericStiffness = new Parameter("dtsStericStiffness"," DTS probe/bouncer steric spring stiffness", 8.0e-4, "N/m per face")
 		.setMutableAtRuntime()
 		.setDescription("Stiffness of the soft penetration spring between a probe/bouncer node and each contacting membrane face. Soft enough that the node DWELLS in contact and transmits a sustained push (so the membrane bulges) rather than being ejected in one step. Too stiff (> ~gamma/dt summed over contacts) -> bouncy rigid wall, no bulge; too soft -> the node sinks through. ~8e-4 works for vertexRadius~0.05 um at dt=1e-5.");
+
+	// ---- Two-shell membrane: a stiffer inner ACTIN CORTEX (continuum) under the fluid outer LIPID BILAYER,
+	//      coupled by sliding membrane-cortex-attachment (MCA) linkers. See TWO_SHELL_MEMBRANE_DESIGN.pdf. ----
+	static final Parameter dtsCortexOn = new Parameter("dtsCortexOn"," DTS build inner actin-cortex shell", 0.0, "bool")
+		.setDescription("Build a second, INNER DTS shell standing in for the cross-linked actin cortex (a stiff continuum), under the outer lipid bilayer, coupled by sliding MCA linkers. Actin anchors to the cortex (reaction); actin pushes the bilayer (steric). 0=single shell (legacy). Off by default.");
+	static final Parameter dtsCortexRadius = new Parameter("dtsCortexRadius"," DTS inner cortex shell radius", 1.1, "microns")
+		.setDescription("Initial radius of the inner cortex shell. The gap to the bilayer (dtsMembraneRadius - this) is the cortex thickness (~0.1 um ~ 100 nm in cells); also the MCA rest separation if dtsMcaRestGap<=0.");
+	static final Parameter dtsCortexKappaScale = new Parameter("dtsCortexKappaScale"," DTS cortex bending-rigidity scale", 20.0, "x bilayer")
+		.setDescription("Cortex bending rigidity as a multiple of the bilayer kappa (dtsKappaBend). The cortex is the stiff load-bearing reaction surface, so >1 (default 20x).");
+	static final Parameter dtsCortexAreaScale = new Parameter("dtsCortexAreaScale"," DTS cortex area-modulus scale", 10.0, "x bilayer")
+		.setDescription("Cortex area-stretch modulus K_A as a multiple of the bilayer dtsKappaArea. Stiffer cortex resists shape change (>1, default 10x).");
+	static final Parameter dtsCortexDragScale = new Parameter("dtsCortexDragScale"," DTS cortex vertex drag scale", 5.0, "x bilayer")
+		.setDescription("Per-vertex Stokes drag of the cortex as a multiple of the bilayer vertex drag. Heavier (slower) cortex = stiff on the fast timescale, remodels slowly: bears the actin anchor without riding out, relieves strain without blowing up. >1 (default 5x).");
+	static final Parameter dtsMcaStiffness = new Parameter("dtsMcaStiffness"," DTS membrane-cortex linker stiffness", 5.0e-4, "N/m per linker")
+		.setMutableAtRuntime()
+		.setDescription("Sliding MCA linker spring stiffness (per bilayer vertex). Two-sided spring that holds each bilayer vertex at the rest gap off the NEAREST cortex surface point (re-selected each step => slides tangentially, no in-plane drag; bears normal load only). Force-limited by dtsMcaForceMax. ERM/ezrin-like.");
+	static final Parameter dtsMcaRestGap = new Parameter("dtsMcaRestGap"," DTS MCA linker rest separation", 0.0, "microns")
+		.setMutableAtRuntime()
+		.setDescription("Rest separation the MCA linkers hold the bilayer off the cortex surface (the cortex thickness). <=0 => use (dtsMembraneRadius - dtsCortexRadius).");
+	static final Parameter dtsMcaForceMax = new Parameter("dtsMcaForceMax"," DTS MCA linker force ceiling", 6.0e-12, "Newtons")
+		.setMutableAtRuntime()
+		.setDescription("Per-linker force cap (~few pN, ERM-complex scale). The linker bears up to this normal load; beyond it the bilayer can pull away (a proto-bleb under option C; an explicit detachment/break would be option D).");
 	static final Parameter dtsMaxDispFrac = new Parameter("dtsMaxDispFrac"," DTS vertex max per-step move (frac of vertex radius)", 0.0, "")
 		.setMutableAtRuntime()
 		.setDescription("0 = off. >0 caps a DTS membrane vertex's per-step translation to this * vertexRadius. Safety net for stiff area/volume constraints and large transients (e.g. a reduced-volume target mismatch) under explicit Euler -- the vertex moves slowly instead of taking one huge step and exploding. ~0.1-0.25 is reasonable.");

@@ -1,0 +1,59 @@
+<BOA> DTS membrane v2 -- TWO-SHELL stability test (coupling rung C). Outer fluid LIPID BILAYER (R=1.2) +
+<BOA> inner stiff ACTIN CORTEX (R=1.1), coupled by SLIDING MCA linkers (hold each bilayer vertex at the rest gap
+<BOA> off the nearest cortex surface point -> bears normal load, slides tangentially). No actin yet: this isolates
+<BOA> the new two-shell + linker physics and asks only "is it stable". See TWO_SHELL_MEMBRANE_DESIGN.pdf.
+<BOA> Probe optional (dtsProbeForce) to push the bilayer and watch the cortex hold + MCA transmit.
+
+buildDtsMembrane:true:1.0;
+dtsMembraneSubdiv:true:4;
+dtsMembraneRadius:true:1.2;         // outer bilayer
+dtsVertexRadiusFrac:true:0.5;
+
+// --- bilayer (outer) mechanics: compliant fluid ---
+dtsKappaBend:true:1.0e-19;
+dtsKappaArea:true:0.1;
+dtsKappaVolume:true:5.0e-15;
+dtsTargetReducedVol:true:1.0;
+dtsMaxDispFrac:true:0.15;
+
+// --- inner ACTIN CORTEX shell (stiff continuum) ---
+dtsCortexOn:true:1.0;
+dtsCortexRadius:true:1.1;           // gap to bilayer = 0.1 um ~ cortex thickness
+dtsCortexKappaScale:true:20.0;      // 20x stiffer bending
+dtsCortexAreaScale:true:10.0;       // 10x stiffer area -> K_A = 1.0
+dtsCortexDragScale:true:5.0;        // heavier/slower cortex (stiff fast, remodels slow)
+
+// --- sliding membrane-cortex-attachment (MCA) linkers (rung C) ---
+dtsMcaStiffness:true:5.0e-4;        // per-linker spring (k*dt/gamma ~ 0.12 -> stable)
+dtsMcaRestGap:true:0.0;             // 0 -> use (bilayerR - cortexR) = 0.1
+dtsMcaForceMax:true:6.0e-12;        // ~6 pN per ERM-complex-scale linker
+
+// --- optional probe to perturb the bilayer (0 = pure rest test) ---
+dtsProbeForce:true:0.0;
+dtsProbeRadius:true:0.15;
+dtsProbeStartX:true:0.6;
+
+deltaT:true:1.0E-5;
+collisionDeltaT:true:1.0E-5;
+brownianDeltaT:true:1.0E-5;
+biochemDeltaT:true:0.001;
+runTime:true:0.1;
+toFileInterval:true:150.0;
+remoteWriteInterval:true:2000.0;
+dtsBrownianOff:true:1.0;
+
+boxXDim:true:5.0;
+boxYDim:true:5.0;
+boxZDim:true:5.0;
+aeta:true:0.1;
+
+simOutsideBug:false:0.0;
+initialFilaments:false:0.0;
+initialMyoMiniFils:false:0.0;
+equilNodes:false:0.0;
+fillNodeCt:true:0;
+buildBranchedFils:false:0.0;
+buildMembraneSheet:false:0.0;
+buildMembraneSphere:false:0.0;
+forminConc:true:0.0;
+ratchetOn:false:0.0;
