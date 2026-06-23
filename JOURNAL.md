@@ -21,7 +21,8 @@ real stabilizer.
 - **Containment unchanged (both models):** maxActinR 1.178 < maxMembR 1.208, 0 endpoints outside; network grows
   normally (~240 segments). So end-spheres match the capsule on containment + stability while being cheaper/physical.
 - NOTE: collapse stays guarded off when arp/formin active (per-vertex pools not remapped) — dendritic gets flips+split
-  only; that already suffices here. Seed-robustness (3/5/11) running. Runs: RUN_LOGS/2026-06-23_endsphere/.
+  only; that already suffices here. Seed-robustness CONFIRMED: seeds 3/5/8/11 all run clean to 12000 (|F|max
+  ~1e-11, 0 endpoints outside) — the seed-dependent blow-up is gone. Runs: RUN_LOGS/2026-06-23_endsphere/.
 
 ## 2026-06-22 — Membrane v2 DTS: continuous-surface bead collision (infra + grid coarse-gate) — WIP finding
 
