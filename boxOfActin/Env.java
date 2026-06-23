@@ -591,6 +591,12 @@ public class Env {
 	static final Parameter dtsMcaForceMax = new Parameter("dtsMcaForceMax"," DTS MCA linker force ceiling", 6.0e-12, "Newtons")
 		.setMutableAtRuntime()
 		.setDescription("Per-linker force cap (~few pN, ERM-complex scale). The linker bears up to this normal load; beyond it the bilayer can pull away (a proto-bleb under option C; an explicit detachment/break would be option D).");
+	static final Parameter dtsCortexTargetRedVol = new Parameter("dtsCortexTargetRedVol"," DTS cortex target reduced volume", 1.0, "")
+		.setMutableAtRuntime()
+		.setDescription("Target reduced volume of the INNER cortex shell (fraction of its IC volume). <1 makes the cortex CONTRACT (pull in) -- a stand-in for myosin cortical contraction; the MCA linkers then pull the bilayer inward, and the area-conserving bilayer sheds the excess as wrinkles/ruffles/blebs. 1.0 = no contraction.");
+	static final Parameter dtsCortexVolScale = new Parameter("dtsCortexVolScale"," DTS cortex volume-modulus scale", 1.0, "x bilayer")
+		.setMutableAtRuntime()
+		.setDescription("Cortex volume-constraint modulus K_V as a multiple of the bilayer dtsKappaVolume. Raise (with dtsCortexTargetRedVol<1) so the cortex actually contracts against its bending/area stiffness.");
 	static final Parameter dtsMaxDispFrac = new Parameter("dtsMaxDispFrac"," DTS vertex max per-step move (frac of vertex radius)", 0.0, "")
 		.setMutableAtRuntime()
 		.setDescription("0 = off. >0 caps a DTS membrane vertex's per-step translation to this * vertexRadius. Safety net for stiff area/volume constraints and large transients (e.g. a reduced-volume target mismatch) under explicit Euler -- the vertex moves slowly instead of taking one huge step and exploding. ~0.1-0.25 is reasonable.");

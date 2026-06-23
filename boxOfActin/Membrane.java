@@ -303,6 +303,8 @@ public final class Membrane {
             cortex.isCortex = true;
             cortex.kappaBend *= Env.dtsCortexKappaScale.getValue();
             cortex.kappaArea  = Env.dtsKappaArea.getValue() * Env.dtsCortexAreaScale.getValue();
+            cortex.kappaVolume = Env.dtsKappaVolume.getValue() * Env.dtsCortexVolScale.getValue();
+            cortex.targetRedVol = Env.dtsCortexTargetRedVol.getValue();   // <1 => cortex contracts (pull in)
             cortex.dragScale  = Env.dtsCortexDragScale.getValue();
             // calculateProperties ran with owner==null (drag scale 1) during construction; re-run now that
             // dragScale is set so the cortex vertices get their heavier (slower) Stokes drag.

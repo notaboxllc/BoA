@@ -1,0 +1,250 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /tmp/twoshell_pullin...
+     Parameter assigned: buildDtsMembrane set to true
+     Parameter assigned: dtsMembraneSubdiv set to 4
+     Parameter assigned: dtsMembraneRadius set to 1.2
+     Parameter assigned: dtsVertexRadiusFrac set to 0.5
+     Parameter assigned: dtsKappaBend set to 1.0E-19
+     Parameter assigned: dtsKappaArea set to 0.1
+     Parameter assigned: dtsKappaVolume set to 5.0E-15
+     Parameter assigned: dtsTargetReducedVol set to 1.0
+     Parameter assigned: dtsMaxDispFrac set to 0.15
+     Parameter assigned: dtsCortexOn set to 1.0
+     Parameter assigned: dtsCortexRadius set to 1.1
+     Parameter assigned: dtsCortexKappaScale set to 20.0
+     Parameter assigned: dtsCortexAreaScale set to 2.0
+     Parameter assigned: dtsCortexDragScale set to 5.0
+     Parameter assigned: dtsMcaStiffness set to 5.0E-4
+     Parameter assigned: dtsMcaRestGap set to 0.0
+     Parameter assigned: dtsMcaForceMax set to 6.0E-12
+     Parameter assigned: dtsProbeForce set to 0.0
+     Parameter assigned: dtsProbeRadius set to 0.15
+     Parameter assigned: dtsProbeStartX set to 0.6
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: biochemDeltaT set to 0.001
+     Parameter assigned: runTime set to 0.15
+     Parameter assigned: toFileInterval set to 150
+     Parameter assigned: remoteWriteInterval set to 2000
+     Parameter assigned: dtsBrownianOff set to true
+     Parameter assigned: boxXDim set to 5.0
+     Parameter assigned: boxYDim set to 5.0
+     Parameter assigned: boxZDim set to 5.0
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: simOutsideBug set to false
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: fillNodeCt set to 0
+     Parameter assigned: buildBranchedFils set to false
+     Parameter assigned: buildMembraneSheet set to false
+     Parameter assigned: buildMembraneSphere set to false
+     Parameter assigned: forminConc set to 0.0
+     Parameter assigned: ratchetOn set to false
+     Parameter assigned: dtsCortexTargetRedVol set to 0.6
+     Parameter assigned: dtsCortexVolScale set to 20.0
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-3610879306699938541 (BOA_RNG_SEED unset)
+[DTS] membrane #0 built: nu=4  nv=2562  nf=5120  ne=7680  maxVal=12  R=1.200 um  l0=0.0906 um  rVert=0.0453 um  A0=18.0739 um^2  V0=7.2226 um^3
+[DTS]   continuum sphere: A=18.0956 (mesh 99.9%)  V=7.2382 (mesh 99.8%)
+[DTS] membrane #1 built: nu=4  nv=2562  nf=5120  ne=7680  maxVal=12  R=1.100 um  l0=0.0830 um  rVert=0.0415 um  A0=15.1871 um^2  V0=5.5632 um^3
+[DTS]   continuum sphere: A=15.2053 (mesh 99.9%)  V=5.5753 (mesh 99.8%)
+[DTS] two-shell: bilayer R=1.200 + cortex R=1.100  (cortex kappa x20, K_A=0.200, drag x5.0)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 26; xBinWidth = 0.2 µm
+nYBins = 26; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 26 x 26 x 26 cells (0.2 µm each)
+[14:58] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[14:58]   ON   ThingStep Threads
+[14:58]   ON   ThingBrownian Threads
+[14:58]   ON   Myosin Threads
+[14:58]   OFF  MyoDimer Threads
+[14:58]   ON   Protein Node Threads
+[14:58]   OFF  MyoMiniFil Threads
+[14:58]   OFF  Chamber Myo Threads
+[14:58]   OFF  Chamber MyoDimer Threads
+[14:58]   ON   Mesh Threads
+[14:58]   ON   Ck Mesh Threads
+[14:58]   ON   Ck Mots Threads
+[14:58]   OFF  XLink Threads
+[14:58]   OFF  Arp23 Threads
+[14:58]   OFF  NodeLink Threads
+[14:58]   ON   Membrane Node Threads
+[14:58]   OFF  ActA Threads
+[14:58]   ON   MotorBindGrid3D Fill
+[14:58] [phase-plan] 9 active, 8 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/twoshell_pullin
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/twoshell_pullin
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.twoshell_pullin
+ThreeJSWriter: wrote params_effective.txt (367 parameters)
+[DTS-E] step 0  E bend=2.514e-18 area=3.495e-42 vol=1.775e-44 tot=2.514e-18 J   A=18.0739/18.0739  V=7.2226/7.2226 um  |F|max=8.81e-14 N
+[DTS-E] step 0  E bend=5.029e-17 area=5.568e-40 vol=8.000e-15 tot=8.050e-15 J   A=15.1871/15.1871  V=5.5632/5.5632 um  |F|max=5.09e-11 N
+[MCA] step 0 linked=2562/2562  gap=0.100  bilayerMaxR=1.200 cortexMaxR=1.100
+[FLIP] step 0 membrane#0 flips=0/7680 verify=true
+[FLIP] step 0 membrane#1 flips=0/7680 verify=true
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=3347.8 cumMaxPerThread=1292
+[DTS-E] step 500  E bend=4.998e-17 area=1.233e-16 vol=5.318e-17 tot=2.264e-16 J   A=17.8629/18.0739  V=6.1692/7.2226 um  |F|max=2.51e-10 N
+[DTS-E] step 500  WARNING 5 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 500  E bend=1.319e-15 area=8.061e-16 vol=1.280e-15 tot=3.405e-15 J   A=15.5370/15.1871  V=4.2281/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 500 linked=2659/2659  gap=0.100  bilayerMaxR=1.213 cortexMaxR=1.122
+[FLIP] step 500 membrane#0 flips=174/7971 verify=true
+[FLIP] step 500 membrane#1 flips=355/8460 verify=true
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=3430.5 cumMaxPerThread=1326
+[DTS-E] step 1000  E bend=4.003e-17 area=1.735e-16 vol=6.503e-17 tot=2.785e-16 J   A=17.8235/18.0739  V=6.0577/7.2226 um  |F|max=3.11e-10 N
+[DTS-E] step 1000  WARNING 23 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 1000  E bend=1.223e-15 area=1.200e-15 vol=7.859e-16 tot=3.209e-15 J   A=15.6140/15.1871  V=4.0354/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 1000 linked=2727/2727  gap=0.100  bilayerMaxR=1.217 cortexMaxR=1.122
+[FLIP] step 1000 membrane#0 flips=299/8175 verify=true
+[FLIP] step 1000 membrane#1 flips=355/8613 verify=true
+[REMESH] step 1000 split=99 -> nv=2826 nf=5648 ne=8472 verify=true
+[REMESH] step 1000 split=136 -> nv=3009 nf=6014 ne=9021 verify=true
+[COLLAPSE] step 1000 collapse=86 -> nv=2740 nf=5476 ne=8214 verify=true
+[COLLAPSE] step 1000 collapse=126 -> nv=2883 nf=5762 ne=8643 verify=true
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=3469.9 cumMaxPerThread=1348
+[DTS-E] step 1500  E bend=2.560e-17 area=2.141e-16 vol=6.471e-17 tot=3.044e-16 J   A=17.7957/18.0739  V=6.0606/7.2226 um  |F|max=3.21e-10 N
+[DTS-E] step 1500  WARNING 8 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 1500  E bend=1.109e-15 area=1.140e-15 vol=5.048e-16 tot=2.754e-15 J   A=15.6032/15.1871  V=3.8969/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 1500 linked=2799/2799  gap=0.100  bilayerMaxR=1.217 cortexMaxR=1.105
+[FLIP] step 1500 membrane#0 flips=662/8391 verify=true
+[FLIP] step 1500 membrane#1 flips=359/8613 verify=true
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=3503.5 cumMaxPerThread=1360
+Sim. time=00.02....~72.85 minutes computation to simulate 1 sec, run finished in ~00.16 hours
+[DTS-E] step 2000  E bend=1.810e-17 area=2.551e-16 vol=6.719e-17 tot=3.403e-16 J   A=17.7703/18.0739  V=6.0386/7.2226 um  |F|max=4.28e-10 N
+[DTS-E] step 2000  WARNING 7 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 2000  E bend=9.076e-16 area=1.165e-15 vol=3.761e-16 tot=2.449e-15 J   A=15.6079/15.1871  V=3.8204/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 2000 linked=2800/2800  gap=0.100  bilayerMaxR=1.217 cortexMaxR=1.115
+[FLIP] step 2000 membrane#0 flips=623/8394 verify=true
+[FLIP] step 2000 membrane#1 flips=371/8658 verify=true
+[REMESH] step 2000 split=49 -> nv=2849 nf=5694 ne=8541 verify=true
+[REMESH] step 2000 split=90 -> nv=2978 nf=5952 ne=8928 verify=true
+[COLLAPSE] step 2000 collapse=56 -> nv=2793 nf=5582 ne=8373 verify=true
+[COLLAPSE] step 2000 collapse=103 -> nv=2875 nf=5746 ne=8619 verify=true
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=3520.4 cumMaxPerThread=1360
+[DTS-E] step 2500  E bend=1.643e-17 area=2.056e-16 vol=7.223e-17 tot=2.943e-16 J   A=17.8013/18.0739  V=5.9949/7.2226 um  |F|max=4.13e-10 N
+[DTS-E] step 2500  WARNING 4 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 2500  E bend=8.528e-16 area=1.140e-15 vol=2.654e-16 tot=2.258e-15 J   A=15.6032/15.1871  V=3.7432/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 2500 linked=2758/2758  gap=0.100  bilayerMaxR=1.205 cortexMaxR=1.113
+[FLIP] step 2500 membrane#0 flips=549/8268 verify=true
+[FLIP] step 2500 membrane#1 flips=345/8622 verify=true
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=3531.6 cumMaxPerThread=1360
+[DTS-E] step 3000  E bend=1.537e-17 area=1.844e-16 vol=6.977e-17 tot=2.695e-16 J   A=17.8158/18.0739  V=6.0160/7.2226 um  |F|max=4.10e-10 N
+[DTS-E] step 3000  E bend=7.704e-16 area=9.947e-16 vol=2.125e-16 tot=1.978e-15 J   A=15.5758/15.1871  V=3.7006/5.5632 um  |F|max=9.98e-10 N
+[MCA] step 3000 linked=2756/2756  gap=0.100  bilayerMaxR=1.200 cortexMaxR=1.108
+[FLIP] step 3000 membrane#0 flips=554/8262 verify=true
+[FLIP] step 3000 membrane#1 flips=292/8649 verify=true
+[REMESH] step 3000 split=41 -> nv=2797 nf=5590 ne=8385 verify=true
+[REMESH] step 3000 split=78 -> nv=2963 nf=5922 ne=8883 verify=true
+[COLLAPSE] step 3000 collapse=45 -> nv=2752 nf=5500 ne=8250 verify=true
+[COLLAPSE] step 3000 collapse=84 -> nv=2879 nf=5754 ne=8631 verify=true
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=3542.8 cumMaxPerThread=1365
+[DTS-E] step 3500  E bend=1.507e-17 area=2.975e-16 vol=8.603e-17 tot=3.986e-16 J   A=17.7460/18.0739  V=5.8827/7.2226 um  |F|max=5.36e-10 N
+[DTS-E] step 3500  WARNING 1 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 3500  E bend=7.257e-16 area=9.763e-16 vol=1.714e-16 tot=1.873e-15 J   A=15.5722/15.1871  V=3.6637/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 3500 linked=2758/2758  gap=0.100  bilayerMaxR=1.206 cortexMaxR=1.136
+[FLIP] step 3500 membrane#0 flips=466/8268 verify=true
+[FLIP] step 3500 membrane#1 flips=369/8628 verify=true
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=3545.3 cumMaxPerThread=1367
+Sim. time=00.04....~66.79 minutes computation to simulate 1 sec, run finished in ~00.12 hours
+[DTS-E] step 4000  E bend=1.558e-17 area=2.743e-16 vol=9.406e-17 tot=3.840e-16 J   A=17.7590/18.0739  V=5.8216/7.2226 um  |F|max=4.42e-10 N
+[DTS-E] step 4000  E bend=6.758e-16 area=9.246e-16 vol=1.371e-16 tot=1.737e-15 J   A=15.5619/15.1871  V=3.6292/5.5632 um  |F|max=9.54e-10 N
+[MCA] step 4000 linked=2737/2737  gap=0.100  bilayerMaxR=1.204 cortexMaxR=1.125
+[FLIP] step 4000 membrane#0 flips=512/8205 verify=true
+[FLIP] step 4000 membrane#1 flips=336/8658 verify=true
+[REMESH] step 4000 split=48 -> nv=2785 nf=5566 ne=8349 verify=true
+[REMESH] step 4000 split=52 -> nv=2940 nf=5876 ne=8814 verify=true
+[COLLAPSE] step 4000 collapse=52 -> nv=2733 nf=5462 ne=8193 verify=true
+[COLLAPSE] step 4000 collapse=55 -> nv=2885 nf=5766 ne=8649 verify=true
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=3550.2 cumMaxPerThread=1367
+[DTS-E] step 4500  E bend=1.497e-17 area=2.812e-16 vol=9.488e-17 tot=3.911e-16 J   A=17.7551/18.0739  V=5.8156/7.2226 um  |F|max=4.67e-10 N
+[DTS-E] step 4500  WARNING 1 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 4500  E bend=7.003e-16 area=9.433e-16 vol=1.223e-16 tot=1.766e-15 J   A=15.5656/15.1871  V=3.6130/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 4500 linked=2737/2737  gap=0.100  bilayerMaxR=1.201 cortexMaxR=1.127
+[FLIP] step 4500 membrane#0 flips=527/8205 verify=true
+[FLIP] step 4500 membrane#1 flips=394/8613 verify=true
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=3553.2 cumMaxPerThread=1367
+[DTS-E] step 5000  E bend=1.613e-17 area=2.326e-16 vol=9.837e-17 tot=3.471e-16 J   A=17.7840/18.0739  V=5.7899/7.2226 um  |F|max=4.40e-10 N
+[DTS-E] step 5000  WARNING 2 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 5000  E bend=6.742e-16 area=9.102e-16 vol=1.151e-16 tot=1.700e-15 J   A=15.5589/15.1871  V=3.6048/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 5000 linked=2740/2740  gap=0.100  bilayerMaxR=1.209 cortexMaxR=1.124
+[FLIP] step 5000 membrane#0 flips=562/8214 verify=true
+[FLIP] step 5000 membrane#1 flips=356/8607 verify=true
+[REMESH] step 5000 split=47 -> nv=2787 nf=5570 ne=8355 verify=true
+[REMESH] step 5000 split=68 -> nv=2939 nf=5874 ne=8811 verify=true
+[COLLAPSE] step 5000 collapse=39 -> nv=2748 nf=5492 ne=8238 verify=true
+[COLLAPSE] step 5000 collapse=54 -> nv=2885 nf=5766 ne=8649 verify=true
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=3554.6 cumMaxPerThread=1367
+[DTS-E] step 5500  E bend=1.671e-17 area=2.427e-16 vol=1.052e-16 tot=3.646e-16 J   A=17.7777/18.0739  V=5.7413/7.2226 um  |F|max=3.97e-10 N
+[DTS-E] step 5500  E bend=6.460e-16 area=8.800e-16 vol=9.259e-17 tot=1.619e-15 J   A=15.5527/15.1871  V=3.5773/5.5632 um  |F|max=9.64e-10 N
+[MCA] step 5500 linked=2758/2758  gap=0.100  bilayerMaxR=1.217 cortexMaxR=1.120
+[FLIP] step 5500 membrane#0 flips=557/8268 verify=true
+[FLIP] step 5500 membrane#1 flips=375/8625 verify=true
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=3555.5 cumMaxPerThread=1378
+Sim. time=00.06....~68.28 minutes computation to simulate 1 sec, run finished in ~00.10 hours
+[DTS-E] step 6000  E bend=1.538e-17 area=2.693e-16 vol=1.123e-16 tot=3.970e-16 J   A=17.7619/18.0739  V=5.6920/7.2226 um  |F|max=4.07e-10 N
+[DTS-E] step 6000  WARNING 1 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 6000  E bend=6.200e-16 area=9.475e-16 vol=8.505e-17 tot=1.653e-15 J   A=15.5665/15.1871  V=3.5674/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 6000 linked=2729/2731  gap=0.100  bilayerMaxR=1.245 cortexMaxR=1.124
+[FLIP] step 6000 membrane#0 flips=490/8187 verify=true
+[FLIP] step 6000 membrane#1 flips=339/8682 verify=true
+[REMESH] step 6000 split=37 -> nv=2768 nf=5532 ne=8298 verify=true
+[REMESH] step 6000 split=61 -> nv=2957 nf=5910 ne=8865 verify=true
+[COLLAPSE] step 6000 collapse=44 -> nv=2724 nf=5444 ne=8166 verify=true
+[COLLAPSE] step 6000 collapse=55 -> nv=2902 nf=5800 ne=8700 verify=true
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=3554.7 cumMaxPerThread=1378
+[DTS-E] step 6500  E bend=1.504e-17 area=2.785e-16 vol=1.159e-16 tot=4.094e-16 J   A=17.7567/18.0739  V=5.6672/7.2226 um  |F|max=6.09e-10 N
+[DTS-E] step 6500  WARNING 4 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 6500  E bend=6.196e-16 area=8.189e-16 vol=7.373e-17 tot=1.512e-15 J   A=15.5398/15.1871  V=3.5516/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 6500 linked=2724/2725  gap=0.100  bilayerMaxR=1.210 cortexMaxR=1.134
+[FLIP] step 6500 membrane#0 flips=517/8169 verify=true
+[FLIP] step 6500 membrane#1 flips=370/8574 verify=true
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=3555.0 cumMaxPerThread=1378
+[DTS-E] step 7000  E bend=1.452e-17 area=2.601e-16 vol=1.187e-16 tot=3.933e-16 J   A=17.7673/18.0739  V=5.6490/7.2226 um  |F|max=5.04e-10 N
+[DTS-E] step 7000  E bend=6.179e-16 area=9.433e-16 vol=7.713e-17 tot=1.638e-15 J   A=15.5656/15.1871  V=3.5564/5.5632 um  |F|max=9.76e-10 N
+[MCA] step 7000 linked=2691/2692  gap=0.100  bilayerMaxR=1.221 cortexMaxR=1.125
+[FLIP] step 7000 membrane#0 flips=498/8070 verify=true
+[FLIP] step 7000 membrane#1 flips=403/8601 verify=true
+[REMESH] step 7000 split=56 -> nv=2748 nf=5492 ne=8238 verify=true
+[REMESH] step 7000 split=59 -> nv=2928 nf=5852 ne=8778 verify=true
+[COLLAPSE] step 7000 collapse=58 -> nv=2690 nf=5376 ne=8064 verify=true
+[COLLAPSE] step 7000 collapse=70 -> nv=2858 nf=5712 ne=8568 verify=true
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=3554.9 cumMaxPerThread=1420
+[DTS-E] step 7500  E bend=1.380e-17 area=2.603e-16 vol=1.160e-16 tot=3.901e-16 J   A=17.7672/18.0739  V=5.6668/7.2226 um  |F|max=5.16e-10 N
+[DTS-E] step 7500  WARNING 2 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 7500  E bend=6.523e-16 area=9.405e-16 vol=7.954e-17 tot=1.672e-15 J   A=15.5651/15.1871  V=3.5598/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 7500 linked=2699/2701  gap=0.100  bilayerMaxR=1.215 cortexMaxR=1.131
+[FLIP] step 7500 membrane#0 flips=534/8097 verify=true
+[FLIP] step 7500 membrane#1 flips=478/8697 verify=true
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=3555.6 cumMaxPerThread=1447
+Sim. time=00.08....~66.64 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[DTS-E] step 8000  E bend=1.266e-17 area=2.482e-16 vol=1.182e-16 tot=3.791e-16 J   A=17.7744/18.0739  V=5.6521/7.2226 um  |F|max=4.84e-10 N
+[DTS-E] step 8000  WARNING 1 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 8000  E bend=5.861e-16 area=8.571e-16 vol=7.465e-17 tot=1.518e-15 J   A=15.5479/15.1871  V=3.5529/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 8000 linked=2695/2697  gap=0.100  bilayerMaxR=1.215 cortexMaxR=1.135
+[FLIP] step 8000 membrane#0 flips=494/8085 verify=true
+[FLIP] step 8000 membrane#1 flips=410/8625 verify=true
+[REMESH] step 8000 split=45 -> nv=2742 nf=5480 ne=8220 verify=true
+[REMESH] step 8000 split=81 -> nv=2958 nf=5912 ne=8868 verify=true
+[COLLAPSE] step 8000 collapse=36 -> nv=2706 nf=5408 ne=8112 verify=true
+[COLLAPSE] step 8000 collapse=95 -> nv=2863 nf=5722 ne=8583 verify=true
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=3555.5 cumMaxPerThread=1447
+[DTS-E] step 8500  E bend=1.371e-17 area=2.258e-16 vol=1.223e-16 tot=3.619e-16 J   A=17.7882/18.0739  V=5.6249/7.2226 um  |F|max=4.61e-10 N
+[DTS-E] step 8500  E bend=5.896e-16 area=8.418e-16 vol=7.572e-17 tot=1.507e-15 J   A=15.5447/15.1871  V=3.5544/5.5632 um  |F|max=9.77e-10 N
+[MCA] step 8500 linked=2722/2729  gap=0.100  bilayerMaxR=1.209 cortexMaxR=1.139
+[FLIP] step 8500 membrane#0 flips=604/8181 verify=true
+[FLIP] step 8500 membrane#1 flips=442/8598 verify=true
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=3556.9 cumMaxPerThread=1447
+[DTS-E] step 9000  E bend=1.401e-17 area=1.827e-16 vol=1.161e-16 tot=3.128e-16 J   A=17.8170/18.0739  V=5.6658/7.2226 um  |F|max=3.77e-10 N
+[DTS-E] step 9000  WARNING 2 vertices hit the force cap (FMAX=1.0e-09 N) -- degenerate triangles
+[DTS-E] step 9000  E bend=6.686e-16 area=8.512e-16 vol=6.922e-17 tot=1.589e-15 J   A=15.5467/15.1871  V=3.5449/5.5632 um  |F|max=1.00e-09 N
+[MCA] step 9000 linked=2747/2751  gap=0.100  bilayerMaxR=1.215 cortexMaxR=1.130
+[FLIP] step 9000 membrane#0 flips=631/8247 verify=true
+[FLIP] step 9000 membrane#1 flips=432/8607 verify=true
+[REMESH] step 9000 split=34 -> nv=2785 nf=5566 ne=8349 verify=true
+[REMESH] step 9000 split=70 -> nv=2941 nf=5878 ne=8817 verify=true
+[COLLAPSE] step 9000 collapse=27 -> nv=2758 nf=5512 ne=8268 verify=true
+[COLLAPSE] step 9000 collapse=71 -> nv=2870 nf=5736 ne=8604 verify=true
