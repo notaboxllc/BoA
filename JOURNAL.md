@@ -1,5 +1,35 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — Two-shell STAGE 2: actin anchors to the cortex, pushes the bilayer — SUPERMAN FIXED
+
+Routed the actin so its reaction lands on the stiff cortex and its push on the compliant bilayer. The "superman"
+free-ride (actin + membrane co-drifting outward, ~0.12 µm unbounded, single shell) is gone.
+
+- **Surface chemistry on the cortex.** Moved hot-patch/Arp/formin init out of the ctor into
+  `initSurfaceChemistry()`, called on the CORTEX in two-shell mode (where actin nucleates) / the sole shell in
+  single-shell mode. So formin mothers nucleate at the cortex.
+- **Cortex nucleation geometry.** In `forminStep`, when `isCortex`: nucleate with the POINTED end anchored to the
+  cortex vertex and the BARBED end pointing OUTWARD, growing toward the bilayer (vs the legacy barbed-at-membrane).
+  The barbed end pushes the bilayer via steric; there is NO barbed bond, so no ride-out.
+- **Routing.** `collideAllActin` -> `bilayer().collideActin()` (steric push on the bilayer); `branchAllActin` ->
+  `cortex()` (Arp field lives there). The anchor bonds dereference `fs.end1Node`/`end2Node` (cortex vertices), so
+  they load the cortex regardless of which shell the steric runs on.
+- **Two-sided cortex anchor (the key).** The pointed-end tether was one-sided (held the filament, didn't push the
+  cortex). One-sided, the MCA dragged the cortex out to track the bilayer bulge and the anchored actin rode along
+  (~0.05 µm residual co-drift). Made it TWO-SIDED when anchored to the cortex: the actin push-reaction now loads the
+  cortex INWARD, countering the MCA outward drag. Result: cortex BULK holds (mean R pinned 1.100), only the local
+  protrusion base tracks the bilayer (cortex maxR -> 1.147), bilayer protrudes to ~1.25, actin p95 ~1.20 — a bounded
+  protrusion against a held reaction frame, not the old unbounded co-drift.
+- **BUGFIX.** With arp OFF but formin ON, `arpLocal` is null, so the old split guard (`arpLocal!=null && ...`) let
+  the CORTEX remesh -> nv grew past the formin arrays (sized to initial nv) -> AIOOBE in forminStep. Added
+  `hasSurfaceChem()` (arp/formin/hot present) and gate split AND collapse on it: a shell carrying surface chemistry
+  stays fixed-topology (the cortex), only the bilayer remeshes.
+- **Validated (ParameterFiles/dtsMembraneStage2, formin-only, arp/branch off):** 0 errors, both shells verify=true,
+  cortex mean R steady at 1.100, bounded protrusion. Runs: RUN_LOGS/2026-06-23_stage2/.
+- **OPEN:** re-enable Arp branching on the cortex (branch gating currently keys on cortex proximity, but Stage-2
+  barbed tips grow toward the BILAYER -> revisit the branch zone); tune MCA cap if a more bleb-like (cortex-flat)
+  protrusion is wanted; the local cortex tracking the protrusion base is physical but its degree is MCA-tunable.
+
 ## 2026-06-23 — Two-shell membrane STAGE 1: bilayer + cortex + sliding MCA linkers — STABLE
 
 First cut of the two-shell model (design: TWO_SHELL_MEMBRANE_DESIGN.pdf): outer fluid LIPID BILAYER + inner stiff

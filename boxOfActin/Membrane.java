@@ -91,6 +91,11 @@ public final class Membrane {
     private double[] arpNext, arpLap;        // Jacobi scratch (per-vertex)
     public double[] forminLocal;             // nv: depletable formin pool at hot vertices; null = off
 
+    /** True if this shell carries per-vertex surface chemistry (Arp field / NPF hot patches / formin pool), which
+     *  is allocated to the INITIAL nv (not capacity-sized). Such a shell must NOT remesh (split/collapse change nv
+     *  and would overflow these arrays) -- it's the cortex / nucleating membrane, kept fixed-topology. */
+    public boolean hasSurfaceChem() { return arpLocal != null || forminLocal != null || arpHot != null; }
+
     /**
      * Build a closed icosphere membrane and register it. Creates the vertex Things,
      * derives the wing-edge and vertex-incidence arrays from the faces, and records the
@@ -174,12 +179,20 @@ public final class Membrane {
         }
 
         theMembranes.add(this);
+        // Surface chemistry (hot patches / Arp field / formin pool) is initialized later by initSurfaceChemistry(),
+        // on the CORTEX in two-shell mode (where actin nucleates) or the sole shell in single-shell mode -- NOT here
+        // in the ctor, because isCortex isn't set until buildIcosphereMembrane finishes constructing both shells.
+        report();
+    }
+
+    /** Initialize the actin-nucleating surface chemistry (NPF hot patches, Arp2/3 field, formin pool) on THIS shell.
+     *  Called by buildIcosphereMembrane on the cortex (two-shell) or the bilayer (single-shell). */
+    public void initSurfaceChemistry() {
         if (Env.dtsArpOn.isActive() || Env.dtsForminOn.isActive()) {
             markHotPatches();
             if (Env.dtsArpOn.isActive())    initArp();
             if (Env.dtsForminOn.isActive()) initFormin();
         }
-        report();
     }
 
     // --- vertex incidence helper ---
@@ -309,9 +322,12 @@ public final class Membrane {
             // calculateProperties ran with owner==null (drag scale 1) during construction; re-run now that
             // dragScale is set so the cortex vertices get their heavier (slower) Stokes drag.
             for (int i = 0; i < cortex.nv; i++) cortex.vert[i].calculateProperties();
+            cortex.initSurfaceChemistry();   // actin nucleates AT THE CORTEX in two-shell mode (anchor = reaction)
             Thing.talkln(String.format(
                 "[DTS] two-shell: bilayer R=%.3f + cortex R=%.3f  (cortex kappa x%.0f, K_A=%.3g, drag x%.1f)",
                 r, rc, Env.dtsCortexKappaScale.getValue(), cortex.kappaArea, cortex.dragScale));
+        } else {
+            bilayer().initSurfaceChemistry();   // single shell: chemistry on the sole membrane (legacy)
         }
     }
 
@@ -586,7 +602,7 @@ public final class Membrane {
     /** Split every edge longer than splitLen (remesh stretched/growing regions). Returns #splits. */
     int remeshSweep(double splitLen) {
         buildFlipIndex();
-        if (arpLocal != null && arpLocal.length < capV) return 0;   // per-vertex fields not capacity-sized yet -> skip
+        if (hasSurfaceChem()) return 0;   // per-vertex chem (arp/formin/hot) not capacity-sized -> don't grow nv (would overflow them); this shell (the cortex / nucleating membrane) stays fixed-topology
         int ne0=ne, ns=0;                                           // snapshot: don't re-split this sweep's new edges
         for (int e=0;e<ne0;e++) if (edgeLen(edgeVert[2*e],edgeVert[2*e+1]) > splitLen) { if (edgeSplit(e)>=0) ns++; }
         return ns;
@@ -699,7 +715,7 @@ public final class Membrane {
      *  LINK CONDITION (common neighbours of u,v == exactly the two wing vertices), valence bounds, and geometry (no
      *  inverted / degenerate / sliver retained face). On success the mesh is fully rederived from faces. */
     boolean edgeCollapse(int e){
-        if (arpLocal != null || forminLocal != null) return false;     // per-vertex chem / anchors not remapped
+        if (hasSurfaceChem()) return false;     // per-vertex chem / anchors not remapped under vertex compaction
         int u=edgeVert[2*e], v=edgeVert[2*e+1];
         int f0=edgeFace[2*e], f1=edgeFace[2*e+1], c=edgeWing[2*e], d=edgeWing[2*e+1];
         if (u==v || c==d) return false;
@@ -737,7 +753,7 @@ public final class Membrane {
     /** Collapse short edges (< minLen) until none remain collapsible. Returns #collapses. Restarts the scan after each
      *  success (indices renumber on rederive); terminates when a full pass collapses nothing. */
     int collapseSweep(double minLen){
-        if (arpLocal != null || forminLocal != null) return 0;
+        if (hasSurfaceChem()) return 0;
         buildFlipIndex();
         int done=0, guard=0;
         boolean progress=true;
@@ -1085,7 +1101,17 @@ public final class Membrane {
             ix/=il; iy/=il; iz/=il;                              // inward radial (vertex -> center)
             double halfLen = 0.5*(Env.actinSeed.getIntValue()+1)*Env.actinMonoRadius;   // seed half-length (um)
             FilSegment mother;
-            if (Env.dtsForminGrowOut.isActive()) {
+            if (isCortex) {
+                // TWO-SHELL (Stage 2): nucleate AT THE CORTEX. POINTED end (end1) anchored to the cortex vertex
+                // (the reaction surface, one-sided tether); BARBED end (end2) points OUTWARD and grows toward the
+                // bilayer, which it pushes via steric -- with NO barbed bond, so no superman ride-out (the reaction
+                // is borne by the stiff cortex, the push deforms the compliant bilayer). end1 = center - halfLen*uVec,
+                // so seat center = vertex + halfLen*outward to put the pointed end at the cortex vertex.
+                double ox=-ix, oy=-iy, oz=-iz;   // outward unit (cortex vertex -> away from center, toward bilayer)
+                Pt3D nucPt = new Pt3D(vx(v)+halfLen*ox, vy(v)+halfLen*oy, vz(v)+halfLen*oz);
+                mother = FilSegment.makeForminMother(nucPt, new Pt3D(ox, oy, oz));   // barbed outward toward bilayer
+                FilSegment.linkEnd1Node(mother, vert[v]);    // pointed end anchored to the cortex (reaction)
+            } else if (Env.dtsForminGrowOut.isActive()) {
                 // FORMIN holds the BARBED end (end2) a STANDOFF distance off the cortex; pointed end (end1)
                 // trails into the cytoplasm. Seat the center so end2 (= center + halfLen*uVec, uVec=outward)
                 // lands at the standoff point (vertex + standoff*inward) -- in agreement with the tether's
@@ -1120,7 +1146,10 @@ public final class Membrane {
      *  bulges the membrane), plus the polymerization ratchet on barbed tips. Grid-accelerated. */
     public static void collideAllActin() {
         if (theMembranes.isEmpty() || FilSegment.filSegmentCt == 0) return;
-        theMembranes.get(0).collideActin();
+        // STERIC PUSH lands on the BILAYER (compliant surface actin deforms). The formin/Arp anchor bonds target
+        // the CORTEX (set at nucleation, dereferenced by fs.end1Node/end2Node in collideActin), so the reaction is
+        // borne by the stiff cortex -- not the pushed bilayer. In single-shell mode bilayer()==the sole shell (legacy).
+        bilayer().collideActin();
     }
 
     // Anchor-spring magnitude (N), capped so a large offset (e.g. a freshly nucleated mother before the
@@ -1208,13 +1237,21 @@ public final class Membrane {
                     an.incForceSumSlot(-fxA,-fyA,-fzA);                                                // vertex -> barbed end (push cortex out)
                     fs.dbgAnchorF = m; fs.dbgAnchorOff = off;   // for the single-filament force-state diagnostic
                 }
-                // de-novo (pointed-end) mother: one-sided tether (don't load the cortex inward).
+                // pointed-end mother: tether the pointed (base) end to its anchor vertex.
                 else if (fs.nodeAtEnd1 && fs.end1Node != null && !fs.end1Node.removeMe) {
                     ProteinNode an = fs.end1Node;
                     double ax = (an.getCoordX()-e1x), ay = (an.getCoordY()-e1y), az = (an.getCoordZ()-e1z);
                     double m = anchorMag(kAnchor, ax, ay, az);
                     double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
-                    force.setVals(m*ax/off, m*ay/off, m*az/off); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
+                    double fx=m*ax/off, fy=m*ay/off, fz=m*az/off;
+                    force.setVals(fx,fy,fz); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
+                    // TWO-SHELL (Stage 2): when the base is anchored to the CORTEX, make the tether TWO-SIDED so the
+                    // filament's push-reaction loads the cortex INWARD. This is what makes the cortex the genuine
+                    // reaction surface: the inward actin reaction counters the MCA's outward drag (the bilayer bulge
+                    // pulling the cortex along), so the cortex holds and the anchored actin does NOT ride out. On the
+                    // single shell this stays one-sided (loading the sole membrane inward would just dimple it).
+                    if (an instanceof MembraneVertex && ((MembraneVertex)an).owner.isCortex)
+                        an.incForceSumSlot(-fx, -fy, -fz);
                 }
             }
             if (System.getenv("BOA_BRANCH_DIAG") != null && fs.forminMother && fs.arpChildCt > 0 && Env.counter % 200 == 0) {
@@ -1304,8 +1341,9 @@ public final class Membrane {
      *  Arp (negative feedback). Bounded by the Arp field + dtsMaxFilaments cap. */
     public static void branchAllActin() {
         if (theMembranes.isEmpty() || FilSegment.filSegmentCt == 0) return;
-        Membrane m = theMembranes.get(0);
-        if (m.arpLocal == null) return;
+        Membrane m = cortex();            // Arp field lives on the cortex (two-shell); fall back to the sole shell
+        if (m == null) m = bilayer();
+        if (m == null || m.arpLocal == null) return;
         m.branchStep();
     }
 
