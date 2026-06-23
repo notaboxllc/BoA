@@ -798,8 +798,9 @@ scene.add(sun);
 // ── instanced segment mesh ────────────────────────────────────────────────────
 // Unit cylinder along Y: radius 1, height 1. Scaled per-instance to (r, length, r).
 const MAX_SEGMENTS = 50000;
-const MAX_MYOSINS       = 5000;
-const MAX_MINIFILAMENTS = 2000;
+const MAX_MYOSINS       = 24000;   // raised from 5000: dense scenes (e.g. SoftBox 160 minifils × 32 heads + node
+                                   // shells) exceed 5000, and the tail got dropped ⇒ bare minifilament backbones.
+const MAX_MINIFILAMENTS = 4000;
 const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1);
 const segMesh = new THREE.InstancedMesh(cylGeo,
   new THREE.MeshPhongMaterial({ color: 0xffffff }), MAX_SEGMENTS);
@@ -857,6 +858,16 @@ nodeMesh.count = 0;
 nodeMesh.frustumCulled = false;
 nodeMesh.renderOrder = 2;   // draw after opaque geometry so transparency blends correctly
 scene.add(nodeMesh);
+
+// Crosslinkers — thin bright-white (emissive) cylinders connecting two crosslinked filament-segment centres
+// (SoftBox; ADDITIVE: BoA frames carry no data.crosslinks, so this mesh simply stays empty there — BoA rendering
+// is unaffected. Part of unifying the SoftBox + BoA viewer into one shared file.)
+const MAX_CROSSLINKS = 16000;
+const crosslinkMesh = new THREE.InstancedMesh(cylGeo,
+  new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.7 }), MAX_CROSSLINKS);
+crosslinkMesh.count = 0;
+crosslinkMesh.frustumCulled = false;
+scene.add(crosslinkMesh);
 
 // ── membrane (StickyNode) surface ─────────────────────────────────────────────
 // Membrane nodes render as largely-translucent, flattened (oblate) spheres whose
@@ -1464,7 +1475,7 @@ function applyFrameData(data) {
   segMesh.instanceMatrix.needsUpdate = true;
   if (segMesh.instanceColor) segMesh.instanceColor.needsUpdate = true;
 
-  updateMyosinData(data.myosins, data.minifilaments, data.nodes);
+  updateMyosinData(data.myosins, data.minifilaments, data.nodes, data.crosslinks);
   updateMembraneSurface(data.nodes, data.membraneLinks);
   updateDtsMembranes(data.membranes);
   updateAxisLines(data.segments);
@@ -1478,6 +1489,7 @@ function applyFrameData(data) {
     `segments: ${count}` +
     (data.myosins      ? `<br>myosins: ${data.myosins.length}`           : '') +
     (data.minifilaments ? `<br>minifilaments: ${data.minifilaments.length}` : '') +
+    (data.crosslinks   ? `<br>crosslinks: ${data.crosslinks.length}`       : '') +
     (data.nodes && data.nodes.length ? `<br>nodes: ${data.nodes.length}`     : '');
 }
 
@@ -1692,7 +1704,7 @@ function updateBenchmarkScene(data) {
   }
 }
 
-function updateMyosinData(myosins, minifilaments, nodes) {
+function updateMyosinData(myosins, minifilaments, nodes, crosslinks) {
   // Myosins — identity-keyed by m.id (= MyoRod.thingInstanceId, the composite's stable key).
   // Rod, lever, motor have separate slot counters because rod can be invisible.
   // myoIdToSlot/myoSlotToId track the lever slot; motor uses the same slot (lever is never skipped).
@@ -1777,16 +1789,29 @@ function updateMyosinData(myosins, minifilaments, nodes) {
     }
   }
 
+  // Crosslinkers — thin bright-white cylinders between the two linked segment centres {a, b}.
+  let crosslinkCt = 0;
+  if (crosslinks) {
+    for (const c of crosslinks) {
+      if (crosslinkCt >= MAX_CROSSLINKS) break;
+      if (!setCylinderMatrix(c.a, c.b, 0.008, 0.02)) continue;   // min-length 0.02 µm so the short link still reads
+      crosslinkMesh.setMatrixAt(crosslinkCt, dummy.matrix);
+      crosslinkCt++;
+    }
+  }
+
   rodMesh.count = rodCt;
   leverMesh.count = leverCt;
   motorMesh.count = motorCt;
   minifilMesh.count = minifilCt;
   nodeMesh.count = nodeCt;
+  crosslinkMesh.count = crosslinkCt;
   rodMesh.instanceMatrix.needsUpdate = true;
   leverMesh.instanceMatrix.needsUpdate = true;
   motorMesh.instanceMatrix.needsUpdate = true;
   minifilMesh.instanceMatrix.needsUpdate = true;
   nodeMesh.instanceMatrix.needsUpdate = true;
+  crosslinkMesh.instanceMatrix.needsUpdate = true;
   if (motorMesh.instanceColor) motorMesh.instanceColor.needsUpdate = true;
 }
 
