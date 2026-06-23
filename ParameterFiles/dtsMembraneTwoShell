@@ -27,6 +27,7 @@ dtsCortexDragScale:true:5.0;        // heavier/slower cortex (stiff fast, remode
 dtsMcaStiffness:true:5.0e-4;        // per-linker spring (k*dt/gamma ~ 0.12 -> stable)
 dtsMcaRestGap:true:0.0;             // 0 -> use (bilayerR - cortexR) = 0.1
 dtsMcaForceMax:true:6.0e-12;        // ~6 pN per ERM-complex-scale linker
+dtsMcaLinkViz:true:3;               // emit every 3rd linker to the viewer (0=off; toggle/color in Display panel)
 
 // --- optional probe to perturb the bilayer (0 = pure rest test) ---
 dtsProbeForce:true:0.0;
