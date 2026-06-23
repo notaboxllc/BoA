@@ -990,8 +990,12 @@ function updateDtsMembranes(membranes) {
     if (s.surf.material.vertexColors !== heatOn) { s.surf.material.vertexColors = heatOn; s.surf.material.needsUpdate = true; }
     s.surf.material.opacity = heatOn ? Math.max(cfg.opacity, 0.55) : cfg.opacity;
 
-    const idx = s.geo.getIndex();
-    if (!idx || idx.count !== faces.length) s.geo.setIndex(new THREE.BufferAttribute(new Uint32Array(faces), 1));
+    // Re-upload the index EVERY frame: topology changes at constant face count (edge flips; split+collapse that
+    // net to the same nf), and collapse RENUMBERS vertices (swap-compaction). Updating only on a count change left
+    // the wireframe drawing stale faces on the new vertex numbering => spurious edges leaping across the mesh.
+    let idx = s.geo.getIndex();
+    if (!idx || idx.array.length < faces.length) { idx = new THREE.BufferAttribute(new Uint32Array(faces), 1); s.geo.setIndex(idx); }
+    else { idx.array.set(faces); idx.needsUpdate = true; }
     s.geo.setDrawRange(0, faces.length);
     s.geo.computeVertexNormals();
     s.geo.computeBoundingSphere();
