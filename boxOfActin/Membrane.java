@@ -1389,7 +1389,12 @@ public final class Membrane {
             int a=faceVert[3*f], b=faceVert[3*f+1], c=faceVert[3*f+2];
             double arp = (arpLocal[a]+arpLocal[b]+arpLocal[c]) / 3.0;
             if (arp <= 0.02) continue;
-            if (Thing.currentScratch().rng.nextDouble() >= rate*arp*dt) continue;
+            // Arp2/3 nucleation needs a G-actin monomer to seed the daughter, so the branch rate is [G-actin]-
+            // DEPENDENT (the same buffered free-actin elongation reads). With both branching and elongation ~[G-actin],
+            // the inter-branch SPACING (= elongation velocity / branch rate) is concentration-INDEPENDENT, matching
+            // the robust ~0.8 um/branch in cells -> dtsBranchRate is now a true rate constant, calibrated once.
+            double conc = Thing.theBox.getMonomerConc();    // free G-actin [uM]
+            if (Thing.currentScratch().rng.nextDouble() >= rate*arp*conc*dt) continue;
             // Real Arp2/3 branch: a daughter nucleates off this mother at a point in its barbed-end zone,
             // CONNECTED via an Arp23 junction (makeArpBranch handles the ~70deg structural angle + the helix
             // tilt + the mother-daughter linkage). The membrane-facing daughters then grow + ratchet + push.
