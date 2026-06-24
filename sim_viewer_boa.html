@@ -2100,7 +2100,10 @@ function eigenVecFor(xx, xy, xz, yy, yz, zz, lambda, out) {
 function loadFrame(n) {
   if (loading) return;
   loading = true;
-  fetch(frameUrl(n))
+  // cache:'no-store' — a run opened mid-write negative-caches 404s for not-yet-written frames; on reload the GET
+  // re-serves the cached 404, loadFrame's .catch silently keeps the last-rendered frame, and the geometry FREEZES at
+  // the old end while the slider still advances (the "frozen after frame N" symptom). Always fetch fresh.
+  fetch(frameUrl(n), { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => { currentFrameData = data; applyFrameData(data); loading = false; })
     .catch(() => { loading = false; });
