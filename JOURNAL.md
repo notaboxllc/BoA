@@ -1,5 +1,25 @@
 # BoxOfActin Project Journal
 
+## 2026-06-24 — Viewer "frozen after frame ~198" = a NaN-coord node = legacy equilibrateNodeNumber on a DTS membrane
+
+The s2_1sec run looked frozen past frame ~198 in the viewer. Root cause was a single node whose center went
+`[NaN,NaN,z]`; `NaN` is invalid JSON, so the browser's `r.json()` threw and the whole frame failed to load (scene
+stuck at 197 while the slider advanced). Python's json *accepts* NaN, which is why an earlier file check looked clean.
+- **The NaN node:** at setup, `equilNodes` is frozen to `ProteinNode.nodeCt`, which on a DTS config counts the ~5124
+  membrane vertices. A bilayer edge-collapse legitimately drops nodeCt by one, so `equilibrateNodeNumber()` re-adds a
+  node via the legacy Listeria-bug routine `rdmNodeInsideCurrentDistribution()` -> places it at
+  `sqrt(bugRadius^2 - z^2)` with z drawn from the membrane z-range (|z|~0.47) and bRad=bugRadius-nodeRadius=0.45 ->
+  negative radicand -> NaN x,y, finite z. Exactly `[NaN,NaN,-0.47]`.
+- **Why it was hard to repro:** seed-dependent (placement uses `Env.mtRNG`, seeded from `Math.random()`, value lost),
+  AND remesh is env-gated (`BOA_REMESH_N`/`BOA_COLLAPSE_N`) so collapse-off runs never trigger it. The `[COLLAPSE]`
+  log only prints on %500 steps, hiding the true first collapse (~step 23640, not the logged 58000). Reproduced via a
+  seed sweep with remesh ON: `BOA_RNG_SEED=5` fires `[NAN-BIRTH]` at step 23001 with the construction stack.
+- **Fixes (751ee7c):** (1) doLoop skips `equilibrateNodeNumber()` when a DTS membrane is present; (2) defensive
+  `Math.max(0,...)` clamp on the radicand. (3) Defense-in-depth: viewer parses NaN/Inf->null + drops non-finite
+  nodes/segments (2ececa1), and `ThreeJSWriter` skips non-finite nodes (7bf4fe3) so a future NaN can't break JSON.
+  Verified: seed 5 now runs clean to 25000 with collapses still active. Env-gated `BOA_NAN_BIRTH` tripwires left in
+  (Thing ctor construction guard + doLoop one-shot node scan).
+
 ## 2026-06-23 — 1s dendritic run: significant array, but branch density RUNS AWAY (treadmilling needed)
 
 Ran the calibrated two-shell dendritic config (conc-dependent branching, actinConc=16, capConc=7) for 1.0 s of
