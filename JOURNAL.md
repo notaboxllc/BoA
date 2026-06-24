@@ -1,5 +1,24 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — Concentration-dependent branching + density = branch/capping balance (calibrated to ~0.8 um/branch)
+
+Made Arp2/3 branching [G-actin]-dependent and bumped actin concentration, then found the real density regulator.
+- **Conc-dependent branching:** branch prob = rate*arp*getMonomerConc()*dt (nucleation needs a monomer; mirrors
+  addMonomerSim, dt-independent). dtsBranchRate is now a true rate constant. actinConc 8->16 (faster reach + genuine
+  bilayer push: bilayer protrudes to ~1.23 by growth, not ride-out).
+- **Spacing is NOT concentration-independent.** The naive velocity/rate cancellation is broken by leading-edge
+  branch gating + autocatalytic branching. The density is a branching/CAPPING balance ~ [G-actin].[Arp]/[capping]
+  (Pollard dendritic-nucleation): higher actin -> denser (biologically correct). Verified: capConc=2 densifies
+  autocatalytically to 0.22 um/branch (runaway, way too dense); the spacing differs strongly by [actin]
+  (conc=8 -> ~1.6, conc=16 -> ~0.22 at capConc=2).
+- **Capping is the regulator (it already exists: checkCapping, capRate*capConc*dt).** Raising capConc 2->7 BOUNDS
+  the density (no runaway) and lands the mature spacing at ~0.6-0.87 um/branch (centering ~0.8, the lamellipodia
+  literature value) at actinConc=16. Set in dtsMembraneStage2Dendritic. The [BRANCH-DENSITY] log reports um/branch
+  for re-tuning at other [actin].
+- Take-away: the literature branch SPACING emerges from the branch/cap balance, not the branch rate alone -- capConc
+  (or dtsBranchRate) tunes it; it shifts with [actin] as in real cells. Runs: RUN_LOGS/2026-06-23_stage2/s2conc*,
+  s2cap7.
+
 ## 2026-06-23 — Two-shell dendritic: branch rate tuned to literature spacing (~0.8 um/branch)
 
 User wanted a sparser dendritic network tuned to the literature inter-branch spacing. Lamellipodia electron
