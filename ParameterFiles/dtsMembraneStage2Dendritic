@@ -107,3 +107,7 @@ dtsArpOn:true:1.0;
 dtsBranchOn:true:1.0;
 dtsMcaForceMax:true:2.5e-12;
 runTime:true:0.25;
+
+// Gentle anchor cap (~3x the actin push, not the 100pN default) so the cortex tether anchors without
+// yanking the mother on branch events (was a sudden leap on first branch).
+dtsAnchorForceMax:true:1.5e-11;

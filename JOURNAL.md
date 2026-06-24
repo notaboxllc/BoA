@@ -45,8 +45,20 @@ free-ride (actin + membrane co-drifting outward, ~0.12 µm unbounded, single she
   ON by default in two-shell mode and gates against the BILAYER (was opt-in + gated on the cortex). Daughters load
   the bilayer only as they GROW (ratchet-throttled, gentle). Branches still form (80+ vs ~102 ungated), cortex bulk
   steady (mean 1.100), no leap. Run: stage2dend_gate.
-- **OPEN:** the local cortex still distends ~0.04 at a protrusion base (further reducible via a lower MCA cap or
-  rung-D breaking linkers -> true bleb); MCA cap is the main residual-superman knob.
+- **BRANCH-LEAP root cause = over-strong tether; fixed.** A mother leapt (outward pre-gate, inward post-gate) on
+  branching. Instrumented (BOA_INWARD_DIAG, FilSegment.dbgBranchAtStep + [INWARD] per-step trajectory): the
+  pointed-end tether was PINNED AT ITS CAP (dtsAnchorForceMax default 1e-10 = 100 pN, 20x the 5 pN actin push), so
+  it constantly yanked the mother's pointed end toward the moving cortex vertex; a branch tipped which way it
+  snapped. Lowering the cap to 1.5e-11 (15 pN, 3x push) shrank the branch-step jump from ~13 nm to ~2 nm (symmetric,
+  invisible). Set in dtsMembraneStage2/Stage2Dendritic.
+- **IMPORTANT side finding: the big protrusion was mostly ride-out.** With the gentle cap the bilayer barely
+  protrudes (maxR 1.201) and the cortex is flat (mean 1.100) -- residual superman GONE -- but the actin barbed tips
+  only reach R~1.15, NOT the bilayer (1.2). So the earlier large protrusion (1.27) was the 100 pN tether DRAGGING
+  the mothers out to the bilayer (ride-out), not polymerization. Honest actin-driven protrusion is small and
+  GROWTH-LIMITED: to push the bilayer the actin must grow out ~0.1 um to reach it (polymerization rate / run length
+  / filament bundling), independent of the anchor cap. This is the real open item, not the cap.
+- **OPEN:** make the actin genuinely reach + push the bilayer (faster growth / longer runs / bundling) now that the
+  ride-out crutch is removed; local cortex distension is tiny with the gentle cap; MCA cap still tunable.
 
 ## 2026-06-23 — Two-shell membrane STAGE 1: bilayer + cortex + sliding MCA linkers — STABLE
 

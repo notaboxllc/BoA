@@ -173,6 +173,7 @@ public class FilSegment extends Thing {
 	                                      // the bond re-selects the membrane vertex nearest this direction each step,
 	                                      // so the anchor stays at a fixed angular position while the mesh flows under it.
 	public double dbgAnchorF = 0, dbgAnchorOff = 0;   // last formin-bond force/offset, for the single-filament diagnostic
+	public int dbgBranchAtStep = -1;   // step at which this filament got a branch (BOA_INWARD_DIAG trajectory window)
 	Pt3D end2Pt = new Pt3D();
 	// Inc 1 (2026-06-09): A1 conversion. Neighbour endpoint identity used to be
 	// encoded by the reference-identity check `ptAtEnd? == endNFil.end?Pt`, with
@@ -1377,6 +1378,7 @@ public class FilSegment extends Thing {
 		arpChildLoc[arpChildCt] = bLoc;
 		arpActive[arpChildCt] = true;
 		arpChildCt++;
+		if (arpChildCt == 1) dbgBranchAtStep = Env.counter;   // first branch -> open the BOA_INWARD_DIAG window
 
 		return dFil;
 	}

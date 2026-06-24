@@ -1245,6 +1245,7 @@ public final class Membrane {
                     double off = Math.sqrt(ax*ax+ay*ay+az*az); if (off < 1e-12) off = 1;
                     double fx=m*ax/off, fy=m*ay/off, fz=m*az/off;
                     force.setVals(fx,fy,fz); pt.setVals(e1x,e1y,e1z); fs.incForceSum(force, pt);
+                    fs.dbgAnchorF = m; fs.dbgAnchorOff = off;   // record the pointed-end tether force for diagnostics
                     // TWO-SHELL (Stage 2): when the base is anchored to the CORTEX, make the tether TWO-SIDED so the
                     // filament's push-reaction loads the cortex INWARD. This is what makes the cortex the genuine
                     // reaction surface: the inward actin reaction counters the MCA's outward drag (the bilayer bulge
@@ -1263,6 +1264,13 @@ public final class Membrane {
             double gSeg = fs.bTransGam.y;                              // perpendicular filament drag
             if (fs.childOfArp23 && System.getenv("BOA_NO_DAUGHTER_STERIC") != null) { r1[0]=r1[1]=r1[2]=0; r2[0]=r2[1]=r2[2]=0; }
             else segmentVsMembrane(e1x,e1y,e1z, e2x,e2y,e2z, rad, gSeg, r1, r2);
+            if (System.getenv("BOA_INWARD_DIAG") != null && fs.dbgBranchAtStep >= 0 && Env.counter - fs.dbgBranchAtStep <= 25) {
+                double e1R=Math.sqrt((e1x-center.x)*(e1x-center.x)+(e1y-center.y)*(e1y-center.y)+(e1z-center.z)*(e1z-center.z));
+                double e2R=Math.sqrt((e2x-center.x)*(e2x-center.x)+(e2y-center.y)*(e2y-center.y)+(e2z-center.z)*(e2z-center.z));
+                double st=Math.sqrt((r1[0]+r2[0])*(r1[0]+r2[0])+(r1[1]+r2[1])*(r1[1]+r2[1])+(r1[2]+r2[2])*(r1[2]+r2[2]));
+                Thing.talkln(String.format("[INWARD] br+%d momId=%d e1R=%.4f e2R=%.4f kids=%d anchorF=%.3e steric=%.3e len=%.4f",
+                    Env.counter-fs.dbgBranchAtStep, fs.thingInstanceId, e1R, e2R, fs.arpChildCt, fs.dbgAnchorF, st, fs.length));
+            }
             // SINGLE-FILAMENT force-state diagnostic (BOA_MOM_DIAG): log every formin mother each output frame so a
             // reported "frame interval" can be mapped to its force state (anchor force, steric reaction, tip clearance,
             // length, drag, cap/bond flags) -- to catch the occasional "force state jump".

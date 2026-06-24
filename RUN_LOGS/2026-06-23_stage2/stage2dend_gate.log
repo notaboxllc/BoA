@@ -417,3 +417,320 @@ Sim. time=00.12....~31.04 minutes computation to simulate 1 sec, run finished in
 [FLIP] step 13000 membrane#1 flips=0/7680 verify=true
 [DTS-BRANCH] step 13000  fils=95 nearCortex=88 rejBorn=0  totalBranches=60
 [DTS-ACTIN] step 13000  filaments contacting membrane = 9 / 95
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=2798.7 cumMaxPerThread=936
+[DTS-E] step 13500  E bend=2.536e-18 area=7.983e-22 vol=5.888e-21 tot=2.543e-18 J   A=18.0744/18.0739  V=7.2201/7.2226 um  |F|max=1.21e-12 N
+[DTS-E] step 13500  E bend=5.059e-17 area=1.694e-22 vol=8.097e-21 tot=5.060e-17 J   A=15.1872/15.1871  V=5.5610/5.5632 um  |F|max=2.07e-11 N
+[DTS-ARP] step 13500  maxConc=1.0000  meanConc=0.0808  spread=1490/2562 verts >1%
+[DTS-FORMIN] step 13500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 13500 linked=2565/2565  gap=0.100  bilayerMaxR=1.236 cortexMaxR=1.134
+[FLIP] step 13500 membrane#0 flips=0/7689 verify=true
+[FLIP] step 13500 membrane#1 flips=1/7680 verify=true
+[DTS-ACTIN] step 13500  filaments contacting membrane = 10 / 101
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=2799.9 cumMaxPerThread=938
+Sim. time=00.14....~31.47 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[DTS-E] step 14000  E bend=2.536e-18 area=7.337e-22 vol=5.655e-21 tot=2.542e-18 J   A=18.0744/18.0739  V=7.2202/7.2226 um  |F|max=1.23e-12 N
+[DTS-E] step 14000  E bend=5.058e-17 area=6.464e-23 vol=7.915e-21 tot=5.059e-17 J   A=15.1872/15.1871  V=5.5610/5.5632 um  |F|max=1.25e-11 N
+[DTS-ARP] step 14000  maxConc=1.0000  meanConc=0.0808  spread=1490/2562 verts >1%
+[DTS-FORMIN] step 14000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 14000 linked=2567/2567  gap=0.100  bilayerMaxR=1.235 cortexMaxR=1.133
+[FLIP] step 14000 membrane#0 flips=0/7695 verify=true
+[FLIP] step 14000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 14000  fils=106 nearCortex=98 rejBorn=0  totalBranches=71
+[DTS-ACTIN] step 14000  filaments contacting membrane = 11 / 106
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=2801.1 cumMaxPerThread=941
+[DTS-E] step 14500  E bend=2.535e-18 area=5.919e-22 vol=4.934e-21 tot=2.541e-18 J   A=18.0743/18.0739  V=7.2203/7.2226 um  |F|max=1.00e-12 N
+[DTS-E] step 14500  E bend=5.057e-17 area=3.514e-22 vol=6.871e-21 tot=5.058e-17 J   A=15.1872/15.1871  V=5.5612/5.5632 um  |F|max=1.15e-11 N
+[DTS-ARP] step 14500  maxConc=1.0000  meanConc=0.0806  spread=1489/2562 verts >1%
+[DTS-FORMIN] step 14500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 14500 linked=2567/2567  gap=0.100  bilayerMaxR=1.236 cortexMaxR=1.133
+[FLIP] step 14500 membrane#0 flips=0/7695 verify=true
+[FLIP] step 14500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 14500  filaments contacting membrane = 10 / 106
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=2802.2 cumMaxPerThread=941
+[DTS-E] step 15000  E bend=2.536e-18 area=6.118e-22 vol=4.740e-21 tot=2.541e-18 J   A=18.0743/18.0739  V=7.2204/7.2226 um  |F|max=9.88e-13 N
+[DTS-E] step 15000  E bend=5.058e-17 area=2.796e-22 vol=6.613e-21 tot=5.058e-17 J   A=15.1872/15.1871  V=5.5612/5.5632 um  |F|max=2.90e-11 N
+[DTS-ARP] step 15000  maxConc=1.0000  meanConc=0.0808  spread=1489/2562 verts >1%
+[DTS-FORMIN] step 15000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 15000 linked=2567/2567  gap=0.100  bilayerMaxR=1.235 cortexMaxR=1.132
+[FLIP] step 15000 membrane#0 flips=0/7695 verify=true
+[FLIP] step 15000 membrane#1 flips=2/7680 verify=true
+[DTS-BRANCH] step 15000  fils=109 nearCortex=99 rejBorn=0  totalBranches=74
+[DTS-ACTIN] step 15000  filaments contacting membrane = 10 / 109
+[RATCHET] poly vs gap g to membrane (delta=monomer, f=1.50e-12 N). meanFactor=closure output; relRate=realized:
+  g<0 (overlap)  samples=1828      events=71       meanFactor=0.374  relRate=0.411
+  0.0-0.2d       samples=61        events=1        meanFactor=0.406  relRate=0.173
+  0.2-0.4d       samples=42        events=1        meanFactor=0.508  relRate=0.252
+  0.4-0.6d       samples=29        events=2        meanFactor=0.606  relRate=0.729
+  0.6-0.8d       samples=57        events=3        meanFactor=0.741  relRate=0.556
+  0.8-1.0d       samples=42        events=4        meanFactor=0.916  relRate=1.007
+  1-2d           samples=234       events=24       meanFactor=1.000  relRate=1.084
+  g>=2d (free)   samples=4419      events=418      meanFactor=1.000  relRate=1.000
+  TOTAL eligible tip-fires=6712  poly events=524  (boundary g<delta share=30.7%)
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=2803.2 cumMaxPerThread=943
+[DTS-E] step 15500  E bend=2.536e-18 area=4.885e-22 vol=4.655e-21 tot=2.541e-18 J   A=18.0743/18.0739  V=7.2204/7.2226 um  |F|max=1.05e-12 N
+[DTS-E] step 15500  E bend=5.068e-17 area=4.431e-21 vol=6.255e-21 tot=5.069e-17 J   A=15.1874/15.1871  V=5.5613/5.5632 um  |F|max=2.18e-11 N
+[DTS-ARP] step 15500  maxConc=1.0000  meanConc=0.0814  spread=1491/2562 verts >1%
+[DTS-FORMIN] step 15500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 15500 linked=2566/2566  gap=0.100  bilayerMaxR=1.236 cortexMaxR=1.133
+[FLIP] step 15500 membrane#0 flips=0/7692 verify=true
+[FLIP] step 15500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 15500  filaments contacting membrane = 8 / 116
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=2804.1 cumMaxPerThread=943
+Sim. time=00.16....~30.82 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+[DTS-E] step 16000  E bend=2.539e-18 area=5.514e-22 vol=4.726e-21 tot=2.545e-18 J   A=18.0743/18.0739  V=7.2204/7.2226 um  |F|max=1.15e-12 N
+[DTS-E] step 16000  E bend=5.066e-17 area=2.555e-21 vol=6.491e-21 tot=5.067e-17 J   A=15.1874/15.1871  V=5.5612/5.5632 um  |F|max=3.73e-11 N
+[DTS-ARP] step 16000  maxConc=1.0000  meanConc=0.0814  spread=1498/2562 verts >1%
+[DTS-FORMIN] step 16000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 16000 linked=2568/2568  gap=0.100  bilayerMaxR=1.236 cortexMaxR=1.134
+[FLIP] step 16000 membrane#0 flips=0/7698 verify=true
+[FLIP] step 16000 membrane#1 flips=1/7680 verify=true
+[DTS-BRANCH] step 16000  fils=119 nearCortex=108 rejBorn=0  totalBranches=84
+[DTS-ACTIN] step 16000  filaments contacting membrane = 10 / 119
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=2805.0 cumMaxPerThread=943
+[DTS-E] step 16500  E bend=2.540e-18 area=5.791e-22 vol=4.974e-21 tot=2.546e-18 J   A=18.0743/18.0739  V=7.2203/7.2226 um  |F|max=1.16e-12 N
+[DTS-E] step 16500  E bend=5.070e-17 area=2.788e-21 vol=6.820e-21 tot=5.071e-17 J   A=15.1874/15.1871  V=5.5612/5.5632 um  |F|max=4.44e-11 N
+[DTS-ARP] step 16500  maxConc=1.0000  meanConc=0.0820  spread=1500/2562 verts >1%
+[DTS-FORMIN] step 16500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 16500 linked=2567/2567  gap=0.100  bilayerMaxR=1.237 cortexMaxR=1.134
+[FLIP] step 16500 membrane#0 flips=0/7695 verify=true
+[FLIP] step 16500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 16500  filaments contacting membrane = 9 / 124
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=2805.9 cumMaxPerThread=943
+[DTS-E] step 17000  E bend=2.545e-18 area=6.615e-22 vol=5.397e-21 tot=2.551e-18 J   A=18.0743/18.0739  V=7.2202/7.2226 um  |F|max=1.49e-12 N
+[DTS-E] step 17000  E bend=5.074e-17 area=1.933e-21 vol=7.485e-21 tot=5.075e-17 J   A=15.1873/15.1871  V=5.5611/5.5632 um  |F|max=3.46e-11 N
+[DTS-ARP] step 17000  maxConc=1.0000  meanConc=0.0819  spread=1500/2562 verts >1%
+[DTS-FORMIN] step 17000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 17000 linked=2567/2567  gap=0.100  bilayerMaxR=1.239 cortexMaxR=1.134
+[FLIP] step 17000 membrane#0 flips=0/7695 verify=true
+[FLIP] step 17000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 17000  fils=133 nearCortex=121 rejBorn=0  totalBranches=98
+[DTS-ACTIN] step 17000  filaments contacting membrane = 10 / 133
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=2806.8 cumMaxPerThread=946
+[DTS-E] step 17500  E bend=2.545e-18 area=6.360e-22 vol=5.459e-21 tot=2.551e-18 J   A=18.0743/18.0739  V=7.2202/7.2226 um  |F|max=1.66e-12 N
+[DTS-E] step 17500  E bend=5.070e-17 area=9.323e-22 vol=7.730e-21 tot=5.071e-17 J   A=15.1873/15.1871  V=5.5610/5.5632 um  |F|max=4.36e-11 N
+[DTS-ARP] step 17500  maxConc=1.0000  meanConc=0.0819  spread=1499/2562 verts >1%
+[DTS-FORMIN] step 17500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 17500 linked=2569/2569  gap=0.100  bilayerMaxR=1.240 cortexMaxR=1.135
+[FLIP] step 17500 membrane#0 flips=0/7701 verify=true
+[FLIP] step 17500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 17500  filaments contacting membrane = 13 / 143
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=2807.7 cumMaxPerThread=950
+Sim. time=00.18....~30.92 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[DTS-E] step 18000  E bend=2.541e-18 area=1.377e-21 vol=6.142e-21 tot=2.548e-18 J   A=18.0745/18.0739  V=7.2201/7.2226 um  |F|max=1.82e-12 N
+[DTS-E] step 18000  E bend=5.069e-17 area=1.291e-21 vol=7.674e-21 tot=5.070e-17 J   A=15.1873/15.1871  V=5.5611/5.5632 um  |F|max=3.18e-11 N
+[DTS-ARP] step 18000  maxConc=1.0000  meanConc=0.0826  spread=1501/2562 verts >1%
+[DTS-FORMIN] step 18000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 18000 linked=2569/2569  gap=0.100  bilayerMaxR=1.240 cortexMaxR=1.136
+[FLIP] step 18000 membrane#0 flips=0/7701 verify=true
+[FLIP] step 18000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 18000  fils=151 nearCortex=136 rejBorn=0  totalBranches=116
+[DTS-ACTIN] step 18000  filaments contacting membrane = 12 / 151
+[RATCHET] poly vs gap g to membrane (delta=monomer, f=1.50e-12 N). meanFactor=closure output; relRate=realized:
+  g<0 (overlap)  samples=2328      events=94       meanFactor=0.374  relRate=0.420
+  0.0-0.2d       samples=72        events=2        meanFactor=0.405  relRate=0.289
+  0.2-0.4d       samples=52        events=1        meanFactor=0.509  relRate=0.200
+  0.4-0.6d       samples=37        events=3        meanFactor=0.607  relRate=0.844
+  0.6-0.8d       samples=60        events=3        meanFactor=0.741  relRate=0.520
+  0.8-1.0d       samples=45        events=6        meanFactor=0.914  relRate=1.388
+  1-2d           samples=259       events=27       meanFactor=1.000  relRate=1.085
+  g>=2d (free)   samples=6275      events=603      meanFactor=1.000  relRate=1.000
+  TOTAL eligible tip-fires=9128  poly events=739  (boundary g<delta share=28.4%)
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=2808.7 cumMaxPerThread=954
+[DTS-E] step 18500  E bend=2.544e-18 area=2.813e-22 vol=6.853e-21 tot=2.551e-18 J   A=18.0742/18.0739  V=7.2199/7.2226 um  |F|max=4.64e-12 N
+[DTS-E] step 18500  E bend=5.066e-17 area=2.389e-21 vol=1.079e-20 tot=5.067e-17 J   A=15.1874/15.1871  V=5.5606/5.5632 um  |F|max=2.84e-11 N
+[DTS-ARP] step 18500  maxConc=1.0000  meanConc=0.0832  spread=1504/2562 verts >1%
+[DTS-FORMIN] step 18500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 18500 linked=2569/2569  gap=0.100  bilayerMaxR=1.241 cortexMaxR=1.137
+[FLIP] step 18500 membrane#0 flips=0/7701 verify=true
+[FLIP] step 18500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 18500  filaments contacting membrane = 13 / 157
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=2809.6 cumMaxPerThread=955
+[DTS-E] step 19000  E bend=2.546e-18 area=3.610e-23 vol=8.662e-21 tot=2.555e-18 J   A=18.0739/18.0739  V=7.2196/7.2226 um  |F|max=1.86e-12 N
+[DTS-E] step 19000  E bend=5.065e-17 area=8.715e-22 vol=1.666e-20 tot=5.067e-17 J   A=15.1873/15.1871  V=5.5600/5.5632 um  |F|max=3.65e-11 N
+[DTS-ARP] step 19000  maxConc=1.0000  meanConc=0.0836  spread=1504/2562 verts >1%
+[DTS-FORMIN] step 19000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 19000 linked=2568/2568  gap=0.100  bilayerMaxR=1.241 cortexMaxR=1.137
+[FLIP] step 19000 membrane#0 flips=0/7698 verify=true
+[FLIP] step 19000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 19000  fils=166 nearCortex=154 rejBorn=0  totalBranches=131
+[DTS-ACTIN] step 19000  filaments contacting membrane = 13 / 166
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=2810.4 cumMaxPerThread=955
+[DTS-E] step 19500  E bend=2.549e-18 area=1.813e-22 vol=7.299e-21 tot=2.556e-18 J   A=18.0742/18.0739  V=7.2198/7.2226 um  |F|max=1.89e-12 N
+[DTS-E] step 19500  E bend=5.022e-17 area=8.246e-22 vol=1.402e-20 tot=5.023e-17 J   A=15.1873/15.1871  V=5.5603/5.5632 um  |F|max=7.44e-11 N
+[DTS-ARP] step 19500  maxConc=1.0000  meanConc=0.0840  spread=1504/2562 verts >1%
+[DTS-FORMIN] step 19500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 19500 linked=2571/2571  gap=0.100  bilayerMaxR=1.241 cortexMaxR=1.135
+[FLIP] step 19500 membrane#0 flips=0/7707 verify=true
+[FLIP] step 19500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 19500  filaments contacting membrane = 13 / 177
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=2811.3 cumMaxPerThread=955
+Sim. time=00.20....~32.00 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[DTS-E] step 20000  E bend=2.552e-18 area=8.684e-23 vol=8.244e-21 tot=2.560e-18 J   A=18.0741/18.0739  V=7.2197/7.2226 um  |F|max=1.76e-12 N
+[DTS-E] step 20000  E bend=5.009e-17 area=1.184e-22 vol=1.804e-20 tot=5.011e-17 J   A=15.1872/15.1871  V=5.5599/5.5632 um  |F|max=5.45e-11 N
+[DTS-ARP] step 20000  maxConc=1.0000  meanConc=0.0848  spread=1506/2562 verts >1%
+[DTS-FORMIN] step 20000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 20000 linked=2571/2571  gap=0.100  bilayerMaxR=1.242 cortexMaxR=1.136
+[FLIP] step 20000 membrane#0 flips=1/7707 verify=true
+[FLIP] step 20000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 20000  fils=186 nearCortex=175 rejBorn=0  totalBranches=151
+[DTS-ACTIN] step 20000  filaments contacting membrane = 14 / 186
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=2812.0 cumMaxPerThread=955
+[DTS-E] step 20500  E bend=2.560e-18 area=9.537e-23 vol=9.759e-21 tot=2.570e-18 J   A=18.0741/18.0739  V=7.2194/7.2226 um  |F|max=2.50e-12 N
+[DTS-E] step 20500  E bend=5.023e-17 area=1.865e-21 vol=2.311e-20 tot=5.025e-17 J   A=15.1869/15.1871  V=5.5595/5.5632 um  |F|max=8.50e-11 N
+[DTS-ARP] step 20500  maxConc=1.0000  meanConc=0.0847  spread=1507/2562 verts >1%
+[DTS-FORMIN] step 20500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 20500 linked=2569/2569  gap=0.100  bilayerMaxR=1.242 cortexMaxR=1.141
+[FLIP] step 20500 membrane#0 flips=0/7701 verify=true
+[FLIP] step 20500 membrane#1 flips=5/7680 verify=true
+[DTS-ACTIN] step 20500  filaments contacting membrane = 12 / 205
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=2812.9 cumMaxPerThread=955
+[DTS-E] step 21000  E bend=2.594e-18 area=2.134e-21 vol=1.744e-20 tot=2.614e-18 J   A=18.0747/18.0739  V=7.2183/7.2226 um  |F|max=2.07e-12 N
+[DTS-E] step 21000  E bend=4.983e-17 area=2.775e-20 vol=4.791e-20 tot=4.991e-17 J   A=15.1864/15.1871  V=5.5578/5.5632 um  |F|max=1.01e-10 N
+[DTS-ARP] step 21000  maxConc=1.0000  meanConc=0.0846  spread=1507/2562 verts >1%
+[DTS-FORMIN] step 21000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 21000 linked=2568/2568  gap=0.100  bilayerMaxR=1.242 cortexMaxR=1.144
+[FLIP] step 21000 membrane#0 flips=0/7698 verify=true
+[FLIP] step 21000 membrane#1 flips=1/7680 verify=true
+[DTS-BRANCH] step 21000  fils=213 nearCortex=198 rejBorn=0  totalBranches=179
+[DTS-ACTIN] step 21000  filaments contacting membrane = 14 / 213
+[RATCHET] poly vs gap g to membrane (delta=monomer, f=1.50e-12 N). meanFactor=closure output; relRate=realized:
+  g<0 (overlap)  samples=2992      events=119      meanFactor=0.374  relRate=0.411
+  0.0-0.2d       samples=99        events=2        meanFactor=0.408  relRate=0.209
+  0.2-0.4d       samples=63        events=1        meanFactor=0.507  relRate=0.164
+  0.4-0.6d       samples=48        events=4        meanFactor=0.605  relRate=0.860
+  0.6-0.8d       samples=71        events=4        meanFactor=0.741  relRate=0.582
+  0.8-1.0d       samples=57        events=6        meanFactor=0.915  relRate=1.087
+  1-2d           samples=349       events=32       meanFactor=1.000  relRate=0.947
+  g>=2d (free)   samples=8868      events=859      meanFactor=1.000  relRate=1.000
+  TOTAL eligible tip-fires=12547  poly events=1027  (boundary g<delta share=26.5%)
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=2813.7 cumMaxPerThread=955
+[DTS-E] step 21500  E bend=2.668e-18 area=3.785e-22 vol=3.299e-20 tot=2.702e-18 J   A=18.0743/18.0739  V=7.2167/7.2226 um  |F|max=3.36e-12 N
+[DTS-E] step 21500  E bend=4.953e-17 area=3.785e-21 vol=7.271e-20 tot=4.960e-17 J   A=15.1869/15.1871  V=5.5565/5.5632 um  |F|max=4.84e-11 N
+[DTS-ARP] step 21500  maxConc=1.0000  meanConc=0.0856  spread=1509/2562 verts >1%
+[DTS-FORMIN] step 21500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 21500 linked=2572/2572  gap=0.100  bilayerMaxR=1.264 cortexMaxR=1.164
+[FLIP] step 21500 membrane#0 flips=0/7710 verify=true
+[FLIP] step 21500 membrane#1 flips=1/7680 verify=true
+[DTS-ACTIN] step 21500  filaments contacting membrane = 14 / 229
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=2814.6 cumMaxPerThread=955
+Sim. time=00.22....~33.38 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[DTS-E] step 22000  E bend=2.728e-18 area=6.207e-21 vol=9.416e-20 tot=2.828e-18 J   A=18.0752/18.0739  V=7.2127/7.2226 um  |F|max=4.47e-12 N
+[DTS-E] step 22000  E bend=4.981e-17 area=7.698e-20 vol=2.128e-19 tot=5.010e-17 J   A=15.1859/15.1871  V=5.5518/5.5632 um  |F|max=1.44e-10 N
+[DTS-ARP] step 22000  maxConc=1.0000  meanConc=0.0860  spread=1514/2562 verts >1%
+[DTS-FORMIN] step 22000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 22000 linked=2573/2573  gap=0.100  bilayerMaxR=1.301 cortexMaxR=1.197
+[FLIP] step 22000 membrane#0 flips=0/7713 verify=true
+[FLIP] step 22000 membrane#1 flips=3/7680 verify=true
+[DTS-BRANCH] step 22000  fils=241 nearCortex=224 rejBorn=0  totalBranches=207
+[DTS-ACTIN] step 22000  filaments contacting membrane = 16 / 241
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=2815.5 cumMaxPerThread=955
+[DTS-E] step 22500  E bend=2.733e-18 area=3.010e-21 vol=1.370e-19 tot=2.873e-18 J   A=18.0748/18.0739  V=7.2106/7.2226 um  |F|max=2.87e-12 N
+[DTS-E] step 22500  E bend=4.910e-17 area=3.999e-20 vol=3.068e-19 tot=4.945e-17 J   A=15.1880/15.1871  V=5.5495/5.5632 um  |F|max=6.11e-11 N
+[DTS-ARP] step 22500  maxConc=1.0000  meanConc=0.0858  spread=1508/2562 verts >1%
+[DTS-FORMIN] step 22500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 22500 linked=2572/2572  gap=0.100  bilayerMaxR=1.303 cortexMaxR=1.209
+[FLIP] step 22500 membrane#0 flips=4/7710 verify=true
+[FLIP] step 22500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 22500  filaments contacting membrane = 14 / 253
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=2816.3 cumMaxPerThread=955
+[DTS-E] step 23000  E bend=2.748e-18 area=4.254e-21 vol=1.721e-19 tot=2.924e-18 J   A=18.0750/18.0739  V=7.2092/7.2226 um  |F|max=3.48e-12 N
+[DTS-E] step 23000  E bend=4.920e-17 area=4.070e-20 vol=2.486e-19 tot=4.949e-17 J   A=15.1880/15.1871  V=5.5508/5.5632 um  |F|max=3.54e-11 N
+[DTS-ARP] step 23000  maxConc=1.0000  meanConc=0.0854  spread=1511/2562 verts >1%
+[DTS-FORMIN] step 23000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 23000 linked=2573/2573  gap=0.100  bilayerMaxR=1.312 cortexMaxR=1.220
+[FLIP] step 23000 membrane#0 flips=0/7713 verify=true
+[FLIP] step 23000 membrane#1 flips=0/7680 verify=true
+[DTS-BRANCH] step 23000  fils=269 nearCortex=240 rejBorn=0  totalBranches=235
+[DTS-ACTIN] step 23000  filaments contacting membrane = 14 / 269
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=2817.2 cumMaxPerThread=955
+[DTS-E] step 23500  E bend=2.659e-18 area=2.061e-21 vol=1.348e-19 tot=2.796e-18 J   A=18.0747/18.0739  V=7.2107/7.2226 um  |F|max=2.86e-12 N
+[DTS-E] step 23500  E bend=4.920e-17 area=3.849e-22 vol=2.295e-19 tot=4.943e-17 J   A=15.1872/15.1871  V=5.5513/5.5632 um  |F|max=4.80e-11 N
+[DTS-ARP] step 23500  maxConc=1.0000  meanConc=0.0853  spread=1513/2562 verts >1%
+[DTS-FORMIN] step 23500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 23500 linked=2578/2578  gap=0.100  bilayerMaxR=1.284 cortexMaxR=1.187
+[FLIP] step 23500 membrane#0 flips=0/7728 verify=true
+[FLIP] step 23500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 23500  filaments contacting membrane = 13 / 281
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=2818.0 cumMaxPerThread=955
+Sim. time=00.24....~35.00 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[DTS-E] step 24000  E bend=2.620e-18 area=4.151e-21 vol=1.905e-19 tot=2.814e-18 J   A=18.0749/18.0739  V=7.2085/7.2226 um  |F|max=2.01e-12 N
+[DTS-E] step 24000  E bend=4.943e-17 area=1.315e-19 vol=3.640e-19 tot=4.992e-17 J   A=15.1855/15.1871  V=5.5482/5.5632 um  |F|max=6.86e-11 N
+[DTS-ARP] step 24000  maxConc=1.0000  meanConc=0.0854  spread=1513/2562 verts >1%
+[DTS-FORMIN] step 24000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 24000 linked=2583/2583  gap=0.100  bilayerMaxR=1.274 cortexMaxR=1.175
+[FLIP] step 24000 membrane#0 flips=1/7743 verify=true
+[FLIP] step 24000 membrane#1 flips=1/7680 verify=true
+[DTS-BRANCH] step 24000  fils=296 nearCortex=271 rejBorn=0  totalBranches=263
+[DTS-ACTIN] step 24000  filaments contacting membrane = 16 / 297
+[RATCHET] poly vs gap g to membrane (delta=monomer, f=1.50e-12 N). meanFactor=closure output; relRate=realized:
+  g<0 (overlap)  samples=3948      events=150      meanFactor=0.374  relRate=0.388
+  0.0-0.2d       samples=135       events=4        meanFactor=0.410  relRate=0.302
+  0.2-0.4d       samples=92        events=2        meanFactor=0.507  relRate=0.222
+  0.4-0.6d       samples=74        events=7        meanFactor=0.607  relRate=0.965
+  0.6-0.8d       samples=92        events=6        meanFactor=0.741  relRate=0.665
+  0.8-1.0d       samples=69        events=7        meanFactor=0.918  relRate=1.035
+  1-2d           samples=468       events=46       meanFactor=1.000  relRate=1.003
+  g>=2d (free)   samples=12587     events=1234     meanFactor=1.000  relRate=1.000
+  TOTAL eligible tip-fires=17465  poly events=1456  (boundary g<delta share=25.3%)
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=2818.9 cumMaxPerThread=955
+[DTS-E] step 24500  E bend=2.627e-18 area=8.000e-21 vol=2.611e-19 tot=2.896e-18 J   A=18.0753/18.0739  V=7.2061/7.2226 um  |F|max=2.42e-12 N
+[DTS-E] step 24500  E bend=4.903e-17 area=2.565e-20 vol=4.141e-19 tot=4.947e-17 J   A=15.1879/15.1871  V=5.5472/5.5632 um  |F|max=3.25e-11 N
+[DTS-ARP] step 24500  maxConc=1.0000  meanConc=0.0856  spread=1513/2562 verts >1%
+[DTS-FORMIN] step 24500  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 24500 linked=2582/2582  gap=0.100  bilayerMaxR=1.277 cortexMaxR=1.179
+[FLIP] step 24500 membrane#0 flips=0/7740 verify=true
+[FLIP] step 24500 membrane#1 flips=0/7680 verify=true
+[DTS-ACTIN] step 24500  filaments contacting membrane = 14 / 314
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=2819.9 cumMaxPerThread=955
+[DTS-E] step 25000  E bend=2.652e-18 area=1.290e-20 vol=3.344e-19 tot=2.999e-18 J   A=18.0757/18.0739  V=7.2039/7.2226 um  |F|max=2.83e-12 N
+[DTS-E] step 25000  E bend=4.929e-17 area=1.053e-20 vol=5.032e-19 tot=4.981e-17 J   A=15.1867/15.1871  V=5.5456/5.5632 um  |F|max=8.36e-11 N
+[DTS-ARP] step 25000  maxConc=1.0000  meanConc=0.0859  spread=1516/2562 verts >1%
+[DTS-FORMIN] step 25000  mothers nucleated=36  pool remaining=0.0 over 0 hot verts
+[MCA] step 25000 linked=2587/2587  gap=0.100  bilayerMaxR=1.281 cortexMaxR=1.185
+[FLIP] step 25000 membrane#0 flips=0/7755 verify=true
+[FLIP] step 25000 membrane#1 flips=1/7680 verify=true
+[DTS-BRANCH] step 25000  fils=334 nearCortex=293 rejBorn=0  totalBranches=301
+[DTS-ACTIN] step 25000  filaments contacting membrane = 16 / 334
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=0
+[STATS] filLinks=8 (active=8 inactive=1)
+[STATS] linkCtMean=1.40 (samples=25100) linkCtMeanSettled=2.79 (samples=12600) finalActive=8
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=336 monomers=4404 fActinUM=0.01 meanSegLenUM=0.038 freePoolUM=7.99
+[STATS] mem usedHeapMB=2414.3 maxHeapMB=5368.7
+[STATS] percolation filaments=336 activeLinks=7 linksPerFil=0.021 largestComp=2 (0.6% of fils) spanX=0.00 spanY=0.00 spanZ=0.00 spanFrac=0.00 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=0.000
+ThingStep Threads took 70.861000 seconds.
+ThingBrownian Threads took 9.372000 seconds.
+Myosin Threads took 0.000000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 5.125000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 18.429000 seconds.
+Ck Mesh Threads took 38.068000 seconds.
+Ck Mots Threads took 0.000000 seconds.
+XLink Threads took 1.090000 seconds.
+Arp23 Threads took 2.952000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 7.556000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 7.483000 seconds.
+Finished closing JSON plots!

@@ -100,3 +100,5 @@ dtsMcaLinkViz:true:3;
 dtsArpOn:false:0.0;
 dtsBranchOn:false:0.0;
 runTime:true:0.12;
+
+dtsAnchorForceMax:true:1.5e-11;
