@@ -12,11 +12,17 @@ Made Arp2/3 branching [G-actin]-dependent and bumped actin concentration, then f
   autocatalytically to 0.22 um/branch (runaway, way too dense); the spacing differs strongly by [actin]
   (conc=8 -> ~1.6, conc=16 -> ~0.22 at capConc=2).
 - **Capping is the regulator (it already exists: checkCapping, capRate*capConc*dt).** Raising capConc 2->7 BOUNDS
-  the density (no runaway) and lands the mature spacing at ~0.6-0.87 um/branch (centering ~0.8, the lamellipodia
-  literature value) at actinConc=16. Set in dtsMembraneStage2Dendritic. The [BRANCH-DENSITY] log reports um/branch
-  for re-tuning at other [actin].
-- Take-away: the literature branch SPACING emerges from the branch/cap balance, not the branch rate alone -- capConc
-  (or dtsBranchRate) tunes it; it shifts with [actin] as in real cells. Runs: RUN_LOGS/2026-06-23_stage2/s2conc*,
+  the branch COUNT: branches plateau at ~6 (vs the capConc=2 runaway to 18+). Capping converting the autocatalytic
+  runaway into a bounded count is the real structural result.
+- **BUT um/branch is not a clean steady value (CORRECTION).** It passes THROUGH ~0.8 mid-development (~step 14-16k)
+  then keeps dropping to ~0.35 and slowly rising, because total filament length keeps ACCUMULATING -- the model has
+  no rear turnover (treadmilling / pointed-end depolymerization), so there is no stationary network. (An earlier
+  note here that capConc=7 "lands at ~0.8" was a mid-drift snapshot, not the mature value -- corrected.)
+- **The genuine missing ingredient for a stationary literature spacing is TREADMILLING** (rear depoly + the
+  branch/cap balance), as in a real treadmilling lamellipodium. With it, total length stops accumulating and
+  um/branch reaches a fixed point tunable to ~0.8. That's the next ingredient, beyond capping.
+- Take-away: branch SPACING emerges from branch/cap balance AND network turnover, not the branch rate alone. capConc
+  bounds the count; treadmilling would fix the spacing to a steady value. Runs: RUN_LOGS/2026-06-23_stage2/s2conc*,
   s2cap7.
 
 ## 2026-06-23 — Two-shell dendritic: branch rate tuned to literature spacing (~0.8 um/branch)
