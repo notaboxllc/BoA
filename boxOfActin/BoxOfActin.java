@@ -1214,6 +1214,7 @@ public class BoxOfActin {
 		}
 	}
 	
+	private static boolean nanScanReported = false;   // DIAG (BOA_NAN_BIRTH) one-shot per run
 	public static void doLoop() {
 		// timers
 		double startTime;
@@ -1597,6 +1598,23 @@ public class BoxOfActin {
 				// dense fixture; measures the residual that is NOT GC / fan-out.
 				long _safeT0 = StepProfiler.ENABLED ? System.nanoTime() : 0L;
 				updateCounters();
+
+				// DIAG (BOA_NAN_BIRTH): once per run, find the first node whose coord has gone non-finite and
+				// report its class/id/createdAtStep. createdAtStep == this step => born NaN (a degenerate
+				// placement at construction); createdAtStep earlier => went NaN later (force/integration). This
+				// disambiguates the construction guard in Thing(). Removed once the source is fixed.
+				if (System.getenv("BOA_NAN_BIRTH") != null && !nanScanReported) {
+					for (int i = 0; i < boxOfActin.ProteinNode.nodeCt; i++) {
+						boxOfActin.ProteinNode pn = boxOfActin.ProteinNode.theNodes[i];
+						if (pn == null || pn.removeMe) continue;
+						if (Double.isFinite(pn.getCoordX()) && Double.isFinite(pn.getCoordY()) && Double.isFinite(pn.getCoordZ())) continue;
+						nanScanReported = true;
+						Thing.talkln(String.format("[NAN-SCAN] step %d  class=%s  id=%d  createdAtStep=%d  coord=[%g,%g,%g]",
+								Env.counter, pn.getClass().getName(), pn.thingInstanceId, pn.createdAtStep,
+								pn.getCoordX(), pn.getCoordY(), pn.getCoordZ()));
+						break;
+					}
+				}
 
 				// Phase 4.5 Part-1 — periodic device-memory tick. No-op unless
 				// BOA_PHASE45_MEM_TRACE=1. Logs at MEM_TRACE_STEP_INTERVAL cadence.
@@ -2016,7 +2034,13 @@ public class BoxOfActin {
 				if (Env.kRdmNuc.isActive()) { FilSegment.spawnRdmFilaments(); }
 				if (Env.kNodeNuc.isActive()) { ProteinNode.spawnNodeFilaments(); }
 
-				ProteinNode.equilibrateNodeNumber();
+				// equilibrateNodeNumber() maintains a frozen protein-node count by adding random nodes via the
+				// legacy Listeria-bug cortex geometry (sqrt(bugRadius^2 - z^2)). For a DTS membrane the "nodes"
+				// ARE the membrane vertices: their count legitimately changes on edge split/collapse, and their
+				// z-range (~+/-membrane radius) far exceeds bugRadius -- so the freeze is wrong AND the re-add
+				// produces NaN-positioned nodes (sqrt of a negative). A bilayer collapse dropping nodeCt by one
+				// was exactly what spawned the NaN node that froze the viewer. Skip it when a DTS membrane exists.
+				if (Membrane.theMembranes.isEmpty()) ProteinNode.equilibrateNodeNumber();
 				MyoMiniFilament.equilibrateMyoMiniNumber();
 				if (StepProfiler.ENABLED) { pcCleanupTailNs += System.nanoTime() - _ctailT0; }
 			}

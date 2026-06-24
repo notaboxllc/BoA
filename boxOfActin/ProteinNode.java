@@ -930,7 +930,10 @@ public class ProteinNode extends Thing {
 		double curBRad;
 		Pt3D minMaxZOfNodes = ProteinNode.getMinMaxZOfNodeDistro();
 		pLoc.z = minMaxZOfNodes.x + Env.mtRNG.nextDouble()*(minMaxZOfNodes.y - minMaxZOfNodes.x);  // randomly choose z in range of current z positions of nodes
-		curBRad = Math.sqrt(bRad*bRad - pLoc.z*pLoc.z);
+		// Clamp the radicand at 0: this assumes a bug of radius bRad, so |z| > bRad (e.g. a membrane vertex
+		// z-range fed in by mistake) would make bRad^2 - z^2 negative and sqrt -> NaN, birthing a NaN-coord
+		// node. Defensive; the real guard is not calling this for DTS membrane configs (see doLoop).
+		curBRad = Math.sqrt(Math.max(0.0, bRad*bRad - pLoc.z*pLoc.z));
 		double rdmAng = Env.mtRNG.nextDouble()*2*Math.PI;
 		pLoc.x = curBRad*Math.cos(rdmAng);
 		pLoc.y = curBRad*Math.sin(rdmAng);

@@ -188,7 +188,18 @@ public class Thing extends Object {
 		setCoord(initCoord.x, initCoord.y, initCoord.z);
 		setUVec(1, 0, 0);
 		setYVec(0, 1, 0);
+		// DIAG (BOA_NAN_BIRTH): a Thing born mid-run with a non-finite coord is the source of NaN
+		// nodes in the frame JSON. Print its class + id + construction stack once so we can pin the
+		// degenerate placement, then remove this guard. Mid-run only (counter>0) to skip any startup noise.
+		if (System.getenv("BOA_NAN_BIRTH") != null && Env.counter > 0 && !nanBirthReported
+				&& !(Double.isFinite(initCoord.x) && Double.isFinite(initCoord.y) && Double.isFinite(initCoord.z))) {
+			nanBirthReported = true;
+			talkln(String.format("[NAN-BIRTH] step %d  class=%s  id=%d  coord=[%g,%g,%g]",
+					Env.counter, getClass().getName(), thingInstanceId, initCoord.x, initCoord.y, initCoord.z));
+			new Throwable("[NAN-BIRTH] construction stack").printStackTrace();
+		}
 	}
+	private static boolean nanBirthReported = false;
 	
 	// Per-worker scratch — owns the working memory that used to be retained as
 	// per-Thing Pt3D fields. One instance per worker thread (indexed by the
