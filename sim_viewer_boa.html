@@ -2105,8 +2105,14 @@ function loadFrame(n) {
   // the old end while the slider still advances (the "frozen after frame N" symptom). Always fetch fresh.
   fetch(frameUrl(n), { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-    .then(data => { currentFrameData = data; applyFrameData(data); loading = false; })
-    .catch(() => { loading = false; });
+    .then(data => {
+      currentFrameData = data;
+      try { applyFrameData(data); }
+      catch (err) { console.error('[VIEWER] applyFrameData THREW on frame', n, '(file frame', data.frame, ', segs', (data.segments||[]).length, ')', err); throw err; }
+      console.log('[VIEWER] rendered frame', n, 'file', data.frame, 'segs', (data.segments||[]).length, 'membNv', (data.membranes||[]).map(m=>m.vertices.length));
+      loading = false;
+    })
+    .catch((e) => { console.warn('[VIEWER] frame load FAILED', n, e && e.message); loading = false; });
 }
 
 function goToFrame(n) {
