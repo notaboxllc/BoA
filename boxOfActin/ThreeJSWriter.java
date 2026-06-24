@@ -226,6 +226,11 @@ public class ThreeJSWriter {
             // DTS membrane vertices are rendered as a triangulated surface (the "membranes"
             // array below), not as individual node spheres — skip them here.
             if (pn instanceof MembraneVertex) continue;
+            // A blown-up node (NaN/Inf coord, e.g. from a degenerate anchor placement) would serialize as
+            // INVALID JSON — "center":[NaN,...] — which breaks every strict parser downstream. (The browser
+            // viewer froze on exactly this: r.json() threw, so the whole frame was lost.) Skip it: the sim
+            // keeps running and the frame stays valid JSON. Root cause is a div-by-zero in anchor placement.
+            if (!(Double.isFinite(pn.getCoordX()) && Double.isFinite(pn.getCoordY()) && Double.isFinite(pn.getCoordZ()))) continue;
             if (!firstNode) sb.append(",");
             // Hot-Rho (NPF/Arp2/3 activator) membrane nodes carry "hotRho":true so the viewer can
             // highlight the activated patch where branching is localized.
