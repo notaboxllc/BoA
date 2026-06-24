@@ -2115,8 +2115,11 @@ function goToFrame(n) {
 
 // ── auto-discover total frame count ──────────────────────────────────────────
 async function discoverFrames() {
+  // cache:'no-store' is ESSENTIAL: the count is found by HEAD-probing frame_NNNNNN until a 404. If a run is opened
+  // mid-write, the 404 at the then-current end gets negative-cached by the browser, and on a later reload the probe
+  // re-serves the cached 404 and stops at the old count (frames written afterward never appear, even on hard reload).
   try {
-    const first = await fetch(frameUrl(0), { method: 'HEAD' });
+    const first = await fetch(frameUrl(0), { method: 'HEAD', cache: 'no-store' });
     if (!first.ok) { showError(`No frames found in "${simDir}".`); return; }
   } catch (e) {
     showError(`Cannot reach server: ${e.message}`);
@@ -2126,7 +2129,7 @@ async function discoverFrames() {
   let n = 1;
   while (true) {
     try {
-      const r = await fetch(frameUrl(n), { method: 'HEAD' });
+      const r = await fetch(frameUrl(n), { method: 'HEAD', cache: 'no-store' });
       if (!r.ok) break;
       n++;
     } catch (_) { break; }
