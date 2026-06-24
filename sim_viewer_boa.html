@@ -697,7 +697,7 @@
   <div class="pLabel" style="margin-top:6px;color:#9cf;border-top:1px solid #444;padding-top:4px">DTS membrane shells</div>
   <div id="dtsShellControls"></div>
   <label><span class="pLabel">DTS Arp heatmap</span> <input id="chkDtsArp"     type="checkbox" checked></label>
-  <label><span class="pLabel">MCA linkers</span> <input id="chkMcaLinks" type="checkbox" checked> <input id="colMcaLinks" type="color" value="#ffe066" title="MCA linker color" style="width:22px;height:16px;padding:0;border:1px solid #555;background:none;vertical-align:middle;cursor:pointer"></label>
+  <label><span class="pLabel">MCA linkers</span> <input id="chkMcaLinks" type="checkbox"> <input id="colMcaLinks" type="color" value="#ffe066" title="MCA linker color" style="width:22px;height:16px;padding:0;border:1px solid #555;background:none;vertical-align:middle;cursor:pointer"></label>
   <label><span class="pLabel">Legacy memb opacity</span><input id="sMembOpacity" type="range" min="0.05" max="1" step="0.05" value="0.35"><span class="pVal" id="vMembOpacity">0.35</span></label>
 </div>
 
@@ -1046,7 +1046,7 @@ function buildDtsShellControls() {
 buildDtsShellControls();
 
 // MCA linker lines (bilayer vertex -> nearest cortex point), from frame.mcaLinks (flat [x1,y1,z1,x2,y2,z2,...]).
-let showMcaLinks = true;
+let showMcaLinks = false;   // off by default (toggle on in the Display panel)
 const mcaLinkGeo = new THREE.BufferGeometry();
 let mcaLinkPos = new Float32Array(0);
 const mcaLinkMesh = new THREE.LineSegments(mcaLinkGeo,
