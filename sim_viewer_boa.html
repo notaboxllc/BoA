@@ -2104,12 +2104,17 @@ function loadFrame(n) {
   // re-serves the cached 404, loadFrame's .catch silently keeps the last-rendered frame, and the geometry FREEZES at
   // the old end while the slider still advances (the "frozen after frame N" symptom). Always fetch fresh.
   fetch(frameUrl(n), { cache: 'no-store' })
-    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-    .then(data => {
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
+    .then(txt => {
+      // The sim can emit NaN/Infinity (a blown-up node) which is INVALID JSON -> the browser parser throws and the
+      // whole frame is lost (scene freezes at the last good frame). Sanitize to null so one bad value can't sink the
+      // frame, then drop any node/segment whose coords aren't finite so it doesn't poison the render.
+      const data = JSON.parse(txt.replace(/-?\bInfinity\b/g, 'null').replace(/\bNaN\b/g, 'null'));
+      const fin = a => Array.isArray(a) && a.every(Number.isFinite);
+      if (Array.isArray(data.nodes))    data.nodes    = data.nodes.filter(nd => fin(nd.center));
+      if (Array.isArray(data.segments)) data.segments = data.segments.filter(s => fin(s.end1) && fin(s.end2));
       currentFrameData = data;
-      try { applyFrameData(data); }
-      catch (err) { console.error('[VIEWER] applyFrameData THREW on frame', n, '(file frame', data.frame, ', segs', (data.segments||[]).length, ')', err); throw err; }
-      console.log('[VIEWER] rendered frame', n, 'file', data.frame, 'segs', (data.segments||[]).length, 'membNv', (data.membranes||[]).map(m=>m.vertices.length));
+      applyFrameData(data);
       loading = false;
     })
     .catch((e) => { console.warn('[VIEWER] frame load FAILED', n, e && e.message); loading = false; });
