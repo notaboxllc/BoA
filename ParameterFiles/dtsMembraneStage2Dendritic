@@ -67,7 +67,6 @@ deltaT:true:1.0E-5;
 collisionDeltaT:true:1.0E-5;
 brownianDeltaT:true:1.0E-5;
 biochemDeltaT:true:0.001;
-runTime:true:0.08;
 toFileInterval:true:120.0;
 remoteWriteInterval:true:2000.0;
 
@@ -99,14 +98,12 @@ dtsMcaForceMax:true:6.0e-12;
 dtsMcaLinkViz:true:3;
 dtsArpOn:false:0.0;
 dtsBranchOn:false:0.0;
-runTime:true:0.12;
 
 // --- STAGE 2 DENDRITIC: Arp branching ON; MCA cap below the actin push so the bilayer separates locally
 //     (cortex holds flatter -> less residual superman); long run for significant branch formation ---
 dtsArpOn:true:1.0;
 dtsBranchOn:true:1.0;
 dtsMcaForceMax:true:2.5e-12;
-runTime:true:0.25;
 
 // Gentle anchor cap (~3x the actin push, not the 100pN default) so the cortex tether anchors without
 // yanking the mother on branch events (was a sudden leap on first branch).
@@ -116,3 +113,4 @@ dtsAnchorForceMax:true:1.5e-11;
 // so capping (the Pollard dendritic-nucleation density regulator) sets the steady spacing. Raised capping
 // protein to pull the mature spacing toward the ~0.8 um/branch lamellipodia value at this actin concentration.
 capConc:true:7.0;
+runTime:true:0.25;

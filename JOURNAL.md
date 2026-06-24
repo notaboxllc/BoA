@@ -1,5 +1,20 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — 1s dendritic run: significant array, but branch density RUNS AWAY (treadmilling needed)
+
+Ran the calibrated two-shell dendritic config (conc-dependent branching, actinConc=16, capConc=7) for 1.0 s of
+simulated time (100000 steps, ~45 min wall, ~50 steps/s). Clean finish, 0 errors, both shells verify=true.
+- **Significant mature array:** 82 branches, 117 segments, 7.0 um total polymer. The actin reaches the bilayer
+  (barbed max 1.29) and PUSHES it (bilayer maxR 1.333); cortex bulk holds (mean 1.097). Stable -- the two-shell +
+  remesher handles a dense pushing network.
+- **Density RUNS AWAY (refutes the earlier 'plateau at 6').** Branch count grew monotonically the whole second:
+  3 -> 9 -> 27 -> 45 -> 69 -> 82, um/branch 0.55 -> 0.086 (~10x denser than the 0.8 literature value). capConc=7
+  only sets the RATE of densification, it does NOT bound it: each branch makes a new branchable tip and there is no
+  rear sink (autocatalytic, capped only by dtsMaxFilaments).
+- **Conclusion:** capping alone cannot give a steady literature density; the genuine next ingredient is TREADMILLING
+  (pointed-end depoly / turnover) so the density converges. Good run for evaluating dendritic morphology + bilayer
+  protrusion (s2_1sec). Run: RUN_LOGS/2026-06-23_stage2/s2_1sec.log.
+
 ## 2026-06-23 — Concentration-dependent branching + density = branch/capping balance (calibrated to ~0.8 um/branch)
 
 Made Arp2/3 branching [G-actin]-dependent and bumped actin concentration, then found the real density regulator.
