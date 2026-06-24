@@ -1425,6 +1425,11 @@ public final class Membrane {
         if (Env.counter % 1000 == 0) {
             Thing.talkln(String.format("[DTS-BRANCH] step %d  fils=%d nearCortex=%d rejBorn=%d  totalBranches=%d",
                     Env.counter, cand, nearCortex, rejBorn, branchCt));
+            // Branch DENSITY: total polymer length per branch junction (vs literature ~0.8 um/branch in lamellipodia).
+            double totLen = 0; for (int i=0;i<FilSegment.filSegmentCt;i++){ FilSegment f=FilSegment.theFilSegments[i]; if(f!=null && !f.removeMe) totLen += f.length; }
+            int nb = Arp23.arp23Ct;
+            Thing.talkln(String.format("[BRANCH-DENSITY] step %d  filLen=%.3f um  branches=%d  um/branch=%.3f",
+                    Env.counter, totLen, nb, nb>0 ? totLen/nb : 0));
         }
     }
 

@@ -1,5 +1,18 @@
 # BoxOfActin Project Journal
 
+## 2026-06-23 — Two-shell dendritic: branch rate tuned to literature spacing (~0.8 um/branch)
+
+User wanted a sparser dendritic network tuned to the literature inter-branch spacing. Lamellipodia electron
+tomography (Vinzenz/Koestler et al.) report ~one Arp2/3 branch per 0.8 um of filament length. Added a
+[BRANCH-DENSITY] log: total polymer length / Arp23.arp23Ct = um per branch. Swept dtsBranchRate (was 20, dense):
+- 0.5 -> 0 branches (too sparse, just formin mothers).
+- 2.0 -> um/branch crosses ~0.8 (0.73 @11k -> 0.81 @15k -> 0.89 @21k), matching literature; set as the tuned value
+  in dtsMembraneStage2Dendritic.
+Self-consistent: ~0.8 um/branch on ~1.7 um total filament = ~2 branches, so the network is genuinely sparse. The
+branch COUNT is low because total actin is small (the growth-limit open item) -- the SPACING is the tuned quantity.
+A steady-state literature-density network (more branches at 0.8 um spacing) needs the actin to grow/reach the
+bilayer so more tips qualify at the leading-edge branch gate. Runs: RUN_LOGS/2026-06-23_stage2/sparse_br*.
+
 ## 2026-06-23 — Two-shell STAGE 2: actin anchors to the cortex, pushes the bilayer — SUPERMAN FIXED
 
 Routed the actin so its reaction lands on the stiff cortex and its push on the compliant bilayer. The "superman"
