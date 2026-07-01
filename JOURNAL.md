@@ -1,5 +1,90 @@
 # BoxOfActin Project Journal
 
+## 2026-07-01 — Head-axis (mhat) sign SET AT BIND (not a torque): sign is RETAINED but speed stays ~−2.5 → FORK 3 (sign irrelevant; −2.5 honest)
+
+Corrects yesterday's `myoHeadAxisSignLock` mis-diagnosis. Stereospecific binding is an INITIALIZATION, not a
+persistent torque: set the head's full orientation ONCE at the bind instant, then let the ⊥ hold + roll lock
+hold it. New flag `myoHeadAxisBindSet` (Env.java, default OFF; CPU). Full writeup: `HEAD_AXIS_BIND_SET.md`.
+- **STEP 0 (analytic):** matching the head-frame law `cosθ·mhat − sinθ·(ŷ×mhat)` to the productive f̂-target
+  `cosθ·mhat + sinθ·t̂` (t̂=−(f̂⊥mhat)) → identical iff mhat = **+n̂** (+Z). Stroke law uses `uVec` directly (not
+  `uVecR`); JSON mhat = normalize(end2−end1) = +uVec. Productive pole = +n̂.
+- **STEP 1:** at `setAttachment`, set uVec=+n̂ / yVec=+ŝ, reorienting **about the BOUND TIP** (hold the tip =
+  spring anchor fixed; `coord = tip − halfMot·mhat`). The naïve center-rotate moved the tip → spring yank →
+  avgBound 21→14, glide −0.96 (a bind-time confound, NOT the sign). Tip-preserving fix restores avgBound.
+- **STEP 2 (clean d1000, LS-centroid):** avgBound **~21** (no pin); mhat **frac>0 0.97 in every time bin, NO
+  decay** (sign retained the full ~0.6 ms bound life); glide **LS −1.9 µm/s** (−1.74…−1.95) — stays in the
+  head-frame band, does **NOT** recover toward the f̂-target −3.96.
+- **VERDICT — FORK 3:** avgBound stays ~21 (⇒ true init, not a re-introduced pin — proves yesterday's collapse
+  WAS the persistent torque) AND mhat stays set (⇒ fork-2 "decays back" ruled out) AND speed stays ~−2 (⇒ fork-1
+  "second free sign" ruled out). **The mhat 50/50 is irrelevant to the speed; −2.5 is honest.** STEP-0's
+  equivalence needs a *perfect* head frame, but mhat·n̂ mean is only +0.83 (**~34° of continuous jiggle**) even
+  with the sign pinned — the head-frame law amplifies that continuous noise, which is the real speed cap. Fixing
+  the discrete sign can't remove it; a stiffer hold pin-absorbs. So **head-frame 2-lock (−2.54) stands as final.**
+- Release = catch-slip-on-F8 (per v1), untouched. Both flags (`myoHeadAxisBindSet`, `myoHeadAxisSignLock`) stay
+  OFF as documented negative results. CPU-only, default OFF, BoA-v1ref untouched.
+
+## 2026-07-01 — Head-axis (mhat) sign lock: pins the last free head DOF but over-constrains → PIN-ABSORPTION; head-frame 2-lock stands
+
+Added `myoHeadAxisSignLock` (Env.java, default OFF; CPU) — a **third** compliant head-orientation torque
+(`MyoFilLink.alignUVecSignAxial`, k=`myoJ1FracMoveTorq`=0.4) driving `mhat → +n̂` on top of the polar hold (mhat⊥f̂)
+and the roll lock (yVec→+ŝ). Meant to resolve whether the head-frame run's `mhat` 50/50 is a *second productive
+sign* (pinning → recover toward the f̂-target −3.96) or *noise*. Full writeup: `HEAD_AXIS_SIGN_LOCK.md`.
+- **The lock works mechanically:** mhat sign 50/50 → **100% one side** (stdev 0.889→~0); roll still 100% +ŝ. The
+  last free head DOF is pinned.
+- **But it over-constrains the head → pin-absorption.** LONG d1000 assay (LS-centroid along f̂): **avg bound
+  21.5→13.9** and **glide COLLAPSES −2.54 → +0.22 µm/s** (no net drift; cx jitters in [5.656,5.726] over the whole
+  steady window; head-frame was gliding cleanly by the same t). Run killed at t≈0.42 s — the glide/no-glide split
+  is unambiguous well before 1 s.
+- **Fork verdict:** pinning mhat does NOT recover toward −3.96 (rules out "second-sign") and does NOT preserve the
+  glide — it kills it. The mhat 50/50 is **head-orientation freedom the mechanism NEEDS**, not a recoverable split.
+  **BAIL** per the compliant-only / no-pin-absorption constraint; **head-frame 2-lock (−2.54 µm/s) stands as final.**
+- Caveat (immaterial): the +n̂ target settled at −n̂ because the head's rendered `uVec` is anti-parallel to the
+  productive motor axis (`uVecR`); sign is locked either way. Release = catch-slip-on-F8 (per v1), unchanged.
+- `myoHeadAxisSignLock` kept OFF as a documented negative result. Flag-gated, CPU-only; BoA-v1ref untouched.
+
+## 2026-07-01 — Head-frame neck stroke + stereospecific roll sign: the honest (head-noise-inclusive) stroke; speed drops to v2's band
+
+Recast the neck power stroke from actin-referenced to **head-frame** (flag `myoNeckStrokeHeadFrame`, CPU, default OFF),
+mirroring v2's `-hfswing`+`-rollsign`. Full writeup: `NECK_STROKE_HEADFRAME.md`.
+- **STEP 0:** `myoAxialSwingLock`'s roll lock is **axis-locked** to ŝ=n̂×f̂ but **sign-free** (nearer ±ŝ) — v2's exact
+  50/50 failure mode; the sign lock was the missing piece.
+- **Change:** swing target `uTarget = cosθ·û_head − sinθ·(ŷ_head × û_head)` (NO f̂ in the swing law) + sign-fix the
+  roll to **+ŝ** (the barbed sign). Head-frame ≡ the old f̂ target iff yVec=+ŝ.
+- **LONG d1000 assay (LS-centroid, [0.3,1.17]s, axFrac 1.00):** speed **DROPS −3.96 → −2.54 µm/s** — into v2's ~−2.1
+  band. The f̂-target was "cheating" past head-noise; the head-frame law honestly inherits it → **adopt head-frame as
+  the defensible stroke.** Roll 100% +ŝ (jiggle stdev 0.152); twist cost cheap (arrival 26° mean, 99%<90°); head-axis
+  `mhat·n̂` ≈ 50/50 (stdev 0.889) — a harmless Z-reflection (no cancellation, glide stays clean).
+- **Release** = catch-slip on the F8 tip-spring load (per v1) + break cap — so BoA↔v2 spread reads as stroke-law/head-
+  noise, *provided v2 uses the same release*. Flag-gated, CPU-only; BoA-v1ref untouched.
+
+## 2026-06-30 — Fixed-head / neck-stroke myosin: decent gliding restored via an axial swing-plane lock (flag-gated; promotion UNDECIDED)
+
+Arc to get a **fixed-head** (head never swings) + **neck-based powerstroke** motor gliding correctly again:
+- Baseline `myoFixedHeadNeckStroke` (head held 90° to the filament, neck swings 0→70° on ADP-Pi→ADP) glides
+  pointed-leading but weakly and **wanders** (single-fil net ~1.4 µm/s though tracked ~8.8) — the neck swing plane
+  was often transverse, doing little axial work.
+- **Detour (failed):** the flat "center-bind" family — head laid 180° *along* the filament — `myoCenterParallelBind`
+  + `myoNeckPerpStroke` + `myoCenterBindStandoff` (+ tip-offset `myoParallelBindOffset`). It reeled the filament
+  down into the motor bed (the flat head loses its vertical **strut**) and glided barbed-ward / weak. Mechanism +
+  metrics in the md.
+- **Root cause of the weak fixed-head glide:** the head holds its 90° *polar* angle but its *azimuthal* roll was
+  pinned to the bound segment's **incidental yVec** (`MyoFilLink.alignYVecTorque`), so the swing plane was set by
+  the filament's random roll → often transverse.
+- **Fix — `myoAxialSwingLock`:** retarget the head roll to `shat = normalize(nhat × fhat)` (nhat = bed +Z,
+  fhat = bound seg uVec) via `alignYVecTorqueAxial`, compliant (k_az = `myoJ1FracMoveTorq` = 0.4), head-only. Forces
+  the swing into the axial (fhat–nhat) plane. Single-motor, Brownian off: swing **axial fraction 0.13 → 1.00**.
+- **Swing direction** was still backward (rear swept toward pointed; should be barbed). Fixed via the demo IC
+  neck-bend + **relaxing the rod-orientation gate** (`rodDotFil ≥ 0`, bypassed under `myoAxialSwingLock` in
+  `MyoMotor.checkFilSegCollision`). The bind-pose↔sweep coupling is **not yet a clean model rule**.
+- **Dense-mat result** (6×6×0.5 µm, 1000/µm² = 36 k motors, 12 filaments, Brownian on, 0.15 s): all 13 filaments
+  glide **pointed-leading**, **~5.6–10.5 µm/s (mean ~8)**, and now **directionally** (net ≈ path, ~99% axial) —
+  compatible with fast skeletal myosin II. Measured as net centroid displacement / time.
+
+Flags (all `Env.java`, default **OFF**): `myoFixedHeadNeckStroke`, `myoAxialSwingLock` (bundles the rod-gate bypass);
+detour flags `myoParallelBindOffset` / `myoCenterParallelBind` / `myoNeckPerpStroke` / `myoCenterBindStandoff`; demo IC
+`singleBindDemo`. **CPU path only** (GPU kernels not updated). **Not promoted to default — pending decision.**
+Full writeup + parameter values: `FIXED_HEAD_NECK_STROKE_MOTOR.md`.
+
 ## 2026-06-24 — Viewer "frozen after frame ~198" = a NaN-coord node = legacy equilibrateNodeNumber on a DTS membrane
 
 The s2_1sec run looked frozen past frame ~198 in the viewer. Root cause was a single node whose center went

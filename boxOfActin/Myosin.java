@@ -214,6 +214,20 @@ public class Myosin {
 	}
 
 	public void applyLeverMotorJointTorque () {
+		// TEST FLAG myoNeckStrokeHeadFrame: HEAD-FRAME stroke (no filament reference; see method). Takes
+		// precedence over the polarity law when both are on.
+		if (Env.myoNeckStrokeHeadFrame.isActive() && Env.myoNeckStrokeHeadFrame.getValue() != 0.0
+		    && myoMotor.onFil) {
+			applyLeverMotorJointTorqueHeadFrame();
+			return;
+		}
+		// TEST FLAG myoNeckStrokePolarity: when the head is bound, drive the neck stroke toward a
+		// polarity-derived target so the rear endpoint ALWAYS sweeps toward the barbed end (see below).
+		if (Env.myoNeckStrokePolarity.isActive() && Env.myoNeckStrokePolarity.getValue() != 0.0
+		    && myoMotor.onFil && myoMotor.tipLink != null && myoMotor.tipLink.mySeg != null) {
+			applyLeverMotorJointTorquePolarity();
+			return;
+		}
 		torsionVec.cross(myoLever.uVecAsPt3D(),myoMotor.uVecAsPt3D());
 		// Float32 GPU uVecAsPt3D() updates occasionally produce NaN components (orientation
 		// drift past representable precision). The original code caught NaN at the
@@ -253,6 +267,89 @@ public class Myosin {
 			System.out.println ("Crazy torque result in Myosin.applyLeverMotorJointTorque()");
 		}
 
+	}
+
+	// TEST FLAG myoNeckStrokePolarity (2026-07-01) — well-defined neck-stroke DIRECTION.
+	// The stock torque above relaxes only the scalar lever-motor angle about the (lever x motor) axis, so
+	// the swing azimuth — and thus whether the rear endpoint moves barbed- or pointed-ward — is
+	// under-determined (set by incidental initial azimuth). Here we instead align the lever to a DEFINITE
+	// target direction built from the bound filament polarity:
+	//   fhat = bound seg uVec (pointed->barbed);  mhat = head uVec;  theta = rest lever-motor angle
+	//   that  = -normalize( fhat - (fhat.mhat) mhat )     (the -fhat direction, projected perp to mhat)
+	//   uTarget = cos(theta)*mhat + sin(theta)*that
+	// The rear (-uTarget) then has rear.fhat = +sin(theta)*|f_perp| > 0 for a head held ~perpendicular to
+	// the filament, i.e. the rear ALWAYS sweeps toward the barbed (+) end, regardless of starting azimuth.
+	// Compliant alignment torque (same coeff/drag as the stock stroke), applied to the lever only (the
+	// target references the external filament, not an internal body pair).
+	public void applyLeverMotorJointTorquePolarity () {
+		Pt3D fhat = myoMotor.tipLink.mySeg.uVecAsPt3D();
+		Pt3D mhat = myoMotor.uVecAsPt3D();
+		double fm = Pt3D.Dot(fhat, mhat);
+		double tx = -(fhat.x - fm*mhat.x), ty = -(fhat.y - fm*mhat.y), tz = -(fhat.z - fm*mhat.z);
+		double tm = Math.sqrt(tx*tx + ty*ty + tz*tz);
+		if (tm < 1e-9) return;                          // head ~parallel to filament -> axial plane undefined
+		tx /= tm; ty /= tm; tz /= tm;
+		double angRelaxed = uncockedLever_MotorAngle;
+		if (myoMotor.isCocked()) { angRelaxed = cockedLever_MotorAngle; }
+		double c = Math.cos(Math.toRadians(angRelaxed)), s = Math.sin(Math.toRadians(angRelaxed));
+		double ux = c*mhat.x + s*tx, uy = c*mhat.y + s*ty, uz = c*mhat.z + s*tz;
+		double um = Math.sqrt(ux*ux + uy*uy + uz*uz); ux /= um; uy /= um; uz /= um;   // uTarget (unit)
+		Pt3D lev = myoLever.uVecAsPt3D();
+		// torque = lever x uTarget rotates the lever toward uTarget (shortest path)
+		torsionVec.setVals(lev.y*uz - lev.z*uy, lev.z*ux - lev.x*uz, lev.x*uy - lev.y*ux);
+		if (Double.isNaN(torsionVec.x)) return;
+		double dotLU = lev.x*ux + lev.y*uy + lev.z*uz;
+		if (dotLU > 1.0) dotLU = 1.0; if (dotLU < -1.0) dotLU = -1.0;
+		double ang = Pt3D.fastAcos(dotLU)*180/Math.PI;
+		torsionVec.unitVec();
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*ang
+		                    /((1/myoMotor.bRotGam.y + 1/myoLever.bRotGam.y)*Env.deltaT.getValue());
+		double maxMag = Env.myosinStallForce.getValue()*0.5*myoMotor.getDim()*1e-18;
+		torsionMag = Math.min(torsionMag, maxMag);
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			if (!DIAG_DRY_RUN) myoLever.incTorqueSum(torsionVec);   // lever only
+		}
+	}
+
+	// TEST FLAG myoNeckStrokeHeadFrame (2026-07-01) — HEAD-FRAME neck stroke (motor-contained).
+	// The neck swings relative to the HEAD's own frame, about the head hinge axis yHead:
+	//   uTarget = cos(theta)*uHead - sin(theta)*(yHead x uHead)
+	// There is NO filament axis in this law — actin polarity enters ONLY through the head's bound pose
+	// (its uVec, from the 90deg polar hold, and its yVec, sign-locked to +shat by alignYVecTorqueAxial when
+	// this flag is on). This equals the myoNeckStrokePolarity fhat-target iff yHead = +shat, but it inherits
+	// the head's real thermal orientation noise (which the fhat reference cleanly ignores). Compliant
+	// alignment torque, same coeff/drag as the stock stroke, applied to the lever only.
+	public void applyLeverMotorJointTorqueHeadFrame () {
+		Pt3D mhat  = myoMotor.uVecAsPt3D();
+		Pt3D yhead = myoMotor.yVecAsPt3D();
+		// hinge axis h = yHead x uHead (the head's third frame axis); the neck rotates about yHead in the
+		// plane spanned by uHead and h.
+		double hx = yhead.y*mhat.z - yhead.z*mhat.y;
+		double hy = yhead.z*mhat.x - yhead.x*mhat.z;
+		double hz = yhead.x*mhat.y - yhead.y*mhat.x;
+		double angRelaxed = uncockedLever_MotorAngle;
+		if (myoMotor.isCocked()) { angRelaxed = cockedLever_MotorAngle; }
+		double c = Math.cos(Math.toRadians(angRelaxed)), s = Math.sin(Math.toRadians(angRelaxed));
+		double ux = c*mhat.x - s*hx, uy = c*mhat.y - s*hy, uz = c*mhat.z - s*hz;   // uTarget
+		double um = Math.sqrt(ux*ux + uy*uy + uz*uz);
+		if (um < 1e-12) return;
+		ux /= um; uy /= um; uz /= um;
+		Pt3D lev = myoLever.uVecAsPt3D();
+		torsionVec.setVals(lev.y*uz - lev.z*uy, lev.z*ux - lev.x*uz, lev.x*uy - lev.y*ux);   // lever x uTarget
+		if (Double.isNaN(torsionVec.x)) return;
+		double dotLU = lev.x*ux + lev.y*uy + lev.z*uz;
+		if (dotLU > 1.0) dotLU = 1.0; if (dotLU < -1.0) dotLU = -1.0;
+		double ang = Pt3D.fastAcos(dotLU)*180/Math.PI;
+		torsionVec.unitVec();
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*ang
+		                    /((1/myoMotor.bRotGam.y + 1/myoLever.bRotGam.y)*Env.deltaT.getValue());
+		double maxMag = Env.myosinStallForce.getValue()*0.5*myoMotor.getDim()*1e-18;
+		torsionMag = Math.min(torsionMag, maxMag);
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			if (!DIAG_DRY_RUN) myoLever.incTorqueSum(torsionVec);   // lever only
+		}
 	}
 
 	public void applyRodLeverJointForce () {

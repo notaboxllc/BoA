@@ -690,6 +690,7 @@
   <label><span class="pLabel">Segment axes</span>    <input id="chkAxes"       type="checkbox"></label>
   <label><span class="pLabel">Barbed ends</span>     <input id="chkBarbedEnds" type="checkbox"></label>
   <label><span class="pLabel">Age color</span>       <input id="chkAgeColor"   type="checkbox" checked></label>
+  <label><span class="pLabel">Bound motors only</span><input id="chkBoundOnly" type="checkbox"></label>
   <label><span class="pLabel">Age legend</span>      <span style="display:inline-block;width:90px;height:10px;border:1px solid #555;background:linear-gradient(to right,#ff0000,#ff8800,#ffff00)"></span>&nbsp;<span style="font-size:10px;color:#aaa">ADP→ATP</span></label>
   <label><span class="pLabel">Supports</span>        <input id="chkSupports"   type="checkbox" checked></label>
   <label><span class="pLabel">Force arrow</span>     <input id="chkArrow"    type="checkbox" checked></label>
@@ -813,6 +814,7 @@ segMesh.instanceColor = new THREE.InstancedBufferAttribute(
   new Float32Array(MAX_SEGMENTS * 3), 3);
 scene.add(segMesh);
 let showAgeColor = true;            // toggled by #chkAgeColor
+let boundMotorsOnly = false;        // toggled by #chkBoundOnly: render only myosins with m.bound===true (backward-compatible — frames lacking the field are unaffected)
 const SEG_FALLBACK = new THREE.Color(0xcc44bb);
 const _ageCol = new THREE.Color();
 // Map notADPRatio in [0,1] to a colour: 0 (fully ADP / old) -> red, 1 (all ATP / young)
@@ -836,7 +838,10 @@ scene.add(leverMesh);
 
 const sphGeo = new THREE.SphereGeometry(1, 8, 6);
 const motorMesh = new THREE.InstancedMesh(sphGeo,
-  new THREE.MeshPhongMaterial({}), MAX_MYOSINS);
+  // TEMP: render the motor head domain largely transparent so it no longer occludes the neck/lever.
+  // (depthWrite:false lets the lever behind the head show through.) Revert opacity to 1 / remove
+  // transparent+depthWrite to restore the solid head.
+  new THREE.MeshPhongMaterial({ transparent: true, opacity: 0.18, depthWrite: false }), MAX_MYOSINS);
 motorMesh.count = 0;
 motorMesh.frustumCulled = false;
 scene.add(motorMesh);
@@ -1065,7 +1070,7 @@ function updateMcaLinks(arr) {
 }
 
 const motorColors = {
-  'NONE':  new THREE.Color(0x4444ff),
+  'NONE':  new THREE.Color(0xaa00ff),   // PURPLE — distinct, so the brief NONE state is visible
   'ATP':   new THREE.Color(0xffff00),
   'ADPPi': new THREE.Color(0xff9900),
   'ADP':   new THREE.Color(0xff0000),
@@ -1781,6 +1786,9 @@ function updateMyosinData(myosins, minifilaments, nodes, crosslinks) {
 
   if (myosins) {
     for (const m of myosins) {
+      // "Bound motors only" filter: skip myosins explicitly flagged unbound (m.bound===false).
+      // Frames that don't write a bound field (m.bound===undefined) are never skipped (backward-compatible).
+      if (boundMotorsOnly && m.bound === false) continue;
       // Rod (may be invisible)
       if (!m.rod.invisible && rodCt < MAX_MYOSINS &&
           setCylinderMatrix(m.rod.end1, m.rod.end2, m.rod.r * rodScale)) {
@@ -2318,6 +2326,12 @@ document.getElementById('sMembOpacity').addEventListener('input', e => {
 document.getElementById('chkBarbedEnds').addEventListener('change', e => {
   showBarbedEnds = e.target.checked;
   updateBarbedEnds(currentFrameData ? currentFrameData.segments : null);
+});
+document.getElementById('chkBoundOnly').addEventListener('change', e => {
+  boundMotorsOnly = e.target.checked;
+  // Re-render the current frame's myosins in place (updateMyosinData resets counts + needsUpdate).
+  if (currentFrameData)
+    updateMyosinData(currentFrameData.myosins, currentFrameData.minifilaments, currentFrameData.nodes, currentFrameData.crosslinks);
 });
 document.getElementById('chkAgeColor').addEventListener('change', e => {
   showAgeColor = e.target.checked;

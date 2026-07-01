@@ -551,7 +551,51 @@ public class BoxOfActin {
 		Env.setTimeStepCounts();
 		Env.setDependencies();
 		FileOps.recalcJSonValues();
-		
+
+		// TEST FLAG (2026-06-30) — fixed-head / 70deg-neck power stroke. See Env.myoFixedHeadNeckStroke.
+		// Override the Myosin static rest-angle fields once at startup, before any Myosin/MyoFilLink
+		// is built or any GPU plan reads them. Motor head no longer swings on ADP-Pi->ADP (held at
+		// 90deg to the filament); the neck takes the whole stroke (0->70deg from unbound rest).
+		if (Env.myoFixedHeadNeckStroke.isActive() && Env.myoFixedHeadNeckStroke.getValue() != 0.0) {
+			Myosin.cockedMotor_ActinAngle = Myosin.uncockedMotor_ActinAngle; // 90deg: head fixed, no rotation
+			Myosin.cockedLever_MotorAngle = 70.0;                            // neck swings 70deg from rest
+			talkln("[TEST] myoFixedHeadNeckStroke ON: cockedMotor_ActinAngle="
+				+ Myosin.cockedMotor_ActinAngle + " cockedLever_MotorAngle=" + Myosin.cockedLever_MotorAngle);
+		}
+
+		// TEST FLAG (2026-06-30) — parallel head bind, pointed-end offset. See Env.myoParallelBindOffset.
+		// Force the head's rest angle relative to the filament to 180deg (lies parallel/collinear with the
+		// actin axis) in BOTH nucleotide states, so binding induces no head swing. The pointed-end binding
+		// offset itself is applied per-event in MyoMotor.ontoFilament.
+		if (Env.myoParallelBindOffset.isActive() && Env.myoParallelBindOffset.getValue() != 0.0) {
+			Myosin.uncockedMotor_ActinAngle = 180.0;
+			Myosin.cockedMotor_ActinAngle   = 180.0;
+			talkln("[TEST] myoParallelBindOffset ON: motor-actin rest angle forced to 180 (head parallel to filament);"
+				+ " bind point offset -1 motorLength (" + Env.myoMotorLength.getValue() + " um) toward pointed end");
+		}
+
+		// TEST FLAG (2026-06-30) — strain-free center bind. See Env.myoCenterParallelBind. Force the head's
+		// rest angle relative to the filament to 180deg so a head that binds in the anti-parallel orientation
+		// (the new gate) sits at its torque-free equilibrium. The center-bind side and the 30deg anti-parallel
+		// gate themselves live in MyoMotor (initialize / checkFilSegCollision) and MyoFilLink.addForces.
+		if (Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0) {
+			Myosin.uncockedMotor_ActinAngle = 180.0;
+			Myosin.cockedMotor_ActinAngle   = 180.0;
+			talkln("[TEST] myoCenterParallelBind ON: bind side=head center; gate=angle(filUVec,uVecR)<30deg;"
+				+ " motor-actin rest angle forced to 180 (head parallel to filament)");
+		}
+
+		// TEST FLAG (2026-06-30) — perpendicular neck rest + 70deg stroke. See Env.myoNeckPerpStroke.
+		// Rotate the neck-motor rest angles by +90deg so the neck's pre-stroke (ADP-Pi) rest is perpendicular
+		// to the filament (head is pinned parallel at 180deg), and the ADP-Pi->ADP stroke sweeps it 70deg
+		// ALONG the filament axis (90 -> 160, increasing sense). Composes on top of myoCenterParallelBind.
+		if (Env.myoNeckPerpStroke.isActive() && Env.myoNeckPerpStroke.getValue() != 0.0) {
+			Myosin.uncockedLever_MotorAngle = 90.0;    // neck perpendicular to filament at rest (pre-stroke)
+			Myosin.cockedLever_MotorAngle   = 160.0;   // 70deg power stroke from perpendicular (90 + 70, increasing sense)
+			talkln("[TEST] myoNeckPerpStroke ON: neck-motor rest=90deg (perp to filament), post-stroke=160deg"
+				+ " (70deg swing along axis, increasing sense)");
+		}
+
 		// make Things, etc
 		makeCrucible();
 		makeInitialThings();
@@ -3347,6 +3391,12 @@ public class BoxOfActin {
 				} else {
 					MyosinFixed.setUpSingleMyosinDiag();
 				}
+				return;
+			}
+
+			// 2026-06-30: single myosin + single filament binding demo (deterministic, no Brownian search).
+			if (Env.singleBindDemo.isActive()) {
+				MyosinFixed.setUpSingleBindDemo();
 				return;
 			}
 

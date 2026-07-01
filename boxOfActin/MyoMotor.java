@@ -165,8 +165,15 @@ public class MyoMotor extends Thing {
 		Thing.recomputeDerivedSoA(myThingNumber, myThingNumber + 1);
 		// Refresh bindTip Pt3D snapshot — Mesh/MotorBindGrid3D read its x/y/z each
 		// step to spatially bin the motor's binding tip (= end2).
+		// TEST FLAG (2026-06-30) — myoCenterParallelBind: bind side is the head CENTER, so bin by the
+		// center (coord) instead of the tip (end2) to keep candidate generation consistent with the
+		// center-based distance check in checkFilSegCollision.
 		if (bindTip != null) {
-			bindTip.x = getEnd2X(); bindTip.y = getEnd2Y(); bindTip.z = getEnd2Z();
+			if (Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0) {
+				bindTip.x = getCoordX(); bindTip.y = getCoordY(); bindTip.z = getCoordZ();
+			} else {
+				bindTip.x = getEnd2X(); bindTip.y = getEnd2Y(); bindTip.z = getEnd2Z();
+			}
 		}
 		// for collision detection
 		xRange = Math.abs(getCoordX()-getEnd2X());
@@ -384,23 +391,49 @@ public class MyoMotor extends Thing {
 		final double fUy = FilSegment.soaUY[filId];
 		final double fUz = FilSegment.soaUZ[filId];
 		final double motDotFil = soaUX[motorId]*fUx + soaUY[motorId]*fUy + soaUZ[motorId]*fUz;
-		if (motDotFil < Env.myoMotorAlignWithFilTolerance.getValue()) { return; }
-		// Rod orientation gate: dot(rodUVec, filUVec) >= 0
-		final double rodDotFil = soaRodUX[motorId]*fUx + soaRodUY[motorId]*fUy + soaRodUZ[motorId]*fUz;
-		if (rodDotFil < 0) { return; }
+		// TEST FLAG (2026-06-30) — myoCenterParallelBind: replace the orientation gates with the single
+		// criterion angle(filUVec, motor uVecR) < 30deg. uVecR = -uVec, so dot(filUVec, uVecR) = -motDotFil;
+		// require -motDotFil > cos(30deg)  <=>  motDotFil < -COS30. The old positive-alignment tolerance and
+		// the rod-orientation gate are bypassed (they assume a perpendicular head, not a flat anti-parallel one).
+		final boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
+		if (centerBind) {
+			final double COS30 = 0.8660254037844387;
+			if (motDotFil > -COS30) { return; }   // head not within 30deg of anti-parallel to filament
+		} else {
+			if (motDotFil < Env.myoMotorAlignWithFilTolerance.getValue()) { return; }
+			// Rod orientation gate: dot(rodUVec, filUVec) >= 0. Bypassed under myoAxialSwingLock: the
+			// barbed-ward-sweep pose has the anchor on the barbed side so the rod points toward the pointed
+			// end (rodDotFil < 0), which this gate would otherwise reject. (Test flag; changes selectivity.)
+			if (!(Env.myoAxialSwingLock.isActive() && Env.myoAxialSwingLock.getValue() != 0.0)) {
+				final double rodDotFil = soaRodUX[motorId]*fUx + soaRodUY[motorId]*fUy + soaRodUZ[motorId]*fUz;
+				if (rodDotFil < 0) { return; }
+			}
+		}
 		// Formin-bound filament excluded (dead `&& myNode` branch from prior code not ported — unreachable)
 		if (FilSegment.soaNodeAtEnd2[filId]) { return; }
 
-		// Point-line geometry — perpendicular drop from motor bindTip onto fil end1AsPt3D()→end2AsPt3D() segment
+		// Point-line geometry — perpendicular drop from the motor binding point onto fil end1→end2 segment.
+		// soaX/soaY/soaZ are the motor TIP (= coord + ½·motorLength·uVec). TEST FLAG myoCenterParallelBind:
+		// the binding side is the head CENTER, so recover the center (= tip − ½·motorLength·uVec) and drop
+		// from there — otherwise the attach point (= projection of the search point) would be the TIP's
+		// projection while addForces tethers the CENTER, leaving a constant ~½-motorLength offset/bias.
 		final double e1x = FilSegment.soaEnd1X[filId];
 		final double e1y = FilSegment.soaEnd1Y[filId];
 		final double e1z = FilSegment.soaEnd1Z[filId];
 		final double r1x = FilSegment.soaEnd2X[filId] - e1x;
 		final double r1y = FilSegment.soaEnd2Y[filId] - e1y;
 		final double r1z = FilSegment.soaEnd2Z[filId] - e1z;
-		final double mx  = soaX[motorId];
-		final double my  = soaY[motorId];
-		final double mz  = soaZ[motorId];
+		final double mx, my, mz;
+		if (centerBind) {
+			final double halfLen = 0.5 * Env.myoMotorLength.getValue();
+			mx = soaX[motorId] - halfLen*soaUX[motorId];
+			my = soaY[motorId] - halfLen*soaUY[motorId];
+			mz = soaZ[motorId] - halfLen*soaUZ[motorId];
+		} else {
+			mx = soaX[motorId];
+			my = soaY[motorId];
+			mz = soaZ[motorId];
+		}
 		final double r2x = mx - e1x;
 		final double r2y = my - e1y;
 		final double r2z = mz - e1z;
@@ -453,6 +486,14 @@ public class MyoMotor extends Thing {
 		synchronized(attachSync) {
 			if (onFil) { return; }
 			if (bindTimer < Env.myoRebindTime.getValue()) { return; }  // don't bind if too soon after unbinding
+			// TEST FLAG (2026-06-30) — myoParallelBindOffset: slide the attachment one motor length toward the
+			// POINTED end. posOnSeg is measured from end1 (the pointed/minus end; end2 is barbed), so the
+			// pointed-ward shift subtracts. Clamp >=0 so the attach point stays on this segment. Combined with
+			// the 180deg head rest angle set in begin(), the head locks in lying flat and the head-neck joint
+			// lands ~at the originally found point — no artificial barbed-ward swing.
+			if (Env.myoParallelBindOffset.isActive() && Env.myoParallelBindOffset.getValue() != 0.0) {
+				arcOnSeg = Math.max(0.0, arcOnSeg - Env.myoMotorLength.getValue());
+			}
 			tipLink.setAttachment(seg, arcOnSeg);
 			totalBindEvents++;
 		}

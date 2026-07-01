@@ -195,6 +195,10 @@ public class ThreeJSWriter {
                     m.myoLever.getEnd1X(), m.myoLever.getEnd1Y(), m.myoLever.getEnd1Z(),
                     m.myoLever.getEnd2X(), m.myoLever.getEnd2Y(), m.myoLever.getEnd2Z(),
                     MyoLever.radius));
+            // Top-level bound flag for the viewer's "Bound motors only" filter (m.bound===false => skipped).
+            // Mirrors the motor's onFil state; lives at the myosin level so the viewer can filter without
+            // reaching into the nested motor object.
+            sb.append(",\"bound\":").append(m.myoMotor.onFil);
             sb.append(",\"motor\":").append(motorJson(m.myoMotor)).append("}");
             firstMyo = false;
         }
@@ -548,10 +552,12 @@ public class ThreeJSWriter {
             case MyoMotor.ADP:   state = "ADP";   break;
             default:             state = "NONE";  break;
         }
+        // yVec (head roll axis) exposed for head-frame diagnostics (roll census / jiggle stdevs).
         return String.format(
-            "{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"state\":\"%s\",\"onFil\":%b}",
+            "{\"end1\":[%.5g,%.5g,%.5g],\"end2\":[%.5g,%.5g,%.5g],\"r\":%.5g,\"state\":\"%s\",\"onFil\":%b,\"yVec\":[%.5g,%.5g,%.5g]}",
             mo.getEnd1X(), mo.getEnd1Y(), mo.getEnd1Z(),
             mo.getEnd2X(), mo.getEnd2Y(), mo.getEnd2Z(),
-            MyoMotor.radius, state, mo.onFil);
+            MyoMotor.radius, state, mo.onFil,
+            mo.getYVecX(), mo.getYVecY(), mo.getYVecZ());
     }
 }

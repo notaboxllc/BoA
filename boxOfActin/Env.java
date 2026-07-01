@@ -282,6 +282,105 @@ public class Env {
 	// Both default OFF, so production/gliding/contractility runs are unaffected.
 	static final Parameter buildMembraneSheet = new Parameter("buildMembraneSheet", " Build membrane StickyNode sheet IC", 0, "", Parameter.BOOLEAN, false);
 	static final Parameter buildBranchedFils  = new Parameter("buildBranchedFils", " Build Arp2/3 branched-filament IC", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): alternate power-stroke kinematics. When ON, the motor head does NOT
+	// rotate on the ADP-Pi -> ADP transition — it stays fixed at 90 deg relative to the filament
+	// (cockedMotor_ActinAngle forced to 90, == uncockedMotor_ActinAngle). Instead the entire stroke
+	// is taken up by the neck/lever, which swings through 70 deg relative to its unbound (straight,
+	// 0 deg) rest state (cockedLever_MotorAngle forced to 70), in the same torsion direction the head
+	// used to rotate. Applied as a one-time override of the Myosin.* static angle fields in begin(),
+	// so both the CPU (MyoFilLink.alignUVecTorque / Myosin.applyLeverMotorJointTorque) and GPU
+	// (GPUMoveThing jointParams/motorForceParams, read at plan build) paths pick it up. Default OFF.
+	static final Parameter myoFixedHeadNeckStroke = new Parameter("myoFixedHeadNeckStroke", " TEST: fixed head, 70deg neck power stroke", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): parallel-bind, pointed-end offset. When ON, two changes at the bind event:
+	//   (1) the head's rest angle relative to the filament is forced to 180 deg (motor lies parallel /
+	//       collinear with the actin axis), via the Myosin.*Motor_ActinAngle static fields in begin();
+	//   (2) when a binding point is found, the actual attachment is slid exactly one motor length toward
+	//       the POINTED end (end1; posOnSeg decreased by myoMotorLength, clamped >=0) in MyoMotor.ontoFilament,
+	//       so the head-neck joint lands ~at the originally found point and the head locks in lying flat.
+	// Intent: bind the head parallel to the filament WITHOUT the artificial barbed-ward head swing that
+	// exaggerates gliding — as if the motor slides backward one motor length to lock into the site.
+	// Applied to both CPU and GPU bind paths (both route through ontoFilament). Default OFF.
+	static final Parameter myoParallelBindOffset = new Parameter("myoParallelBindOffset", " TEST: parallel head bind, -1 motorLen pointed-end offset", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): strain-free center bind. Successor to myoParallelBindOffset (Run 3), which
+	// self-released because it tethered the head TIP one motor length off the found point (~20 pN > 12 pN
+	// break force). When ON:
+	//   (1) Bind side switches from the tip (end2) to the CENTER of the motor head — the cross-bridge spring
+	//       tethers the head center (coord) to the attach point (MyoFilLink.addForces), and the grid bins the
+	//       motor by its center (MyoMotor.initialize sets bindTip = coord). The attach point is already the
+	//       filament point closest to the center (checkFilSegCollision projects the center), so at bind the
+	//       spring length is just the perpendicular gap (<= myoColTol ~6 nm => <= ~6 pN, well under break).
+	//   (2) Bind-capture gate becomes: angle(filament uVec, motor uVecR) < 30 deg  <=>  dot(filUVec, motorUVec)
+	//       < -cos(30deg) = -0.8660254. I.e. the head must already lie ~anti-parallel to the filament (uVecR,
+	//       the reversed head axis, within 30 deg of the filament). The old positive-alignment gate and the
+	//       rod-orientation gate are bypassed (they were tuned for the perpendicular-head geometry).
+	//   (3) Head rest angle relative to the filament is forced to 180 deg (begin()), matching the bind gate, so
+	//       a freshly-bound head sits at its torque-free equilibrium — strain-free and stable (no self-release).
+	// Default OFF. CPU bind path only (the GPU kernels are not updated for this test flag).
+	static final Parameter myoCenterParallelBind = new Parameter("myoCenterParallelBind", " TEST: strain-free center bind, 30deg anti-parallel gate", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): perpendicular neck rest + 70deg power stroke. Composes on top of
+	// myoCenterParallelBind (head pinned at 180deg, i.e. parallel to the filament). With the head flat
+	// along the filament, the default neck-motor rest (~0deg, neck collinear with head) leaves the neck
+	// lying ALONG the filament, so its power-stroke swing is transverse and does no axial work => no glide.
+	// This flag rotates the neck-motor rest angles by +90deg so the neck's pre-stroke (ADP-Pi / uncocked)
+	// rest is PERPENDICULAR to the filament, and the ADP-Pi->ADP stroke sweeps it 70deg along the axis,
+	// reproducing the gliding geometry the head used to provide when it was held at 90deg. Set in begin():
+	//   uncockedLever_MotorAngle 0 -> 90 (rest, neck perpendicular);  cockedLever_MotorAngle -> 160 (90+70).
+	// Default OFF.
+	static final Parameter myoNeckPerpStroke = new Parameter("myoNeckPerpStroke", " TEST: neck perpendicular rest + 70deg stroke", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): center-bind head standoff. Gives the cross-bridge (1 pN/nm) spring a nonzero
+	// REST LENGTH (microns) so a center-bound head is held this far OFF the filament binding point (attachPt
+	// stays on the axis; the head sits at distance = standoff from it) instead of right on the axis. Restores
+	// a perpendicular offset / moment arm that the flat 180deg bind removed. Only acts when myoCenterParallelBind
+	// is ON. forceMag = (dist - standoff)*myoSpring (negative below standoff -> pushes back out to it). Default 0.
+	static final Parameter myoCenterBindStandoff = new Parameter("myoCenterBindStandoff", " TEST: center-bind spring rest length (head standoff off filament)", 0.0, distUnits);
+	// Single-myosin + single-filament binding demo IC (MyosinFixed.setUpSingleBindDemo). One filament + one
+	// motor posed for an immediate, Brownian-free bind. Mutually exclusive with the gliding assay. Default OFF.
+	static final Parameter singleBindDemo = new Parameter("singleBindDemo", " Single myosin+filament binding demo IC", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-06-30): axial swing-plane lock. Retargets the bound head's roll/azimuth torque
+	// (MyoFilLink.alignYVecTorque) so the head's yVec aligns to shat = normalize(nhat x fhat) — the desired
+	// swing-plane normal — instead of the bound segment's incidental yVec. fhat = bound segment uVec,
+	// nhat = bed normal (lab +Z). This forces the J1 neck swing into the axial (fhat-nhat) plane so the
+	// converter sweeps toward the + end rather than transverse. Compliant (k_az = myoJ1FracMoveTorq, the
+	// existing orientation coeff — NOT a stiff pin), head-only reaction, 90deg polar hold unchanged. CPU
+	// path only. Default OFF.
+	static final Parameter myoAxialSwingLock = new Parameter("myoAxialSwingLock", " TEST: lock head azimuth so neck swing is axial", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-07-01): well-defined (polarity-derived) neck power-stroke DIRECTION. The stock
+	// Myosin.applyLeverMotorJointTorque only relaxes the SCALAR lever-motor angle about the lever x motor
+	// axis — it never references the filament, so the swing azimuth (and thus whether the neck's rear
+	// endpoint sweeps toward the barbed or pointed end) is ill-defined / set by incidental initial azimuth.
+	// When ON (and the head is bound), the stroke instead aligns the lever to a DEFINITE target direction
+	//   uTarget = cos(theta_rest)*mhat + sin(theta_rest)*that,   that = -(fhat perp to mhat),
+	// so the rear endpoint (-uLever) ALWAYS gains a +fhat (barbed) component regardless of start azimuth.
+	// fhat = bound-segment uVec (pointed->barbed), mhat = head uVec, theta_rest = uncocked/cocked lever
+	// angle. Lever-only reaction; falls back to the stock torque when unbound. Default OFF.
+	static final Parameter myoNeckStrokePolarity = new Parameter("myoNeckStrokePolarity", " TEST: polarity-defined neck-stroke direction (rear->barbed)", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-07-01): HEAD-FRAME neck stroke + stereospecific roll sign (motor-contained, not
+	// actin-referenced). Unlike myoNeckStrokePolarity (which targets cos(th)*mhat + sin(th)*(-fhat_perp),
+	// referencing the filament axis fhat EVERY step), the head-frame law swings the neck relative to the
+	// HEAD's own frame: uTarget = cos(th)*uHead - sin(th)*(yHead x uHead), about the head hinge axis yHead.
+	// NO fhat in the swing law — actin polarity enters ONLY through the head's bound roll. To make that roll
+	// definite, this flag also SIGN-FIXES the axial roll lock (alignYVecTorqueAxial) to +shat = +(nhat x fhat)
+	// (the barbed-sweep sign) instead of the nearer of +/-shat. head-frame == the old fhat target iff
+	// head.yVec = +shat. Requires myoAxialSwingLock ON. CPU path only. Default OFF.
+	static final Parameter myoNeckStrokeHeadFrame = new Parameter("myoNeckStrokeHeadFrame", " TEST: head-frame neck stroke + stereospecific roll sign", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-07-01): HEAD-AXIS SIGN LOCK — the last free head DOF. The 90deg polar hold pins only
+	// mhat perp fhat; the roll lock pins yVec to +shat; together they leave mhat = +/-nhat with a FREE sign
+	// (~50/50). Under the head-frame swing law that flips the axial tilt for half the heads -> partial
+	// cancellation -> the head-frame speed drop. This flag drives the head uVec (mhat) to a definite +nhat
+	// (bed normal, +Z) with a compliant, head-only torque (alignUVecSignAxial), completing the stereospecific
+	// head pose so head-frame swing == filament-referenced by construction. On top of myoNeckStrokeHeadFrame
+	// + myoAxialSwingLock. CPU path only. Default OFF.
+	static final Parameter myoHeadAxisSignLock = new Parameter("myoHeadAxisSignLock", " TEST: head-axis (mhat) sign lock to +nhat", 0, "", Parameter.BOOLEAN, false);
+	// TEST FLAG (2026-07-01): HEAD-AXIS SIGN SET AT BIND — stereospecific bind pose, NOT a persistent torque.
+	// The prior myoHeadAxisSignLock added a 3rd per-step torque driving mhat->+nhat and pin-absorbed (avgBound
+	// 21->14, glide -2.54->+0.22). Stereospecific binding is an INITIALIZATION: a specific actin interface sets
+	// the head's full orientation at the bind instant ONCE; thereafter the head is held by the locks it already
+	// has (perp hold + roll lock). STEP-0 pole resolution (analytic, matching the head-frame law to the
+	// productive fhat-target): the productive mhat pole is +nhat (mhat = the head uVec, used directly by the
+	// head-frame stroke law). At setAttachment, when this flag is on, the head uVec is initialized to
+	// +(nhat perp fhat) and yVec to +shat=nhat x fhat (consistent with the two locks). NO new steady-state
+	// torque. Per-motor pure. Default OFF.
+	static final Parameter myoHeadAxisBindSet = new Parameter("myoHeadAxisBindSet", " TEST: set head-axis (mhat) sign +nhat at bind (no torque)", 0, "", Parameter.BOOLEAN, false);
 	// Closed spherical membrane IC (makeSphereOfNodes) with a few hot-Rho (NPF) patches, for testing the
 	// activated-Arp2/3 field on a curved/closed surface. Both default OFF.
 	static final Parameter buildMembraneSphere = new Parameter("buildMembraneSphere", " Build spherical membrane IC", 0, "", Parameter.BOOLEAN, false);

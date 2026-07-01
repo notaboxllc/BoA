@@ -88,6 +88,37 @@ public class MyoFilLink {
 		if (Env.useGPU) DIAG_UPDATEPOS_FROM_BIND_CT++;
 		updatePos();
 		myMotor.onFil = true;
+		// TEST FLAG myoHeadAxisBindSet (2026-07-01) — stereospecific bind pose (initialization, NOT a torque).
+		// Set the head's full orientation ONCE at the bind instant so mhat is on the productive pole (+nhat,
+		// STEP-0) and yVec = +shat, consistent with the perp hold + roll lock that then maintain it. The stroke
+		// law reads myMotor.uVec/yVec directly, so writing the SoA here is sufficient; coord is untouched (no
+		// positional yank — with center-bind the tip == coord, orientation-independent).
+		if (Env.myoHeadAxisBindSet.isActive() && Env.myoHeadAxisBindSet.getValue() != 0.0) {
+			Pt3D fhat = mySeg.uVecAsPt3D();
+			// shat = nhat x fhat with nhat = (0,0,1) -> (-fy, fx, 0); mhat = +(nhat perp fhat), normalized.
+			double sx = -fhat.y, sy = fhat.x, sz = 0.0;
+			double sm = Math.sqrt(sx*sx + sy*sy + sz*sz);
+			double ndf = fhat.z;                                   // nhat . fhat
+			double mx = 0.0 - ndf*fhat.x, my = 0.0 - ndf*fhat.y, mz = 1.0 - ndf*fhat.z;
+			double mm = Math.sqrt(mx*mx + my*my + mz*mz);
+			if (sm > 1e-9 && mm > 1e-9) {                          // else filament ~parallel to bed normal: skip
+				mx /= mm; my /= mm; mz /= mm;                      // mhat = +nhat (perp fhat), unit
+				// Reorient the head ABOUT ITS BOUND TIP (the actin-binding site = cross-bridge spring anchor),
+				// NOT its center: hold the tip fixed and swing the body around it, so the bind pose-set does
+				// NOT jump the spring length (which with tip-bind would spike the catch-slip/break load and
+				// shed the bind). tip = coord + halfMot*uVec (== freshMotorTip in addForces); after setting
+				// uVec = mhat, restore coord = tip - halfMot*mhat so the tip is unchanged. centerBind -> halfMot
+				// = 0 -> coord unchanged (graceful).
+				final boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
+				final double halfMot = centerBind ? 0.0 : 0.5 * Env.myoMotorLength.getValue();
+				double tipX = myMotor.getCoordX() + halfMot*myMotor.getUVecX();
+				double tipY = myMotor.getCoordY() + halfMot*myMotor.getUVecY();
+				double tipZ = myMotor.getCoordZ() + halfMot*myMotor.getUVecZ();
+				myMotor.setUVec(mx, my, mz);                       // mhat = +nhat
+				myMotor.setYVec(sx/sm, sy/sm, sz/sm);              // yhead = +shat
+				myMotor.setCoord(tipX - halfMot*mx, tipY - halfMot*my, tipZ - halfMot*mz);  // tip preserved
+			}
+		}
 	}
 	
 	// Phase 4 prep (2026-06-04) — when set via env var
@@ -139,6 +170,9 @@ public class MyoFilLink {
 				addForces();
 				alignUVecTorque();
 				alignYVecTorque();
+				if (Env.myoHeadAxisSignLock.isActive() && Env.myoHeadAxisSignLock.getValue() != 0.0) {
+					alignUVecSignAxial();
+				}
 				ckRelease();
 			}
 		}
@@ -178,13 +212,20 @@ public class MyoFilLink {
 		// and use it for the spring distance, direction, AND the torque application
 		// point. On the CPU path coord/uVec are also fresh and this equals bindTip,
 		// so CPU behaviour is unchanged.
-		final double halfMot = 0.5 * Env.myoMotorLength.getValue();
+		// TEST FLAG (2026-06-30) — myoCenterParallelBind: tether the head CENTER (coord) rather than the
+		// tip (end2). attachPt is the filament point closest to the center, so at bind the spring length is
+		// just the perpendicular gap (strain-free). Otherwise use the tip as before.
+		final boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
+		final double halfMot = centerBind ? 0.0 : 0.5 * Env.myoMotorLength.getValue();
 		freshMotorTip.setVals(myMotor.getCoordX() + halfMot*myMotor.getUVecX(),
 		                      myMotor.getCoordY() + halfMot*myMotor.getUVecY(),
 		                      myMotor.getCoordZ() + halfMot*myMotor.getUVecZ());
 		double dist = Pt3D.ptDist(freshMotorTip, attachPt);
 		if (dist < 0) { dist = 0; }
-		forceMag = dist*Env.myoSpring.getValue();
+		// TEST FLAG myoCenterBindStandoff: nonzero spring REST LENGTH holds the center-bound head this far off
+		// the filament binding point. forceMag<0 when dist<standoff pushes the head back out to the standoff.
+		final double standoff = centerBind ? Env.myoCenterBindStandoff.getValue() : 0.0;
+		forceMag = (dist - standoff)*Env.myoSpring.getValue();
 		F.unitVec(attachPt,freshMotorTip);
 		F.scale(forceMag);
 		myMotor.incForceSum(F,freshMotorTip);
@@ -256,6 +297,12 @@ public class MyoFilLink {
 	}
 	
 	public void alignYVecTorque () {
+		// TEST FLAG myoAxialSwingLock: retarget the head's roll reference from the segment's incidental yVec
+		// to shat = normalize(nhat x fhat) so the neck swing plane is axial (see alignYVecTorqueAxial).
+		if (Env.myoAxialSwingLock.isActive() && Env.myoAxialSwingLock.getValue() != 0.0) {
+			alignYVecTorqueAxial();
+			return;
+		}
 		torsionVec.cross(mySeg.yVecAsPt3D(),myMotor.yVecAsPt3D());
 		torsionVec.unitVec();
 		
@@ -270,13 +317,85 @@ public class MyoFilLink {
 		if (torsionVec.checkPt3D()) {
 			torsionVec.scale(torsionMag);
 			mySeg.incTorqueSum(torsionVec);
-		
+
 			torsionVec.scale(-1);
 			myMotor.incTorqueSum(torsionVec);
 		} else {
 			System.out.println ("Crazy torque result in MyoFilLink.alignYVecTorque()");
 		}
 
+	}
+
+	// TEST FLAG myoAxialSwingLock (2026-06-30) — axial swing-plane lock.
+	// Instead of aligning the head roll to the segment's incidental yVec, align it to the desired
+	// swing-plane normal shat = normalize(nhat x fhat), where fhat = bound segment uVec (toward +/barbed
+	// end) and nhat = bed normal (lab +Z). With shat = (0,0,1) x (fx,fy,fz) = (-fy, fx, 0), the head's yVec
+	// is driven into +/-shat by a COMPLIANT restoring torque tau = k_az*(headYVec x shat) about that axis,
+	// so the J1 neck swing sweeps in the axial (fhat-nhat) plane toward the + end rather than transverse.
+	// Head-only reaction (shat is a lab/bed reference, not the segment's roll); k_az = myoJ1FracMoveTorq
+	// (same compliant coeff as the perp/orientation torque — NOT a stiff pin). The 90deg polar hold in
+	// alignUVecTorque is left unchanged.
+	// TEST FLAG myoHeadAxisSignLock (2026-07-01) — HEAD-AXIS SIGN LOCK, the last free head DOF.
+	// The 90deg polar hold (alignUVecTorque) pins only the head-actin ANGLE (mhat perp fhat); the roll lock
+	// (alignYVecTorqueAxial) pins yVec to +shat. Together they force mhat = +/-nhat, but the SIGN is free
+	// (~50/50). The head-frame swing law flips its axial tilt when mhat flips, so ~half the heads swing with
+	// a reversed axial component -> partial cancellation -> the observed speed drop. This lock breaks the
+	// degeneracy by driving the head uVec (mhat) to a definite +nhat (bed normal, +Z) with a COMPLIANT,
+	// head-only torque (same coeff family as the roll/perp locks; NOT a stiff pin). Completes the
+	// stereospecific head pose: with all three axes+signs fixed, head-frame swing == filament-referenced.
+	public void alignUVecSignAxial () {
+		Pt3D mhat = myMotor.uVecAsPt3D();
+		double nx = 0.0, ny = 0.0, nz = 1.0;                 // +nhat = bed normal (lab +Z)
+		// torque = mhat x nhat rotates mhat toward +nhat
+		torsionVec.setVals(mhat.y*nz - mhat.z*ny, mhat.z*nx - mhat.x*nz, mhat.x*ny - mhat.y*nx);
+		double dotVecs = mhat.x*nx + mhat.y*ny + mhat.z*nz;  // mhat.nhat
+		if (dotVecs >  1.0) dotVecs =  1.0;
+		if (dotVecs < -1.0) dotVecs = -1.0;
+		double angTween = GPUMoveThing.accurateAcos(dotVecs)*180/Math.PI;   // full 0..180 to +nhat
+		torsionVec.unitVec();                                // handles the near-antiparallel degeneracy w/ a kick
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angTween
+		                    /((1/myMotor.bRotGam.y + 1/mySeg.bRotGam.y)*Env.deltaT.getValue());
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			myMotor.incTorqueSum(torsionVec);                // head only — nhat is a lab/bed reference
+		} else {
+			System.out.println ("Crazy torque result in MyoFilLink.alignUVecSignAxial()");
+		}
+	}
+
+	public void alignYVecTorqueAxial () {
+		Pt3D fhat = mySeg.uVecAsPt3D();
+		// shat = nhat x fhat with nhat = (0,0,1): the swing-plane normal. Aligning the head yVec to +/-shat
+		// forces the neck swing into the axial (fhat-nhat) plane. NOTE: the SIGN of shat does not set the
+		// sweep DIRECTION (barbed vs pointed) -- that is set by the lever's azimuth, not the head roll -- so
+		// we just align to the nearer of +/-shat (avoids a 180deg roll fight).
+		double sx = -fhat.y, sy = fhat.x, sz = 0.0;
+		double sm = Math.sqrt(sx*sx + sy*sy + sz*sz);
+		if (sm < 1e-9) return;                        // filament ~parallel to bed normal -> shat undefined
+		sx /= sm; sy /= sm; sz /= sm;
+		Pt3D yh = myMotor.yVecAsPt3D();
+		torsionVec.setVals(yh.y*sz - yh.z*sy, yh.z*sx - yh.x*sz, yh.x*sy - yh.y*sx);
+		double dotVecs = yh.x*sx + yh.y*sy + yh.z*sz;
+		if (dotVecs >  1.0) dotVecs =  1.0;
+		if (dotVecs < -1.0) dotVecs = -1.0;
+		// STEREOSPECIFIC ROLL SIGN (myoNeckStrokeHeadFrame): lock to +shat SPECIFICALLY (the barbed-sweep
+		// sign) instead of the nearer of +/-shat, completing the head frame so the head-frame stroke law is
+		// equivalent to the fhat target. torsionVec (= yh x shat) already rotates yh toward +shat, and
+		// angTween = acos(yh.shat) is the full 0..180deg angle to +shat (a head arriving near -shat pays the
+		// real ~180deg twist). Otherwise (axial-lock alone) align to the nearer of +/-shat.
+		boolean signFixed = Env.myoNeckStrokeHeadFrame.isActive() && Env.myoNeckStrokeHeadFrame.getValue() != 0.0;
+		if (!signFixed && dotVecs < 0) { torsionVec.scale(-1); dotVecs = -dotVecs; }
+		double angTween = GPUMoveThing.accurateAcos(dotVecs)*180/Math.PI;
+		torsionVec.unitVec();
+		// same magnitude form / coefficient as the existing roll torque, applied to the head only
+		double torsionMag = Env.myoJ1FracMoveTorq.getValue()*(Math.PI/180)*angTween
+		                    /((1/myMotor.bRotGam.x + 1/mySeg.bRotGam.x)*Env.deltaT.getValue());
+		if (torsionVec.checkPt3D()) {
+			torsionVec.scale(torsionMag);
+			myMotor.incTorqueSum(torsionVec);        // head only — no segment reaction
+		} else {
+			System.out.println ("Crazy torque result in MyoFilLink.alignYVecTorqueAxial()");
+		}
 	}
 	
 	public void updatePos () {

@@ -107,6 +107,58 @@ public class MyosinFixed extends Myosin {
 		Pt3D myoDirection = new Pt3D(0, 0, 1);
 		new MyosinFixed(myoLoc, myoDirection);
 	}
+
+	// Single-myosin / single-filament BINDING demo (2026-06-30). One short filament along +X through
+	// the origin, plus one fixed myosin posed so its head is already in the binding pocket — no Brownian
+	// search needed. For the center-bind model the head is laid ~anti-parallel to the filament (uVec ~ -X,
+	// satisfying the 30deg gate) with its centre on the axis; otherwise the head is held ~perpendicular
+	// (vertical motor, head up at the filament — the baseline gate). Run with Brownian off
+	// (BTransCoeff/BRotCoeff/myoBrownianAttn = 0), a small dt, and a high frame rate to watch the bind
+	// (and subsequent power stroke) deterministically.
+	public static void setUpSingleBindDemo () {
+		// short filament centred at the origin, +X (pointed end = -X, barbed = +X), z = 0
+		double filLen = 0.4;
+		int monCt = (int)(filLen / Env.actinMonoRadius);
+		new FilSegment(new Pt3D(0, 0, 0), new Pt3D(1, 0, 0), -1, monCt, false);
+
+		double rodLen   = Env.myoRodLength.getValue();
+		double leverLen = Env.myoLeverLength.getValue();
+		double motorLen = Env.myoMotorLength.getValue();
+		boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
+		if (centerBind) {
+			// BENT, body-ORTHOGONAL IC: the head is laid anti-parallel ON the filament (centre at the
+			// origin, uVec = -X, satisfying the 30deg center-bind gate), while the neck + rod stand
+			// straight UP (+Z), perpendicular to the filament. This L-shape puts the long body orthogonal
+			// to the filament so the neck (lever-motor) power stroke sweeps in the X-Z viewing plane.
+			// Build the straight assembly pointing -Z from the rod-tail anchor, then re-pose only the head
+			// to lie flat on the filament; the lever's motor-end already sits at (½·motorLen, 0, 0) so the
+			// head's neck-end joins it. Start the head in ADP-Pi so the lever-motor joint is at its 90deg
+			// pre-stroke rest matching this geometry; the ADP-Pi->ADP transition then swings it to ~160deg.
+			double x0      = 0.5 * motorLen;        // head neck-end == lever-motor joint x
+			double anchorZ = rodLen + leverLen;     // rod-tail anchor at the top of the upright body
+			MyosinFixed myo = new MyosinFixed(new Pt3D(x0, 0, anchorZ), new Pt3D(0, 0, -1));
+			myo.setMotor(new Pt3D(0, 0, 0), new Pt3D(-1, 0, 0), motorLen, MyoMotor.ADPPi);
+		} else {
+			// TIP-bound model (e.g. myoFixedHeadNeckStroke: head held ~90deg to the filament, neck swings
+			// 0->70deg). The motor stands perpendicular with its head TIP (end2) on the filament and the
+			// neck + rod standing UP, orthogonal to the filament. A small initial neck bend (in the X-Z
+			// plane) breaks the collinear lever-motor degeneracy (no Brownian here) so the power-stroke
+			// torque has a defined swing plane. Build rod+lever along the slightly-tilted body axis so
+			// lever.end2 lands at the head's neck point (0,0,motorLen), then re-pose the head perpendicular
+			// with its tip on the filament. Start in ADP so the lever-motor joint drives to its 70deg
+			// post-stroke rest (the neck visibly swings up from ~10deg to 70deg).
+			double NB    = Math.toRadians(10.0);                        // initial neck bend off the head axis
+			// bend toward +X (the POINTED side): the rear starts pointed-ward, so WITHOUT the polarity fix
+			// the stroke would sweep it toward the pointed end. This is the adversarial IC for verifying
+			// myoNeckStrokePolarity — the fix must swing the rear to the barbed (+) end regardless. (This +X
+			// bend also satisfies the stock rod-orientation gate, so binding needs no gate bypass.)
+			Pt3D bodyU   = new Pt3D(Math.sin(NB), 0, -Math.cos(NB));    // rod/lever axis (toward tip), mostly -Z
+			double rl    = rodLen + leverLen;
+			Pt3D rodEnd1 = new Pt3D(-rl * bodyU.x, 0, motorLen - rl * bodyU.z);
+			MyosinFixed myo = new MyosinFixed(rodEnd1, bodyU);
+			myo.setMotor(new Pt3D(0, 0, 0.5 * motorLen), new Pt3D(0, 0, -1), motorLen, MyoMotor.ADP);
+		}
+	}
 	
 	public static void fillPlaneWithFixedMyosins () {
 		double myoDensity = Env.fixedMyosinDensity.getValue(); // number per sq. micron
