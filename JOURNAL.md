@@ -1,5 +1,31 @@
 # BoxOfActin Project Journal
 
+## 2026-07-01 — PROMOTED the f̂-directed neck-stroke motor to the DEFAULT myosin; old F9 head-swing preserved behind myoLegacyHeadSwing
+
+Adopted the f̂-referenced (filament-directed) neck powerstroke as the myosin and made it the default (runs with no
+flags). Full writeup: `NECK_STROKE_DEFAULT_PROMOTION.md`. Biological basis: stereospecific binding registers the
+head to actin in one orientation, so an f̂-referenced neck swing faithfully stands in for "neck swings off an
+actin-registered head."
+- **Collapse:** `myoFixedHeadNeckStroke` (fixed head 90°, neck 0→70°) + `myoAxialSwingLock` (roll → ŝ=n̂×f̂) +
+  `myoNeckStrokePolarity` (f̂-directed rear-barbed swing) → default, via `Env.defaultNeckStrokeMotorOn()` (each
+  gate = `default || own flag`). Roll-sign/head-frame/mhat-lock stay OFF (f̂ is robust to the head sign — the
+  default run's mhat sits 50/50 with no speed penalty, so roll-sign is unnecessary).
+- **Legacy:** `myoLegacyHeadSwing:true` (default OFF) restores the old F9 head-swing motor (head 90→120°, stock
+  roll + stock lever-motor torque) — the prior validated oracle, kept for regression.
+- **Regression:** literal byte-identity is ILL-POSED here — `Math.random()` in `UCircRnd` (Brownian) + myosin-mat
+  placement makes the sim non-reproducible run-to-run (unseedable by `-seed`/`BOA_RNG_SEED`; verified distinct
+  md5s even at 1 thread). Met the two contracts via **code-path identity** (the diff touches ONLY the gate
+  predicates + GPU guard; f̂/stock methods and angle constants untouched → new-default ≡ old-flagged-f̂, and
+  legacy ≡ old-default, by construction) + **observable equivalence** (`[MOTOR]` log + head–actin angle census:
+  default head fixed ~90° across nucleotide states; legacy head swings to ~120° in ADP = the F9 signature).
+- **GPU parity (standing item):** the f̂ swing lives in `applyLeverMotorJointTorquePolarity` (CPU-only); the GPU
+  joint kernel is polarity-blind. Chose GUARD over port (non-trivial): `-gpu` + default now BAILS loudly
+  (`[MOTOR][FATAL]` + `IllegalStateException`, verified) and points to `myoLegacyHeadSwing:true` for the device
+  (verified: legacy GPU runs, FATAL count 0). The f̂ GPU port is the documented PENDING item.
+- **Physics unchanged (long d1000 default):** −2.96 µm/s at avgBound 16.6 = **0.178 µm/s per bound motor**, matching
+  the reference f̂ run's 3.96/21.2 = 0.187 (~5%); the absolute-speed gap is this random mat's lower bound count,
+  not the model. mhat 50/50, no penalty. CPU-only default; `BoA-v1ref` untouched; release = catch-slip-on-F8.
+
 ## 2026-07-01 — Head-axis (mhat) sign SET AT BIND (not a torque): sign is RETAINED but speed stays ~−2.5 → FORK 3 (sign irrelevant; −2.5 honest)
 
 Corrects yesterday's `myoHeadAxisSignLock` mis-diagnosis. Stereospecific binding is an INITIALIZATION, not a

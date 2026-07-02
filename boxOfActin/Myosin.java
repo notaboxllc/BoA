@@ -221,9 +221,13 @@ public class Myosin {
 			applyLeverMotorJointTorqueHeadFrame();
 			return;
 		}
-		// TEST FLAG myoNeckStrokePolarity: when the head is bound, drive the neck stroke toward a
-		// polarity-derived target so the rear endpoint ALWAYS sweeps toward the barbed end (see below).
-		if (Env.myoNeckStrokePolarity.isActive() && Env.myoNeckStrokePolarity.getValue() != 0.0
+		// PROMOTION (2026-07-01): the fhat-directed neck stroke is part 3 of 3 of the DEFAULT motor. When the
+		// head is bound, drive the neck stroke toward a polarity-derived target so the rear endpoint ALWAYS
+		// sweeps toward the barbed end (see below). Active by default; the test flag myoNeckStrokePolarity
+		// still forces it (redundant). myoLegacyHeadSwing:true falls through to the stock lever-motor
+		// relaxation below (old F9). The head-frame branch above still takes precedence when its flag is on.
+		if ((Env.defaultNeckStrokeMotorOn()
+		     || (Env.myoNeckStrokePolarity.isActive() && Env.myoNeckStrokePolarity.getValue() != 0.0))
 		    && myoMotor.onFil && myoMotor.tipLink != null && myoMotor.tipLink.mySeg != null) {
 			applyLeverMotorJointTorquePolarity();
 			return;

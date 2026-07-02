@@ -381,6 +381,27 @@ public class Env {
 	// +(nhat perp fhat) and yVec to +shat=nhat x fhat (consistent with the two locks). NO new steady-state
 	// torque. Per-motor pure. Default OFF.
 	static final Parameter myoHeadAxisBindSet = new Parameter("myoHeadAxisBindSet", " TEST: set head-axis (mhat) sign +nhat at bind (no torque)", 0, "", Parameter.BOOLEAN, false);
+
+	// PROMOTION (2026-07-01): the f-hat-directed neck-stroke motor is now the DEFAULT myosin. The three flags
+	// myoFixedHeadNeckStroke (fixed head 90deg, neck takes the 0->70deg stroke) + myoAxialSwingLock (roll axis
+	// -> shat = nhat x fhat) + myoNeckStrokePolarity (neck swings toward the fhat-derived target so the rear
+	// always sweeps barbed-ward) are collapsed into the default. Biological basis: stereospecific binding
+	// registers the head to actin in one orientation, so an fhat-referenced neck swing is a faithful stand-in
+	// for "neck swings off an actin-registered head". See NECK_STROKE_DEFAULT_PROMOTION.md.
+	//   myoLegacyHeadSwing:true restores the OLD F9 head-swing motor (head rotates 90->120deg on ADP-Pi->ADP,
+	//   stock lever-motor relaxation, stock roll) — the prior validated oracle, kept for regression.
+	// The individual test flags above still force their own behavior on (redundant under the default) for A/B.
+	static final Parameter myoLegacyHeadSwing = new Parameter("myoLegacyHeadSwing", " LEGACY: old F9 head-swing motor (pre-promotion default)", 0, "", Parameter.BOOLEAN, false);
+
+	/** True when the DEFAULT fhat-directed neck-stroke motor is active (fixed head 90deg + axial roll lock +
+	 *  fhat-directed neck powerstroke). Default ON; myoLegacyHeadSwing:true turns it OFF to restore the old
+	 *  F9 head-swing motor. Each of the three constituent behaviors is gated on this OR its own legacy test
+	 *  flag, so: new default (no flags) == old flagged fhat run bit-for-bit, and myoLegacyHeadSwing == old
+	 *  default (F9) bit-for-bit. */
+	static boolean defaultNeckStrokeMotorOn () {
+		return !(myoLegacyHeadSwing.isActive() && myoLegacyHeadSwing.getValue() != 0.0);
+	}
+
 	// Closed spherical membrane IC (makeSphereOfNodes) with a few hot-Rho (NPF) patches, for testing the
 	// activated-Arp2/3 field on a curved/closed surface. Both default OFF.
 	static final Parameter buildMembraneSphere = new Parameter("buildMembraneSphere", " Build spherical membrane IC", 0, "", Parameter.BOOLEAN, false);

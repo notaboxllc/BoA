@@ -297,9 +297,12 @@ public class MyoFilLink {
 	}
 	
 	public void alignYVecTorque () {
-		// TEST FLAG myoAxialSwingLock: retarget the head's roll reference from the segment's incidental yVec
-		// to shat = normalize(nhat x fhat) so the neck swing plane is axial (see alignYVecTorqueAxial).
-		if (Env.myoAxialSwingLock.isActive() && Env.myoAxialSwingLock.getValue() != 0.0) {
+		// PROMOTION (2026-07-01): axial roll lock is part 2 of 3 of the DEFAULT fhat motor. Retarget the head's
+		// roll reference from the segment's incidental yVec to shat = normalize(nhat x fhat) so the neck swing
+		// plane is axial (see alignYVecTorqueAxial). Active by default; the test flag myoAxialSwingLock still
+		// forces it (redundant). myoLegacyHeadSwing:true falls through to the stock yVec roll below (old F9).
+		if (Env.defaultNeckStrokeMotorOn()
+		    || (Env.myoAxialSwingLock.isActive() && Env.myoAxialSwingLock.getValue() != 0.0)) {
 			alignYVecTorqueAxial();
 			return;
 		}

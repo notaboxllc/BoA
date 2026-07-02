@@ -552,15 +552,20 @@ public class BoxOfActin {
 		Env.setDependencies();
 		FileOps.recalcJSonValues();
 
-		// TEST FLAG (2026-06-30) — fixed-head / 70deg-neck power stroke. See Env.myoFixedHeadNeckStroke.
-		// Override the Myosin static rest-angle fields once at startup, before any Myosin/MyoFilLink
-		// is built or any GPU plan reads them. Motor head no longer swings on ADP-Pi->ADP (held at
-		// 90deg to the filament); the neck takes the whole stroke (0->70deg from unbound rest).
-		if (Env.myoFixedHeadNeckStroke.isActive() && Env.myoFixedHeadNeckStroke.getValue() != 0.0) {
+		// PROMOTION (2026-07-01) — fixed-head / 70deg-neck power stroke is now the DEFAULT (part 1 of 3: the
+		// rest angles). Override the Myosin static rest-angle fields once at startup, before any Myosin/MyoFilLink
+		// is built or any GPU plan reads them. Motor head no longer swings on ADP-Pi->ADP (held at 90deg to the
+		// filament); the neck takes the whole stroke (0->70deg from unbound rest). Active by default; the
+		// individual test flag myoFixedHeadNeckStroke still forces it (redundant). myoLegacyHeadSwing:true skips
+		// this block, leaving the Java-default angles (uncockedMotor=90, cockedMotor=120 -> head swings; lever
+		// 0->60) = the old F9 head-swing motor.
+		if (Env.defaultNeckStrokeMotorOn()
+		    || (Env.myoFixedHeadNeckStroke.isActive() && Env.myoFixedHeadNeckStroke.getValue() != 0.0)) {
 			Myosin.cockedMotor_ActinAngle = Myosin.uncockedMotor_ActinAngle; // 90deg: head fixed, no rotation
 			Myosin.cockedLever_MotorAngle = 70.0;                            // neck swings 70deg from rest
-			talkln("[TEST] myoFixedHeadNeckStroke ON: cockedMotor_ActinAngle="
-				+ Myosin.cockedMotor_ActinAngle + " cockedLever_MotorAngle=" + Myosin.cockedLever_MotorAngle);
+			talkln("[MOTOR] default fhat neck-stroke: cockedMotor_ActinAngle="
+				+ Myosin.cockedMotor_ActinAngle + " cockedLever_MotorAngle=" + Myosin.cockedLever_MotorAngle
+				+ (Env.defaultNeckStrokeMotorOn() ? " (default)" : " (forced by flag)"));
 		}
 
 		// TEST FLAG (2026-06-30) — parallel head bind, pointed-end offset. See Env.myoParallelBindOffset.
@@ -594,6 +599,26 @@ public class BoxOfActin {
 			Myosin.cockedLever_MotorAngle   = 160.0;   // 70deg power stroke from perpendicular (90 + 70, increasing sense)
 			talkln("[TEST] myoNeckPerpStroke ON: neck-motor rest=90deg (perp to filament), post-stroke=160deg"
 				+ " (70deg swing along axis, increasing sense)");
+		}
+
+		// GPU PARITY GUARD (2026-07-01). The default fhat-directed neck powerstroke lives in
+		// Myosin.applyLeverMotorJointTorquePolarity (and the head-frame variant), which are CPU-ONLY — the
+		// GPU joint kernel is still polarity-blind and would silently run the old ill-defined swing. Rather
+		// than ship a silently-wrong GPU default, bail loudly. To run on the GPU, use the legacy F9 motor
+		// (which the device kernel DOES implement) via myoLegacyHeadSwing:true, or drop -gpu for the CPU path.
+		// (The GPU port of the fhat swing is the documented pending item; see NECK_STROKE_DEFAULT_PROMOTION.md.)
+		boolean fhatSwingActive = Env.defaultNeckStrokeMotorOn()
+			|| (Env.myoNeckStrokePolarity.isActive() && Env.myoNeckStrokePolarity.getValue() != 0.0)
+			|| (Env.myoNeckStrokeHeadFrame.isActive() && Env.myoNeckStrokeHeadFrame.getValue() != 0.0);
+		if (Env.useGPU && fhatSwingActive) {
+			String msg = "[MOTOR][FATAL] -gpu with the default fhat-directed neck-stroke motor is not supported: "
+				+ "the fhat swing (Myosin.applyLeverMotorJointTorquePolarity) is CPU-only and the GPU joint "
+				+ "kernel is polarity-blind, so the device would silently run the old ill-defined swing. "
+				+ "Remedy: run on CPU (drop -gpu), OR use the legacy GPU motor with myoLegacyHeadSwing:true.";
+			System.out.println(msg);
+			System.err.println(msg);
+			throw new IllegalStateException("GPU default fhat neck-stroke motor unsupported (polarity-blind kernel); "
+				+ "use CPU or myoLegacyHeadSwing:true");
 		}
 
 		// make Things, etc
