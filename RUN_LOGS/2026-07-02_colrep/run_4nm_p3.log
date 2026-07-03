@@ -1,0 +1,550 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay_d1000_colTol4nm...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.7
+     Parameter assigned: toFileInterval set to 300
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 1000.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: myoColTol set to 0.004
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=2524903753693005320 (BOA_RNG_SEED unset)
+[MOTOR] default fhat neck-stroke: cockedMotor_ActinAngle=90.0 cockedLever_MotorAngle=70.0 (default)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+[15:33] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[15:33]   ON   ThingStep Threads
+[15:33]   ON   ThingBrownian Threads
+[15:33]   ON   Myosin Threads
+[15:33]   OFF  MyoDimer Threads
+[15:33]   OFF  Protein Node Threads
+[15:33]   OFF  MyoMiniFil Threads
+[15:33]   OFF  Chamber Myo Threads
+[15:33]   OFF  Chamber MyoDimer Threads
+[15:33]   ON   Mesh Threads
+[15:33]   ON   Ck Mesh Threads
+[15:33]   ON   Ck Mots Threads
+[15:33]   OFF  XLink Threads
+[15:33]   OFF  Arp23 Threads
+[15:33]   OFF  NodeLink Threads
+[15:33]   OFF  Membrane Node Threads
+[15:33]   OFF  ActA Threads
+[15:33]   ON   MotorBindGrid3D Fill
+[15:33] [phase-plan] 7 active, 10 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/colrep_4nm_p3
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/colrep_4nm_p3
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.glidingAssay_d1000_colTol4nm
+ThreeJSWriter: wrote params_effective.txt (381 parameters)
+[STRETCHCENSUS] step=301 t=0.0030 n=8 ext_nm=4.7955 absFdF_pN=2.8633 sgnFdF_pN=1.1919 dwell_ms=0.3120
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=42007.5 cumMaxPerThread=5261
+[STRETCHCENSUS] step=601 t=0.0060 n=12 ext_nm=4.2394 absFdF_pN=2.5432 sgnFdF_pN=1.4929 dwell_ms=0.4267
+[STRETCHCENSUS] step=901 t=0.0090 n=17 ext_nm=5.1069 absFdF_pN=3.8055 sgnFdF_pN=-0.6825 dwell_ms=0.4326
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=42009.7 cumMaxPerThread=5261
+Sim. time=00.01....~109.69 minutes computation to simulate 1 sec, run finished in ~01.26 hours
+[STRETCHCENSUS] step=1201 t=0.0120 n=11 ext_nm=5.3054 absFdF_pN=3.8908 sgnFdF_pN=-0.6124 dwell_ms=0.4637
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+[STRETCHCENSUS] step=1501 t=0.0150 n=15 ext_nm=5.2133 absFdF_pN=2.8744 sgnFdF_pN=-1.0250 dwell_ms=0.4939
+[STRETCHCENSUS] step=1801 t=0.0180 n=10 ext_nm=5.8065 absFdF_pN=3.7420 sgnFdF_pN=-1.6733 dwell_ms=0.5190
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.02....~107.71 minutes computation to simulate 1 sec, run finished in ~01.22 hours
+[STRETCHCENSUS] step=2101 t=0.0210 n=16 ext_nm=5.5099 absFdF_pN=2.5401 sgnFdF_pN=0.7017 dwell_ms=0.5036
+[STRETCHCENSUS] step=2401 t=0.0240 n=15 ext_nm=5.4935 absFdF_pN=2.3366 sgnFdF_pN=-0.7128 dwell_ms=0.4798
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+[STRETCHCENSUS] step=2701 t=0.0270 n=11 ext_nm=5.4266 absFdF_pN=2.2786 sgnFdF_pN=-0.9260 dwell_ms=0.4990
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.03....~107.84 minutes computation to simulate 1 sec, run finished in ~01.20 hours
+[STRETCHCENSUS] step=3001 t=0.0300 n=13 ext_nm=4.2887 absFdF_pN=2.5065 sgnFdF_pN=0.0120 dwell_ms=0.5043
+[STRETCHCENSUS] step=3301 t=0.0330 n=14 ext_nm=5.5888 absFdF_pN=2.3056 sgnFdF_pN=1.0561 dwell_ms=0.5115
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=3601 t=0.0360 n=10 ext_nm=4.2671 absFdF_pN=2.0672 sgnFdF_pN=-0.6797 dwell_ms=0.5308
+[STRETCHCENSUS] step=3901 t=0.0390 n=11 ext_nm=4.8098 absFdF_pN=2.7637 sgnFdF_pN=0.2260 dwell_ms=0.5390
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=42010.5 cumMaxPerThread=5261
+Sim. time=00.04....~106.96 minutes computation to simulate 1 sec, run finished in ~01.18 hours
+[STRETCHCENSUS] step=4201 t=0.0420 n=12 ext_nm=5.5715 absFdF_pN=3.0087 sgnFdF_pN=0.4435 dwell_ms=0.5471
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=42010.5 cumMaxPerThread=5261
+[STRETCHCENSUS] step=4501 t=0.0450 n=12 ext_nm=6.3185 absFdF_pN=4.0220 sgnFdF_pN=-1.6526 dwell_ms=0.5446
+[STRETCHCENSUS] step=4801 t=0.0480 n=9 ext_nm=5.1401 absFdF_pN=3.3719 sgnFdF_pN=-0.5923 dwell_ms=0.5528
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.05....~105.61 minutes computation to simulate 1 sec, run finished in ~01.14 hours
+[STRETCHCENSUS] step=5101 t=0.0510 n=8 ext_nm=5.1854 absFdF_pN=3.3995 sgnFdF_pN=-0.3967 dwell_ms=0.5615
+[STRETCHCENSUS] step=5401 t=0.0540 n=11 ext_nm=4.0092 absFdF_pN=2.0682 sgnFdF_pN=0.2814 dwell_ms=0.5609
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+[STRETCHCENSUS] step=5701 t=0.0570 n=11 ext_nm=4.8958 absFdF_pN=2.4993 sgnFdF_pN=-0.8895 dwell_ms=0.5687
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+Sim. time=00.06....~108.67 minutes computation to simulate 1 sec, run finished in ~01.16 hours
+[STRETCHCENSUS] step=6001 t=0.0600 n=12 ext_nm=5.6804 absFdF_pN=3.6193 sgnFdF_pN=-3.3159 dwell_ms=0.5613
+[STRETCHCENSUS] step=6301 t=0.0630 n=10 ext_nm=5.8590 absFdF_pN=3.7354 sgnFdF_pN=1.9241 dwell_ms=0.5645
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+[STRETCHCENSUS] step=6601 t=0.0660 n=9 ext_nm=5.4797 absFdF_pN=2.5418 sgnFdF_pN=1.1376 dwell_ms=0.5566
+[STRETCHCENSUS] step=6901 t=0.0690 n=14 ext_nm=4.8863 absFdF_pN=2.2266 sgnFdF_pN=-1.0243 dwell_ms=0.5554
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.07....~118.75 minutes computation to simulate 1 sec, run finished in ~01.25 hours
+[STRETCHCENSUS] step=7201 t=0.0720 n=11 ext_nm=5.0796 absFdF_pN=3.1747 sgnFdF_pN=0.9013 dwell_ms=0.5559
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=7501 t=0.0750 n=11 ext_nm=5.7140 absFdF_pN=3.6684 sgnFdF_pN=0.7937 dwell_ms=0.5585
+[STRETCHCENSUS] step=7801 t=0.0780 n=16 ext_nm=4.5597 absFdF_pN=2.6526 sgnFdF_pN=0.6038 dwell_ms=0.5546
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.08....~117.66 minutes computation to simulate 1 sec, run finished in ~01.22 hours
+[STRETCHCENSUS] step=8101 t=0.0810 n=14 ext_nm=4.6744 absFdF_pN=3.1833 sgnFdF_pN=0.0701 dwell_ms=0.5585
+[STRETCHCENSUS] step=8401 t=0.0840 n=7 ext_nm=5.6231 absFdF_pN=2.7876 sgnFdF_pN=1.4418 dwell_ms=0.5653
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=8701 t=0.0870 n=9 ext_nm=5.1516 absFdF_pN=2.2796 sgnFdF_pN=1.1150 dwell_ms=0.5671
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.09....~119.01 minutes computation to simulate 1 sec, run finished in ~01.21 hours
+[STRETCHCENSUS] step=9001 t=0.0900 n=12 ext_nm=6.3665 absFdF_pN=4.2046 sgnFdF_pN=-0.8595 dwell_ms=0.5653
+[STRETCHCENSUS] step=9301 t=0.0930 n=8 ext_nm=5.7711 absFdF_pN=2.2194 sgnFdF_pN=0.0797 dwell_ms=0.5655
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+[STRETCHCENSUS] step=9601 t=0.0960 n=7 ext_nm=3.4936 absFdF_pN=1.7656 sgnFdF_pN=1.4813 dwell_ms=0.5670
+[STRETCHCENSUS] step=9901 t=0.0990 n=14 ext_nm=4.3744 absFdF_pN=2.8341 sgnFdF_pN=1.3877 dwell_ms=0.5678
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.10....~117.80 minutes computation to simulate 1 sec, run finished in ~01.18 hours
+[STRETCHCENSUS] step=10201 t=0.1020 n=11 ext_nm=3.7162 absFdF_pN=1.7492 sgnFdF_pN=-1.0432 dwell_ms=0.5706
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+[STRETCHCENSUS] step=10501 t=0.1050 n=9 ext_nm=4.9968 absFdF_pN=2.5104 sgnFdF_pN=-0.5329 dwell_ms=0.5735
+[STRETCHCENSUS] step=10801 t=0.1080 n=9 ext_nm=4.7107 absFdF_pN=2.2386 sgnFdF_pN=-0.5539 dwell_ms=0.5757
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.11....~116.85 minutes computation to simulate 1 sec, run finished in ~01.15 hours
+[STRETCHCENSUS] step=11101 t=0.1110 n=7 ext_nm=5.0907 absFdF_pN=2.8872 sgnFdF_pN=-0.4321 dwell_ms=0.5829
+[STRETCHCENSUS] step=11401 t=0.1140 n=9 ext_nm=5.0797 absFdF_pN=3.5490 sgnFdF_pN=-0.0378 dwell_ms=0.5864
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+[STRETCHCENSUS] step=11701 t=0.1170 n=11 ext_nm=5.7369 absFdF_pN=3.1217 sgnFdF_pN=1.1714 dwell_ms=0.5883
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+Sim. time=00.12....~117.93 minutes computation to simulate 1 sec, run finished in ~01.14 hours
+[STRETCHCENSUS] step=12001 t=0.1200 n=10 ext_nm=6.5518 absFdF_pN=4.6223 sgnFdF_pN=3.0116 dwell_ms=0.5909
+[STRETCHCENSUS] step=12301 t=0.1230 n=9 ext_nm=3.9944 absFdF_pN=2.0472 sgnFdF_pN=0.9229 dwell_ms=0.5908
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+[STRETCHCENSUS] step=12601 t=0.1260 n=8 ext_nm=5.1403 absFdF_pN=2.3264 sgnFdF_pN=0.6285 dwell_ms=0.5924
+[STRETCHCENSUS] step=12901 t=0.1290 n=13 ext_nm=5.1897 absFdF_pN=2.7846 sgnFdF_pN=0.7532 dwell_ms=0.5904
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=42010.2 cumMaxPerThread=5261
+Sim. time=00.13....~117.57 minutes computation to simulate 1 sec, run finished in ~01.12 hours
+[STRETCHCENSUS] step=13201 t=0.1320 n=12 ext_nm=4.9973 absFdF_pN=2.6624 sgnFdF_pN=1.5743 dwell_ms=0.5877
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+[STRETCHCENSUS] step=13501 t=0.1350 n=12 ext_nm=5.3647 absFdF_pN=3.1173 sgnFdF_pN=1.8343 dwell_ms=0.5853
+[STRETCHCENSUS] step=13801 t=0.1380 n=12 ext_nm=5.6729 absFdF_pN=3.9582 sgnFdF_pN=-0.9790 dwell_ms=0.5837
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=42010.3 cumMaxPerThread=5261
+Sim. time=00.14....~117.49 minutes computation to simulate 1 sec, run finished in ~01.10 hours
+[STRETCHCENSUS] step=14101 t=0.1410 n=12 ext_nm=4.8466 absFdF_pN=2.0371 sgnFdF_pN=0.3955 dwell_ms=0.5861
+[STRETCHCENSUS] step=14401 t=0.1440 n=12 ext_nm=4.0552 absFdF_pN=2.2866 sgnFdF_pN=-0.6346 dwell_ms=0.5903
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=14701 t=0.1470 n=14 ext_nm=5.2308 absFdF_pN=3.7412 sgnFdF_pN=0.6174 dwell_ms=0.5943
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.15....~117.39 minutes computation to simulate 1 sec, run finished in ~01.08 hours
+[STRETCHCENSUS] step=15001 t=0.1500 n=12 ext_nm=5.4983 absFdF_pN=3.6602 sgnFdF_pN=0.3702 dwell_ms=0.5953
+[STRETCHCENSUS] step=15301 t=0.1530 n=10 ext_nm=5.6539 absFdF_pN=2.5913 sgnFdF_pN=1.4651 dwell_ms=0.5974
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=15601 t=0.1560 n=11 ext_nm=5.2995 absFdF_pN=2.5133 sgnFdF_pN=0.3140 dwell_ms=0.6024
+[STRETCHCENSUS] step=15901 t=0.1590 n=13 ext_nm=5.2821 absFdF_pN=2.6862 sgnFdF_pN=-0.2734 dwell_ms=0.6045
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.16....~119.26 minutes computation to simulate 1 sec, run finished in ~01.07 hours
+[STRETCHCENSUS] step=16201 t=0.1620 n=16 ext_nm=5.3913 absFdF_pN=3.8166 sgnFdF_pN=1.6081 dwell_ms=0.6046
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=16501 t=0.1650 n=10 ext_nm=5.8600 absFdF_pN=3.8837 sgnFdF_pN=0.1764 dwell_ms=0.6054
+[STRETCHCENSUS] step=16801 t=0.1680 n=8 ext_nm=6.5142 absFdF_pN=3.9341 sgnFdF_pN=0.7177 dwell_ms=0.6073
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.17....~117.50 minutes computation to simulate 1 sec, run finished in ~01.04 hours
+[STRETCHCENSUS] step=17101 t=0.1710 n=10 ext_nm=4.5804 absFdF_pN=2.3639 sgnFdF_pN=-1.9007 dwell_ms=0.6061
+[STRETCHCENSUS] step=17401 t=0.1740 n=8 ext_nm=3.1159 absFdF_pN=1.8376 sgnFdF_pN=-0.4696 dwell_ms=0.6070
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+[STRETCHCENSUS] step=17701 t=0.1770 n=10 ext_nm=4.7934 absFdF_pN=3.0553 sgnFdF_pN=2.0490 dwell_ms=0.6067
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=42010.4 cumMaxPerThread=5261
+Sim. time=00.18....~117.65 minutes computation to simulate 1 sec, run finished in ~01.02 hours
+[STRETCHCENSUS] step=18001 t=0.1800 n=13 ext_nm=5.3144 absFdF_pN=3.2991 sgnFdF_pN=-0.2957 dwell_ms=0.6054
+[STRETCHCENSUS] step=18301 t=0.1830 n=15 ext_nm=5.7229 absFdF_pN=3.4992 sgnFdF_pN=2.4875 dwell_ms=0.6040
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=42010.5 cumMaxPerThread=5261
+[STRETCHCENSUS] step=18601 t=0.1860 n=11 ext_nm=5.4234 absFdF_pN=4.0456 sgnFdF_pN=2.0712 dwell_ms=0.6028
+[STRETCHCENSUS] step=18901 t=0.1890 n=9 ext_nm=5.6787 absFdF_pN=3.0969 sgnFdF_pN=-1.9848 dwell_ms=0.6045
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=42010.5 cumMaxPerThread=5261
+Sim. time=00.19....~118.45 minutes computation to simulate 1 sec, run finished in ~01.01 hours
+[STRETCHCENSUS] step=19201 t=0.1920 n=17 ext_nm=5.3733 absFdF_pN=3.9822 sgnFdF_pN=0.8386 dwell_ms=0.6075
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=42010.5 cumMaxPerThread=5261
+[STRETCHCENSUS] step=19501 t=0.1950 n=17 ext_nm=5.1047 absFdF_pN=2.8766 sgnFdF_pN=1.8543 dwell_ms=0.6069
+[STRETCHCENSUS] step=19801 t=0.1980 n=9 ext_nm=5.8573 absFdF_pN=3.5248 sgnFdF_pN=0.1971 dwell_ms=0.6089
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+Sim. time=00.20....~117.27 minutes computation to simulate 1 sec, run finished in ~00.98 hours
+[STRETCHCENSUS] step=20101 t=0.2010 n=10 ext_nm=5.6591 absFdF_pN=2.4127 sgnFdF_pN=0.4765 dwell_ms=0.6089
+[STRETCHCENSUS] step=20401 t=0.2040 n=12 ext_nm=5.0266 absFdF_pN=3.6497 sgnFdF_pN=1.5243 dwell_ms=0.6119
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+[STRETCHCENSUS] step=20701 t=0.2070 n=12 ext_nm=5.5739 absFdF_pN=3.5324 sgnFdF_pN=-0.7890 dwell_ms=0.6113
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+Sim. time=00.21....~116.88 minutes computation to simulate 1 sec, run finished in ~00.95 hours
+[STRETCHCENSUS] step=21001 t=0.2100 n=11 ext_nm=4.2562 absFdF_pN=1.7075 sgnFdF_pN=-0.1321 dwell_ms=0.6153
+[STRETCHCENSUS] step=21301 t=0.2130 n=13 ext_nm=6.0453 absFdF_pN=2.7795 sgnFdF_pN=-0.4921 dwell_ms=0.6123
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+[STRETCHCENSUS] step=21601 t=0.2160 n=12 ext_nm=5.5360 absFdF_pN=3.3648 sgnFdF_pN=-1.0890 dwell_ms=0.6087
+[STRETCHCENSUS] step=21901 t=0.2190 n=10 ext_nm=5.0773 absFdF_pN=2.3440 sgnFdF_pN=0.8880 dwell_ms=0.6071
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+Sim. time=00.22....~105.17 minutes computation to simulate 1 sec, run finished in ~00.84 hours
+[STRETCHCENSUS] step=22201 t=0.2220 n=12 ext_nm=6.1066 absFdF_pN=3.7995 sgnFdF_pN=0.2791 dwell_ms=0.6084
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+[STRETCHCENSUS] step=22501 t=0.2250 n=13 ext_nm=4.3171 absFdF_pN=2.6456 sgnFdF_pN=-1.3644 dwell_ms=0.6106
+[STRETCHCENSUS] step=22801 t=0.2280 n=15 ext_nm=5.7736 absFdF_pN=3.6318 sgnFdF_pN=0.6720 dwell_ms=0.6105
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.23....~107.35 minutes computation to simulate 1 sec, run finished in ~00.84 hours
+[STRETCHCENSUS] step=23101 t=0.2310 n=15 ext_nm=4.8176 absFdF_pN=2.6556 sgnFdF_pN=0.5086 dwell_ms=0.6126
+[STRETCHCENSUS] step=23401 t=0.2340 n=12 ext_nm=4.6586 absFdF_pN=2.3323 sgnFdF_pN=1.5080 dwell_ms=0.6138
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=23701 t=0.2370 n=9 ext_nm=6.7693 absFdF_pN=3.0618 sgnFdF_pN=1.2353 dwell_ms=0.6153
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.24....~106.31 minutes computation to simulate 1 sec, run finished in ~00.82 hours
+[STRETCHCENSUS] step=24001 t=0.2400 n=14 ext_nm=5.2921 absFdF_pN=3.0759 sgnFdF_pN=-0.7080 dwell_ms=0.6155
+[STRETCHCENSUS] step=24301 t=0.2430 n=14 ext_nm=5.4346 absFdF_pN=2.4164 sgnFdF_pN=-0.1141 dwell_ms=0.6158
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=24601 t=0.2460 n=10 ext_nm=5.1198 absFdF_pN=3.0509 sgnFdF_pN=-1.2330 dwell_ms=0.6190
+[STRETCHCENSUS] step=24901 t=0.2490 n=15 ext_nm=5.2329 absFdF_pN=3.5785 sgnFdF_pN=-1.0678 dwell_ms=0.6168
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.25....~106.69 minutes computation to simulate 1 sec, run finished in ~00.80 hours
+[STRETCHCENSUS] step=25201 t=0.2520 n=15 ext_nm=4.6823 absFdF_pN=2.7374 sgnFdF_pN=0.6851 dwell_ms=0.6163
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=25501 t=0.2550 n=15 ext_nm=5.4758 absFdF_pN=3.3410 sgnFdF_pN=0.4998 dwell_ms=0.6147
+[STRETCHCENSUS] step=25801 t=0.2580 n=10 ext_nm=4.6892 absFdF_pN=2.4394 sgnFdF_pN=0.1135 dwell_ms=0.6141
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.26....~106.25 minutes computation to simulate 1 sec, run finished in ~00.78 hours
+[STRETCHCENSUS] step=26101 t=0.2610 n=8 ext_nm=4.9638 absFdF_pN=2.0686 sgnFdF_pN=-0.4171 dwell_ms=0.6146
+[STRETCHCENSUS] step=26401 t=0.2640 n=14 ext_nm=4.8253 absFdF_pN=2.9320 sgnFdF_pN=0.1504 dwell_ms=0.6164
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=26701 t=0.2670 n=10 ext_nm=4.4325 absFdF_pN=2.9010 sgnFdF_pN=0.9391 dwell_ms=0.6170
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.27....~106.03 minutes computation to simulate 1 sec, run finished in ~00.76 hours
+[STRETCHCENSUS] step=27001 t=0.2700 n=10 ext_nm=5.6835 absFdF_pN=3.5699 sgnFdF_pN=0.7022 dwell_ms=0.6182
+[STRETCHCENSUS] step=27301 t=0.2730 n=9 ext_nm=4.2388 absFdF_pN=1.5282 sgnFdF_pN=0.0271 dwell_ms=0.6197
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=27601 t=0.2760 n=11 ext_nm=5.0882 absFdF_pN=2.9862 sgnFdF_pN=-0.2731 dwell_ms=0.6217
+[STRETCHCENSUS] step=27901 t=0.2790 n=14 ext_nm=4.3100 absFdF_pN=2.3612 sgnFdF_pN=-0.8434 dwell_ms=0.6232
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.28....~107.19 minutes computation to simulate 1 sec, run finished in ~00.75 hours
+[STRETCHCENSUS] step=28201 t=0.2820 n=12 ext_nm=6.1458 absFdF_pN=3.8162 sgnFdF_pN=1.2131 dwell_ms=0.6230
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=28501 t=0.2850 n=10 ext_nm=5.1543 absFdF_pN=3.5453 sgnFdF_pN=-0.5720 dwell_ms=0.6197
+[STRETCHCENSUS] step=28801 t=0.2880 n=14 ext_nm=5.4765 absFdF_pN=2.4130 sgnFdF_pN=0.3322 dwell_ms=0.6181
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.29....~107.81 minutes computation to simulate 1 sec, run finished in ~00.74 hours
+[STRETCHCENSUS] step=29101 t=0.2910 n=14 ext_nm=5.8753 absFdF_pN=3.4527 sgnFdF_pN=0.2419 dwell_ms=0.6191
+[STRETCHCENSUS] step=29401 t=0.2940 n=15 ext_nm=5.7571 absFdF_pN=4.2471 sgnFdF_pN=-1.6641 dwell_ms=0.6191
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=29701 t=0.2970 n=17 ext_nm=5.0344 absFdF_pN=2.7688 sgnFdF_pN=1.2771 dwell_ms=0.6212
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.30....~106.61 minutes computation to simulate 1 sec, run finished in ~00.71 hours
+[STRETCHCENSUS] step=30001 t=0.3000 n=13 ext_nm=5.0878 absFdF_pN=3.3670 sgnFdF_pN=0.1605 dwell_ms=0.6208
+[STRETCHCENSUS] step=30301 t=0.3030 n=9 ext_nm=5.0108 absFdF_pN=3.3229 sgnFdF_pN=-2.4903 dwell_ms=0.6213
+[GATHER] call=61000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=30601 t=0.3060 n=13 ext_nm=5.8369 absFdF_pN=2.5838 sgnFdF_pN=-0.6072 dwell_ms=0.6221
+[STRETCHCENSUS] step=30901 t=0.3090 n=11 ext_nm=3.9721 absFdF_pN=2.1548 sgnFdF_pN=-0.9279 dwell_ms=0.6209
+[GATHER] call=62000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.31....~107.46 minutes computation to simulate 1 sec, run finished in ~00.70 hours
+[STRETCHCENSUS] step=31201 t=0.3120 n=11 ext_nm=4.8638 absFdF_pN=2.2814 sgnFdF_pN=-0.3805 dwell_ms=0.6200
+[GATHER] call=63000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=31501 t=0.3150 n=11 ext_nm=5.1237 absFdF_pN=2.7425 sgnFdF_pN=0.2818 dwell_ms=0.6192
+[STRETCHCENSUS] step=31801 t=0.3180 n=6 ext_nm=3.5772 absFdF_pN=1.4251 sgnFdF_pN=-1.2119 dwell_ms=0.6190
+[GATHER] call=64000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.32....~106.79 minutes computation to simulate 1 sec, run finished in ~00.68 hours
+[STRETCHCENSUS] step=32101 t=0.3210 n=10 ext_nm=6.0622 absFdF_pN=3.6128 sgnFdF_pN=0.8614 dwell_ms=0.6203
+[STRETCHCENSUS] step=32401 t=0.3240 n=10 ext_nm=4.9507 absFdF_pN=2.3994 sgnFdF_pN=0.5174 dwell_ms=0.6215
+[GATHER] call=65000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=32701 t=0.3270 n=9 ext_nm=5.8943 absFdF_pN=4.7848 sgnFdF_pN=-0.8556 dwell_ms=0.6215
+[GATHER] call=66000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.33....~106.01 minutes computation to simulate 1 sec, run finished in ~00.65 hours
+[STRETCHCENSUS] step=33001 t=0.3300 n=12 ext_nm=4.0358 absFdF_pN=1.7887 sgnFdF_pN=0.3107 dwell_ms=0.6209
+[STRETCHCENSUS] step=33301 t=0.3330 n=8 ext_nm=5.3024 absFdF_pN=2.6524 sgnFdF_pN=2.1676 dwell_ms=0.6223
+[GATHER] call=67000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=33601 t=0.3360 n=9 ext_nm=5.0028 absFdF_pN=2.9911 sgnFdF_pN=0.2336 dwell_ms=0.6230
+[STRETCHCENSUS] step=33901 t=0.3390 n=12 ext_nm=5.8017 absFdF_pN=4.3352 sgnFdF_pN=-3.6995 dwell_ms=0.6237
+[GATHER] call=68000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.34....~106.87 minutes computation to simulate 1 sec, run finished in ~00.64 hours
+[STRETCHCENSUS] step=34201 t=0.3420 n=10 ext_nm=4.8094 absFdF_pN=3.2608 sgnFdF_pN=-0.6721 dwell_ms=0.6238
+[GATHER] call=69000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=34501 t=0.3450 n=11 ext_nm=5.6695 absFdF_pN=3.7124 sgnFdF_pN=-0.8463 dwell_ms=0.6239
+[STRETCHCENSUS] step=34801 t=0.3480 n=11 ext_nm=5.2913 absFdF_pN=2.8249 sgnFdF_pN=0.1820 dwell_ms=0.6225
+[GATHER] call=70000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.35....~106.96 minutes computation to simulate 1 sec, run finished in ~00.62 hours
+[STRETCHCENSUS] step=35101 t=0.3510 n=11 ext_nm=6.0322 absFdF_pN=3.5180 sgnFdF_pN=-0.0558 dwell_ms=0.6230
+[STRETCHCENSUS] step=35401 t=0.3540 n=10 ext_nm=5.9116 absFdF_pN=3.6213 sgnFdF_pN=-1.3628 dwell_ms=0.6203
+[GATHER] call=71000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=35701 t=0.3570 n=6 ext_nm=4.7365 absFdF_pN=1.6950 sgnFdF_pN=0.7697 dwell_ms=0.6209
+[GATHER] call=72000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.36....~106.90 minutes computation to simulate 1 sec, run finished in ~00.61 hours
+[STRETCHCENSUS] step=36001 t=0.3600 n=13 ext_nm=5.3676 absFdF_pN=3.1895 sgnFdF_pN=-0.1586 dwell_ms=0.6197
+[STRETCHCENSUS] step=36301 t=0.3630 n=14 ext_nm=4.2471 absFdF_pN=2.2028 sgnFdF_pN=0.0583 dwell_ms=0.6191
+[GATHER] call=73000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=36601 t=0.3660 n=15 ext_nm=4.9419 absFdF_pN=2.9573 sgnFdF_pN=0.5346 dwell_ms=0.6197
+[STRETCHCENSUS] step=36901 t=0.3690 n=11 ext_nm=5.3029 absFdF_pN=2.8995 sgnFdF_pN=0.3828 dwell_ms=0.6197
+[GATHER] call=74000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.37....~107.49 minutes computation to simulate 1 sec, run finished in ~00.59 hours
+[STRETCHCENSUS] step=37201 t=0.3720 n=10 ext_nm=4.9879 absFdF_pN=2.8693 sgnFdF_pN=2.7016 dwell_ms=0.6204
+[GATHER] call=75000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=37501 t=0.3750 n=8 ext_nm=4.5827 absFdF_pN=2.6613 sgnFdF_pN=1.4207 dwell_ms=0.6211
+[STRETCHCENSUS] step=37801 t=0.3780 n=13 ext_nm=5.6986 absFdF_pN=3.2090 sgnFdF_pN=-1.5999 dwell_ms=0.6205
+[GATHER] call=76000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.38....~105.72 minutes computation to simulate 1 sec, run finished in ~00.56 hours
+[STRETCHCENSUS] step=38101 t=0.3810 n=13 ext_nm=4.8099 absFdF_pN=3.4060 sgnFdF_pN=1.7538 dwell_ms=0.6222
+[STRETCHCENSUS] step=38401 t=0.3840 n=10 ext_nm=4.2754 absFdF_pN=2.9420 sgnFdF_pN=0.4534 dwell_ms=0.6231
+[GATHER] call=77000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=38701 t=0.3870 n=12 ext_nm=5.6747 absFdF_pN=3.9892 sgnFdF_pN=3.4124 dwell_ms=0.6217
+[GATHER] call=78000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.39....~106.58 minutes computation to simulate 1 sec, run finished in ~00.55 hours
+[STRETCHCENSUS] step=39001 t=0.3900 n=8 ext_nm=5.7583 absFdF_pN=1.9481 sgnFdF_pN=0.3995 dwell_ms=0.6211
+[STRETCHCENSUS] step=39301 t=0.3930 n=14 ext_nm=4.9118 absFdF_pN=2.2861 sgnFdF_pN=-1.8074 dwell_ms=0.6226
+[GATHER] call=79000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=39601 t=0.3960 n=15 ext_nm=5.6679 absFdF_pN=3.2365 sgnFdF_pN=2.0483 dwell_ms=0.6216
+[STRETCHCENSUS] step=39901 t=0.3990 n=8 ext_nm=6.0125 absFdF_pN=3.3066 sgnFdF_pN=1.6075 dwell_ms=0.6212
+[GATHER] call=80000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.40....~107.07 minutes computation to simulate 1 sec, run finished in ~00.54 hours
+[STRETCHCENSUS] step=40201 t=0.4020 n=9 ext_nm=5.5007 absFdF_pN=2.4244 sgnFdF_pN=-1.8972 dwell_ms=0.6218
+[GATHER] call=81000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=40501 t=0.4050 n=7 ext_nm=4.6808 absFdF_pN=2.8084 sgnFdF_pN=1.2761 dwell_ms=0.6222
+[STRETCHCENSUS] step=40801 t=0.4080 n=15 ext_nm=4.5055 absFdF_pN=2.0799 sgnFdF_pN=-1.0561 dwell_ms=0.6214
+[GATHER] call=82000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.41....~106.24 minutes computation to simulate 1 sec, run finished in ~00.51 hours
+[STRETCHCENSUS] step=41101 t=0.4110 n=12 ext_nm=4.3311 absFdF_pN=2.8062 sgnFdF_pN=0.1362 dwell_ms=0.6202
+[STRETCHCENSUS] step=41401 t=0.4140 n=14 ext_nm=5.0940 absFdF_pN=2.5293 sgnFdF_pN=0.8412 dwell_ms=0.6199
+[GATHER] call=83000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+[STRETCHCENSUS] step=41701 t=0.4170 n=10 ext_nm=5.1989 absFdF_pN=2.9966 sgnFdF_pN=0.6840 dwell_ms=0.6226
+[GATHER] call=84000 totalDirty=0 maxThread=0 cumAvg=42010.8 cumMaxPerThread=5261
+Sim. time=00.42....~106.43 minutes computation to simulate 1 sec, run finished in ~00.50 hours
+[STRETCHCENSUS] step=42001 t=0.4200 n=9 ext_nm=4.5395 absFdF_pN=2.8235 sgnFdF_pN=-0.4921 dwell_ms=0.6239
+[STRETCHCENSUS] step=42301 t=0.4230 n=10 ext_nm=5.4815 absFdF_pN=3.4049 sgnFdF_pN=3.3679 dwell_ms=0.6255
+[GATHER] call=85000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=42601 t=0.4260 n=10 ext_nm=4.5672 absFdF_pN=2.4483 sgnFdF_pN=1.3809 dwell_ms=0.6256
+[STRETCHCENSUS] step=42901 t=0.4290 n=10 ext_nm=5.7849 absFdF_pN=3.4464 sgnFdF_pN=1.0329 dwell_ms=0.6257
+[GATHER] call=86000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.43....~106.77 minutes computation to simulate 1 sec, run finished in ~00.48 hours
+[STRETCHCENSUS] step=43201 t=0.4320 n=11 ext_nm=4.8557 absFdF_pN=3.1648 sgnFdF_pN=-0.2063 dwell_ms=0.6254
+[GATHER] call=87000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=43501 t=0.4350 n=17 ext_nm=4.8854 absFdF_pN=2.7777 sgnFdF_pN=0.2641 dwell_ms=0.6264
+[STRETCHCENSUS] step=43801 t=0.4380 n=11 ext_nm=4.9050 absFdF_pN=2.5437 sgnFdF_pN=0.4919 dwell_ms=0.6270
+[GATHER] call=88000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.44....~106.35 minutes computation to simulate 1 sec, run finished in ~00.46 hours
+[STRETCHCENSUS] step=44101 t=0.4410 n=9 ext_nm=5.7037 absFdF_pN=2.1904 sgnFdF_pN=-0.2560 dwell_ms=0.6281
+[STRETCHCENSUS] step=44401 t=0.4440 n=11 ext_nm=4.4292 absFdF_pN=2.6373 sgnFdF_pN=-0.5157 dwell_ms=0.6292
+[GATHER] call=89000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=44701 t=0.4470 n=12 ext_nm=4.9338 absFdF_pN=2.6585 sgnFdF_pN=-1.2575 dwell_ms=0.6288
+[GATHER] call=90000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.45....~106.29 minutes computation to simulate 1 sec, run finished in ~00.44 hours
+[STRETCHCENSUS] step=45001 t=0.4500 n=11 ext_nm=5.3432 absFdF_pN=2.8339 sgnFdF_pN=1.6736 dwell_ms=0.6298
+[STRETCHCENSUS] step=45301 t=0.4530 n=12 ext_nm=5.0799 absFdF_pN=2.3427 sgnFdF_pN=0.9227 dwell_ms=0.6312
+[GATHER] call=91000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=45601 t=0.4560 n=14 ext_nm=5.5546 absFdF_pN=3.3728 sgnFdF_pN=0.5396 dwell_ms=0.6323
+[STRETCHCENSUS] step=45901 t=0.4590 n=14 ext_nm=6.2001 absFdF_pN=4.4395 sgnFdF_pN=1.4983 dwell_ms=0.6316
+[GATHER] call=92000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.46....~107.26 minutes computation to simulate 1 sec, run finished in ~00.43 hours
+[STRETCHCENSUS] step=46201 t=0.4620 n=13 ext_nm=3.7541 absFdF_pN=1.6575 sgnFdF_pN=-0.7297 dwell_ms=0.6314
+[GATHER] call=93000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=46501 t=0.4650 n=13 ext_nm=4.7904 absFdF_pN=2.2971 sgnFdF_pN=-1.9920 dwell_ms=0.6316
+[STRETCHCENSUS] step=46801 t=0.4680 n=11 ext_nm=6.0384 absFdF_pN=3.1244 sgnFdF_pN=1.5761 dwell_ms=0.6318
+[GATHER] call=94000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.47....~107.15 minutes computation to simulate 1 sec, run finished in ~00.41 hours
+[STRETCHCENSUS] step=47101 t=0.4710 n=13 ext_nm=4.3201 absFdF_pN=2.4221 sgnFdF_pN=-0.3640 dwell_ms=0.6321
+[STRETCHCENSUS] step=47401 t=0.4740 n=9 ext_nm=4.8641 absFdF_pN=3.3467 sgnFdF_pN=1.8846 dwell_ms=0.6327
+[GATHER] call=95000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=47701 t=0.4770 n=10 ext_nm=6.3198 absFdF_pN=4.3872 sgnFdF_pN=-0.4048 dwell_ms=0.6335
+[GATHER] call=96000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.48....~106.20 minutes computation to simulate 1 sec, run finished in ~00.39 hours
+[STRETCHCENSUS] step=48001 t=0.4800 n=12 ext_nm=5.1071 absFdF_pN=3.8805 sgnFdF_pN=1.2022 dwell_ms=0.6337
+[STRETCHCENSUS] step=48301 t=0.4830 n=13 ext_nm=5.4405 absFdF_pN=4.1065 sgnFdF_pN=0.7423 dwell_ms=0.6351
+[GATHER] call=97000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=48601 t=0.4860 n=10 ext_nm=3.8873 absFdF_pN=1.4494 sgnFdF_pN=0.5220 dwell_ms=0.6362
+[STRETCHCENSUS] step=48901 t=0.4890 n=9 ext_nm=5.1879 absFdF_pN=3.2447 sgnFdF_pN=0.5085 dwell_ms=0.6360
+[GATHER] call=98000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.49....~107.47 minutes computation to simulate 1 sec, run finished in ~00.38 hours
+[STRETCHCENSUS] step=49201 t=0.4920 n=11 ext_nm=6.3427 absFdF_pN=4.2595 sgnFdF_pN=-1.0822 dwell_ms=0.6364
+[GATHER] call=99000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=49501 t=0.4950 n=9 ext_nm=5.2708 absFdF_pN=2.9180 sgnFdF_pN=2.1015 dwell_ms=0.6368
+[STRETCHCENSUS] step=49801 t=0.4980 n=11 ext_nm=4.7857 absFdF_pN=3.4486 sgnFdF_pN=2.0091 dwell_ms=0.6367
+[GATHER] call=100000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.50....~106.76 minutes computation to simulate 1 sec, run finished in ~00.36 hours
+[STRETCHCENSUS] step=50101 t=0.5010 n=8 ext_nm=5.3020 absFdF_pN=2.8408 sgnFdF_pN=-0.4145 dwell_ms=0.6366
+[STRETCHCENSUS] step=50401 t=0.5040 n=11 ext_nm=5.2518 absFdF_pN=2.5020 sgnFdF_pN=0.4872 dwell_ms=0.6347
+[GATHER] call=101000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=50701 t=0.5070 n=12 ext_nm=5.7380 absFdF_pN=3.3113 sgnFdF_pN=-0.0467 dwell_ms=0.6354
+[GATHER] call=102000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.51....~102.57 minutes computation to simulate 1 sec, run finished in ~00.32 hours
+[STRETCHCENSUS] step=51001 t=0.5100 n=11 ext_nm=5.1660 absFdF_pN=2.6853 sgnFdF_pN=1.0535 dwell_ms=0.6357
+[STRETCHCENSUS] step=51301 t=0.5130 n=9 ext_nm=5.4793 absFdF_pN=2.8650 sgnFdF_pN=-0.4562 dwell_ms=0.6360
+[GATHER] call=103000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=51601 t=0.5160 n=12 ext_nm=4.4161 absFdF_pN=2.3448 sgnFdF_pN=0.5265 dwell_ms=0.6365
+[STRETCHCENSUS] step=51901 t=0.5190 n=8 ext_nm=4.5896 absFdF_pN=3.4530 sgnFdF_pN=0.7073 dwell_ms=0.6363
+[GATHER] call=104000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.52....~106.19 minutes computation to simulate 1 sec, run finished in ~00.32 hours
+[STRETCHCENSUS] step=52201 t=0.5220 n=12 ext_nm=5.5584 absFdF_pN=2.6939 sgnFdF_pN=0.9174 dwell_ms=0.6374
+[GATHER] call=105000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=52501 t=0.5250 n=11 ext_nm=6.0111 absFdF_pN=4.4649 sgnFdF_pN=0.3243 dwell_ms=0.6391
+[STRETCHCENSUS] step=52801 t=0.5280 n=12 ext_nm=4.9452 absFdF_pN=2.4367 sgnFdF_pN=-0.6545 dwell_ms=0.6389
+[GATHER] call=106000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.53....~105.57 minutes computation to simulate 1 sec, run finished in ~00.30 hours
+[STRETCHCENSUS] step=53101 t=0.5310 n=11 ext_nm=5.4888 absFdF_pN=3.4874 sgnFdF_pN=1.6110 dwell_ms=0.6388
+[STRETCHCENSUS] step=53401 t=0.5340 n=11 ext_nm=4.1503 absFdF_pN=2.1810 sgnFdF_pN=-1.1652 dwell_ms=0.6387
+[GATHER] call=107000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=53701 t=0.5370 n=7 ext_nm=4.7294 absFdF_pN=1.5492 sgnFdF_pN=1.5492 dwell_ms=0.6382
+[GATHER] call=108000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.54....~105.14 minutes computation to simulate 1 sec, run finished in ~00.28 hours
+[STRETCHCENSUS] step=54001 t=0.5400 n=12 ext_nm=5.3595 absFdF_pN=3.1197 sgnFdF_pN=0.2438 dwell_ms=0.6381
+[STRETCHCENSUS] step=54301 t=0.5430 n=11 ext_nm=5.5612 absFdF_pN=3.2762 sgnFdF_pN=-2.2243 dwell_ms=0.6369
+[GATHER] call=109000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=54601 t=0.5460 n=15 ext_nm=6.0949 absFdF_pN=3.7964 sgnFdF_pN=3.4608 dwell_ms=0.6374
+[STRETCHCENSUS] step=54901 t=0.5490 n=15 ext_nm=5.2791 absFdF_pN=3.5921 sgnFdF_pN=0.5774 dwell_ms=0.6374
+[GATHER] call=110000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.55....~106.01 minutes computation to simulate 1 sec, run finished in ~00.27 hours
+[STRETCHCENSUS] step=55201 t=0.5520 n=10 ext_nm=6.0901 absFdF_pN=3.8640 sgnFdF_pN=2.3900 dwell_ms=0.6379
+[GATHER] call=111000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=55501 t=0.5550 n=10 ext_nm=4.7928 absFdF_pN=1.8551 sgnFdF_pN=0.9308 dwell_ms=0.6388
+[STRETCHCENSUS] step=55801 t=0.5580 n=10 ext_nm=5.9231 absFdF_pN=3.0222 sgnFdF_pN=-0.9783 dwell_ms=0.6387
+[GATHER] call=112000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.56....~105.35 minutes computation to simulate 1 sec, run finished in ~00.25 hours
+[STRETCHCENSUS] step=56101 t=0.5610 n=11 ext_nm=5.3384 absFdF_pN=3.5454 sgnFdF_pN=-0.8996 dwell_ms=0.6396
+[STRETCHCENSUS] step=56401 t=0.5640 n=9 ext_nm=5.3554 absFdF_pN=2.9342 sgnFdF_pN=-0.2580 dwell_ms=0.6413
+[GATHER] call=113000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=56701 t=0.5670 n=10 ext_nm=5.7053 absFdF_pN=2.1556 sgnFdF_pN=0.0532 dwell_ms=0.6413
+[GATHER] call=114000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.57....~105.65 minutes computation to simulate 1 sec, run finished in ~00.23 hours
+[STRETCHCENSUS] step=57001 t=0.5700 n=10 ext_nm=5.6638 absFdF_pN=4.4907 sgnFdF_pN=1.4490 dwell_ms=0.6425
+[STRETCHCENSUS] step=57301 t=0.5730 n=8 ext_nm=6.0674 absFdF_pN=4.4076 sgnFdF_pN=1.8955 dwell_ms=0.6422
+[GATHER] call=115000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=57601 t=0.5760 n=8 ext_nm=5.5901 absFdF_pN=4.0594 sgnFdF_pN=-1.0026 dwell_ms=0.6418
+[STRETCHCENSUS] step=57901 t=0.5790 n=8 ext_nm=5.0711 absFdF_pN=3.1448 sgnFdF_pN=-1.7814 dwell_ms=0.6426
+[GATHER] call=116000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.58....~107.76 minutes computation to simulate 1 sec, run finished in ~00.22 hours
+[STRETCHCENSUS] step=58201 t=0.5820 n=13 ext_nm=4.3778 absFdF_pN=1.8591 sgnFdF_pN=0.9416 dwell_ms=0.6427
+[GATHER] call=117000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=58501 t=0.5850 n=12 ext_nm=5.3057 absFdF_pN=2.5391 sgnFdF_pN=-0.7741 dwell_ms=0.6426
+[STRETCHCENSUS] step=58801 t=0.5880 n=15 ext_nm=4.3437 absFdF_pN=1.9251 sgnFdF_pN=-0.0612 dwell_ms=0.6425
+[GATHER] call=118000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.59....~106.67 minutes computation to simulate 1 sec, run finished in ~00.20 hours
+[STRETCHCENSUS] step=59101 t=0.5910 n=15 ext_nm=6.5967 absFdF_pN=4.4531 sgnFdF_pN=2.4239 dwell_ms=0.6424
+[STRETCHCENSUS] step=59401 t=0.5940 n=9 ext_nm=5.9871 absFdF_pN=3.9548 sgnFdF_pN=-1.1303 dwell_ms=0.6428
+[GATHER] call=119000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=59701 t=0.5970 n=9 ext_nm=5.2325 absFdF_pN=3.0823 sgnFdF_pN=0.3728 dwell_ms=0.6429
+[GATHER] call=120000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.60....~106.37 minutes computation to simulate 1 sec, run finished in ~00.18 hours
+[STRETCHCENSUS] step=60001 t=0.6000 n=12 ext_nm=6.1594 absFdF_pN=3.3583 sgnFdF_pN=-3.0018 dwell_ms=0.6432
+[STRETCHCENSUS] step=60301 t=0.6030 n=10 ext_nm=6.9379 absFdF_pN=4.2218 sgnFdF_pN=-1.3237 dwell_ms=0.6425
+[GATHER] call=121000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=60601 t=0.6060 n=12 ext_nm=4.0449 absFdF_pN=2.1091 sgnFdF_pN=-0.3152 dwell_ms=0.6431
+[STRETCHCENSUS] step=60901 t=0.6090 n=9 ext_nm=5.1822 absFdF_pN=3.3121 sgnFdF_pN=0.6881 dwell_ms=0.6433
+[GATHER] call=122000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.61....~106.67 minutes computation to simulate 1 sec, run finished in ~00.16 hours
+[STRETCHCENSUS] step=61201 t=0.6120 n=12 ext_nm=4.8315 absFdF_pN=2.3414 sgnFdF_pN=-1.8290 dwell_ms=0.6434
+[GATHER] call=123000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=61501 t=0.6150 n=6 ext_nm=4.7037 absFdF_pN=3.0467 sgnFdF_pN=-1.4909 dwell_ms=0.6443
+[STRETCHCENSUS] step=61801 t=0.6180 n=12 ext_nm=5.0423 absFdF_pN=2.6984 sgnFdF_pN=1.5575 dwell_ms=0.6446
+[GATHER] call=124000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.62....~105.72 minutes computation to simulate 1 sec, run finished in ~00.14 hours
+[STRETCHCENSUS] step=62101 t=0.6210 n=14 ext_nm=4.7008 absFdF_pN=3.2587 sgnFdF_pN=0.9716 dwell_ms=0.6452
+[STRETCHCENSUS] step=62401 t=0.6240 n=13 ext_nm=5.3551 absFdF_pN=2.6666 sgnFdF_pN=-0.8451 dwell_ms=0.6441
+[GATHER] call=125000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=62701 t=0.6270 n=11 ext_nm=4.6894 absFdF_pN=2.4714 sgnFdF_pN=0.0855 dwell_ms=0.6449
+[GATHER] call=126000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.63....~105.46 minutes computation to simulate 1 sec, run finished in ~00.12 hours
+[STRETCHCENSUS] step=63001 t=0.6300 n=7 ext_nm=4.3338 absFdF_pN=2.3437 sgnFdF_pN=1.3816 dwell_ms=0.6455
+[STRETCHCENSUS] step=63301 t=0.6330 n=8 ext_nm=4.1930 absFdF_pN=1.2982 sgnFdF_pN=-0.4603 dwell_ms=0.6454
+[GATHER] call=127000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=63601 t=0.6360 n=10 ext_nm=6.3122 absFdF_pN=4.4355 sgnFdF_pN=-1.4729 dwell_ms=0.6455
+[STRETCHCENSUS] step=63901 t=0.6390 n=9 ext_nm=4.6094 absFdF_pN=2.5352 sgnFdF_pN=1.5315 dwell_ms=0.6445
+[GATHER] call=128000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.64....~105.88 minutes computation to simulate 1 sec, run finished in ~00.11 hours
+[STRETCHCENSUS] step=64201 t=0.6420 n=10 ext_nm=5.5843 absFdF_pN=2.9156 sgnFdF_pN=-0.8245 dwell_ms=0.6449
+[GATHER] call=129000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=64501 t=0.6450 n=8 ext_nm=4.7776 absFdF_pN=2.3484 sgnFdF_pN=1.9213 dwell_ms=0.6460
+[STRETCHCENSUS] step=64801 t=0.6480 n=11 ext_nm=5.3698 absFdF_pN=2.0267 sgnFdF_pN=-0.8063 dwell_ms=0.6456
+[GATHER] call=130000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.65....~105.96 minutes computation to simulate 1 sec, run finished in ~00.09 hours
+[STRETCHCENSUS] step=65101 t=0.6510 n=11 ext_nm=5.4141 absFdF_pN=2.4369 sgnFdF_pN=0.3264 dwell_ms=0.6457
+[STRETCHCENSUS] step=65401 t=0.6540 n=10 ext_nm=4.2104 absFdF_pN=2.5632 sgnFdF_pN=0.3692 dwell_ms=0.6447
+[GATHER] call=131000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=65701 t=0.6570 n=9 ext_nm=5.5814 absFdF_pN=3.6027 sgnFdF_pN=-0.3551 dwell_ms=0.6451
+[GATHER] call=132000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.66....~81.52 minutes computation to simulate 1 sec, run finished in ~00.05 hours
+[STRETCHCENSUS] step=66001 t=0.6600 n=7 ext_nm=4.8968 absFdF_pN=1.5720 sgnFdF_pN=-0.4302 dwell_ms=0.6456
+[STRETCHCENSUS] step=66301 t=0.6630 n=12 ext_nm=3.9831 absFdF_pN=2.3770 sgnFdF_pN=0.8039 dwell_ms=0.6459
+[GATHER] call=133000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=66601 t=0.6660 n=11 ext_nm=4.9251 absFdF_pN=2.4930 sgnFdF_pN=0.5426 dwell_ms=0.6461
+[STRETCHCENSUS] step=66901 t=0.6690 n=13 ext_nm=4.4182 absFdF_pN=1.7033 sgnFdF_pN=-0.5755 dwell_ms=0.6455
+[GATHER] call=134000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.67....~81.78 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[STRETCHCENSUS] step=67201 t=0.6720 n=13 ext_nm=6.1285 absFdF_pN=3.4718 sgnFdF_pN=0.3287 dwell_ms=0.6459
+[GATHER] call=135000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=67501 t=0.6750 n=11 ext_nm=4.9774 absFdF_pN=2.5189 sgnFdF_pN=-1.0769 dwell_ms=0.6465
+[STRETCHCENSUS] step=67801 t=0.6780 n=11 ext_nm=4.6597 absFdF_pN=2.8326 sgnFdF_pN=1.1913 dwell_ms=0.6458
+[GATHER] call=136000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+Sim. time=00.68....~81.82 minutes computation to simulate 1 sec, run finished in ~00.03 hours
+[STRETCHCENSUS] step=68101 t=0.6810 n=9 ext_nm=4.7558 absFdF_pN=2.7315 sgnFdF_pN=1.5632 dwell_ms=0.6467
+[STRETCHCENSUS] step=68401 t=0.6840 n=12 ext_nm=4.8732 absFdF_pN=3.6251 sgnFdF_pN=-0.6427 dwell_ms=0.6465
+[GATHER] call=137000 totalDirty=0 maxThread=0 cumAvg=42010.7 cumMaxPerThread=5261
+[STRETCHCENSUS] step=68701 t=0.6870 n=8 ext_nm=6.2742 absFdF_pN=3.6070 sgnFdF_pN=-0.3959 dwell_ms=0.6471
+[GATHER] call=138000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+Sim. time=00.69....~81.75 minutes computation to simulate 1 sec, run finished in ~00.01 hours
+[STRETCHCENSUS] step=69001 t=0.6900 n=7 ext_nm=4.9811 absFdF_pN=2.3963 sgnFdF_pN=0.1919 dwell_ms=0.6467
+[STRETCHCENSUS] step=69301 t=0.6930 n=12 ext_nm=4.0768 absFdF_pN=2.1017 sgnFdF_pN=-0.0876 dwell_ms=0.6469
+[GATHER] call=139000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+[STRETCHCENSUS] step=69601 t=0.6960 n=15 ext_nm=4.8029 absFdF_pN=2.8224 sgnFdF_pN=-0.3767 dwell_ms=0.6475
+[STRETCHCENSUS] step=69901 t=0.6990 n=10 ext_nm=5.0025 absFdF_pN=2.8551 sgnFdF_pN=2.2550 dwell_ms=0.6490
+[GATHER] call=140000 totalDirty=0 maxThread=0 cumAvg=42010.6 cumMaxPerThread=5261
+Sim. time=00.70....~82.10 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=11944
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=70101) linkCtMeanSettled=0.00 (samples=35102) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=11 monomers=740 fActinUM=0.01 meanSegLenUM=0.184 freePoolUM=14.99
+[STATS] mem usedHeapMB=1679.2 maxHeapMB=4295.0
+[STATS] percolation filaments=1 activeLinks=0 linksPerFil=0.000 largestComp=1 (100.0% of fils) spanX=0.12 spanY=0.33 spanZ=0.06 spanFrac=0.33 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=11.231
+[STATS] glidingVelocity=3.2895
+ThingStep Threads took 1956.667000 seconds.
+ThingBrownian Threads took 537.565000 seconds.
+Myosin Threads took 685.652000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 57.106000 seconds.
+Ck Mesh Threads took 38.068000 seconds.
+Ck Mots Threads took 117.882000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 205.376000 seconds.
+Finished closing JSON plots!

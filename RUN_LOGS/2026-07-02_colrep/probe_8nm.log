@@ -1,0 +1,340 @@
+[TELEPORT_DIAG] enabled=false threshold=0.1
+Loading parameter values from /home/jba/Code/BoA/ParameterFiles/glidingAssay_d1000_colTol8nm...
+     Parameter assigned: deltaT set to 1.0E-5
+     Parameter assigned: biochemDeltaT set to 0.01
+     Parameter assigned: collisionDeltaT set to 1.0E-5
+     No match found for parameter label brownianDeltaT ... you best check that out!
+     Parameter assigned: runTime set to 0.7
+     Parameter assigned: toFileInterval set to 300
+     Parameter assigned: remoteWriteInterval set to 1000
+     Parameter assigned: fracMove set to 0.5
+     Parameter assigned: fracR set to 0.1
+     Parameter assigned: fracMoveTorq set to 0.2
+     Parameter assigned: boxXDim set to 14.0
+     Parameter assigned: boxYDim set to 2.0
+     Parameter assigned: boxZDim set to 0.5
+     Parameter assigned: aeta set to 0.1
+     Parameter assigned: noMonomersSimd set to true
+     Parameter assigned: kRdmNuc set to 0.0
+     Parameter assigned: kNodeNuc set to 0.0
+     Parameter assigned: initialFilaments set to 0
+     Parameter assigned: initialMyoMiniFils set to 0
+     Parameter assigned: equilNodes set to 0
+     Parameter assigned: glidingAssay set to true
+     Parameter assigned: externalDensitySweep set to true
+     Parameter assigned: fixedMyosinDensity set to 1000.0
+     Parameter assigned: fixedMyosinZValue set to -0.05
+     Parameter assigned: glidingFilamentLength set to 2.0
+     Parameter assigned: filSegLength set to 64
+     Parameter assigned: myoColTol set to 0.008
+Done... there were 1 misunderstandings.
+[RNG] per-worker RNG pool: 17 MTFs, masterSeed=-6230655492118370141 (BOA_RNG_SEED unset)
+[MOTOR] default fhat neck-stroke: cockedMotor_ActinAngle=90.0 cockedLever_MotorAngle=70.0 (default)
+**************************************************************
+Eulerian Mesh stats:
+nXBins = 71; xBinWidth = 0.2 µm
+nYBins = 11; yBinWidth = 0.2 µm
+binDepth = 1000
+**************************************************************
+MotorBindGrid3D: 71 x 11 x 4 cells (0.2 µm each)
+[13:10] [phase-plan] inert-wave cull — ThreadSet activation snapshot:
+[13:10]   ON   ThingStep Threads
+[13:10]   ON   ThingBrownian Threads
+[13:10]   ON   Myosin Threads
+[13:10]   OFF  MyoDimer Threads
+[13:10]   OFF  Protein Node Threads
+[13:10]   OFF  MyoMiniFil Threads
+[13:10]   OFF  Chamber Myo Threads
+[13:10]   OFF  Chamber MyoDimer Threads
+[13:10]   ON   Mesh Threads
+[13:10]   ON   Ck Mesh Threads
+[13:10]   ON   Ck Mots Threads
+[13:10]   OFF  XLink Threads
+[13:10]   OFF  Arp23 Threads
+[13:10]   OFF  NodeLink Threads
+[13:10]   OFF  Membrane Node Threads
+[13:10]   OFF  ActA Threads
+[13:10]   ON   MotorBindGrid3D Fill
+[13:10] [phase-plan] 7 active, 10 inert (will skip dispatch)
+ThreeJSWriter: created directory /home/jba/Code/threejs_output/colrep_8nm_p1
+ThreeJSWriter: output directory /home/jba/Code/threejs_output/colrep_8nm_p1
+ThreeJSWriter: archived 5 source files to source.zip
+ThreeJSWriter: wrote params_input.glidingAssay_d1000_colTol8nm
+ThreeJSWriter: wrote params_effective.txt (381 parameters)
+[GATHER] call=1000 totalDirty=0 maxThread=0 cumAvg=42009.7 cumMaxPerThread=5261
+[GATHER] call=2000 totalDirty=0 maxThread=0 cumAvg=42013.1 cumMaxPerThread=5261
+Sim. time=00.01....~76.62 minutes computation to simulate 1 sec, run finished in ~00.88 hours
+[GATHER] call=3000 totalDirty=0 maxThread=0 cumAvg=42014.3 cumMaxPerThread=5261
+[GATHER] call=4000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.02....~72.84 minutes computation to simulate 1 sec, run finished in ~00.83 hours
+[GATHER] call=5000 totalDirty=0 maxThread=0 cumAvg=42015.0 cumMaxPerThread=5261
+[GATHER] call=6000 totalDirty=0 maxThread=0 cumAvg=42015.3 cumMaxPerThread=5261
+Sim. time=00.03....~72.54 minutes computation to simulate 1 sec, run finished in ~00.81 hours
+[GATHER] call=7000 totalDirty=0 maxThread=0 cumAvg=42015.5 cumMaxPerThread=5261
+[GATHER] call=8000 totalDirty=0 maxThread=0 cumAvg=42015.5 cumMaxPerThread=5261
+Sim. time=00.04....~73.88 minutes computation to simulate 1 sec, run finished in ~00.81 hours
+[GATHER] call=9000 totalDirty=0 maxThread=0 cumAvg=42015.5 cumMaxPerThread=5261
+[GATHER] call=10000 totalDirty=0 maxThread=0 cumAvg=42015.4 cumMaxPerThread=5261
+Sim. time=00.05....~74.22 minutes computation to simulate 1 sec, run finished in ~00.80 hours
+[GATHER] call=11000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+[GATHER] call=12000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+Sim. time=00.06....~76.71 minutes computation to simulate 1 sec, run finished in ~00.82 hours
+[GATHER] call=13000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+[GATHER] call=14000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+Sim. time=00.07....~94.06 minutes computation to simulate 1 sec, run finished in ~00.99 hours
+[GATHER] call=15000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+[GATHER] call=16000 totalDirty=0 maxThread=0 cumAvg=42015.3 cumMaxPerThread=5261
+Sim. time=00.08....~92.95 minutes computation to simulate 1 sec, run finished in ~00.96 hours
+[GATHER] call=17000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+[GATHER] call=18000 totalDirty=0 maxThread=0 cumAvg=42015.2 cumMaxPerThread=5261
+Sim. time=00.09....~94.23 minutes computation to simulate 1 sec, run finished in ~00.96 hours
+[GATHER] call=19000 totalDirty=0 maxThread=0 cumAvg=42015.1 cumMaxPerThread=5261
+[GATHER] call=20000 totalDirty=0 maxThread=0 cumAvg=42015.0 cumMaxPerThread=5261
+Sim. time=00.10....~107.71 minutes computation to simulate 1 sec, run finished in ~01.08 hours
+[GATHER] call=21000 totalDirty=0 maxThread=0 cumAvg=42015.0 cumMaxPerThread=5261
+[GATHER] call=22000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+Sim. time=00.11....~107.96 minutes computation to simulate 1 sec, run finished in ~01.06 hours
+[GATHER] call=23000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=24000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.12....~86.80 minutes computation to simulate 1 sec, run finished in ~00.84 hours
+[GATHER] call=25000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=26000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.13....~83.77 minutes computation to simulate 1 sec, run finished in ~00.80 hours
+[GATHER] call=27000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=28000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+Sim. time=00.14....~82.88 minutes computation to simulate 1 sec, run finished in ~00.77 hours
+[GATHER] call=29000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=30000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.15....~82.64 minutes computation to simulate 1 sec, run finished in ~00.76 hours
+[GATHER] call=31000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=32000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.16....~83.34 minutes computation to simulate 1 sec, run finished in ~00.75 hours
+[GATHER] call=33000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=34000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.17....~82.90 minutes computation to simulate 1 sec, run finished in ~00.73 hours
+[GATHER] call=35000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=36000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+Sim. time=00.18....~82.86 minutes computation to simulate 1 sec, run finished in ~00.72 hours
+[GATHER] call=37000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=38000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+Sim. time=00.19....~83.81 minutes computation to simulate 1 sec, run finished in ~00.71 hours
+[GATHER] call=39000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=40000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.20....~82.82 minutes computation to simulate 1 sec, run finished in ~00.69 hours
+[GATHER] call=41000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=42000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+Sim. time=00.21....~82.77 minutes computation to simulate 1 sec, run finished in ~00.68 hours
+[GATHER] call=43000 totalDirty=0 maxThread=0 cumAvg=42014.9 cumMaxPerThread=5261
+[GATHER] call=44000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.22....~83.44 minutes computation to simulate 1 sec, run finished in ~00.67 hours
+[GATHER] call=45000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=46000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.23....~82.55 minutes computation to simulate 1 sec, run finished in ~00.65 hours
+[GATHER] call=47000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=48000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.24....~82.52 minutes computation to simulate 1 sec, run finished in ~00.63 hours
+[GATHER] call=49000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=50000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.25....~82.95 minutes computation to simulate 1 sec, run finished in ~00.62 hours
+[GATHER] call=51000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=52000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.26....~82.39 minutes computation to simulate 1 sec, run finished in ~00.60 hours
+[GATHER] call=53000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=54000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.27....~82.49 minutes computation to simulate 1 sec, run finished in ~00.59 hours
+[GATHER] call=55000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=56000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.28....~82.46 minutes computation to simulate 1 sec, run finished in ~00.58 hours
+[GATHER] call=57000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=58000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.29....~82.08 minutes computation to simulate 1 sec, run finished in ~00.56 hours
+[GATHER] call=59000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=60000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.30....~82.08 minutes computation to simulate 1 sec, run finished in ~00.55 hours
+[GATHER] call=61000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=62000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.31....~82.47 minutes computation to simulate 1 sec, run finished in ~00.54 hours
+[GATHER] call=63000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=64000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.32....~82.20 minutes computation to simulate 1 sec, run finished in ~00.52 hours
+[GATHER] call=65000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=66000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.33....~82.45 minutes computation to simulate 1 sec, run finished in ~00.51 hours
+[GATHER] call=67000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=68000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.34....~83.24 minutes computation to simulate 1 sec, run finished in ~00.50 hours
+[GATHER] call=69000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=70000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.35....~82.51 minutes computation to simulate 1 sec, run finished in ~00.48 hours
+[GATHER] call=71000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=72000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.36....~82.61 minutes computation to simulate 1 sec, run finished in ~00.47 hours
+[GATHER] call=73000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=74000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.37....~83.33 minutes computation to simulate 1 sec, run finished in ~00.46 hours
+[GATHER] call=75000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=76000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.38....~82.41 minutes computation to simulate 1 sec, run finished in ~00.44 hours
+[GATHER] call=77000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=78000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.39....~82.40 minutes computation to simulate 1 sec, run finished in ~00.43 hours
+[GATHER] call=79000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=80000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.40....~83.22 minutes computation to simulate 1 sec, run finished in ~00.42 hours
+[GATHER] call=81000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=82000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.41....~82.68 minutes computation to simulate 1 sec, run finished in ~00.40 hours
+[GATHER] call=83000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=84000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.42....~83.00 minutes computation to simulate 1 sec, run finished in ~00.39 hours
+[GATHER] call=85000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=86000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.43....~83.52 minutes computation to simulate 1 sec, run finished in ~00.38 hours
+[GATHER] call=87000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=88000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.44....~84.58 minutes computation to simulate 1 sec, run finished in ~00.37 hours
+[GATHER] call=89000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=90000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.45....~89.52 minutes computation to simulate 1 sec, run finished in ~00.37 hours
+[GATHER] call=91000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=92000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.46....~90.20 minutes computation to simulate 1 sec, run finished in ~00.36 hours
+[GATHER] call=93000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=94000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.47....~93.72 minutes computation to simulate 1 sec, run finished in ~00.36 hours
+[GATHER] call=95000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=96000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.48....~89.66 minutes computation to simulate 1 sec, run finished in ~00.33 hours
+[GATHER] call=97000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=98000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.49....~75.31 minutes computation to simulate 1 sec, run finished in ~00.26 hours
+[GATHER] call=99000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=100000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.50....~84.02 minutes computation to simulate 1 sec, run finished in ~00.28 hours
+[GATHER] call=101000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=102000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.51....~83.13 minutes computation to simulate 1 sec, run finished in ~00.26 hours
+[GATHER] call=103000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=104000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.52....~104.28 minutes computation to simulate 1 sec, run finished in ~00.31 hours
+[GATHER] call=105000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=106000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.53....~107.69 minutes computation to simulate 1 sec, run finished in ~00.31 hours
+[GATHER] call=107000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=108000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.54....~106.85 minutes computation to simulate 1 sec, run finished in ~00.28 hours
+[GATHER] call=109000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=110000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.55....~107.51 minutes computation to simulate 1 sec, run finished in ~00.27 hours
+[GATHER] call=111000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=112000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.56....~106.62 minutes computation to simulate 1 sec, run finished in ~00.25 hours
+[GATHER] call=113000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=114000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.57....~106.60 minutes computation to simulate 1 sec, run finished in ~00.23 hours
+[GATHER] call=115000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+[GATHER] call=116000 totalDirty=0 maxThread=0 cumAvg=42014.8 cumMaxPerThread=5261
+Sim. time=00.58....~106.71 minutes computation to simulate 1 sec, run finished in ~00.21 hours
+[GATHER] call=117000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=118000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.59....~107.09 minutes computation to simulate 1 sec, run finished in ~00.20 hours
+[GATHER] call=119000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=120000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.60....~106.25 minutes computation to simulate 1 sec, run finished in ~00.18 hours
+[GATHER] call=121000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=122000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.61....~107.73 minutes computation to simulate 1 sec, run finished in ~00.16 hours
+[GATHER] call=123000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=124000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.62....~106.95 minutes computation to simulate 1 sec, run finished in ~00.14 hours
+[GATHER] call=125000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=126000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.63....~106.92 minutes computation to simulate 1 sec, run finished in ~00.12 hours
+[GATHER] call=127000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=128000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.64....~107.02 minutes computation to simulate 1 sec, run finished in ~00.11 hours
+[GATHER] call=129000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=130000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.65....~107.37 minutes computation to simulate 1 sec, run finished in ~00.09 hours
+[GATHER] call=131000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=132000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.66....~117.53 minutes computation to simulate 1 sec, run finished in ~00.08 hours
+[GATHER] call=133000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=134000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.67....~121.31 minutes computation to simulate 1 sec, run finished in ~00.06 hours
+[GATHER] call=135000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=136000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.68....~119.56 minutes computation to simulate 1 sec, run finished in ~00.04 hours
+[GATHER] call=137000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=138000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.69....~117.68 minutes computation to simulate 1 sec, run finished in ~00.02 hours
+[GATHER] call=139000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+[GATHER] call=140000 totalDirty=0 maxThread=0 cumAvg=42014.7 cumMaxPerThread=5261
+Sim. time=00.70....~120.51 minutes computation to simulate 1 sec, run finished in ~00.00 hours
+collisionTime = 0.0
+myosinTime = 0.0
+[STATS] bindEvents=55881
+[STATS] filLinks=0 (active=0 inactive=0)
+[STATS] linkCtMean=0.00 (samples=70101) linkCtMeanSettled=0.00 (samples=35102) finalActive=0
+[STATS] filFilBroadphase active=false filsegMeshFillSkipped=0 candPairs=0 candMaxPerSeg=0 overflowSegs=0 drainCalls=0
+[STATS] fActin segs=11 monomers=740 fActinUM=0.01 meanSegLenUM=0.184 freePoolUM=14.99
+[STATS] mem usedHeapMB=1679.7 maxHeapMB=4295.0
+[STATS] percolation filaments=1 activeLinks=0 linksPerFil=0.000 largestComp=1 (100.0% of fils) spanX=0.13 spanY=0.11 spanZ=0.12 spanFrac=0.13 percolates=false
+[A3] cpuFallback histogram (last classify): thingCt=0 cpuFb total=0 { FilSeg=0 MyoMini=0 ProteinNode=0 Chamber=0 other=0 }
+[A3] dimer cohesion dispatch: device(noop)=0 cpu(work)=0  | body↔rod constrain: device(noop)=0 cpu(work)=0  | updateMyosins(host-bookkeeping)=0
+[NODE] cpuNodeTetherApplyCt=0 (must be 0 on GPU node path)
+[STATS] checkBugInsideFireCt=0
+[STATS] addLinkForcesFireCt=0
+[STATS] addTorsionFireCt=0
+[STATS] meshFillFilSegFireCt=0
+[STATS] meshAllSegsFireCt=0
+[STATS] mbg3dFillFilSegFireCt=0
+[STATS] updatePosFromBindFireCt=0
+[STATS] updatePosFromStepFireCt=0
+[STATS] validateSegFireCt=0
+[STATS] anchorFireCt=0
+[STATS] filSegInitFireCt=0
+[STATS] motorInitFireCt=0
+[STATS] meanBoundMotors=20.298
+[STATS] glidingVelocity=5.9677
+ThingStep Threads took 1608.859000 seconds.
+ThingBrownian Threads took 441.740000 seconds.
+Myosin Threads took 576.655000 seconds.
+MyoDimer Threads took 0.000000 seconds.
+Protein Node Threads took 0.000000 seconds.
+MyoMiniFil Threads took 0.000000 seconds.
+Chamber Myo Threads took 0.000000 seconds.
+Chamber MyoDimer Threads took 0.000000 seconds.
+Mesh Threads took 71.174000 seconds.
+Ck Mesh Threads took 48.318000 seconds.
+Ck Mots Threads took 108.603000 seconds.
+XLink Threads took 0.000000 seconds.
+Arp23 Threads took 0.000000 seconds.
+NodeLink Threads took 0.000000 seconds.
+Membrane Node Threads took 0.000000 seconds.
+ActA Threads took 0.000000 seconds.
+MotorBindGrid3D Fill took 173.460000 seconds.
+Finished closing JSON plots!
+	Command being timed: "java -Xmx4G --enable-preview -cp /home/jba/Code/TornadoVM/dist/tornadovm-4.0.1-dev-ptx-linux-amd64/tornadovm-4.0.1-dev-ptx/share/java/tornado/tornado-api-4.0.1-dev.jar:libs/*:. BoxOfActin -r -pf ParameterFiles/glidingAssay_d1000_colTol8nm -3js /home/jba/Code/threejs_output/colrep_8nm_p1"
+	User time (seconds): 15311.17
+	System time (seconds): 171.68
+	Percent of CPU this job got: 403%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:03:55
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 2605388
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 530
+	Minor (reclaiming a frame) page faults: 708202
+	Voluntary context switches: 40369415
+	Involuntary context switches: 401374
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 5007520
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

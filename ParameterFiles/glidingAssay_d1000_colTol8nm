@@ -1,4 +1,4 @@
-<BOA> capture-radius sensitivity: myoColTol=6nm, default f-hat motor, d1000 full mat
+<BOA> capture-radius sensitivity: myoColTol=8nm, default f-hat motor, d1000 full mat
 deltaT:true:1.0E-5;
 biochemDeltaT:true:0.01;
 collisionDeltaT:true:1.0E-5;
@@ -25,4 +25,4 @@ fixedMyosinDensity:true:1000;
 fixedMyosinZValue:true:-0.05;
 glidingFilamentLength:true:2.0;
 filSegLength:true:64.0;
-myoColTol:true:0.006;
+myoColTol:true:0.008;

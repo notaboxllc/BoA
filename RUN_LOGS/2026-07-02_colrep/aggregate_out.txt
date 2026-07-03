@@ -1,0 +1,18 @@
+run              frames  tend  cov!  vax@.20  vax@.30    |v|  aFrac   avgB  drift
+colrep_4nm_p1       235  0.70 False   -3.066   -3.061  3.088  0.993  11.39  0.269
+colrep_4nm_p2       235  0.70 False   -2.955   -3.045  2.981  0.991  11.25  0.263
+colrep_4nm_p3        38  0.11 False      nan      nan    nan    nan    nan    nan
+colrep_6nm_p1       235  0.70 False   -2.497   -2.509  2.509  0.995  16.57  0.151
+colrep_6nm_p2       111  0.33 False   -3.249   -3.316  3.266  0.995  17.50  0.186
+colrep_8nm_p1       235  0.70 False   -5.303   -5.595  5.455  0.972  19.47  0.272
+colrep_8nm_p2       235  0.70 False   -4.310   -4.426  4.316  0.999  19.76  0.218
+colrep_8nm_p3        86  0.25 False   -3.399      nan  3.410  0.997  19.54  0.174
+
+# ---- STRETCH CENSUS (steady window t>=0.20, from run logs; batch runs only) ----
+run              nsamp n_bound  ext_nm absFdF_pN sgnFdF_pN dwell_ms
+run_4nm_p2       167    11.3   5.087    2.8645    0.2379   0.6317
+run_4nm_p3         3    11.3   5.420    3.1983    0.4039   0.6113
+run_6nm_p1       167    16.7   5.250    3.0121    0.2011   0.3949
+run_6nm_p2        67    17.1   5.157    2.9843    0.2066   0.4041
+run_8nm_p2       167    19.8   5.503    3.2066    0.1228   0.2377
+run_8nm_p3        21    19.5   5.785    3.3279    0.3582   0.2428

@@ -17,7 +17,22 @@ public class MyoFilLink {
 	//counting release method
 	static int myoBreakForceRelease = 0;
 	static int normalRelease = 0;
-	
+
+	// ---- Read-only stretch census (2026-07-02, capture-radius replicate task) ----
+	// Gated behind BOA_STRETCH_CENSUS; default-off => byte-identical (no force/RNG touched,
+	// pure bookkeeping). Reports, over the currently-bound cross-bridge population at output
+	// cadence: anchor-spring extension (nm) = forceMag/myoSpring, |forceDotFil| & signed
+	// forceDotFil per head (pN), and mean bound-episode dwell (ms) from completed bind->release
+	// episodes. Mirrors v2's -stretchcensus (PHASE2_CAPTURE_RADIUS_FINDINGS STEP 3).
+	static final boolean STRETCH_CENSUS;
+	static {
+		String s = System.getenv("BOA_STRETCH_CENSUS");
+		STRETCH_CENSUS = (s != null && !s.isEmpty() && !s.equals("0") && !s.equalsIgnoreCase("false"));
+	}
+	int bindStep = -1;                 // Env.counter at the current bind; -1 when free
+	static long censusDwellSteps = 0;  // sum of completed-episode lifetimes (in steps)
+	static long censusDwellEpisodes = 0;
+
 	// (Removed dead `stepSize` field — it had no consumers; the working stroke is
 	// emergent from the cross-bridge spring + rebind geometry, not an explicit step.)
 	// Cross-bridge stiffness is now Env.myoSpring (runtime-mutable); read via getValue().
@@ -85,6 +100,7 @@ public class MyoFilLink {
 	public void setAttachment (FilSegment seg, double pos) {
 		mySeg = seg;
 		posOnSeg = pos;
+		if (STRETCH_CENSUS) bindStep = Env.counter;   // census: start of a bound episode
 		if (Env.useGPU) DIAG_UPDATEPOS_FROM_BIND_CT++;
 		updatePos();
 		myMotor.onFil = true;
@@ -432,6 +448,11 @@ public class MyoFilLink {
 		}
 	}
 	public void release () {
+		if (STRETCH_CENSUS && bindStep >= 0) {        // census: complete a bound episode
+			censusDwellSteps += (Env.counter - bindStep);
+			censusDwellEpisodes++;
+			bindStep = -1;
+		}
 		mySeg = null;
 		posOnSeg = 0;
 		forceMag = 0;
@@ -533,6 +554,33 @@ public class MyoFilLink {
 		rmMe = null;
 	}
 	
+	// Read-only census over the currently-bound cross-bridge population. Iterates by direct
+	// mySeg-null test (NOT isFree(), which can trigger validateSeg->release side effects), reads
+	// per-link forceMag/forceDotFil already computed this step, and prints population means.
+	// Dwell is the running mean of completed bind->release episode lifetimes. No force/RNG touched.
+	public static void stretchCensus (int step, double simTime) {
+		if (!STRETCH_CENSUS) return;
+		int n = 0;
+		double extSum = 0, absFdfSum = 0, sgnFdfSum = 0;
+		final double spring = Env.myoSpring.getValue();
+		for (int i = 0; i < myoFilLinkCt; i++) {
+			MyoFilLink l = theMyoFilLinks[i];
+			if (l == null || l.mySeg == null) continue;
+			n++;
+			extSum    += l.forceMag / spring;      // µm
+			absFdfSum += Math.abs(l.forceDotFil);  // N
+			sgnFdfSum += l.forceDotFil;            // N
+		}
+		double dwellMs = censusDwellEpisodes > 0
+		        ? (double) censusDwellSteps / censusDwellEpisodes * Env.deltaT.getValue() * 1000.0
+		        : 0.0;
+		if (n > 0) {
+			System.out.printf(
+			    "[STRETCHCENSUS] step=%d t=%.4f n=%d ext_nm=%.4f absFdF_pN=%.4f sgnFdF_pN=%.4f dwell_ms=%.4f%n",
+			    step, simTime, n, extSum / n * 1000.0, absFdfSum / n * 1e12, sgnFdfSum / n * 1e12, dwellMs);
+		}
+	}
+
 	public static void removeAll () {
 		for (int i=0;i<myoFilLinkCt;i++) {
 			if (theMyoFilLinks[i] != null) { 

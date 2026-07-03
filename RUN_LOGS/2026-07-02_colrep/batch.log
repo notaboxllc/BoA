@@ -1,0 +1,15 @@
+[13:53] launch 6nm draw1 -> RUN_LOGS/2026-07-02_colrep/run_6nm_p1.log
+[14:08] launch 8nm draw2 -> RUN_LOGS/2026-07-02_colrep/run_8nm_p2.log
+[14:14] launch 4nm draw2 -> RUN_LOGS/2026-07-02_colrep/run_4nm_p2.log
+[15:11] DONE 6nm draw1 exit=0
+[15:11] launch 6nm draw2 -> RUN_LOGS/2026-07-02_colrep/run_6nm_p2.log
+[15:27] DONE 8nm draw2 exit=0
+[15:27] launch 8nm draw3 -> RUN_LOGS/2026-07-02_colrep/run_8nm_p3.log
+[15:32] DONE 4nm draw2 exit=0
+[15:33] launch 4nm draw3 -> RUN_LOGS/2026-07-02_colrep/run_4nm_p3.log
+[16:28] DONE 6nm draw2 exit=0
+[16:28] launch 6nm draw3 -> RUN_LOGS/2026-07-02_colrep/run_6nm_p3.log
+[16:43] DONE 8nm draw3 exit=0
+[16:48] DONE 4nm draw3 exit=0
+[17:19] DONE 6nm draw3 exit=0
+[17:19] BATCH COMPLETE

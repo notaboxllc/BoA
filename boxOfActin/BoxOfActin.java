@@ -2938,6 +2938,7 @@ public class BoxOfActin {
 					LiveFrameServer.dispatchGlidingAssay(gaJson);
 				}
 			}
+			if (Env.glidingAssay.isActive()) MyoFilLink.stretchCensus(Env.counter, Env.simulationTime);
 			reportContractilityStats();
 			threeJSCounter = 0;
 		}
@@ -3035,6 +3036,7 @@ public class BoxOfActin {
 					LiveFrameServer.dispatchGlidingAssay(gaJson);
 				}
 			}
+			if (Env.glidingAssay.isActive()) MyoFilLink.stretchCensus(Env.counter, Env.simulationTime);
 			threeJSCounter = 0;
 		}
 	}

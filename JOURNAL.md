@@ -1,5 +1,25 @@
 # BoxOfActin Project Journal
 
+## 2026-07-02 — Capture-radius sweep REPLICATED with error bars: BoA's trend is real (net RISES with radius), NOT mat noise — opposite of v2
+
+Full writeup: `CAPTURE_RADIUS_REPLICATE.md`. Re-ran the `myoColTol` = 4/6/8 nm sweep with **3 fresh mat draws each**
+(9 CPU runs, d1000, dt 1e-5, one 2 µm filament, LS-centroid along f̂ over [0.30,0.70] s, all coverage-clean) to
+settle whether BoA's earlier single-run "+48%, drift-flat" side-result was mat-draw noise or real.
+- **3-draw means (net |v_axial| / avgBound / per-bound drift):** 4 nm 2.91±0.21 / 11.2 / **0.259**; 6 nm
+  2.83±0.23 / 16.9 / 0.167; 8 nm **4.89±0.51** / 19.8 / **0.248**. Net **RISES 4→8 nm +68%** (slowest 8 nm draw
+  4.43 > every 4/6 nm draw — cleanly separated, not noise); avgBound monotonic +76%; **per-bound drift ~FLAT**
+  across the extremes (0.259→0.248). = BoA's binding-count picture, **replicated**.
+- **Opposite of v2** (GPU 3-seed: net −61%, drift COLLAPSE 0.380→0.081). Codes agree at 6 nm (~2.8–3.1), diverge
+  in **sign** at the extremes ⇒ the CPU/GPU sign difference is real; the Gauss–Seidel/Jacobi co-bound stale-force
+  residual is the leading explanation (a GPU-fidelity finding, not mat noise).
+- **Stretch census (read-only, `BOA_STRETCH_CENSUS`, default byte-identical):** BoA reproduces v2's STEP-3
+  GEOMETRY exactly — ext +8%, |fdF| +10%, signed fdF → ~0 (axial cancellation), dwell **−62%** (4→8 nm). The
+  paradox: *identical* per-head geometry, yet BoA net rises while v2 net falls ⇒ the divergence is **not** in the
+  stretch geometry (same in both) but in **co-bound load-sharing** — BoA-CPU converts extra heads into glide at
+  flat efficiency (shorter dwell = faster cycling compensates); v2-GPU's parallel co-bound resistance craters it.
+- Census hook added behind `MyoFilLink.stretchCensus` + `bindStep` episode-dwell accumulation, gated call at
+  output cadence in `doLoop`. Measurement-only; `myoColTol` is a param; `BoA-v1ref` untouched.
+
 ## 2026-07-02 — Bind-point-along-head moment-arm probe: the J1 torque is the PROPULSION lever, not a parasitic drag (hypothesis REFUTED)
 
 Full writeup: `BIND_POINT_TORQUE_FINDINGS.md`. Flag `myoBindPoint` p∈[0,1] slides the bind point along the head —
