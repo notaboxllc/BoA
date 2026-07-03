@@ -169,11 +169,13 @@ public class MyoMotor extends Thing {
 		// center (coord) instead of the tip (end2) to keep candidate generation consistent with the
 		// center-based distance check in checkFilSegCollision.
 		if (bindTip != null) {
-			if (Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0) {
-				bindTip.x = getCoordX(); bindTip.y = getCoordY(); bindTip.z = getCoordZ();
-			} else {
-				bindTip.x = getEnd2X(); bindTip.y = getEnd2Y(); bindTip.z = getEnd2Z();
-			}
+			// TEST FLAG (2026-07-02) — myoBindPoint / myoCenterParallelBind: bin by the actual bind point
+			// (= coord + offset*uVec), so candidate generation stays consistent with the same point used by
+			// checkFilSegCollision and addForces. Default (tip): offset = +1/2*L => bind point == end2.
+			final double off = Env.myoBindHeadOffset();
+			bindTip.x = getCoordX() + off*getUVecX();
+			bindTip.y = getCoordY() + off*getUVecY();
+			bindTip.z = getCoordZ() + off*getUVecZ();
 		}
 		// for collision detection
 		xRange = Math.abs(getCoordX()-getEnd2X());
@@ -423,17 +425,14 @@ public class MyoMotor extends Thing {
 		final double r1x = FilSegment.soaEnd2X[filId] - e1x;
 		final double r1y = FilSegment.soaEnd2Y[filId] - e1y;
 		final double r1z = FilSegment.soaEnd2Z[filId] - e1z;
-		final double mx, my, mz;
-		if (centerBind) {
-			final double halfLen = 0.5 * Env.myoMotorLength.getValue();
-			mx = soaX[motorId] - halfLen*soaUX[motorId];
-			my = soaY[motorId] - halfLen*soaUY[motorId];
-			mz = soaZ[motorId] - halfLen*soaUZ[motorId];
-		} else {
-			mx = soaX[motorId];
-			my = soaY[motorId];
-			mz = soaZ[motorId];
-		}
+		// TEST FLAG (2026-07-02) — myoBindPoint / myoCenterParallelBind: project from the bind point
+		// (= coord + off*uVec). soaX/Y/Z is the head TIP (= coord + 1/2*L*uVec), so shift it by
+		// (off - 1/2*L)*uVec to reach the bind point. Default (tip): off = +1/2*L => shift 0 => m == tip,
+		// byte-identical. centerBind: off 0 => shift -1/2*L => m == center (prior behavior).
+		final double shift = Env.myoBindHeadOffset() - 0.5*Env.myoMotorLength.getValue();
+		final double mx = soaX[motorId] + shift*soaUX[motorId];
+		final double my = soaY[motorId] + shift*soaUY[motorId];
+		final double mz = soaZ[motorId] + shift*soaUZ[motorId];
 		final double r2x = mx - e1x;
 		final double r2y = my - e1y;
 		final double r2z = mz - e1z;

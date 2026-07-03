@@ -1,5 +1,29 @@
 # BoxOfActin Project Journal
 
+## 2026-07-02 — Bind-point-along-head moment-arm probe: the J1 torque is the PROPULSION lever, not a parasitic drag (hypothesis REFUTED)
+
+Full writeup: `BIND_POINT_TORQUE_FINDINGS.md`. Flag `myoBindPoint` p∈[0,1] slides the bind point along the head —
+tip 0 (default, byte-identical) / mid 0.5 / rear=J1 1 — via one `Env.myoBindHeadOffset()` helper threaded into the
+bind decision (`checkFilSegCollision`), spatial-bin `bindTip`, and the cross-bridge spring anchor (`addForces`);
+decision point ≡ spring anchor ⇒ d≈0 at bind, **no positional yank** (bound lifetimes hold 35/43/24 steps; a yank
+would collapse them to ~1). Default OFF, CPU only, `BoA-v1ref` untouched, no stroke/release/kinetics change.
+- **Hypothesis (jba):** the neck stroke's J1 constraint force is a *parasitic* torque about the actin contact
+  (arm ≈ head length) that saps a forward glide — so shrinking the arm tip→rear should RAISE v_axial, RAISE axial
+  fraction, LOWER transverse RMS.
+- **Result (d1000, dt 1e-5, LS-centroid along f̂, settled 0.70 s, 3 mat draws):** every prediction is INVERTED.
+  v_axial **falls monotonically and reverses sign** −2.96±0.31 → −0.79±0.17 → **+0.87±0.10** µm/s (tip/mid/rear;
+  per-bound drift −0.181/−0.027/+0.103, non-overlapping bands, n3 each); axial fraction FALLS 1.00→0.99→0.91;
+  transRMS flat/rising 24→20→28 nm; rotational wander RISES ~3× (fhatAng 5.9°→16.9° at zero arm).
+- **Verdict — REFUTED, informatively:** the J1→contact arm is the **productive propulsion lever**, not a parasitic
+  drag. The head (rigid ~90° strut) is rotated by the stroke about a center near its tip-ward third; the filament
+  is dragged by whichever end it's tethered to — tip = full forward, mid = 73% lost (clean half-arm isolate, same
+  3-body topology), rear=J1 = propulsion gone and slightly reversed with the head flailing. Kill the arm and the
+  forward glide is gone — so no hidden glide is being "taxed." Confirms & explains `PHASE2` (effective lever =
+  HEAD_LEN; flat neck-angle sweep). Tip is fastest AND lowest-disturbance ⇒ no parasitic-torque lever to exploit.
+- **Faithfulness / confounds:** tip (actin site offset from the converter) is the defensible geometry = the
+  default; mid/rear are probes (rear structurally indefensible + removes the strut stand-off & reach — confound
+  named; midpoint weighted as the clean isolate). Diagnosis, not a promotion.
+
 ## 2026-07-01 — PROMOTED the f̂-directed neck-stroke motor to the DEFAULT myosin; old F9 head-swing preserved behind myoLegacyHeadSwing
 
 Adopted the f̂-referenced (filament-directed) neck powerstroke as the myosin and made it the default (runs with no

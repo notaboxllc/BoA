@@ -109,8 +109,9 @@ public class MyoFilLink {
 				// shed the bind). tip = coord + halfMot*uVec (== freshMotorTip in addForces); after setting
 				// uVec = mhat, restore coord = tip - halfMot*mhat so the tip is unchanged. centerBind -> halfMot
 				// = 0 -> coord unchanged (graceful).
-				final boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
-				final double halfMot = centerBind ? 0.0 : 0.5 * Env.myoMotorLength.getValue();
+				// halfMot = the bind-point offset (Env.myoBindHeadOffset): reorient about the ACTUAL bound
+				// point (tip/mid/rear per myoBindPoint), not always the tip, so no positional yank there either.
+				final double halfMot = Env.myoBindHeadOffset();
 				double tipX = myMotor.getCoordX() + halfMot*myMotor.getUVecX();
 				double tipY = myMotor.getCoordY() + halfMot*myMotor.getUVecY();
 				double tipZ = myMotor.getCoordZ() + halfMot*myMotor.getUVecZ();
@@ -216,7 +217,11 @@ public class MyoFilLink {
 		// tip (end2). attachPt is the filament point closest to the center, so at bind the spring length is
 		// just the perpendicular gap (strain-free). Otherwise use the tip as before.
 		final boolean centerBind = Env.myoCenterParallelBind.isActive() && Env.myoCenterParallelBind.getValue() != 0.0;
-		final double halfMot = centerBind ? 0.0 : 0.5 * Env.myoMotorLength.getValue();
+		// TEST FLAG (2026-07-02) — myoBindPoint: anchor the cross-bridge spring at the same bind point the
+		// bind decision used (= coord + off*uVec, off from Env.myoBindHeadOffset()). Default (tip): off = +1/2*L
+		// => freshMotorTip == end2, byte-identical. centerBind: off 0 => center. Keeping this identical to the
+		// decision point means d~=0 at bind (no positional yank on a freshly-bound, non-stroking head).
+		final double halfMot = Env.myoBindHeadOffset();
 		freshMotorTip.setVals(myMotor.getCoordX() + halfMot*myMotor.getUVecX(),
 		                      myMotor.getCoordY() + halfMot*myMotor.getUVecY(),
 		                      myMotor.getCoordZ() + halfMot*myMotor.getUVecZ());

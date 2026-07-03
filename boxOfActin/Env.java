@@ -382,6 +382,22 @@ public class Env {
 	// torque. Per-motor pure. Default OFF.
 	static final Parameter myoHeadAxisBindSet = new Parameter("myoHeadAxisBindSet", " TEST: set head-axis (mhat) sign +nhat at bind (no torque)", 0, "", Parameter.BOOLEAN, false);
 
+	// TEST FLAG (2026-07-02): BIND POINT ALONG THE HEAD — moment-arm probe for the neck-swing's parasitic torque.
+	// The default motor binds actin at the head TIP (end2 = coord + 1/2*motorLength*uVec) and anchors the
+	// cross-bridge spring there (MyoFilLink.addForces). The power stroke is a pure torque on the neck, whose
+	// constraint force at the neck-head junction J1 (= end1 = coord - 1/2*L*uVec) resolves into a torque about the
+	// actin contact with moment arm = |J1 - contact| along the head axis. Sliding the contact toward J1 shrinks
+	// that arm, so this flag moves the bind point (BOTH the bind-decision projection point AND the spring anchor,
+	// kept identical so d~=0 at bind => no positional yank) a FRACTION p in [0,1] along the head from tip to J1:
+	//   p = 0.0  -> tip  (offset +1/2*L, full arm = L)     [= default, byte-identical when inactive]
+	//   p = 0.5  -> mid  (offset  0,      half arm = 1/2*L) [CLEAN isolate: same 3-body topology, half the arm]
+	//   p = 1.0  -> rear = J1 (offset -1/2*L, zero arm = 0) [extreme: collapses head+neck to ~2-body at contact;
+	//                                                        also removes the head's perp stand-off -> GEOMETRY
+	//                                                        confound, weight the midpoint]
+	// offset along uVec = (0.5 - p)*motorLength. Default OFF (isActive()==false) => tip, exactly the prior code.
+	// CPU bind path only (GPU binding/force kernels are not updated for this flag). See BIND_POINT_TORQUE_FINDINGS.md.
+	static final Parameter myoBindPoint = new Parameter("myoBindPoint", " TEST: bind point fraction along head tip(0)->J1(1)", 0.0, "");
+
 	// PROMOTION (2026-07-01): the f-hat-directed neck-stroke motor is now the DEFAULT myosin. The three flags
 	// myoFixedHeadNeckStroke (fixed head 90deg, neck takes the 0->70deg stroke) + myoAxialSwingLock (roll axis
 	// -> shat = nhat x fhat) + myoNeckStrokePolarity (neck swings toward the fhat-derived target so the rear
@@ -400,6 +416,23 @@ public class Env {
 	 *  default (F9) bit-for-bit. */
 	static boolean defaultNeckStrokeMotorOn () {
 		return !(myoLegacyHeadSwing.isActive() && myoLegacyHeadSwing.getValue() != 0.0);
+	}
+
+	/** Signed offset (microns) along the head uVec from the head CENTER (coord) to the bind/anchor point.
+	 *  This single helper is the source of truth for BOTH the bind-decision projection point
+	 *  (MyoMotor.checkFilSegCollision), the spatial-bin position (MyoMotor.initialize -> bindTip), and the
+	 *  cross-bridge spring anchor (MyoFilLink.addForces), so the decision point and the spring anchor are the
+	 *  SAME point (=> d~=0 at bind, no positional yank).
+	 *  Precedence: myoBindPoint (fraction tip->J1) when active; else myoCenterParallelBind (center=0); else tip. */
+	static double myoBindHeadOffset () {
+		final double L = myoMotorLength.getValue();
+		if (myoBindPoint.isActive()) {
+			return (0.5 - myoBindPoint.getValue()) * L;   // p=0 tip(+L/2), 0.5 mid(0), 1 rear/J1(-L/2)
+		}
+		if (myoCenterParallelBind.isActive() && myoCenterParallelBind.getValue() != 0.0) {
+			return 0.0;                                   // center bind
+		}
+		return 0.5 * L;                                   // default: tip (end2)
 	}
 
 	// Closed spherical membrane IC (makeSphereOfNodes) with a few hot-Rho (NPF) patches, for testing the
