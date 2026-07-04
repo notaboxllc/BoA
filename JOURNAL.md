@@ -1,5 +1,30 @@
 # BoxOfActin Project Journal
 
+## 2026-07-03 — dt-convergence at coltol8/d1000 on ACTIVE BoA: BoA SATURATES TOO (loses its duty cycle as dt→0, like v2) ⇒ detachment problem is UNIVERSAL, gather question CLOSED
+
+Full writeup: `BOA_DT_CONVERGENCE_FINDINGS.md`. Mirrored v2's dt-refinement series (`~/Code/SoftBox/DT_CONVERGENCE_SEGGATHER_FINDINGS.md`)
+on active BoA — coltol8/d1000, CPU, `CAPTURE_RADIUS_REPLICATE` protocol, dt = 1e-5 / 5e-6 / 2.5e-6 (single draw,
+`runTime`=0.7 held ⇒ same window at every dt; 70k/140k/280k steps; 73/129/213 min wall).
+- **BoA saturates too, unambiguously.** Refining dt 4×: avgBound **EXPLODES 19.6→68.6→163.9** (8.4×, toward the
+  ~220 all-reachable plateau); per-bound drift **CRATERS 0.258→0.032→0.0068** (38×); windowed dwell **LENGTHENS
+  0.23→0.50→0.71 ms** (3×); per-head detachment **CRATERS 4317→2003→1402 /s** (3×); catch-slip load **DROPS
+  3.18→2.72→2.29 pN** (F8 overshoot removed — the v2 mechanism, confirmed on load).
+- **The two codes CONVERGE to the same limit.** BoA's avgBound tracks v2's point-for-point (19.6≈17.9, 68.6≈69.1,
+  163.9≈157.9); BoA's drift starts 3× higher at coarse dt (0.258 vs 0.090) but **lands on v2's converged value**
+  (0.0068 vs 0.0077 @dt=2.5e-6); net glide both → ~1.1–1.2 µm/s (BoA's coarse 5.06 washes out).
+- **⇒ FORK: BoA SATURATES TOO.** The missing dt-robust detachment is **universal** — catch-slip on F8 (± the 12 pN
+  break-cap) has no dt-robust duty cycle; refining dt removes the false over-detachment that propped it up, nothing
+  detaches, the model freezes into a fully-bound carpet with drift→0. The coarse-dt gather split (v2 0.081 vs BoA
+  0.248 @avgB≈19) is an **operating-point artifact** of two unconverged codes. **Gather question CLOSED — no gather
+  redesign.** The real problem is the detachment pathway (needs a dt-independent, nucleotide/ATP-limited,
+  catch-slip-modulated release), for BOTH codes.
+- **Nuance:** BoA's 12 pN break-cap stays the *dominant* detachment channel (~59–67%) at every dt — it doesn't
+  shift to catch-slip as dt→0 (a real BoA/v2 detail) — but detachment still slows toward zero all the same.
+- Measurement-only: param-file dt override + a byte-identical-when-off census extension (`bfRel`/`nRel` cumulative
+  release counters added to the `[STRETCHCENSUS]` line, for windowed detachment-rate + break-cap fraction). No
+  model/release/stroke/kinetics change; `BoA-v1ref` byte-clean. Single draw (38× monotone effect; coarse point
+  matches the `CAPTURE_RADIUS_REPLICATE` 3-draw coltol8 mean, avgBound 19.6 vs 19.76±0.16).
+
 ## 2026-07-02 — Capture-radius sweep REPLICATED with error bars: BoA's trend is real (net RISES with radius), NOT mat noise — opposite of v2
 
 Full writeup: `CAPTURE_RADIUS_REPLICATE.md`. Re-ran the `myoColTol` = 4/6/8 nm sweep with **3 fresh mat draws each**

@@ -1,0 +1,9 @@
+# BoA dt-convergence, coltol8/d1000, window [0.3,0.7] s
+
+          dt |     avgBound |    net|v_ax| |        drift |      axialFr |    dwell_win |     detach/s | detach/head/s | breakcapFrac |      |FdF|pN |         tend |         viol
+    1.00e-05 |        19.61 |        5.062 |       0.2581 |        0.994 |       0.2334 |      84050.1 |     4316.871 |        0.646 |       3.1828 |        0.699 |            n
+             (census: dbf=21663 dnr=11873 over 0.399s; ext_nm=5.466 sgnFdF=0.0508)
+    5.00e-06 |        68.64 |        2.192 |       0.0319 |        0.994 |       0.4999 |     137581.5 |     2003.033 |        0.589 |       2.7244 |        0.699 |            n
+             (census: dbf=32335 dnr=22560 over 0.399s; ext_nm=4.648 sgnFdF=0.0240)
+    2.50e-06 |       163.89 |        1.108 |       0.0068 |        0.993 |       0.7111 |     230240.6 |     1402.311 |        0.670 |       2.2879 |        0.699 |            n
+             (census: dbf=61527 dnr=30339 over 0.399s; ext_nm=4.282 sgnFdF=-0.0095)

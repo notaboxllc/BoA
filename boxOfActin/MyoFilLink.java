@@ -575,9 +575,12 @@ public class MyoFilLink {
 		        ? (double) censusDwellSteps / censusDwellEpisodes * Env.deltaT.getValue() * 1000.0
 		        : 0.0;
 		if (n > 0) {
+			// bfRel/nRel are cumulative release counters (never reset mid-run): difference
+			// consecutive census lines for windowed detachment rate + break-cap fraction.
 			System.out.printf(
-			    "[STRETCHCENSUS] step=%d t=%.4f n=%d ext_nm=%.4f absFdF_pN=%.4f sgnFdF_pN=%.4f dwell_ms=%.4f%n",
-			    step, simTime, n, extSum / n * 1000.0, absFdfSum / n * 1e12, sgnFdfSum / n * 1e12, dwellMs);
+			    "[STRETCHCENSUS] step=%d t=%.4f n=%d ext_nm=%.4f absFdF_pN=%.4f sgnFdF_pN=%.4f dwell_ms=%.4f bfRel=%d nRel=%d%n",
+			    step, simTime, n, extSum / n * 1000.0, absFdfSum / n * 1e12, sgnFdfSum / n * 1e12, dwellMs,
+			    myoBreakForceRelease, normalRelease);
 		}
 	}
 
